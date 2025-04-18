@@ -1,1 +1,4 @@
-pycache
+*pycache*
+*.wav
+*.mp3
+
