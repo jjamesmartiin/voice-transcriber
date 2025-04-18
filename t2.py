@@ -7,7 +7,7 @@ import pyperclip
 import subprocess
 from transcribe import transcribe_audio
 
-def main():
+def record_and_transcribe():
     # Check if GPU is available
     try:
         import torch
@@ -41,6 +41,23 @@ def main():
     
     print(f"{transcription}")
     return transcription
+
+def main():
+    print("T2 Transcription Tool")
+    print("Press Enter to start recording, or type 'quit' to exit")
+    
+    while True:
+        try:
+            user_input = input("> ")
+            if user_input.lower() in ['quit', 'exit', 'q']:
+                print("Exiting...")
+                break
+            
+            record_and_transcribe()
+            print("\nReady for next recording (press Enter or type 'quit' to exit)")
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            break
 
 if __name__ == "__main__":
     main()
