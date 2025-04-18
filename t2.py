@@ -42,19 +42,41 @@ def record_and_transcribe():
     print(f"{transcription}")
     return transcription
 
+def getch():
+    """Get a single character from standard input without waiting for enter"""
+    try:
+        # For Unix/Linux/MacOS
+        import termios, tty
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
+    except ImportError:
+        # For Windows
+        import msvcrt
+        return msvcrt.getch().decode()
+
 def main():
     print("T2 Transcription Tool")
-    print("Press Enter to start recording, or type 'quit' to exit")
+    print("Press Enter or Space to start recording, or type 'q' to exit")
     
     while True:
         try:
-            user_input = input("> ")
-            if user_input.lower() in ['quit', 'exit', 'q']:
-                print("Exiting...")
+            print("> ", end="", flush=True)
+            ch = getch()
+            
+            if ch in [' ', '\r', '\n']:  # Space or Enter key
+                print()  # Move to next line after keypress
+                record_and_transcribe()
+            elif ch.lower() in ['q', 'Q']:
+                print("\nExiting...")
                 break
             
-            record_and_transcribe()
-            print("\nReady for next recording (press Enter or type 'quit' to exit)")
+            print("\nReady for next recording (press Enter or Space to start, or type 'q' to exit)")
         except KeyboardInterrupt:
             print("\nExiting...")
             break
