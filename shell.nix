@@ -6,8 +6,8 @@ let
 in pkgs.mkShell {
   packages = [
     # other non-Python packages can be added here
-    pkgs.lame # for mp3 encoding
-
+    pkgs.lame # for mp3 encoding # I don't think this is needed anymore
+    pkgs.xclip # for clipboard access
     # Python packages
     (pkgs.python3.withPackages (python-pkgs: with python-pkgs; [
       # select Python packages here
@@ -15,6 +15,7 @@ in pkgs.mkShell {
       openai-whisper
       keyboard
       wavefile
+      pyperclip
     ]))
   ];
 }
