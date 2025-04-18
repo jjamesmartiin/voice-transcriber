@@ -39,7 +39,7 @@ def main():
         except Exception:
             print("Unable to copy to clipboard")
     
-    print(f"Transcription: {transcription}")
+    print(f"{transcription}")
     return transcription
 
 if __name__ == "__main__":

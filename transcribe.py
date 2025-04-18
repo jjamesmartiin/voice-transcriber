@@ -2,6 +2,10 @@
 # now we need to use whisper to transcribe the audio
 
 import whisper
+import warnings
+
+# Filter out UserWarning about FP16 not supported on CPU
+warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
 
 # Move model loading into function to avoid loading during import
 def load_model(model_name="base", device=None):
