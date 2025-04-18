@@ -1,7 +1,8 @@
 # speech recognition file using whisper
 
 # Configuration
-RECORD_SECONDS = 10  # Change this value to adjust recording duration
+RECORD_SECONDS = 9  # Change this value to adjust recording duration
+# 10 seconds has a visual bug when using the countdown
 
 # -------------------------------------
 
