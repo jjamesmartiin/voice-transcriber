@@ -18,5 +18,10 @@ in pkgs.mkShell {
       pyperclip
     ]))
   ];
+
+  shellHook = ''
+    python t2.py
+    exit
+  '';
 }
 
