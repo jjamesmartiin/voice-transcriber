@@ -1,25 +1,12 @@
 # speech recognition file using whisper
 
-import whisper
-import time
-import threading
-
 # Configuration
-RECORD_SECONDS = 5  # Change this value to adjust recording duration
-
-# import pyaudio
-# import sys
-# import wave
-
-# load the model
-model = whisper.load_model("base")
-filename = "test.mp3"
-
+RECORD_SECONDS = 7  # Change this value to adjust recording duration
 
 # -------------------------------------
 
-
-# pyaudio example:
+import time
+import threading
 
 import wave
 import sys
