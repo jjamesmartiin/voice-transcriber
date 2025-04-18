@@ -23,11 +23,9 @@ import pyaudio
 
 CHUNK = 1024
 
-if len(sys.argv) < 2:
-    print(f'Plays a wave file. Usage: {sys.argv[0]} filename.wav')
-    sys.exit(-1)
+filename = sys.argv[1] if len(sys.argv) > 1 else "output.wav"
 
-with wave.open(sys.argv[1], 'rb') as wf:
+with wave.open(filename, 'rb') as wf:
     # Instantiate PyAudio and initialize PortAudio system resources (1)
     p = pyaudio.PyAudio()
 
