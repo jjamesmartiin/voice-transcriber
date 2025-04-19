@@ -14,7 +14,7 @@ def load_model(model_name="base", device=None):
         model.to(device)
     return model
 
-def transcribe_audio(audio_path="output.wav", model_name="base", device=None):
+def transcribe_audio(audio_path="output.wav", model_name="large", device=None):
     # Load model on demand with device specification
     model = load_model(model_name, device)
     
