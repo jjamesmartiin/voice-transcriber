@@ -12,7 +12,8 @@ in pkgs.mkShell {
     (pkgs.python3.withPackages (python-pkgs: with python-pkgs; [
       # select Python packages here
       pyaudio
-      openai-whisper
+      # openai-whisper
+      faster-whisper
       keyboard
       wavefile
       pyperclip

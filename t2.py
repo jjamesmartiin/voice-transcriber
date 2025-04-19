@@ -5,7 +5,7 @@ import sys
 import os
 import pyperclip
 import subprocess
-from transcribe import transcribe_audio
+from transcribe2 import transcribe_audio
 
 def record_and_transcribe():
     # Check if GPU is available
@@ -13,7 +13,7 @@ def record_and_transcribe():
         import torch
         device = "cuda" if torch.cuda.is_available() else "cpu"
     except ImportError:
-        device = None
+        device = "cpu"
     
     print("Recording audio...")
     # Use subprocess to run rec.py
@@ -24,7 +24,7 @@ def record_and_transcribe():
     result = transcribe_audio(device=device)
     
     # Get transcription and strip whitespace
-    transcription = result["text"].strip()
+    transcription = result.strip()
     
     # Copy to clipboard
     try:
