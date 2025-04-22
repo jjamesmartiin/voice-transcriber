@@ -8,13 +8,13 @@ import warnings
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
 
 # Move model loading into function to avoid loading during import
-def load_model(model_name="base", device=None):
+def load_model(model_name="medium", device=None):
     model = whisper.load_model(model_name)
     if device:
         model.to(device)
     return model
 
-def transcribe_audio(audio_path="output.wav", model_name="large", device=None):
+def transcribe_audio(audio_path="output.wav", model_name="medium", device=None):
     # Load model on demand with device specification
     model = load_model(model_name, device)
     
