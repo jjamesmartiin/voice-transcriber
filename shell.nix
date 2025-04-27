@@ -16,12 +16,17 @@ in pkgs.mkShell {
       keyboard
       wavefile
       pyperclip
+      # Additional packages for testing
+      numpy
+      scipy
+      gtts
     ]))
   ];
 
+  # Remove automatic exit for testing purposes
   shellHook = ''
-    python t2.py
-    exit
+    # python t2.py
+    # exit
   '';
 }
 
