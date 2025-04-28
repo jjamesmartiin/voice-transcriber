@@ -1,5 +1,9 @@
 # voice-transcriber
-to use run `nix-shell`
+- to run from nixos use: 
+```shell
+nix-shell --run "python t2.py"
+```
+
 
 ## tips:
 ### to get copy/paste notification 

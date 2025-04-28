@@ -4,25 +4,12 @@ This directory contains test scripts for the voice transcriber application.
 
 ## Test Scripts
 
-1. `test1.py` - A comprehensive test that:
+1. `voice-transcription-test.py` - A comprehensive test that:
    - Generates test audio using gTTS (Google Text-to-Speech)
    - Tests transcription accuracy against expected output
    - Includes a fallback test with a sine wave audio
 
-2. `test1_simple.py` - A simpler test that:
-   - Only uses standard library dependencies
-   - Creates a simple sine wave audio file
-   - Tests that the transcription pipeline runs without errors
-   - Also tests with the existing output.wav file if available
-
 ## Running the Tests
-
-### Simple Test (No Additional Dependencies)
-
-```bash
-# From the project root directory
-python tests/test1_simple.py
-```
 
 ### Comprehensive Test
 
@@ -51,10 +38,9 @@ Then run the test:
 
 ```bash
 # From the project root directory
-python tests/test1.py
+python tests/voice-transcription-test.py
 ```
 
 ## Expected Results
 
-- The simple test is expected to run without errors but may not produce meaningful transcription (since it uses a sine wave).
-- The comprehensive test with gTTS should produce a more meaningful test, checking if words from the expected text are found in the transcription. 
+The comprehensive test with gTTS should produce a meaningful test, checking if words from the expected text are found in the transcription. It also includes a fallback test using a sine wave audio file to ensure the pipeline runs without errors. 
