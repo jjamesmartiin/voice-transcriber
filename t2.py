@@ -17,7 +17,7 @@ CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1  # Mono for faster processing
 RATE = 16000  # Lower sample rate for faster processing while maintaining speech quality
-RECORD_SECONDS = 9  # Default recording time
+RECORD_SECONDS = 20  # Default recording time
 
 # Determine device at startup
 def get_device():
