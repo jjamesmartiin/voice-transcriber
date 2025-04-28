@@ -4,27 +4,59 @@
 MODEL = "small"
 
 import warnings
+import threading
 from faster_whisper import WhisperModel, BatchedInferencePipeline
+import time
 
 # Filter out UserWarning about FP16 not supported on CPU
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
 
-# Move model loading into function to avoid loading during import
+# Global variable to hold the preloaded model
+_model = None
+_model_lock = threading.Lock()
+
 def load_model(model_name=MODEL, device="cpu", compute_type="int8"):
     model = WhisperModel(model_name, device=device, compute_type=compute_type)
     batched_model = BatchedInferencePipeline(model=model)
-    #return model
     return batched_model
 
+def get_model(model_name=MODEL, device="cpu", compute_type="int8"):
+    """Get or initialize the model singleton"""
+    global _model
+    
+    with _model_lock:
+        if _model is None:
+            print("Loading transcription model... (first run only)")
+            start_time = time.time()
+            _model = load_model(model_name, device, compute_type)
+            elapsed = time.time() - start_time
+            print(f"Model loaded in {elapsed:.2f} seconds")
+    
+    return _model
+
+def preload_model(model_name=MODEL, device="cpu", compute_type="int8"):
+    """Preload the model in a background thread"""
+    def _preload():
+        get_model(model_name, device, compute_type)
+    
+    thread = threading.Thread(target=_preload)
+    thread.daemon = True
+    thread.start()
+    return thread
+
 def transcribe_audio(audio_path="output.wav", model_name=MODEL, device="cpu"):
-    # Load model on demand with device specification
-    model = load_model(model_name, device)
+    # Use the singleton model instead of loading it each time
+    model = get_model(model_name, device)
+    
+    # Time the transcription process
+    start_time = time.time()
     
     # Transcribe audio with faster-whisper
-    # segments, info = model.transcribe(audio_path) # single core?
-    segments, info = model.transcribe(audio_path, batch_size=4) # batch size = how many threads to use  
+    segments, info = model.transcribe(audio_path, batch_size=8)  # increased batch size for better performance
     
-    # Print language info
+    # Print language and timing info
+    elapsed = time.time() - start_time
+    print(f"Transcription completed in {elapsed:.2f} seconds")
     print("Detected language '%s' with probability %f" % (info.language, info.language_probability))
     
     # Return the full transcript
@@ -37,7 +69,7 @@ if __name__ == "__main__":
     print(result)
     
     # Optional: Uncomment to print segments with timestamps
-    # model = load_model()
+    # model = get_model()
     # segments, info = model.transcribe("output.wav")
     # for segment in segments:
     #     print("[%.2fs -> %.2fs] %s" % (segment.start, segment.end, segment.text))

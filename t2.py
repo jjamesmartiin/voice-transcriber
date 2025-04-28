@@ -5,23 +5,33 @@ import sys
 import os
 import pyperclip
 import subprocess
-from transcribe2 import transcribe_audio
+import time
+from transcribe2 import transcribe_audio, preload_model
 
-def record_and_transcribe():
-    # Check if GPU is available
+# Determine device at startup
+def get_device():
     try:
         import torch
         device = "cuda" if torch.cuda.is_available() else "cpu"
     except ImportError:
         device = "cpu"
-    
+    return device
+
+# Global device variable
+DEVICE = get_device()
+
+# Preload model at startup in background thread
+preload_thread = preload_model(device=DEVICE)
+
+def record_and_transcribe():
     print("Recording audio...")
     # Use subprocess to run rec.py
     subprocess.run(["python", "rec.py"], check=True)
     
     print("Transcribing audio...")
     # Transcribe with GPU if available
-    result = transcribe_audio(device=device)
+    start_time = time.time()
+    result = transcribe_audio(device=DEVICE)
     
     # Get transcription and strip whitespace
     transcription = result.strip()
@@ -62,7 +72,14 @@ def getch():
 
 def main():
     print("T2 Transcription Tool")
-    print("Press Enter or Space to start recording, or type 'q' to exit")
+    print(f"Using device: {DEVICE}")
+    print("Model loading in background, press Enter or Space to start recording, or type 'q' to exit")
+    
+    # Wait for model to fully load before allowing first transcription
+    if preload_thread.is_alive():
+        print("Waiting for model to fully load...")
+        preload_thread.join()
+        print("Model loaded and ready!")
     
     while True:
         try:
