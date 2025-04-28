@@ -24,14 +24,18 @@ DEVICE = get_device()
 preload_thread = preload_model(device=DEVICE)
 
 def record_and_transcribe():
+    # Start timing the entire process
+    process_start_time = time.time()
+    
     print("Recording audio...")
     # Use subprocess to run rec.py
     subprocess.run(["python", "rec.py"], check=True)
     
     print("Transcribing audio...")
     # Transcribe with GPU if available
-    start_time = time.time()
+    transcribe_start_time = time.time()
     result = transcribe_audio(device=DEVICE)
+    transcribe_end_time = time.time()
     
     # Get transcription and strip whitespace
     transcription = result.strip()
@@ -49,7 +53,14 @@ def record_and_transcribe():
         except Exception:
             print("Unable to copy to clipboard")
     
+    # Calculate and display timing information
+    process_end_time = time.time()
+    transcribe_time = transcribe_end_time - transcribe_start_time
+    total_time = process_end_time - process_start_time
+    
     print(f"{transcription}")
+    print(f"Time to transcribe: {transcribe_time:.2f}s | Total time to copy: {total_time:.2f}s")
+    
     return transcription
 
 def getch():
