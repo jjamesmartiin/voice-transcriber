@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+# Preserve user environment variables that might be needed
+export USER_PATH="$PATH"
+export USER_HOME="$HOME"
+
+# You can add any other environment variables your script needs
+# export PYTHONPATH="$PYTHONPATH:/some/additional/path"
+
+nix-build shell.nix -o result 
+nix-shell --run "python t2.py"
