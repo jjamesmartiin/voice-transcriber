@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
-# Optimized script to record audio and transcribe it
+# Optimized script to record audio and transcribe it with minimal latency
 
 import sys
 import os
 import pyperclip
-import subprocess
+import threading
 import time
-from transcribe2 import transcribe_audio, preload_model
+import wave
+import numpy as np
+import pyaudio
+import queue
+from transcribe2 import transcribe_audio, preload_model, get_model
+
+# Audio configuration
+CHUNK = 1024
+FORMAT = pyaudio.paInt16
+CHANNELS = 1  # Mono for faster processing
+RATE = 16000  # Lower sample rate for faster processing while maintaining speech quality
+RECORD_SECONDS = 9  # Default recording time
 
 # Determine device at startup
 def get_device():
@@ -23,43 +34,193 @@ DEVICE = get_device()
 # Preload model at startup in background thread
 preload_thread = preload_model(device=DEVICE)
 
-def record_and_transcribe():
-    # Start timing the entire process
-    process_start_time = time.time()
+# Audio buffer for streaming processing
+audio_buffer = queue.Queue()
+stop_recording = threading.Event()
+
+def record_audio_stream():
+    """Record audio directly into memory and stream to the buffer"""
     
-    print("Recording audio...")
-    # Use subprocess to run rec.py
-    subprocess.run(["python", "rec.py"], check=True)
+    # Suppress PyAudio warnings
+    stderr_fd = os.dup(2)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull_fd, 2)
     
-    print("Transcribing audio...")
-    # Transcribe with GPU if available
+    p = pyaudio.PyAudio()
+    
+    # Restore stderr
+    os.dup2(stderr_fd, 2)
+    os.close(devnull_fd)
+    os.close(stderr_fd)
+    
+    stream = p.open(format=FORMAT, 
+                    channels=CHANNELS, 
+                    rate=RATE, 
+                    input=True,
+                    frames_per_buffer=CHUNK)
+    
+    frames = []
+    
+    # Start countdown in a separate thread
+    countdown_thread = threading.Thread(target=countdown_timer)
+    countdown_thread.daemon = True
+    countdown_thread.start()
+    
+    # Listen for keypress to stop early
+    input_thread = threading.Thread(target=check_for_stop_key)
+    input_thread.daemon = True
+    input_thread.start()
+    
+    # Calculate max chunks for the recording duration
+    max_chunks = int(RATE / CHUNK * RECORD_SECONDS)
+    
+    print("Recording... Press Space to stop")
+    
+    # Record audio
+    for i in range(max_chunks):
+        if stop_recording.is_set():
+            break
+        data = stream.read(CHUNK, exception_on_overflow=False)
+        frames.append(data)
+        audio_buffer.put(data)  # Add to buffer for real-time processing
+    
+    print("\nFinished recording")
+    
+    # Add a None to mark the end of the stream
+    audio_buffer.put(None)
+    
+    # Clean up
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
+    
+    # Save to file for backup and debugging
+    with wave.open('output.wav', 'wb') as wf:
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(p.get_sample_size(FORMAT))
+        wf.setframerate(RATE)
+        wf.writeframes(b''.join(frames))
+    
+    return frames
+
+def countdown_timer():
+    """Display countdown timer during recording"""
+    for i in range(RECORD_SECONDS, 0, -1):
+        if stop_recording.is_set():
+            break
+        print(f'Recording time remaining: {i} seconds... (press space to stop)', end='\r')
+        time.sleep(1)
+
+def check_for_stop_key():
+    """Check for space key to stop recording early"""
+    import select
+    try:
+        import termios, tty
+        old_settings = termios.tcgetattr(sys.stdin)
+        tty.setcbreak(sys.stdin.fileno())
+        
+        while not stop_recording.is_set():
+            if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
+                c = sys.stdin.read(1)
+                if c == ' ':  # Space key
+                    print("\nStopping recording early...")
+                    stop_recording.set()
+                    break
+            time.sleep(0.1)
+        
+        # Restore terminal settings
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+    except (ImportError, AttributeError, termios.error):
+        # Windows fallback
+        import msvcrt
+        while not stop_recording.is_set():
+            if msvcrt.kbhit():
+                if msvcrt.getch() == b' ':
+                    print("\nStopping recording early...")
+                    stop_recording.set()
+                    break
+            time.sleep(0.1)
+
+def process_audio_stream():
+    """Process the audio stream as it's being recorded"""
+    # Get preloaded model
+    model = get_model(device=DEVICE)
+    
+    # Collect audio data until we get None (end of stream)
+    chunks = []
+    while True:
+        chunk = audio_buffer.get()
+        if chunk is None:
+            break
+        chunks.append(chunk)
+    
+    # Convert audio data to proper format for transcription
+    audio_data = b''.join(chunks)
+    
+    # Start transcription immediately
     transcribe_start_time = time.time()
-    result = transcribe_audio(device=DEVICE)
+    
+    # Process the complete audio
+    temp_file = "temp_output.wav"
+    with wave.open(temp_file, 'wb') as wf:
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(2)  # 16-bit
+        wf.setframerate(RATE)
+        wf.writeframes(audio_data)
+    
+    # Transcribe with optimized parameters
+    result = transcribe_audio(audio_path=temp_file, device=DEVICE)
     transcribe_end_time = time.time()
     
-    # Get transcription and strip whitespace
+    # Clean up temp file
+    try:
+        os.remove(temp_file)
+    except:
+        pass
+    
+    return result, transcribe_end_time - transcribe_start_time
+
+def record_and_transcribe():
+    """Record audio and transcribe it with minimal latency"""
+    process_start_time = time.time()
+    
+    # Reset stop flag
+    stop_recording.clear()
+    
+    # Start recording in a separate thread
+    record_thread = threading.Thread(target=record_audio_stream)
+    record_thread.start()
+    
+    # Start processing in parallel
+    result, transcribe_time = process_audio_stream()
+    
+    # Ensure recording is complete
+    record_thread.join()
+    
+    # Clean up result
     transcription = result.strip()
     
-    # Copy to clipboard
+    # Copy to clipboard with fast path
     try:
         pyperclip.copy(transcription)
         print("Transcription copied to clipboard")
     except Exception as e:
         print(f"Failed to use pyperclip: {e}")
         try:
+            # Direct system clipboard access as fallback
+            import subprocess
             subprocess.run(['xclip', '-selection', 'clipboard'], 
                           input=transcription.encode(), check=True)
             print("Transcription copied using xclip")
         except Exception:
             print("Unable to copy to clipboard")
     
-    # Calculate and display timing information
+    # Calculate timing information
     process_end_time = time.time()
-    transcribe_time = transcribe_end_time - transcribe_start_time
     total_time = process_end_time - process_start_time
     
     print(f"{transcription}")
-    print(f"Time to transcribe: {transcribe_time:.2f}s | Total time to copy: {total_time:.2f}s")
+    print(f"Time to transcribe: {transcribe_time:.2f}s | Total time: {total_time:.2f}s")
     
     return transcription
 
@@ -82,7 +243,7 @@ def getch():
         return msvcrt.getch().decode()
 
 def main():
-    print("T2 Transcription Tool")
+    print("T2 Transcription Tool (Optimized)")
     print(f"Using device: {DEVICE}")
     print("Model loading in background, press Enter or Space to start recording, or type 'q' to exit")
     
