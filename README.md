@@ -5,6 +5,7 @@
 - [ ] add some global shortcut/gui branch
 - [ ] try it out on wsl/hyper v
 - [ ] fix breaking terminal output when quitting using 'q'
+    - this only breaks on windows i think
 - [ ] make something to cache the nixpkgs so it works totally offline...
     > maybe done...
 
