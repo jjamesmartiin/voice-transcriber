@@ -146,6 +146,8 @@ def process_audio_stream():
     # Get preloaded model
     model = get_model(device=DEVICE)
     
+    
+
     # Collect audio data until we get None (end of stream)
     chunks = []
     while True:
@@ -160,6 +162,11 @@ def process_audio_stream():
     # Start transcription immediately
     transcribe_start_time = time.time()
     
+    print("testline")
+    # somewhere after this line is giving me this output/warning: 
+    # 2025-05-01 06:47:52.065986702 [W:onnxruntime:Default, onnxruntime_pybind_state.cc:1983 CreateInferencePybindStateModule] Init provider bridge failed.
+    # I don't know why this is happening
+
     # Process the complete audio
     temp_file = "temp_output.wav"
     with wave.open(temp_file, 'wb') as wf:
@@ -190,7 +197,7 @@ def record_and_transcribe():
     # Start recording in a separate thread
     record_thread = threading.Thread(target=record_audio_stream)
     record_thread.start()
-    
+
     # Start processing in parallel
     result, transcribe_time = process_audio_stream()
     
