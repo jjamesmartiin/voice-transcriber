@@ -10,6 +10,8 @@ from faster_whisper import WhisperModel, BatchedInferencePipeline
 
 # Filter out UserWarning about FP16 not supported on CPU
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
+# Filter out ONNX Runtime provider bridge initialization warning
+warnings.filterwarnings("ignore", message="Init provider bridge failed")
 
 # Global variable to hold the preloaded model
 _model = None
