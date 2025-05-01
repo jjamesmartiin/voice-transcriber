@@ -200,9 +200,6 @@ def record_and_transcribe():
     # Clean up result
     transcription = result.strip()
     
-    # todo: This seems to take a while and I need to clean this up. Start a timer before this earlier in the function and start one after too.
-    # Print the transcription immediately after obtaining it
-    print(f"\nTranscription: {transcription}")
     
     # Copy to clipboard with fast path
     try:
@@ -215,7 +212,7 @@ def record_and_transcribe():
             import subprocess
             subprocess.run(['xclip', '-selection', 'clipboard'], 
                           input=transcription.encode(), check=True)
-            print("Transcription copied using xclip")
+            # print("Transcription copied using xclip")
         except Exception:
             print("Unable to copy to clipboard")
     
@@ -223,7 +220,10 @@ def record_and_transcribe():
     process_end_time = time.time()
     total_time = process_end_time - process_start_time
     
-    print(f"Time to transcribe: {transcribe_time:.2f}s | Total time: {total_time:.2f}s")
+    print(f"Total time: {total_time:.2f}s")
+
+    # put the text we copied at the end so it's easier to see
+    print(f"\nTranscription: {transcription}")
     
     return transcription
 
