@@ -10,7 +10,12 @@ import wave
 import numpy as np
 import pyaudio
 import queue
+import warnings
 from transcribe2 import transcribe_audio, preload_model, get_model
+
+# Suppress ONNX warnings
+warnings.filterwarnings("ignore", message=".*Init provider bridge failed.*")
+warnings.filterwarnings("ignore", category=UserWarning)
 
 # Audio configuration
 CHUNK = 1024
@@ -146,8 +151,6 @@ def process_audio_stream():
     # Get preloaded model
     model = get_model(device=DEVICE)
     
-    
-
     # Collect audio data until we get None (end of stream)
     chunks = []
     while True:
@@ -162,10 +165,6 @@ def process_audio_stream():
     # Start transcription immediately
     transcribe_start_time = time.time()
     
-    print("testline")
-    # somewhere after this line is giving me this output/warning: 
-    # 2025-05-01 06:47:52.065986702 [W:onnxruntime:Default, onnxruntime_pybind_state.cc:1983 CreateInferencePybindStateModule] Init provider bridge failed.
-    # I don't know why this is happening
 
     # Process the complete audio
     temp_file = "temp_output.wav"
@@ -176,9 +175,20 @@ def process_audio_stream():
         wf.writeframes(audio_data)
     
     # Transcribe with optimized parameters
+    # Suppress ONNX warnings during transcription
+    # we were getting this warning:
+    # 2025-05-01 06:47:52.065986702 [W:onnxruntime:Default, onnxruntime_pybind_state.cc:1983 CreateInferencePybindStateModule] Init provider bridge failed.
+    stderr_fd = os.dup(2)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull_fd, 2)
     result = transcribe_audio(audio_path=temp_file, device=DEVICE)
+    # Restore stderr
+    os.dup2(stderr_fd, 2)
+    os.close(devnull_fd)
+    os.close(stderr_fd)
     transcribe_end_time = time.time()
     
+
     # Clean up temp file
     try:
         os.remove(temp_file)
