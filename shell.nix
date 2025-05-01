@@ -45,20 +45,11 @@ in pkgs.mkShell {
       # custom ones
       python-pkgs.faster-whisper
     ]))
+
+    # these are packages that are needed but not symlinked by default so they gc'd
+    pkgs.bashInteractive
+    pkgs.ncurses
+    pkgs.readline
   ];
-
-
-  # nix-build -o 
-
-#   shellHook = ''
-#     # Create a local GC root in the project directory
-#     GC_ROOT_DIR="./nix-gc-roots"
-#     mkdir -p $GC_ROOT_DIR # don't remove this dir
-#     ${pkgs.nix}/bin/nix-store --add-root $GC_ROOT_DIR/nixpkgs-env --indirect $(${pkgs.nix}/bin/nix-store -qR ${nixpkgs})
-
-#     # echo "Created local GC roots at $GC_ROOT_DIR/{nixpkgs,pkgs}-env"
-#   '';
-
-
 }
 
