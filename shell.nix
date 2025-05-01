@@ -5,6 +5,7 @@ let
   nixpkgs = fetchTarball "https://github.com/NixOS/nixpkgs/archive/cf8cc1201be8bc71b7cbbbdaf349b22f4f99c7ae.tar.gz"; 
   pkgs = import (nixpkgs) {};
 
+  # custom python def so I can use custom python packages not in nixpkgs
   python = pkgs.python3.override {
     self = python;
     packageOverrides = pyfinal: pyprev: {
@@ -17,21 +18,6 @@ in pkgs.mkShell {
     # other non-Python packages can be added here
     pkgs.lame # for mp3 encoding # I don't think this is needed anymore
     pkgs.xclip # for clipboard access
-
-    # # Python packages
-    # (pkgs.python3.withPackages (python-pkgs: with python-pkgs; [
-    #   # select Python packages here
-    #   pyaudio
-    #   # openai-whisper
-    #   faster-whisper
-    #   keyboard
-    #   wavefile
-    #   pyperclip
-    #   # Additional packages for testing
-    #   numpy
-    #   scipy
-    #   gtts
-    # ]))
 
     (python.withPackages (python-pkgs: [
       python-pkgs.pyaudio
