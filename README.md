@@ -1,4 +1,8 @@
 # TODO
+- [ ] REALLY make sure that it works offline and that we don't need to download anything after running it once
+- [ ] REALLY make sure that it works offline and that we don't need to download anything after running it once
+- [ ] REALLY make sure that it works offline and that we don't need to download anything after running it once
+- [ ] REALLY make sure that it works offline and that we don't need to download anything after running it once
 - [ ] add an interrupt during transcription in case it's wrong
 - [x] fix the warning from `faster-whisper` onnx stuff (surpressed but not quite fixed)
 - [x] add a test for the transcriber
