@@ -2,11 +2,11 @@
 let
   # We pin to a specific nixpkgs commit for reproducibility.
   # Last updated: 2024-04-29. Check for new commits at https://status.nixos.org.
-  # nixpkgs = fetchTarball "https://github.com/NixOS/nixpkgs/archive/cf8cc1201be8bc71b7cbbbdaf349b22f4f99c7ae.tar.gz"; 
-  # pkgs = import (nixpkgs) {};
+  nixpkgs = fetchTarball "https://github.com/NixOS/nixpkgs/archive/cf8cc1201be8bc71b7cbbbdaf349b22f4f99c7ae.tar.gz"; 
+  pkgs = import (nixpkgs) {};
 
   # Use a local nixpkgs instead of fetching from GitHub
-  pkgs = import <nixpkgs> {};
+  # pkgs = import <nixpkgs> {};
 
   # custom python def so I can use custom python packages not in nixpkgs
   python = pkgs.python3.override {
@@ -16,29 +16,51 @@ let
     };
   };
 
-in pkgs.mkShell {
-  packages = [
-    # other non-Python packages can be added here
-    pkgs.lame # for mp3 encoding # I don't think this is needed anymore
-    pkgs.xclip # for clipboard access
+in
+  pkgs.stdenvNoCC.mkDerivation {
+    name = "shell";
+    dontUnpack = true;
 
-    (python.withPackages (python-pkgs: [
-      python-pkgs.pyaudio
-      python-pkgs.keyboard
-      python-pkgs.wavefile
-      python-pkgs.pyperclip
-      python-pkgs.numpy
-      python-pkgs.scipy
-      python-pkgs.gtts
+    buildInputs = [
+      # other non-Python packages can be added here
+      pkgs.lame # for mp3 encoding # I don't think this is needed anymore
+      pkgs.xclip # for clipboard access
 
-      # custom ones
-      python-pkgs.faster-whisper
-    ]))
+      (python.withPackages (python-pkgs: [
+        python-pkgs.pyaudio
+        python-pkgs.keyboard
+        python-pkgs.wavefile
+        python-pkgs.pyperclip
+        python-pkgs.numpy
+        python-pkgs.scipy
+        python-pkgs.gtts
 
-    # these are packages that are needed but not symlinked by default so they gc'd
-    pkgs.bashInteractive
-    pkgs.ncurses
-    pkgs.readline
-  ];
-}
+        # custom ones
+        python-pkgs.faster-whisper
+      ]))
+
+      pkgs.bashInteractive
+      pkgs.ncurses
+      pkgs.readline
+    ];
+
+    # prevent nixpkgs from being gc'd garbage collected
+    inherit nixpkgs;
+
+    builder = builtins.toFile "builder.sh" ''
+      source $stdenv/setup
+      eval $shellHook
+
+      {
+        echo "#!$SHELL"
+        for var in PATH SHELL nixpkgs
+        do echo "declare -x $var=\"''${!var}\""
+        done
+        echo "declare -x PS1='\n\033[1;32m[nix-shell:\w]\$\033[0m '"
+        echo "exec \"$SHELL\" --norc --noprofile \"\$@\""
+      } > "$out"
+
+      chmod a+x "$out"
+    '';
+  }
 
