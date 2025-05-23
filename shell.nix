@@ -2,7 +2,8 @@
 let
   # We pin to a specific nixpkgs commit for reproducibility.
   # Last updated: 2024-04-29. Check for new commits at https://status.nixos.org.
-  nixpkgs = fetchTarball "https://github.com/NixOS/nixpkgs/archive/cf8cc1201be8bc71b7cbbbdaf349b22f4f99c7ae.tar.gz"; 
+  # nixpkgs = fetchTarball "https://github.com/NixOS/nixpkgs/archive/cf8cc1201be8bc71b7cbbbdaf349b22f4f99c7ae.tar.gz"; 
+  nixpkgs = <nixpkgs>; 
   pkgs = import (nixpkgs) {};
 
   # Use a local nixpkgs instead of fetching from GitHub
@@ -18,7 +19,8 @@ let
 
 in
   pkgs.stdenvNoCC.mkDerivation {
-    name = "shell";
+    pname = "voice-transcriber";
+    name = "voice-transcriber";
     dontUnpack = true;
 
     buildInputs = [
@@ -61,6 +63,10 @@ in
       } > "$out"
 
       chmod a+x "$out"
+    '';
+
+    shellHook = ''
+      python t2.py
     '';
   }
 
