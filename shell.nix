@@ -44,6 +44,9 @@ in
       pkgs.bashInteractive
       pkgs.ncurses
       pkgs.readline
+
+      # for playing audio
+      pkgs.mpg123
     ];
 
     # prevent nixpkgs from being gc'd garbage collected
@@ -67,6 +70,7 @@ in
 
     shellHook = ''
       python t2.py
+      #python # just for testing
     '';
   }
 

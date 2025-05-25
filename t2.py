@@ -222,16 +222,11 @@ def record_and_transcribe():
     try:
         pyperclip.copy(transcription)
         print("Transcription copied to clipboard")
+        import subprocess
+        # Use mpg123 for fastest MP3 playback (fire-and-forget)
+        playSound = subprocess.Popen(['mpg123', '-q', 'sounds/pop.mp3'], stderr=subprocess.DEVNULL)
     except Exception as e:
-        print(f"Failed to use pyperclip: {e}")
-        try:
-            # Direct system clipboard access as fallback
-            import subprocess
-            subprocess.run(['xclip', '-selection', 'clipboard'], 
-                          input=transcription.encode(), check=True)
-            # print("Transcription copied using xclip")
-        except Exception:
-            print("Unable to copy to clipboard")
+        print("Unable to copy to clipboard")
     
     # Calculate timing information
     process_end_time = time.time()
