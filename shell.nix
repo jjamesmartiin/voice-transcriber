@@ -82,20 +82,15 @@ in
       echo "Voice Transcriber Environment Ready!"
       echo ""
       echo "Available modes:"
-      echo "  ./start_gui.sh           - GUI app with F12 hotkey (RECOMMENDED)"
-      echo "  python t2.py             - Terminal mode"
-      echo "  python3 global_shortcut.py - Control key daemon (IMPROVED WAYLAND SUPPORT)"
-      echo ""
+      echo "  python t2.py             - Terminal manual mode"
       echo "For global shortcuts on Wayland:"
       echo "  python3 global_shortcut.py --check  - Check system compatibility"
       echo "  sudo usermod -a -G input \$USER      - Add user to input group (if needed)"
       echo ""
-      echo "For best experience, use: ./start_gui.sh"
+
       #python t2.py
       #python # just for testing
-
-
-      python3 simple_voice_transcriber.py
+      python3 simple_voice_transcriber.py # works anywhere but terminal?
     '';
   }
 

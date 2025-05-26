@@ -34,67 +34,14 @@ nix-shell --run "python t2.py"
 nix-shell --run "python simple_voice_transcriber.py"
 ```
 
-### GUI Mode (RECOMMENDED!)
-```shell
-# Start the GUI application
-./start_gui.sh
-
-# Or manually:
-nix-shell --run "python3 voice_gui.py"
-```
-
-The GUI app provides:
-- **Visual interface** with status updates and transcription results
-- **Multiple keyboard shortcuts** - F12, Space, or Ctrl+R to toggle recording
-- **Click-to-record button** as alternative to shortcuts
-- **Background operation** - minimize to run in background
-- **Real-time feedback** with progress indicators
-- **Always on top option** to keep window accessible
-
-**Note**: Keyboard shortcuts work when the window has focus. Use "Keep on Top" button to keep it accessible.
-
 ### Global Shortcut Mode (Command Line)
 ```shell
-# Start the global shortcut daemon
-./start_daemon.sh
-
 # Or manually:
-nix-shell --run "python3 global_shortcut.py"
+nix-shell --run "python3 simple_voice_transcriber.py"
 ```
-
-Once the daemon is running, **hold the Control key** to start recording, then **release Control** to stop recording and transcribe. The transcribed text will be automatically copied to your clipboard.
-
 ## Features
 
 - **Fast offline transcription** using faster-whisper
-- **Multiple interfaces**: GUI app, global shortcuts, or terminal mode
-- **F12 global hotkey** (GUI mode) or Control key (daemon mode)
-- **Desktop notifications** for transcription status
 - **Automatic clipboard copying** of transcribed text
 - **Audio feedback** with pop sound on completion
-- **Background operation** - minimize GUI to system tray
-
-## Recommended Usage
-
-**For best experience, use the GUI mode** (`./start_gui.sh`):
-1. Opens a user-friendly window
-2. Keep window focused or use "Keep on Top" button
-3. Press F12, Space, or Ctrl+R to start/stop recording
-4. See transcription results in real-time
-5. Minimize to background when not actively using shortcuts
-
-## Global Shortcut Setup
-
-The global shortcut daemon (`global_shortcut.py`) uses keyboard monitoring to detect when the Control key is held down. This approach works reliably across different desktop environments including:
-
-- GNOME/Wayland
-- KDE/Plasma
-- XFCE
-- i3/sway
-- Any X11 or Wayland desktop
-
-**Usage**: Hold Control key to record, release to stop and transcribe. Press Escape to exit the daemon.
-
-## tips:
-### to get a copy/paste notification 
-- on gnome: use the `pano` extension
+- **Global keyboard shortcut on wayland** for completion 
