@@ -90,7 +90,7 @@ in
 
       #python t2.py
       #python # just for testing
-      python3 simple_voice_transcriber.py # works anywhere but terminal?
+      python3 app/simple_voice_transcriber.py # works anywhere but terminal?
     '';
   }
 
