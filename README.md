@@ -30,8 +30,8 @@ A fast offline voice transcription tool with global shortcut support for GNOME/W
 ```shell
 nix-shell --run "python t2.py"
 
-# or run this to cache the build offline for use without any internet
-bash nixos
+# for working global shortcut: 
+nix-shell --run "python simple_voice_transcriber.py"
 ```
 
 ### GUI Mode (RECOMMENDED!)
