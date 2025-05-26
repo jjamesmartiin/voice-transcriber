@@ -238,7 +238,7 @@ class SimpleVoiceTranscriber:
         
         # Play start recording sound
         try:
-            subprocess.Popen(['mpg123', '-q', 'sounds/pop2.mp3'], 
+            subprocess.Popen(['mpg123', '-q', 'app/sounds/pop2.mp3'], 
                            stderr=subprocess.DEVNULL)
         except:
             pass
@@ -258,7 +258,7 @@ class SimpleVoiceTranscriber:
         
         # Play stop recording sound
         try:
-            subprocess.Popen(['mpg123', '-q', 'sounds/pop2.mp3'], 
+            subprocess.Popen(['mpg123', '-q', 'app/sounds/pop2.mp3'], 
                            stderr=subprocess.DEVNULL)
         except:
             pass
@@ -295,7 +295,7 @@ class SimpleVoiceTranscriber:
                 
                 # Play sound
                 try:
-                    subprocess.Popen(['mpg123', '-q', 'sounds/pop.mp3'], 
+                    subprocess.Popen(['mpg123', '-q', 'app/sounds/pop.mp3'], 
                                    stderr=subprocess.DEVNULL)
                 except:
                     pass
