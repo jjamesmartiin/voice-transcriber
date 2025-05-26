@@ -28,6 +28,9 @@ in
       pkgs.lame # for mp3 encoding # I don't think this is needed anymore
       pkgs.xclip # for clipboard access
 
+      # For notifications
+      pkgs.libnotify # for notify-send
+
       (python.withPackages (python-pkgs: [
         python-pkgs.pyaudio
         python-pkgs.keyboard
@@ -36,6 +39,9 @@ in
         python-pkgs.numpy
         python-pkgs.scipy
         python-pkgs.gtts
+
+        # For GUI
+        python-pkgs.tkinter
 
         # custom ones
         python-pkgs.faster-whisper
@@ -69,7 +75,15 @@ in
     '';
 
     shellHook = ''
-      python t2.py
+      echo "Voice Transcriber Environment Ready!"
+      echo ""
+      echo "Available modes:"
+      echo "  ./start_gui.sh           - GUI app with F12 hotkey (RECOMMENDED)"
+      echo "  python t2.py             - Terminal mode"
+      echo "  python3 global_shortcut.py - Control key daemon"
+      echo ""
+      echo "For best experience, use: ./start_gui.sh"
+      #python t2.py
       #python # just for testing
     '';
   }
