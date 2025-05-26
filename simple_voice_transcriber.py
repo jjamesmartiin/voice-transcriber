@@ -79,8 +79,6 @@ class SimpleVoiceTranscriber:
         if self.recording:
             return
             
-        self.show_notification("Voice Transcriber", "Recording... Release any key to stop")
-        
         # Wait for model to load if still loading
         if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
             logger.info("Waiting for model to load...")
@@ -121,8 +119,6 @@ class SimpleVoiceTranscriber:
     def process_and_transcribe(self):
         """Process recorded audio and transcribe"""
         try:
-            self.show_notification("Voice Transcriber", "Processing...")
-            
             # Process the audio
             result, transcribe_time = process_audio_stream()
             
@@ -141,28 +137,12 @@ class SimpleVoiceTranscriber:
                 except:
                     pass
                 
-                # Show completion notification
-                self.show_notification("Voice Transcriber", "Transcription complete - copied to clipboard")
                 logger.info(f"✅ Transcribed: {transcription}")
             else:
-                self.show_notification("Voice Transcriber", "No speech detected")
                 logger.info("❌ No speech detected")
                 
         except Exception as e:
             logger.error(f"Transcription error: {e}")
-            self.show_notification("Voice Transcriber", f"Error: {e}")
-
-    def show_notification(self, title, message):
-        """Show desktop notification"""
-        try:
-            subprocess.run([
-                'notify-send', 
-                '--app-name=Voice Transcriber',
-                '--icon=audio-input-microphone',
-                title, message
-            ], check=False)
-        except:
-            logger.info(f"{title}: {message}")
 
     def run(self):
         """Run the voice transcriber"""

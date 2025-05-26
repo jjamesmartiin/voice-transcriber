@@ -205,6 +205,9 @@ class GlobalShortcutDaemon:
                 elif key == getattr(self.pynput_Key, 'k', None):
                     logger.debug("K key pressed")
                     self.check_start_recording()
+                elif key == self.pynput_Key.esc:
+                    logger.info("Escape pressed - exiting...")
+                    self.running = False
             except AttributeError:
                 # Handle special keys that don't have char attribute
                 key_name = str(key).replace('Key.', '')
@@ -224,28 +227,27 @@ class GlobalShortcutDaemon:
                     self.check_stop_recording()
                 elif hasattr(key, 'char') and key.char and key.char.lower() == 'k':
                     logger.debug("K released")
-                    self.check_stop_recording()
+                    # Don't stop recording on K release, only on Alt/Shift release
                 elif key == getattr(self.pynput_Key, 'k', None):
                     logger.debug("K key released")
-                    self.check_stop_recording()
-                elif key == self.pynput_Key.esc:
-                    logger.info("Escape pressed - exiting...")
-                    self.running = False
-                    return False
+                    # Don't stop recording on K release, only on Alt/Shift release
             except AttributeError:
                 # Handle special keys that don't have char attribute
                 key_name = str(key).replace('Key.', '')
                 if key_name == 'k':
                     logger.debug("K special key released")
-                    self.check_stop_recording()
+                    # Don't stop recording on K release, only on Alt/Shift release
         
-        try:
-            with self.pynput_Listener(on_press=on_press, on_release=on_release) as listener:
-                while self.running:
-                    time.sleep(0.1)
-                listener.stop()
-        except Exception as e:
-            logger.error(f"Pynput listener error: {e}")
+        # Keep restarting the listener until we're told to stop
+        while self.running:
+            try:
+                with self.pynput_Listener(on_press=on_press, on_release=on_release) as listener:
+                    listener.join()  # This will block until the listener stops
+            except Exception as e:
+                logger.error(f"Pynput listener error: {e}")
+                if self.running:
+                    logger.info("Restarting listener in 1 second...")
+                    time.sleep(1)
     
     def run_polling_backend(self):
         """Run keyboard monitoring using polling (very basic)"""
@@ -290,7 +292,6 @@ class GlobalShortcutDaemon:
             return
             
         logger.info("Alt+Shift+K pressed - Starting recording...")
-        self.show_notification("Voice Transcriber", "Recording... Release any key to stop")
         
         # Wait for model to load if still loading
         if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
@@ -334,8 +335,6 @@ class GlobalShortcutDaemon:
     def process_and_transcribe(self):
         """Process recorded audio and transcribe"""
         try:
-            self.show_notification("Voice Transcriber", "Processing...")
-            
             # Process the audio
             from t2 import process_audio_stream
             result, transcribe_time = process_audio_stream()
@@ -355,28 +354,12 @@ class GlobalShortcutDaemon:
                 except:
                     pass
                 
-                # Show completion notification (without clipboard content)
-                self.show_notification("Voice Transcriber", "Transcription complete - copied to clipboard")
                 logger.info(f"Transcribed: {transcription}")
             else:
-                self.show_notification("Voice Transcriber", "No speech detected")
                 logger.info("No speech detected")
                 
         except Exception as e:
             logger.error(f"Transcription error: {e}")
-            self.show_notification("Voice Transcriber", f"Error: {e}")
-    
-    def show_notification(self, title, message):
-        """Show desktop notification"""
-        try:
-            subprocess.run([
-                'notify-send', 
-                '--app-name=Voice Transcriber',
-                '--icon=audio-input-microphone',
-                title, message
-            ], check=False)
-        except:
-            logger.info(f"{title}: {message}")
     
     def run_daemon(self):
         """Run the daemon"""
@@ -469,19 +452,10 @@ def main():
             
             result = record_and_transcribe()
             if result:
-                subprocess.run([
-                    'notify-send', 
-                    '--app-name=Voice Transcriber',
-                    '--icon=audio-input-microphone',
-                    'Voice Transcriber', 'Transcription complete - copied to clipboard'
-                ], check=False)
+                # Notification removed - transcription complete silently
+                pass
         except Exception as e:
-            subprocess.run([
-                'notify-send', 
-                '--app-name=Voice Transcriber',
-                '--icon=dialog-error',
-                'Voice Transcriber', f'Error: {e}'
-            ], check=False)
+            logger.error(f"Direct transcription error: {e}")
     else:
         # Run as daemon
         daemon = GlobalShortcutDaemon()
