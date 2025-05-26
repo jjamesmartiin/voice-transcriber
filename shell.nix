@@ -90,7 +90,10 @@ in
 
       #python t2.py
       #python # just for testing
-      python3 app/simple_voice_transcriber.py # works anywhere but terminal?
+      # python3 app/simple_voice_transcriber.py # works anywhere but terminal?
+      echo "To run the transcriber, use one of the following commands:"
+      echo "python3 app/simple_voice_transcriber.py"
+      echo "nix-shell --run \"python3 app/simple_voice_transcriber.py\""
     '';
   }
 
