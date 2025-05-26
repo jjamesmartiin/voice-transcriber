@@ -43,6 +43,10 @@ in
         # For GUI
         python-pkgs.tkinter
 
+        # For global shortcuts (Wayland support)
+        python-pkgs.evdev
+        python-pkgs.pynput
+
         # custom ones
         python-pkgs.faster-whisper
       ]))
@@ -80,7 +84,11 @@ in
       echo "Available modes:"
       echo "  ./start_gui.sh           - GUI app with F12 hotkey (RECOMMENDED)"
       echo "  python t2.py             - Terminal mode"
-      echo "  python3 global_shortcut.py - Control key daemon"
+      echo "  python3 global_shortcut.py - Control key daemon (IMPROVED WAYLAND SUPPORT)"
+      echo ""
+      echo "For global shortcuts on Wayland:"
+      echo "  python3 global_shortcut.py --check  - Check system compatibility"
+      echo "  sudo usermod -a -G input \$USER      - Add user to input group (if needed)"
       echo ""
       echo "For best experience, use: ./start_gui.sh"
       #python t2.py
