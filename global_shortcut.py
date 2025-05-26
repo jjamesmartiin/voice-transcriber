@@ -167,12 +167,6 @@ class GlobalShortcutDaemon:
                                     if event.value == 1:  # Key press
                                         self.check_start_recording()
                                 
-                                # Check for Escape key
-                                elif event.code == ecodes.KEY_ESC and event.value == 1:
-                                    logger.info("Escape pressed - exiting...")
-                                    self.running = False
-                                    return
-                                    
                     except OSError:
                         # Device disconnected, remove it
                         logger.warning(f"Device {device.path} disconnected")
@@ -205,9 +199,6 @@ class GlobalShortcutDaemon:
                 elif key == getattr(self.pynput_Key, 'k', None):
                     logger.debug("K key pressed")
                     self.check_start_recording()
-                elif key == self.pynput_Key.esc:
-                    logger.info("Escape pressed - exiting...")
-                    self.running = False
             except AttributeError:
                 # Handle special keys that don't have char attribute
                 key_name = str(key).replace('Key.', '')

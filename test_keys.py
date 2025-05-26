@@ -44,9 +44,6 @@ def on_release(key):
             logger.info("Shift released")
         elif hasattr(key, 'char') and key.char and key.char.lower() == 'k':
             logger.info("K released")
-        elif key == Key.esc:
-            logger.info("Escape pressed - exiting...")
-            return False
             
         logger.info(f"Current state: Alt={alt_pressed}, Shift={shift_pressed}")
         
