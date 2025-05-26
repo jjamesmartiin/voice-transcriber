@@ -236,6 +236,13 @@ class SimpleVoiceTranscriber:
         self.recording = True
         stop_recording.clear()
         
+        # Play start recording sound
+        try:
+            subprocess.Popen(['mpg123', '-q', 'sounds/pop2.mp3'], 
+                           stderr=subprocess.DEVNULL)
+        except:
+            pass
+        
         # Start recording in background thread
         self.record_thread = threading.Thread(target=self.record_audio)
         self.record_thread.daemon = True
@@ -248,6 +255,13 @@ class SimpleVoiceTranscriber:
             
         self.recording = False
         stop_recording.set()
+        
+        # Play stop recording sound
+        try:
+            subprocess.Popen(['mpg123', '-q', 'sounds/pop2.mp3'], 
+                           stderr=subprocess.DEVNULL)
+        except:
+            pass
         
         # Wait for recording to finish
         if self.record_thread:
