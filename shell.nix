@@ -94,8 +94,8 @@ in
       #python t2.py
       #python # just for testing
 
-      # this is to use the global shortcut  
-      python3 global_shortcut.py
+
+      python3 simple_voice_transcriber.py
     '';
   }
 
