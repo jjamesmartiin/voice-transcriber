@@ -93,6 +93,9 @@ in
       echo "For best experience, use: ./start_gui.sh"
       #python t2.py
       #python # just for testing
+
+      # this is to use the global shortcut  
+      python3 global_shortcut.py
     '';
   }
 
