@@ -80,20 +80,8 @@ in
 
     shellHook = ''
       echo "Voice Transcriber Environment Ready!"
-      echo ""
-      echo "Available modes:"
-      echo "  python t2.py             - Terminal manual mode"
-      echo "For global shortcuts on Wayland:"
-      echo "  python3 global_shortcut.py --check  - Check system compatibility"
-      echo "  sudo usermod -a -G input \$USER      - Add user to input group (if needed)"
-      echo ""
 
-      #python t2.py
-      #python # just for testing
-      # python3 app/simple_voice_transcriber.py # works anywhere but terminal?
-      echo "To run the transcriber, use one of the following commands:"
-      echo "python3 app/simple_voice_transcriber.py"
-      echo "nix-shell --run \"python3 app/simple_voice_transcriber.py\""
+      python app/t2.py
     '';
   }
 
