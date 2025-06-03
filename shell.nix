@@ -47,6 +47,9 @@ in
         python-pkgs.evdev
         python-pkgs.pynput
 
+        # For uinput virtual keyboard support
+        python-pkgs.python-uinput
+
         # custom ones
         python-pkgs.faster-whisper
       ]))

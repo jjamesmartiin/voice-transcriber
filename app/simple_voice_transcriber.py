@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Simple Voice Transcriber with Alt+Shift+K shortcut
-Enhanced with multiple keyboard backends for better terminal compatibility
+Enhanced with Wayland-compatible global hotkeys using evdev+uinput
 """
 import logging
 import threading
@@ -10,6 +10,7 @@ import time
 import os
 import sys
 import select
+import json
 
 # Import transcription functionality
 from t2 import record_and_transcribe, preload_model, get_model, DEVICE, record_audio_stream, process_audio_stream, stop_recording
@@ -336,214 +337,260 @@ if __name__ == "__main__":
         except:
             pass
 
-class SimpleVoiceTranscriber:
-    def __init__(self):
-        self.alt_pressed = False
-        self.shift_pressed = False
-        self.recording = False
-        self.record_thread = None
-        self.process_thread = None
-        self.backend = None
-        self.running = False
-        
-        # Initialize visual notification
-        self.visual_notification = VisualNotification() if VISUAL_NOTIFICATIONS_AVAILABLE else None
-        
-        # Preload model in background
-        logger.info("Loading transcription model...")
-        self.preload_thread = preload_model(device=DEVICE)
-        
-        # Try to initialize the best available backend
-        self.init_backend()
-        
-    def init_backend(self):
-        """Initialize the best available keyboard monitoring backend"""
-        # Try backends in order of preference
-        backends = [
-            ('evdev', self.init_evdev_backend),
-            ('pynput', self.init_pynput_backend)
-        ]
-        
-        for backend_name, init_func in backends:
-            try:
-                if init_func():
-                    self.backend = backend_name
-                    logger.info(f"Using {backend_name} backend for keyboard monitoring")
-                    return True
-            except Exception as e:
-                logger.warning(f"Failed to initialize {backend_name} backend: {e}")
-                continue
-        
-        logger.error("No keyboard monitoring backend available")
-        return False
+class WaylandGlobalHotkeys:
+    """Wayland-compatible global hotkey system using evdev + uinput"""
     
-    def init_evdev_backend(self):
-        """Initialize evdev backend (best for terminals and Wayland)"""
+    def __init__(self, callback_start, callback_stop):
+        self.callback_start = callback_start
+        self.callback_stop = callback_stop
+        self.running = False
+        self.devices = []
+        self.virtual_keyboard = None
+        self.key_states = {}
+        self.hotkey_active = False
+        
+        # Key codes for our hotkey combination (Alt+Shift+K)
+        self.ALT_KEYS = [56, 100]  # KEY_LEFTALT, KEY_RIGHTALT
+        self.SHIFT_KEYS = [42, 54]  # KEY_LEFTSHIFT, KEY_RIGHTSHIFT  
+        self.K_KEY = 37  # KEY_K
+        
+        self.init_devices()
+    
+    def init_devices(self):
+        """Initialize evdev devices and uinput virtual keyboard"""
         try:
             import evdev
-            from evdev import InputDevice, categorize, ecodes
+            import uinput
+            self.evdev = evdev
+            self.uinput = uinput
+        except ImportError as e:
+            logger.error(f"Missing dependencies: {e}")
+            logger.error("Install with: pip install evdev python-uinput")
+            return False
+        
+        # Find keyboard devices
+        try:
+            # Try to get devices from evdev.list_devices() first
+            device_paths = evdev.list_devices()
             
-            # Find keyboard devices
-            devices = [InputDevice(path) for path in evdev.list_devices()]
+            # Also try to manually check common event devices
+            import glob
+            all_event_paths = glob.glob('/dev/input/event*')
+            for path in all_event_paths:
+                if path not in device_paths:
+                    device_paths.append(path)
+            
+            logger.debug(f"Checking {len(device_paths)} input device paths...")
+            
+            devices = []
             keyboards = []
+            
+            for path in device_paths:
+                try:
+                    device = evdev.InputDevice(path)
+                    devices.append(device)
+                except (PermissionError, OSError) as e:
+                    logger.debug(f"Cannot access {path}: {e}")
+                    continue
+            
+            logger.debug(f"Successfully opened {len(devices)} input devices, checking for keyboards...")
             
             for device in devices:
                 caps = device.capabilities()
-                # Check if device has keyboard capabilities (look for common keys)
-                if ecodes.EV_KEY in caps:
-                    key_caps = caps[ecodes.EV_KEY]
-                    # Check for essential keyboard keys
-                    if (ecodes.KEY_A in key_caps and ecodes.KEY_SPACE in key_caps and 
-                        (ecodes.KEY_LEFTALT in key_caps or ecodes.KEY_RIGHTALT in key_caps)):
+                if evdev.ecodes.EV_KEY in caps:
+                    key_caps = caps[evdev.ecodes.EV_KEY]
+                    
+                    # More flexible keyboard detection - look for common keyboard keys
+                    has_letters = any(key in key_caps for key in [
+                        evdev.ecodes.KEY_A, evdev.ecodes.KEY_B, evdev.ecodes.KEY_C,
+                        evdev.ecodes.KEY_Q, evdev.ecodes.KEY_W, evdev.ecodes.KEY_E
+                    ])
+                    has_modifiers = any(key in key_caps for key in [
+                        evdev.ecodes.KEY_LEFTALT, evdev.ecodes.KEY_RIGHTALT,
+                        evdev.ecodes.KEY_LEFTSHIFT, evdev.ecodes.KEY_RIGHTSHIFT,
+                        evdev.ecodes.KEY_LEFTCTRL, evdev.ecodes.KEY_RIGHTCTRL
+                    ])
+                    has_space_enter = any(key in key_caps for key in [
+                        evdev.ecodes.KEY_SPACE, evdev.ecodes.KEY_ENTER
+                    ])
+                    
+                    # Check if it has our specific hotkey keys
+                    has_alt = any(key in key_caps for key in [evdev.ecodes.KEY_LEFTALT, evdev.ecodes.KEY_RIGHTALT])
+                    has_shift = any(key in key_caps for key in [evdev.ecodes.KEY_LEFTSHIFT, evdev.ecodes.KEY_RIGHTSHIFT])
+                    has_k = evdev.ecodes.KEY_K in key_caps
+                    
+                    # Accept device if it looks like a keyboard and has our hotkey keys
+                    if (has_letters or has_modifiers or has_space_enter) and has_alt and has_shift and has_k:
                         keyboards.append(device)
-                        logger.info(f"Found keyboard device: {device.name} at {device.path}")
+                        logger.info(f"Found keyboard: {device.name} at {device.path}")
+                        logger.debug(f"  Device capabilities: letters={has_letters}, modifiers={has_modifiers}, space/enter={has_space_enter}")
+                    else:
+                        logger.debug(f"Skipping device: {device.name} (missing required keys)")
+                        logger.debug(f"  Has letters: {has_letters}, modifiers: {has_modifiers}, space/enter: {has_space_enter}")
+                        logger.debug(f"  Has Alt: {has_alt}, Shift: {has_shift}, K: {has_k}")
             
             if not keyboards:
-                raise Exception("No keyboard devices found")
+                logger.error("No suitable keyboard devices found")
+                logger.error("Available input devices:")
+                for device in devices:
+                    caps = device.capabilities()
+                    has_keys = evdev.ecodes.EV_KEY in caps
+                    key_count = len(caps.get(evdev.ecodes.EV_KEY, [])) if has_keys else 0
+                    logger.error(f"  - {device.name} at {device.path} (has {key_count} keys)")
+                
+                logger.error("Inaccessible devices (permission denied):")
+                for path in device_paths:
+                    if not any(d.path == path for d in devices):
+                        logger.error(f"  - {path}")
+                
+                return False
+                
+            self.devices = keyboards
             
-            self.keyboards = keyboards
-            self.evdev = evdev
-            self.ecodes = ecodes
-            logger.info(f"Found {len(keyboards)} keyboard device(s)")
+            # Create virtual keyboard for sending events
+            try:
+                # Define the keys we might need to send
+                events = (
+                    uinput.KEY_LEFTALT, uinput.KEY_RIGHTALT,
+                    uinput.KEY_LEFTSHIFT, uinput.KEY_RIGHTSHIFT,
+                    uinput.KEY_K, uinput.KEY_A, uinput.KEY_SPACE,
+                    # Add more keys as needed
+                )
+                self.virtual_keyboard = uinput.Device(events)
+                logger.info("Created virtual keyboard device")
+            except Exception as e:
+                logger.warning(f"Could not create virtual keyboard: {e}")
+                # Continue without virtual keyboard - we can still detect hotkeys
+            
             return True
             
-        except ImportError:
-            raise Exception("evdev not available - install with: pip install evdev")
         except PermissionError:
-            raise Exception("Permission denied - add user to input group: sudo usermod -a -G input $USER")
-    
-    def init_pynput_backend(self):
-        """Initialize pynput backend (fallback)"""
-        try:
-            from pynput import keyboard
-            from pynput.keyboard import Key, Listener
-            
-            # Test if pynput can create a listener
-            test_listener = Listener(on_press=lambda key: None, on_release=lambda key: None)
-            test_listener.start()
-            test_listener.stop()
-            
-            self.pynput_keyboard = keyboard
-            self.pynput_Key = Key
-            self.pynput_Listener = Listener
-            return True
-            
-        except ImportError:
-            raise Exception("pynput not available - install with: pip install pynput")
+            logger.error("Permission denied accessing input devices")
+            logger.error("Run as root or add user to input group: sudo usermod -a -G input $USER")
+            logger.error("Then log out and back in")
+            return False
         except Exception as e:
-            raise Exception(f"pynput initialization failed: {e}")
-
-    def run_evdev_backend(self):
-        """Run keyboard monitoring using evdev"""
-        logger.info("Starting evdev keyboard monitoring...")
+            logger.error(f"Error initializing devices: {e}")
+            return False
+    
+    def is_hotkey_pressed(self):
+        """Check if our hotkey combination (Alt+Shift+K) is currently pressed"""
+        alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
+        shift_pressed = any(self.key_states.get(key, False) for key in self.SHIFT_KEYS)
+        k_pressed = self.key_states.get(self.K_KEY, False)
+        
+        return alt_pressed and shift_pressed and k_pressed
+    
+    def is_hotkey_released(self):
+        """Check if hotkey combination is no longer fully pressed"""
+        alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
+        shift_pressed = any(self.key_states.get(key, False) for key in self.SHIFT_KEYS)
+        k_pressed = self.key_states.get(self.K_KEY, False)
+        
+        return not (alt_pressed and shift_pressed and k_pressed)
+    
+    def handle_key_event(self, event):
+        """Handle a key event and check for hotkey activation"""
+        if event.type != self.evdev.ecodes.EV_KEY:
+            return
+        
+        key_code = event.code
+        key_state = event.value  # 1 = press, 0 = release, 2 = repeat
+        
+        # Update key state tracking
+        if key_state in [0, 1]:  # Only track press/release, ignore repeat
+            self.key_states[key_code] = (key_state == 1)
+        
+        # Check for hotkey activation
+        if self.is_hotkey_pressed() and not self.hotkey_active:
+            logger.debug("🎙️ Hotkey activated - starting recording")
+            self.hotkey_active = True
+            self.callback_start()
+        elif self.hotkey_active and self.is_hotkey_released():
+            logger.debug("⏹️ Hotkey released - stopping recording")
+            self.hotkey_active = False
+            self.callback_stop()
+    
+    def run(self):
+        """Main event loop for monitoring keyboard events"""
+        if not self.devices:
+            logger.error("No devices available for monitoring")
+            return False
+        
+        self.running = True
+        logger.info(f"Monitoring {len(self.devices)} keyboard device(s) for Alt+Shift+K")
         
         while self.running:
             try:
                 # Use select to monitor multiple devices
-                devices_map = {dev.fd: dev for dev in self.keyboards}
+                devices_map = {dev.fd: dev for dev in self.devices if dev.fd is not None}
+                
+                if not devices_map:
+                    logger.error("All devices disconnected")
+                    break
+                
                 r, w, x = select.select(devices_map, [], [], 1.0)
                 
                 for fd in r:
                     device = devices_map[fd]
                     try:
                         for event in device.read():
-                            if event.type == self.ecodes.EV_KEY:
-                                # Check for Alt keys
-                                if event.code in [self.ecodes.KEY_LEFTALT, self.ecodes.KEY_RIGHTALT]:
-                                    if event.value == 1:  # Key press
-                                        self.alt_pressed = True
-                                        logger.debug("Alt pressed")
-                                    elif event.value == 0:  # Key release
-                                        self.alt_pressed = False
-                                        logger.debug("Alt released")
-                                        self.check_stop_recording()
-                                
-                                # Check for Shift keys
-                                elif event.code in [self.ecodes.KEY_LEFTSHIFT, self.ecodes.KEY_RIGHTSHIFT]:
-                                    if event.value == 1:  # Key press
-                                        self.shift_pressed = True
-                                        logger.debug("Shift pressed")
-                                    elif event.value == 0:  # Key release
-                                        self.shift_pressed = False
-                                        logger.debug("Shift released")
-                                        self.check_stop_recording()
-                                
-                                # Check for K key
-                                elif event.code == self.ecodes.KEY_K:
-                                    if event.value == 1:  # Key press
-                                        logger.debug("K pressed")
-                                        self.check_start_recording()
-                                
-                    except OSError:
-                        # Device disconnected, remove it
-                        logger.warning(f"Device {device.path} disconnected")
-                        self.keyboards.remove(device)
-                        if not self.keyboards:
-                            logger.error("All keyboard devices disconnected")
-                            self.running = False
-                            return
-                            
+                            self.handle_key_event(event)
+                    except OSError as e:
+                        logger.warning(f"Device {device.path} error: {e}")
+                        # Remove disconnected device
+                        if device in self.devices:
+                            self.devices.remove(device)
+                        continue
+                        
             except Exception as e:
-                logger.error(f"Error in evdev monitoring: {e}")
+                logger.error(f"Error in event loop: {e}")
                 time.sleep(1)
-
-    def run_pynput_backend(self):
-        """Run keyboard monitoring using pynput"""
-        logger.info("Starting pynput keyboard monitoring...")
         
-        def on_press(key):
-            try:
-                if key == self.pynput_Key.alt_l or key == self.pynput_Key.alt_r:
-                    self.alt_pressed = True
-                    logger.debug("Alt pressed")
-                elif key == self.pynput_Key.shift_l or key == self.pynput_Key.shift_r:
-                    self.shift_pressed = True
-                    logger.debug("Shift pressed")
-                elif hasattr(key, 'char') and key.char and key.char.lower() == 'k':
-                    logger.debug("K pressed")
-                    self.check_start_recording()
-            except AttributeError:
-                pass
-        
-        def on_release(key):
-            try:
-                if key == self.pynput_Key.alt_l or key == self.pynput_Key.alt_r:
-                    self.alt_pressed = False
-                    logger.debug("Alt released")
-                    self.check_stop_recording()
-                elif key == self.pynput_Key.shift_l or key == self.pynput_Key.shift_r:
-                    self.shift_pressed = False
-                    logger.debug("Shift released")
-                    self.check_stop_recording()
-                elif hasattr(key, 'char') and key.char and key.char.lower() == 'k':
-                    logger.debug("K released")
-            except AttributeError:
-                pass
-        
-        # Keep restarting the listener until we're told to stop
-        while self.running:
-            try:
-                with self.pynput_Listener(on_press=on_press, on_release=on_release) as listener:
-                    listener.join()  # This will block until the listener stops
-            except Exception as e:
-                logger.error(f"Pynput listener error: {e}")
-                if self.running:
-                    logger.info("Restarting listener in 1 second...")
-                    time.sleep(1)
+        return True
+    
+    def stop(self):
+        """Stop the hotkey monitoring"""
+        self.running = False
+        if self.virtual_keyboard:
+            self.virtual_keyboard.destroy()
 
-    def check_start_recording(self):
-        """Check if Alt+Shift+K combination is pressed to start recording"""
-        logger.debug(f"Checking start: alt={self.alt_pressed}, shift={self.shift_pressed}, recording={self.recording}")
-        if self.alt_pressed and self.shift_pressed and not self.recording:
-            logger.info("🎙️ Alt+Shift+K combination detected - starting recording!")
-            self.start_recording()
-
-    def check_stop_recording(self):
-        """Check if any key in the combination is released to stop recording"""
-        logger.debug(f"Checking stop: alt={self.alt_pressed}, shift={self.shift_pressed}, recording={self.recording}")
-        if self.recording and (not self.alt_pressed or not self.shift_pressed):
-            logger.info("⏹️ Key combination released - stopping recording...")
-            self.stop_recording()
+class SimpleVoiceTranscriber:
+    def __init__(self):
+        self.recording = False
+        self.record_thread = None
+        self.process_thread = None
+        self.hotkey_system = None
+        self.running = False
+        
+        # Initialize visual notification
+        self.visual_notification = VisualNotification()
+        
+        # Preload model in background
+        logger.info("Loading transcription model...")
+        self.preload_thread = preload_model(device=DEVICE)
+        
+        # Initialize global hotkey system
+        self.init_hotkeys()
+        
+    def init_hotkeys(self):
+        """Initialize the global hotkey system"""
+        try:
+            self.hotkey_system = WaylandGlobalHotkeys(
+                callback_start=self.start_recording,
+                callback_stop=self.stop_recording
+            )
+            
+            if self.hotkey_system.devices:
+                logger.info("✅ Global hotkey system initialized")
+                return True
+            else:
+                logger.error("❌ Failed to initialize global hotkey system")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error initializing hotkeys: {e}")
+            return False
 
     def start_recording(self):
         """Start recording audio"""
@@ -559,11 +606,10 @@ class SimpleVoiceTranscriber:
         stop_recording.clear()
         
         # Show visual notification
-        if self.visual_notification:
-            try:
-                self.visual_notification.show_recording_border()
-            except Exception as e:
-                logger.warning(f"Visual notification error: {e}")
+        try:
+            self.visual_notification.show_recording_border()
+        except Exception as e:
+            logger.warning(f"Visual notification error: {e}")
         
         # Play start recording sound
         try:
@@ -586,11 +632,10 @@ class SimpleVoiceTranscriber:
         stop_recording.set()
         
         # Show processing notification
-        if self.visual_notification:
-            try:
-                self.visual_notification.show_processing_border()
-            except Exception as e:
-                logger.warning(f"Visual notification error: {e}")
+        try:
+            self.visual_notification.show_processing_border()
+        except Exception as e:
+            logger.warning(f"Visual notification error: {e}")
         
         # Play stop recording sound
         try:
@@ -630,11 +675,10 @@ class SimpleVoiceTranscriber:
                 pyperclip.copy(transcription)
                 
                 # Show completion notification
-                if self.visual_notification:
-                    try:
-                        self.visual_notification.show_completed_border()
-                    except Exception as e:
-                        logger.warning(f"Visual notification error: {e}")
+                try:
+                    self.visual_notification.show_completed_border()
+                except Exception as e:
+                    logger.warning(f"Visual notification error: {e}")
                 
                 # Play sound
                 try:
@@ -646,51 +690,159 @@ class SimpleVoiceTranscriber:
                 logger.info(f"✅ Transcribed: {transcription}")
             else:
                 # Hide processing notification
-                if self.visual_notification:
-                    try:
-                        self.visual_notification.hide_notification()
-                    except Exception as e:
-                        logger.warning(f"Visual notification error: {e}")
+                try:
+                    self.visual_notification.hide_notification()
+                except Exception as e:
+                    logger.warning(f"Visual notification error: {e}")
                         
                 logger.info("❌ No speech detected")
                 
         except Exception as e:
             # Hide processing notification on error
-            if self.visual_notification:
-                try:
-                    self.visual_notification.hide_notification()
-                except Exception as e2:
-                    logger.warning(f"Visual notification error: {e2}")
+            try:
+                self.visual_notification.hide_notification()
+            except Exception as e2:
+                logger.warning(f"Visual notification error: {e2}")
             logger.error(f"Transcription error: {e}")
 
     def run(self):
         """Run the voice transcriber"""
-        if not self.backend:
-            logger.error("No keyboard monitoring backend available")
+        if not self.hotkey_system or not self.hotkey_system.devices:
+            logger.error("❌ No global hotkey system available")
+            logger.error("💡 Make sure you're running as root or in the input group")
+            logger.error("💡 Install dependencies: pip install evdev python-uinput")
             return False
         
-        logger.info("🎤 Simple Voice Transcriber started!")
+        logger.info("🎤 Voice Transcriber started!")
         logger.info(f"📱 Using device: {DEVICE}")
-        logger.info(f"🔧 Backend: {self.backend}")
-        logger.info("🔥 Hold Alt+Shift+K to record, release any key to transcribe")
+        logger.info("🔥 Hold Alt+Shift+K to record, release to transcribe")
         logger.info("🔄 Use Ctrl+C to exit")
-        
-        if self.backend == 'evdev':
-            logger.info("💡 Using evdev backend - works great in terminals like Alacritty!")
+        logger.info("💡 Global hotkeys work even when Alacritty is in focus!")
         
         self.running = True
         
         try:
-            if self.backend == 'evdev':
-                self.run_evdev_backend()
-            elif self.backend == 'pynput':
-                self.run_pynput_backend()
+            # Run the hotkey monitoring system
+            return self.hotkey_system.run()
+        except KeyboardInterrupt:
+            logger.info("👋 Shutting down...")
+            self.running = False
+            if self.hotkey_system:
+                self.hotkey_system.stop()
+            return True
         except Exception as e:
-            logger.error(f"Error running {self.backend} backend: {e}")
+            logger.error(f"Error running hotkey system: {e}")
             return False
-        
-        return True
 
 if __name__ == "__main__":
+    def check_permissions():
+        """Check if user has proper permissions for input device access"""
+        import grp
+        import pwd
+        
+        # Check if running as root
+        if os.geteuid() == 0:
+            logger.info("✅ Running as root - full input device access available")
+            return True
+        
+        # Check if user is in input group
+        try:
+            current_user = pwd.getpwuid(os.getuid()).pw_name
+            
+            # Get current groups using os.getgroups() which reflects actual active groups
+            current_gids = os.getgroups()
+            
+            # Get input group info
+            input_group = grp.getgrnam('input')
+            
+            # Check if user is in input group (by GID)
+            if input_group.gr_gid in current_gids:
+                logger.info("✅ User is in input group - input device access available")
+                return True
+            else:
+                # Get group names for display
+                group_names = []
+                for gid in current_gids:
+                    try:
+                        group_names.append(grp.getgrgid(gid).gr_name)
+                    except:
+                        group_names.append(str(gid))
+                
+                logger.error("❌ Permission issue detected!")
+                logger.error(f"👤 Current user: {current_user}")
+                logger.error(f"👥 Active groups: {', '.join(group_names)}")
+                logger.error(f"🔢 Input group GID: {input_group.gr_gid} (not in active groups)")
+                logger.error("")
+                logger.error("🔧 To fix this issue, choose one of these options:")
+                logger.error("")
+                logger.error("   Option 1 (Recommended): Add user to input group")
+                logger.error("   sudo usermod -a -G input $USER")
+                logger.error("   Then log out and back in (or reboot)")
+                logger.error("")
+                logger.error("   Option 2: Run as root (less secure)")
+                logger.error("   sudo nix-shell --run 'python3 app/simple_voice_transcriber.py'")
+                logger.error("")
+                logger.error("🔍 Why this is needed:")
+                logger.error("   Global hotkeys on Wayland require direct access to input devices")
+                logger.error("   This bypasses application-level input restrictions")
+                logger.error("   Works even when Alacritty or other apps are focused")
+                logger.error("")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error checking permissions: {e}")
+            logger.error("💡 Try running as root: sudo nix-shell --run 'python3 app/simple_voice_transcriber.py'")
+            return False
+    
+    def check_input_devices():
+        """Check if input devices are accessible"""
+        try:
+            import evdev
+            devices = evdev.list_devices()
+            if not devices:
+                logger.error("❌ No input devices found")
+                return False
+            
+            # Try to access at least one device
+            for device_path in devices:
+                try:
+                    device = evdev.InputDevice(device_path)
+                    device.close()
+                    logger.info(f"✅ Input devices accessible ({len(devices)} found)")
+                    return True
+                except PermissionError:
+                    continue
+            
+            logger.error("❌ Input devices found but not accessible due to permissions")
+            return False
+            
+        except ImportError:
+            logger.error("❌ evdev not available")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Error checking input devices: {e}")
+            return False
+    
+    # Perform comprehensive checks
+    logger.info("🔍 Checking system requirements...")
+    
+    permissions_ok = check_permissions()
+    devices_ok = check_input_devices() if permissions_ok else False
+    
+    if not permissions_ok:
+        logger.error("")
+        logger.error("⚠️  Cannot start voice transcriber due to permission issues")
+        logger.error("📖 Follow the instructions above to fix permissions")
+        sys.exit(1)
+    
+    if not devices_ok:
+        logger.error("")
+        logger.error("⚠️  Cannot access input devices")
+        logger.error("💡 Make sure input devices are connected and accessible")
+        sys.exit(1)
+    
+    logger.info("✅ All system checks passed!")
+    logger.info("")
+    
     transcriber = SimpleVoiceTranscriber()
     transcriber.run() 
