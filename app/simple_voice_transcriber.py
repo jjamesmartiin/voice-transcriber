@@ -13,7 +13,7 @@ import select
 import json
 
 # Import transcription functionality
-from t2 import record_and_transcribe, preload_model, get_model, DEVICE, record_audio_stream, process_audio_stream, stop_recording
+from t2 import record_and_transcribe, preload_model, get_model, DEVICE, record_audio_stream, process_audio_stream, stop_recording, load_audio_config, select_audio_device
 
 # Try to import tkinter for visual notifications
 try:
@@ -298,7 +298,7 @@ if __name__ == "__main__":
                 print("\033[92m" + "█" * 70)  # Green blocks
                 print("█" + " " * 68 + "█")
                 print("█" + f"🔴 RECORDING IN PROGRESS".center(68) + "█")
-                print("█" + f"Hold Alt+Shift+K, release to stop".center(68) + "█")
+                print("█" + f"Hold Alt+Shift, release to stop".center(68) + "█")
                 print("█" + " " * 68 + "█")
                 print("█" * 70 + "\033[0m")
             elif "TRANSCRIBING" in text:
@@ -333,7 +333,7 @@ if __name__ == "__main__":
         try:
             print(f"\033[2J\033[H", end='')  # Clear screen
             print("🎤 Voice Transcriber Ready")
-            print("Hold Alt+Shift+K to record")
+            print("Hold Alt+Shift to record")
         except:
             pass
 
@@ -349,10 +349,9 @@ class WaylandGlobalHotkeys:
         self.key_states = {}
         self.hotkey_active = False
         
-        # Key codes for our hotkey combination (Alt+Shift+K)
+        # Key codes for our hotkey combination (Alt+Shift)
         self.ALT_KEYS = [56, 100]  # KEY_LEFTALT, KEY_RIGHTALT
         self.SHIFT_KEYS = [42, 54]  # KEY_LEFTSHIFT, KEY_RIGHTSHIFT  
-        self.K_KEY = 37  # KEY_K
         
         self.init_devices()
     
@@ -417,17 +416,16 @@ class WaylandGlobalHotkeys:
                     # Check if it has our specific hotkey keys
                     has_alt = any(key in key_caps for key in [evdev.ecodes.KEY_LEFTALT, evdev.ecodes.KEY_RIGHTALT])
                     has_shift = any(key in key_caps for key in [evdev.ecodes.KEY_LEFTSHIFT, evdev.ecodes.KEY_RIGHTSHIFT])
-                    has_k = evdev.ecodes.KEY_K in key_caps
                     
                     # Accept device if it looks like a keyboard and has our hotkey keys
-                    if (has_letters or has_modifiers or has_space_enter) and has_alt and has_shift and has_k:
+                    if (has_letters or has_modifiers or has_space_enter) and has_alt and has_shift:
                         keyboards.append(device)
                         logger.info(f"Found keyboard: {device.name} at {device.path}")
                         logger.debug(f"  Device capabilities: letters={has_letters}, modifiers={has_modifiers}, space/enter={has_space_enter}")
                     else:
                         logger.debug(f"Skipping device: {device.name} (missing required keys)")
                         logger.debug(f"  Has letters: {has_letters}, modifiers: {has_modifiers}, space/enter: {has_space_enter}")
-                        logger.debug(f"  Has Alt: {has_alt}, Shift: {has_shift}, K: {has_k}")
+                        logger.debug(f"  Has Alt: {has_alt}, Shift: {has_shift}")
             
             if not keyboards:
                 logger.error("No suitable keyboard devices found")
@@ -453,7 +451,7 @@ class WaylandGlobalHotkeys:
                 events = (
                     uinput.KEY_LEFTALT, uinput.KEY_RIGHTALT,
                     uinput.KEY_LEFTSHIFT, uinput.KEY_RIGHTSHIFT,
-                    uinput.KEY_K, uinput.KEY_A, uinput.KEY_SPACE,
+                    uinput.KEY_A, uinput.KEY_SPACE,
                     # Add more keys as needed
                 )
                 self.virtual_keyboard = uinput.Device(events)
@@ -474,20 +472,18 @@ class WaylandGlobalHotkeys:
             return False
     
     def is_hotkey_pressed(self):
-        """Check if our hotkey combination (Alt+Shift+K) is currently pressed"""
+        """Check if our hotkey combination (Alt+Shift) is currently pressed"""
         alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
         shift_pressed = any(self.key_states.get(key, False) for key in self.SHIFT_KEYS)
-        k_pressed = self.key_states.get(self.K_KEY, False)
         
-        return alt_pressed and shift_pressed and k_pressed
+        return alt_pressed and shift_pressed
     
     def is_hotkey_released(self):
         """Check if hotkey combination is no longer fully pressed"""
         alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
         shift_pressed = any(self.key_states.get(key, False) for key in self.SHIFT_KEYS)
-        k_pressed = self.key_states.get(self.K_KEY, False)
         
-        return not (alt_pressed and shift_pressed and k_pressed)
+        return not (alt_pressed and shift_pressed)
     
     def handle_key_event(self, event):
         """Handle a key event and check for hotkey activation"""
@@ -518,7 +514,7 @@ class WaylandGlobalHotkeys:
             return False
         
         self.running = True
-        logger.info(f"Monitoring {len(self.devices)} keyboard device(s) for Alt+Shift+K")
+        logger.info(f"Monitoring {len(self.devices)} keyboard device(s) for Alt+Shift")
         
         while self.running:
             try:
@@ -562,6 +558,9 @@ class SimpleVoiceTranscriber:
         self.process_thread = None
         self.hotkey_system = None
         self.running = False
+        
+        # Load saved audio device configuration
+        load_audio_config()
         
         # Initialize visual notification
         self.visual_notification = VisualNotification()
@@ -715,7 +714,7 @@ class SimpleVoiceTranscriber:
         
         logger.info("🎤 Voice Transcriber started!")
         logger.info(f"📱 Using device: {DEVICE}")
-        logger.info("🔥 Hold Alt+Shift+K to record, release to transcribe")
+        logger.info("🔥 Hold Alt+Shift to record, release to transcribe")
         logger.info("🔄 Use Ctrl+C to exit")
         logger.info("💡 Global hotkeys work even when Alacritty is in focus!")
         

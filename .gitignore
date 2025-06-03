@@ -1,4 +1,5 @@
 *pycache*
 *.wav
 result-build
+audio_device_config.json
 

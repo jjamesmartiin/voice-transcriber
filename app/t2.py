@@ -12,6 +12,7 @@ import pyaudio
 import queue
 import warnings
 from transcribe2 import transcribe_audio, preload_model, get_model
+import json
 
 # Suppress ONNX warnings
 warnings.filterwarnings("ignore", message=".*Init provider bridge failed.*")
@@ -21,8 +22,13 @@ warnings.filterwarnings("ignore", category=UserWarning)
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1  # Mono for faster processing
-RATE = 16000  # Lower sample rate for faster processing while maintaining speech quality
+RATE = 44100  # Use standard sample rate supported by most hardware
 RECORD_SECONDS = 20  # Default recording time
+INPUT_DEVICE_INDEX = None  # None = use system default, or specify device index
+CONFIG_FILE = 'audio_device_config.json'  # Local config file for device settings
+
+# Fallback sample rates to try if the primary one fails
+FALLBACK_RATES = [44100, 48000, 22050, 16000, 8000]
 
 # Determine device at startup
 def get_device():
@@ -43,6 +49,90 @@ preload_thread = preload_model(device=DEVICE)
 audio_buffer = queue.Queue()
 stop_recording = threading.Event()
 
+def load_audio_config():
+    """Load audio device configuration from local file"""
+    global INPUT_DEVICE_INDEX
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.loads(f.read())
+                INPUT_DEVICE_INDEX = config.get('input_device_index')
+                print(f"Loaded saved audio device: {INPUT_DEVICE_INDEX}")
+    except Exception as e:
+        print(f"Could not load audio config: {e}")
+
+def save_audio_config():
+    """Save audio device configuration to local file"""
+    try:
+        config = {
+            'input_device_index': INPUT_DEVICE_INDEX
+        }
+        with open(CONFIG_FILE, 'w') as f:
+            f.write(json.dumps(config, indent=2))
+        print(f"Saved audio device config to {CONFIG_FILE}")
+    except Exception as e:
+        print(f"Could not save audio config: {e}")
+
+def select_audio_device():
+    """Interactive audio device selection"""
+    global INPUT_DEVICE_INDEX
+    
+    # Suppress PyAudio warnings
+    stderr_fd = os.dup(2)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull_fd, 2)
+    
+    p = pyaudio.PyAudio()
+    
+    # Restore stderr
+    os.dup2(stderr_fd, 2)
+    os.close(devnull_fd)
+    os.close(stderr_fd)
+    
+    print("\n🎤 Available Audio Input Devices:")
+    print("=" * 60)
+    
+    input_devices = []
+    for i in range(p.get_device_count()):
+        info = p.get_device_info_by_index(i)
+        if info['maxInputChannels'] > 0:
+            input_devices.append((i, info))
+            current_marker = " ← CURRENT" if i == INPUT_DEVICE_INDEX else ""
+            print(f"  {len(input_devices)-1}: Device {i} - {info['name']}")
+            print(f"      Rate: {info['defaultSampleRate']} Hz, Channels: {info['maxInputChannels']}{current_marker}")
+            print()
+    
+    p.terminate()
+    
+    if not input_devices:
+        print("❌ No input devices found!")
+        return False
+    
+    print("=" * 60)
+    print("Enter the number (0-{}) of the device you want to use, or 'c' to cancel:".format(len(input_devices)-1))
+    
+    try:
+        choice = input("> ").strip().lower()
+        
+        if choice == 'c':
+            print("Device selection cancelled.")
+            return False
+        
+        device_idx = int(choice)
+        if 0 <= device_idx < len(input_devices):
+            device_id, device_info = input_devices[device_idx]
+            INPUT_DEVICE_INDEX = device_id
+            print(f"✅ Selected: {device_info['name']}")
+            save_audio_config()
+            return True
+        else:
+            print(f"❌ Invalid choice. Please enter 0-{len(input_devices)-1}")
+            return False
+            
+    except (ValueError, KeyboardInterrupt):
+        print("❌ Invalid input or cancelled.")
+        return False
+
 def record_audio_stream():
     """Record audio directly into memory and stream to the buffer"""
     
@@ -58,13 +148,45 @@ def record_audio_stream():
     os.close(devnull_fd)
     os.close(stderr_fd)
     
-    stream = p.open(format=FORMAT, 
-                    channels=CHANNELS, 
-                    rate=RATE, 
-                    input=True,
-                    frames_per_buffer=CHUNK)
+    # Show available input devices for debugging
+    print("Available input devices:")
+    for i in range(p.get_device_count()):
+        info = p.get_device_info_by_index(i)
+        if info['maxInputChannels'] > 0:
+            print(f"  Device {i}: {info['name']} - Rate: {info['defaultSampleRate']}")
+    
+    # Try different sample rates until one works
+    stream = None
+    working_rate = None
+    
+    for rate in FALLBACK_RATES:
+        try:
+            stream = p.open(format=FORMAT, 
+                            channels=CHANNELS, 
+                            rate=rate, 
+                            input=True,
+                            input_device_index=INPUT_DEVICE_INDEX,
+                            frames_per_buffer=CHUNK)
+            working_rate = rate
+            device_info = p.get_device_info_by_index(INPUT_DEVICE_INDEX) if INPUT_DEVICE_INDEX else p.get_default_input_device_info()
+            print(f"Using sample rate: {rate} Hz")
+            print(f"Using input device: {device_info['name']}")
+            break
+        except Exception as e:
+            print(f"Sample rate {rate} Hz failed: {e}")
+            continue
+    
+    if stream is None:
+        print("ERROR: Could not open audio stream with any sample rate")
+        p.terminate()
+        return []
+    
+    # Update global RATE variable for other functions
+    global RATE
+    RATE = working_rate
     
     frames = []
+    max_amplitude = 0
     
     # Start countdown in a separate thread
     countdown_thread = threading.Thread(target=countdown_timer)
@@ -85,11 +207,32 @@ def record_audio_stream():
     for i in range(max_chunks):
         if stop_recording.is_set():
             break
-        data = stream.read(CHUNK, exception_on_overflow=False)
-        frames.append(data)
-        audio_buffer.put(data)  # Add to buffer for real-time processing
+        try:
+            data = stream.read(CHUNK, exception_on_overflow=False)
+            frames.append(data)
+            audio_buffer.put(data)  # Add to buffer for real-time processing
+            
+            # Monitor audio levels for debugging
+            audio_data = np.frombuffer(data, dtype=np.int16)
+            amplitude = np.max(np.abs(audio_data))
+            max_amplitude = max(max_amplitude, amplitude)
+            
+            # Show audio level indicator every 10 chunks
+            if i % 10 == 0 and amplitude > 100:
+                level_bars = int(amplitude / 1000)
+                print(f"Audio level: {'█' * min(level_bars, 20)} ({amplitude})", end='\r')
+                
+        except Exception as e:
+            print(f"Recording error: {e}")
+            break
     
-    print("\nFinished recording")
+    print(f"\nFinished recording - Max audio level: {max_amplitude}")
+    
+    if max_amplitude < 500:
+        print("⚠️  WARNING: Very low audio levels detected!")
+        print("   - Check microphone is connected and not muted")
+        print("   - Try speaking louder or closer to microphone")
+        print("   - Check system audio input settings")
     
     # Add a None to mark the end of the stream
     audio_buffer.put(None)
@@ -100,11 +243,15 @@ def record_audio_stream():
     p.terminate()
     
     # Save to file for backup and debugging
-    with wave.open('output.wav', 'wb') as wf:
-        wf.setnchannels(CHANNELS)
-        wf.setsampwidth(p.get_sample_size(FORMAT))
-        wf.setframerate(RATE)
-        wf.writeframes(b''.join(frames))
+    try:
+        with wave.open('output.wav', 'wb') as wf:
+            wf.setnchannels(CHANNELS)
+            wf.setsampwidth(p.get_sample_size(FORMAT))
+            wf.setframerate(RATE)
+            wf.writeframes(b''.join(frames))
+        print(f"Audio saved to output.wav for debugging")
+    except Exception as e:
+        print(f"Warning: Could not save audio file: {e}")
     
     return frames
 
@@ -260,7 +407,12 @@ def getch():
 def main():
     print("T2 Transcription Tool (Optimized)")
     print(f"Using device: {DEVICE}")
-    print("Model loading in background, press Enter or Space to start recording, or type 'q' to exit")
+    
+    # Load saved audio device configuration
+    load_audio_config()
+    
+    print("Model loading in background, press Enter or Space to start recording")
+    print("Press 'i' to select audio input device, or 'q' to exit")
     
     # Wait for model to fully load before allowing first transcription
     if preload_thread.is_alive():
@@ -276,11 +428,14 @@ def main():
             if ch in [' ', '\r', '\n']:  # Space or Enter key
                 print()  # Move to next line after keypress
                 record_and_transcribe()
+            elif ch.lower() in ['i']:  # Input device selection
+                print()
+                select_audio_device()
             elif ch.lower() in ['q', 'Q']:
                 print("\nExiting...")
                 break
             
-            print("\nReady for next recording (press Enter or Space to start, or type 'q' to exit)")
+            print("\nReady for next recording (Space/Enter=record, i=input device, q=quit)")
         except KeyboardInterrupt:
             print("\nExiting...")
             break
