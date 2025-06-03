@@ -696,6 +696,9 @@ class SimpleVoiceTranscriber:
                         
                 logger.info("❌ No speech detected")
                 
+                # Offer to change audio device
+                self.offer_device_change()
+                
         except Exception as e:
             # Hide processing notification on error
             try:
@@ -703,7 +706,62 @@ class SimpleVoiceTranscriber:
             except Exception as e2:
                 logger.warning(f"Visual notification error: {e2}")
             logger.error(f"Transcription error: {e}")
+            
+            # Also offer device change on error
+            self.offer_device_change()
 
+    def offer_device_change(self):
+        """Offer to change audio device after failed recording"""
+        logger.info("")
+        logger.info("🔧 What would you like to do?")
+        logger.info("   Space: Try recording again")
+        logger.info("   i: Change audio input device")
+        logger.info("   Any other key: Continue")
+        logger.info("")
+        
+        try:
+            # Use the same getch function pattern as t2.py
+            import termios, tty
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(sys.stdin.fileno())
+                ch = sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            
+            if ch == ' ':  # Space key
+                logger.info("🎤 Ready to record - hold Alt+Shift when ready")
+            elif ch.lower() == 'i':  # Input device selection
+                logger.info("🎤 Opening audio device selection...")
+                if select_audio_device():
+                    logger.info("✅ Audio device updated!")
+                else:
+                    logger.info("❌ Device selection cancelled.")
+                logger.info("🎤 Ready to record - hold Alt+Shift when ready")
+            else:
+                logger.info("🎤 Ready for next recording")
+                
+        except (KeyboardInterrupt, EOFError):
+            logger.info("🎤 Ready for next recording")
+        except ImportError:
+            # Windows fallback - use regular input
+            try:
+                choice = input("Enter choice (Space/i/other): ").strip().lower()
+                if choice == ' ' or choice == '':
+                    logger.info("🎤 Ready to record - hold Alt+Shift when ready")
+                elif choice == 'i':
+                    logger.info("🎤 Opening audio device selection...")
+                    if select_audio_device():
+                        logger.info("✅ Audio device updated!")
+                    else:
+                        logger.info("❌ Device selection cancelled.")
+                    logger.info("🎤 Ready to record - hold Alt+Shift when ready")
+                else:
+                    logger.info("🎤 Ready for next recording")
+            except (KeyboardInterrupt, EOFError):
+                logger.info("🎤 Ready for next recording")
+    
     def run(self):
         """Run the voice transcriber"""
         if not self.hotkey_system or not self.hotkey_system.devices:
