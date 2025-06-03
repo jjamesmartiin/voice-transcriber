@@ -31,6 +31,9 @@ in
       # For notifications
       pkgs.libnotify # for notify-send
 
+      # For ALSA direct device access
+      pkgs.alsa-utils # provides arecord, aplay, etc.
+
       (python.withPackages (python-pkgs: [
         python-pkgs.pyaudio
         python-pkgs.keyboard
