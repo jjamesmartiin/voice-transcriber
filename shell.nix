@@ -81,7 +81,8 @@ in
     shellHook = ''
       echo "Voice Transcriber Environment Ready!"
 
-      python app/t2.py
+      # python app/t2.py
+      python app/simple_voice_transcriber.py
     '';
   }
 
