@@ -424,31 +424,17 @@ def select_audio_device():
     print("\n🎤 Available Audio Input Devices:")
     print("=" * 60)
     
-    # Get PyAudio devices
     input_devices = []
     for i in range(p.get_device_count()):
         info = p.get_device_info_by_index(i)
         if info['maxInputChannels'] > 0:
-            input_devices.append((i, info, 'pyaudio'))
+            input_devices.append((i, info))
+            current_marker = " ← CURRENT" if i == INPUT_DEVICE_INDEX else ""
+            print(f"  {len(input_devices)-1}: Device {i} - {info['name']}")
+            print(f"      Rate: {info['defaultSampleRate']} Hz, Channels: {info['maxInputChannels']}{current_marker}")
+            print()
     
     p.terminate()
-    
-    # Get missing ALSA devices
-    missing_devices = get_missing_alsa_devices()
-    for missing_dev in missing_devices:
-        input_devices.append((missing_dev['virtual_id'], missing_dev, 'alsa'))
-    
-    # Display all devices
-    for idx, (device_id, device_info, device_type) in enumerate(input_devices):
-        current_marker = " ← CURRENT" if device_id == INPUT_DEVICE_INDEX else ""
-        
-        if device_type == 'alsa':
-            print(f"  {idx}: ALSA Device {device_info['card_num']} - {device_info['name']}")
-            print(f"      Rate: {device_info['defaultSampleRate']} Hz, Channels: {device_info['maxInputChannels']} (ALSA Direct){current_marker}")
-        else:
-            print(f"  {idx}: Device {device_id} - {device_info['name']}")
-            print(f"      Rate: {device_info['defaultSampleRate']} Hz, Channels: {device_info['maxInputChannels']}{current_marker}")
-        print()
     
     if not input_devices:
         print("❌ No input devices found!")
@@ -456,7 +442,7 @@ def select_audio_device():
         return False
     
     print("=" * 60)
-    print("Enter device number (0-{}) or 'c' to cancel:".format(len(input_devices)-1))
+    print("Enter the number (0-{}) of the device you want to use, or 'c' to cancel:".format(len(input_devices)-1))
     
     try:
         choice = input("> ").strip().lower()
@@ -467,29 +453,10 @@ def select_audio_device():
         
         device_idx = int(choice)
         if 0 <= device_idx < len(input_devices):
-            device_id, device_info, device_type = input_devices[device_idx]
+            device_id, device_info = input_devices[device_idx]
             INPUT_DEVICE_INDEX = device_id
-            
-            if device_type == 'alsa':
-                print(f"✅ Selected ALSA device: {device_info['name']}")
-                # Store ALSA device info for later use
-                save_audio_config()
-                with open('alsa_device_config.json', 'w') as f:
-                    import json
-                    json.dump({
-                        'device_id': device_id,
-                        'alsa_device': device_info['alsa_device'],
-                        'name': device_info['name']
-                    }, f, indent=2)
-            else:
-                print(f"✅ Selected: {device_info['name']}")
-                save_audio_config()
-                # Remove ALSA config if switching back to PyAudio device
-                try:
-                    os.remove('alsa_device_config.json')
-                except:
-                    pass
-            
+            print(f"✅ Selected: {device_info['name']}")
+            save_audio_config()
             input("Press Enter to return to main menu...")
             return True
         else:
@@ -501,22 +468,50 @@ def select_audio_device():
         print("📋 Device selection cancelled - returning to main menu")
         return False
 
-def record_audio_stream():
-    """Record audio stream"""
-    global RATE
-    
-    # Check if this is an ALSA direct device
-    alsa_device = None
-    if INPUT_DEVICE_INDEX is not None and INPUT_DEVICE_INDEX >= 1000:
+def countdown_timer():
+    """Display countdown timer during recording"""
+    for i in range(RECORD_SECONDS, 0, -1):
+        if stop_recording.is_set():
+            break
+        print(f'Recording time remaining: {i} seconds... (press space to stop)', end='\r')
+        time.sleep(1)
+
+def check_for_stop_key():
+    """Check for space key to stop recording early"""
+    import select
+    try:
+        import termios, tty
+        old_settings = termios.tcgetattr(sys.stdin)
+        tty.setcbreak(sys.stdin.fileno())
+        
+        while not stop_recording.is_set():
+            if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
+                c = sys.stdin.read(1)
+                if c == ' ':  # Space key
+                    print("\nStopping recording early...")
+                    stop_recording.set()
+                    break
+            time.sleep(0.1)
+        
+        # Restore terminal settings
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+    except (ImportError, AttributeError, termios.error):
+        # Windows fallback
         try:
-            with open('alsa_device_config.json', 'r') as f:
-                import json
-                alsa_config = json.load(f)
-                alsa_device = alsa_config['alsa_device']
-                logger.info(f"Using ALSA direct device: {alsa_device}")
-        except Exception as e:
-            logger.error(f"Error loading ALSA config: {e}")
-            return []
+            import msvcrt
+            while not stop_recording.is_set():
+                if msvcrt.kbhit():
+                    if msvcrt.getch() == b' ':
+                        print("\nStopping recording early...")
+                        stop_recording.set()
+                        break
+                time.sleep(0.1)
+        except ImportError:
+            pass
+
+def record_audio_stream(interactive_mode=False):
+    """Record audio directly into memory and stream to the buffer - exact copy from t2.py"""
+    global RATE
     
     # Suppress PyAudio warnings
     stderr_fd = os.dup(2)
@@ -530,171 +525,126 @@ def record_audio_stream():
     os.close(devnull_fd)
     os.close(stderr_fd)
     
-    # Get device info to use its native sample rate
+    # Show available input devices for debugging
+    if interactive_mode:
+        print("Available input devices:")
+        for i in range(p.get_device_count()):
+            info = p.get_device_info_by_index(i)
+            if info['maxInputChannels'] > 0:
+                print(f"  Device {i}: {info['name']} - Rate: {info['defaultSampleRate']}")
+    
+    # Try different sample rates until one works
     stream = None
     working_rate = None
     
-    if alsa_device:
-        # Handle ALSA direct device
-        logger.info(f"Opening ALSA device directly: {alsa_device}")
-        
-        # Try different sample rates for ALSA device
-        for rate in [44100, 48000, 22050, 16000]:
-            try:
-                # Use subprocess to record from ALSA device directly
-                import subprocess
-                import tempfile
-                import threading
-                
-                # Create a temporary file for ALSA recording
-                temp_alsa_file = f"temp_alsa_recording_{int(time.time())}.wav"
-                
-                # Start ALSA recording in background
-                alsa_cmd = [
-                    'arecord', 
-                    '-D', alsa_device,
-                    '-f', 'S16_LE',
-                    '-c', '1',
-                    '-r', str(rate),
-                    temp_alsa_file
-                ]
-                
-                logger.info(f"Starting ALSA recording: {' '.join(alsa_cmd)}")
-                
-                # Try to start arecord
-                try:
-                    alsa_process = subprocess.Popen(alsa_cmd, stderr=subprocess.DEVNULL)
-                    working_rate = rate
-                    
-                    # Wait for recording to stop
-                    while not stop_recording.is_set():
-                        time.sleep(0.1)
-                    
-                    # Stop recording
-                    alsa_process.terminate()
-                    alsa_process.wait()
-                    
-                    # Read the recorded file
-                    if os.path.exists(temp_alsa_file):
-                        with wave.open(temp_alsa_file, 'rb') as wf:
-                            frames_data = wf.readframes(wf.getnframes())
-                        
-                        # Clean up
-                        os.remove(temp_alsa_file)
-                        
-                        # Convert to frame list format
-                        frames = []
-                        chunk_size = CHUNK * 2  # 2 bytes per sample
-                        for i in range(0, len(frames_data), chunk_size):
-                            chunk = frames_data[i:i+chunk_size]
-                            if len(chunk) == chunk_size:
-                                frames.append(chunk)
-                                audio_buffer.put(chunk)
-                        
-                        audio_buffer.put(None)
-                        
-                        RATE = working_rate
-                        
-                        p.terminate()
-                        logger.info(f"ALSA recording completed at {rate} Hz")
-                        return frames
-                    
-                except FileNotFoundError:
-                    logger.warning("arecord not available, falling back to PyAudio")
-                    break
-                except Exception as e:
-                    logger.warning(f"ALSA recording failed at {rate} Hz: {e}")
-                    continue
-                    
-            except Exception as e:
-                logger.warning(f"Error with ALSA device at {rate} Hz: {e}")
-                continue
-        
-        # If ALSA direct failed, fall back to PyAudio
-        logger.warning("ALSA direct recording failed, falling back to PyAudio")
-    
-    # Standard PyAudio recording
-    if INPUT_DEVICE_INDEX is not None and INPUT_DEVICE_INDEX < 1000:
+    for rate in FALLBACK_RATES:
         try:
-            device_info = p.get_device_info_by_index(INPUT_DEVICE_INDEX)
-            device_rate = int(device_info['defaultSampleRate'])
-            logger.info(f"Using device {INPUT_DEVICE_INDEX} native rate: {device_rate} Hz")
-            
-            # Try the device's native rate first
-            try:
-                stream = p.open(format=FORMAT, 
-                                channels=CHANNELS, 
-                                rate=device_rate, 
-                                input=True,
-                                input_device_index=INPUT_DEVICE_INDEX,
-                                frames_per_buffer=CHUNK)
-                working_rate = device_rate
-                logger.info(f"✅ Opened stream at native rate: {device_rate} Hz")
-            except Exception as e:
-                logger.warning(f"Failed to open at native rate {device_rate}: {e}")
-                # Fall back to trying other rates
-                for rate in FALLBACK_RATES:
-                    if rate == device_rate:
-                        continue  # Already tried this
-                    try:
-                        stream = p.open(format=FORMAT, 
-                                        channels=CHANNELS, 
-                                        rate=rate, 
-                                        input=True,
-                                        input_device_index=INPUT_DEVICE_INDEX,
-                                        frames_per_buffer=CHUNK)
-                        working_rate = rate
-                        logger.info(f"✅ Opened stream at fallback rate: {rate} Hz")
-                        break
-                    except Exception:
-                        continue
+            stream = p.open(format=FORMAT, 
+                            channels=CHANNELS, 
+                            rate=rate, 
+                            input=True,
+                            input_device_index=INPUT_DEVICE_INDEX,
+                            frames_per_buffer=CHUNK)
+            working_rate = rate
+            device_info = p.get_device_info_by_index(INPUT_DEVICE_INDEX) if INPUT_DEVICE_INDEX else p.get_default_input_device_info()
+            if interactive_mode:
+                print(f"Using sample rate: {rate} Hz")
+                print(f"Using input device: {device_info['name']}")
+            else:
+                logger.info(f"Using sample rate: {rate} Hz")
+                logger.info(f"Using input device: {device_info['name']}")
+            break
         except Exception as e:
-            logger.error(f"Error getting device info: {e}")
-    
-    # If no specific device or device failed, try default device with fallback rates
-    if stream is None:
-        logger.info("Trying default device with fallback rates")
-        for rate in FALLBACK_RATES:
-            try:
-                stream = p.open(format=FORMAT, 
-                                channels=CHANNELS, 
-                                rate=rate, 
-                                input=True,
-                                input_device_index=None,
-                                frames_per_buffer=CHUNK)
-                working_rate = rate
-                logger.info(f"✅ Opened default stream at rate: {rate} Hz")
-                break
-            except Exception:
-                continue
+            if interactive_mode:
+                print(f"Sample rate {rate} Hz failed: {e}")
+            else:
+                logger.debug(f"Sample rate {rate} Hz failed: {e}")
+            continue
     
     if stream is None:
-        logger.error("Could not open audio stream with any sample rate")
+        if interactive_mode:
+            print("ERROR: Could not open audio stream with any sample rate")
+        else:
+            logger.error("Could not open audio stream with any sample rate")
         p.terminate()
         return []
     
+    # Update global RATE variable for other functions
     RATE = working_rate
     
     frames = []
     max_amplitude = 0
     
-    # Record until stop signal
-    while not stop_recording.is_set():
-        try:
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            frames.append(data)
-            audio_buffer.put(data)
-            
-            # Monitor audio levels
-            audio_data = np.frombuffer(data, dtype=np.int16)
-            amplitude = np.max(np.abs(audio_data))
-            max_amplitude = max(max_amplitude, amplitude)
+    # Start countdown and keypress detection only in interactive mode
+    if interactive_mode:
+        # Start countdown in a separate thread
+        countdown_thread = threading.Thread(target=countdown_timer)
+        countdown_thread.daemon = True
+        countdown_thread.start()
+        
+        # Listen for keypress to stop early
+        input_thread = threading.Thread(target=check_for_stop_key)
+        input_thread.daemon = True
+        input_thread.start()
+        
+        # Calculate max chunks for the recording duration
+        max_chunks = int(RATE / CHUNK * RECORD_SECONDS)
+        print("Recording... Press Space to stop")
+        
+        # Record audio with timeout
+        for i in range(max_chunks):
+            if stop_recording.is_set():
+                break
+            try:
+                data = stream.read(CHUNK, exception_on_overflow=False)
+                frames.append(data)
+                audio_buffer.put(data)  # Add to buffer for real-time processing
                 
-        except Exception as e:
-            logger.error(f"Recording error: {e}")
-            break
+                # Monitor audio levels for debugging
+                audio_data = np.frombuffer(data, dtype=np.int16)
+                amplitude = np.max(np.abs(audio_data))
+                max_amplitude = max(max_amplitude, amplitude)
+                
+                # Show audio level indicator every 10 chunks
+                if i % 10 == 0 and amplitude > 100:
+                    level_bars = int(amplitude / 1000)
+                    print(f"Audio level: {'█' * min(level_bars, 20)} ({amplitude})", end='\r')
+                    
+            except Exception as e:
+                print(f"Recording error: {e}")
+                break
+    else:
+        # Global hotkey mode - record until stop signal
+        while not stop_recording.is_set():
+            try:
+                data = stream.read(CHUNK, exception_on_overflow=False)
+                frames.append(data)
+                audio_buffer.put(data)
+                
+                # Monitor audio levels
+                audio_data = np.frombuffer(data, dtype=np.int16)
+                amplitude = np.max(np.abs(audio_data))
+                max_amplitude = max(max_amplitude, amplitude)
+                    
+            except Exception as e:
+                logger.error(f"Recording error: {e}")
+                break
     
-    # Signal end of stream
+    if interactive_mode:
+        print(f"\nFinished recording - Max audio level: {max_amplitude}")
+        
+        if max_amplitude < 500:
+            print("⚠️  WARNING: Very low audio levels detected!")
+            print("   - Check microphone is connected and not muted")
+            print("   - Try speaking louder or closer to microphone")
+            print("   - Check system audio input settings")
+    else:
+        logger.info(f"Recording finished - Max audio level: {max_amplitude}")
+        
+        if max_amplitude < 500:
+            logger.warning("Very low audio levels detected!")
+    
+    # Add a None to mark the end of the stream
     audio_buffer.put(None)
     
     # Clean up
@@ -702,18 +652,32 @@ def record_audio_stream():
     stream.close()
     p.terminate()
     
-    logger.info(f"Recording finished - Max audio level: {max_amplitude}")
-    
-    if max_amplitude < 500:
-        logger.warning("Very low audio levels detected!")
+    # Save to file for backup and debugging
+    try:
+        filename = 'output.wav' if interactive_mode else 'temp_t3_output.wav'
+        with wave.open(filename, 'wb') as wf:
+            wf.setnchannels(CHANNELS)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(RATE)
+            wf.writeframes(b''.join(frames))
+        if interactive_mode:
+            print(f"Audio saved to {filename} for debugging")
+        else:
+            logger.debug(f"Audio saved to {filename} for debugging")
+    except Exception as e:
+        if interactive_mode:
+            print(f"Warning: Could not save audio file: {e}")
+        else:
+            logger.warning(f"Could not save audio file: {e}")
     
     return frames
 
 def process_audio_stream():
-    """Process and transcribe audio stream"""
+    """Process the audio stream as it's being recorded - exact copy from t2.py"""
+    # Get preloaded model
     model = get_model(device=DEVICE)
     
-    # Collect audio data
+    # Collect audio data until we get None (end of stream)
     chunks = []
     while True:
         chunk = audio_buffer.get()
@@ -724,30 +688,34 @@ def process_audio_stream():
     if not chunks:
         return "", 0
     
+    # Convert audio data to proper format for transcription
     audio_data = b''.join(chunks)
     
-    # Save to temp file for transcription
+    # Start transcription immediately
+    transcribe_start_time = time.time()
+    
+    # Process the complete audio
     temp_file = "temp_t3_output.wav"
     with wave.open(temp_file, 'wb') as wf:
         wf.setnchannels(CHANNELS)
-        wf.setsampwidth(2)
+        wf.setsampwidth(2)  # 16-bit
         wf.setframerate(RATE)
         wf.writeframes(audio_data)
     
-    # Transcribe with suppressed warnings
-    transcribe_start_time = time.time()
-    
+    # Transcribe with optimized parameters
+    # Suppress ONNX warnings during transcription
     stderr_fd = os.dup(2)
     devnull_fd = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull_fd, 2)
     result = transcribe_audio(audio_path=temp_file, device=DEVICE)
+    # Restore stderr
     os.dup2(stderr_fd, 2)
     os.close(devnull_fd)
     os.close(stderr_fd)
     
     transcribe_end_time = time.time()
     
-    # Clean up
+    # Clean up temp file
     try:
         os.remove(temp_file)
     except:
@@ -848,7 +816,7 @@ class T3VoiceTranscriber:
             pass
         
         # Start recording
-        self.record_thread = threading.Thread(target=record_audio_stream)
+        self.record_thread = threading.Thread(target=lambda: record_audio_stream(interactive_mode=False))
         self.record_thread.daemon = True
         self.record_thread.start()
 
@@ -1027,84 +995,6 @@ def check_permissions():
         logger.error(f"❌ Error checking permissions: {e}")
         return False
 
-def get_missing_alsa_devices():
-    """Get ALSA devices that PyAudio doesn't detect"""
-    missing_devices = []
-    
-    try:
-        # Read ALSA cards
-        with open('/proc/asound/cards', 'r') as f:
-            lines = f.readlines()
-        
-        # Parse ALSA cards
-        alsa_cards = {}
-        for line in lines:
-            line = line.strip()
-            if line and not line.startswith(' '):
-                # Line format: " 3 [Snowball       ]: USB-Audio - Blue Snowball"
-                parts = line.split(']', 1)
-                if len(parts) == 2:
-                    card_part = parts[0].strip()
-                    name_part = parts[1].strip()
-                    
-                    # Extract card number and short name
-                    card_info = card_part.split('[')
-                    if len(card_info) == 2:
-                        card_num = card_info[0].strip()
-                        short_name = card_info[1].strip()
-                        
-                        # Extract full name
-                        if ':' in name_part:
-                            full_name = name_part.split(':', 1)[1].strip()
-                        else:
-                            full_name = name_part
-                        
-                        alsa_cards[int(card_num)] = {
-                            'short_name': short_name,
-                            'full_name': full_name,
-                            'card_num': int(card_num)
-                        }
-        
-        # Check which ALSA cards are missing from PyAudio
-        p = pyaudio.PyAudio()
-        pyaudio_devices = []
-        
-        for i in range(p.get_device_count()):
-            try:
-                info = p.get_device_info_by_index(i)
-                pyaudio_devices.append(info['name'])
-            except:
-                continue
-        
-        p.terminate()
-        
-        # Find missing devices
-        for card_num, card_info in alsa_cards.items():
-            found = False
-            for device_name in pyaudio_devices:
-                if (card_info['short_name'].lower() in device_name.lower() or 
-                    card_info['full_name'].lower() in device_name.lower()):
-                    found = True
-                    break
-            
-            if not found:
-                # This is a missing device - add it as a virtual device
-                missing_devices.append({
-                    'virtual_id': 1000 + card_num,  # Use high IDs to avoid conflicts
-                    'name': f"{card_info['full_name']} (hw:{card_num},0)",
-                    'alsa_device': f"hw:{card_num},0",
-                    'card_num': card_num,
-                    'maxInputChannels': 1,  # Assume mono for missing devices
-                    'defaultSampleRate': 44100.0,  # Default rate
-                    'hostApi': 0
-                })
-                logger.info(f"Found missing ALSA device: {card_info['full_name']} (card {card_num})")
-        
-    except Exception as e:
-        logger.debug(f"Error detecting missing ALSA devices: {e}")
-    
-    return missing_devices
-
 def main():
     """Main function with interactive mode"""
     logger.info("T3 Voice Transcriber")
@@ -1196,7 +1086,7 @@ def main():
                             stop_recording.clear()
                             
                             # Start recording
-                            record_thread = threading.Thread(target=record_audio_stream)
+                            record_thread = threading.Thread(target=lambda: record_audio_stream(interactive_mode=True))
                             record_thread.start()
                             
                             logger.info("Recording... Press Space to stop")
@@ -1251,7 +1141,7 @@ def main():
                         if choice in ['', ' ']:
                             # Simple recording without hotkey stop
                             stop_recording.clear()
-                            record_thread = threading.Thread(target=record_audio_stream)
+                            record_thread = threading.Thread(target=lambda: record_audio_stream(interactive_mode=True))
                             record_thread.start()
                             
                             input("Recording... Press Enter to stop")
