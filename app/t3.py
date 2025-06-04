@@ -26,6 +26,9 @@ import warnings
 # Import transcription functionality
 from transcribe2 import transcribe_audio, preload_model, get_model
 
+# Import visual notifications module
+from visual_notifications import VisualNotification
+
 # Try to import clipboard and typing functionality
 try:
     import pyperclip
@@ -33,18 +36,16 @@ try:
 except ImportError:
     CLIPBOARD_AVAILABLE = False
 
-try:
-    import tkinter as tk
-    VISUAL_NOTIFICATIONS_AVAILABLE = True
-except ImportError:
-    VISUAL_NOTIFICATIONS_AVAILABLE = False
-
 # Suppress warnings
 warnings.filterwarnings("ignore", message=".*Init provider bridge failed.*")
 warnings.filterwarnings("ignore", category=UserWarning)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Enable debug logging for troubleshooting hotkey issues
+hotkey_logger = logging.getLogger(__name__ + '.hotkeys')
+hotkey_logger.setLevel(logging.DEBUG)
 
 # Audio configuration - Browser-like settings for better quality
 CHUNK = 256  # Smaller buffer like browsers use (128-256 samples)
@@ -69,193 +70,8 @@ def get_device():
 DEVICE = get_device()
 
 # Audio buffer and control
-audio_buffer = queue.Queue()
+audio_buffer = queue.Queue(maxsize=1000)  # Limit buffer size to prevent memory issues
 stop_recording = threading.Event()
-
-class VisualNotification:
-    """Enhanced visual notification system"""
-    def __init__(self):
-        self.active = False
-        self.overlay_processes = []
-        self.display_env = self._detect_display_environment()
-        self.available_tools = self._detect_available_tools()
-        logger.info(f"Display environment: {self.display_env}")
-        
-    def _detect_display_environment(self):
-        if os.environ.get('WAYLAND_DISPLAY'):
-            return 'wayland'
-        elif os.environ.get('DISPLAY'):
-            return 'x11'
-        else:
-            return 'terminal'
-    
-    def _detect_available_tools(self):
-        tools = []
-        for tool in ['zenity', 'yad', 'kdialog', 'xmessage']:
-            try:
-                subprocess.run(['which', tool], capture_output=True, check=True)
-                tools.append(tool)
-            except:
-                pass
-        return tools
-    
-    def show_recording(self):
-        if self.active:
-            return
-        self.active = True
-        self._create_overlay("🔴 RECORDING", "#ff4444", persistent=True)
-        self._show_terminal_notification("🔴 RECORDING - Release Alt+Shift to stop")
-    
-    def show_processing(self):
-        self._cleanup_overlays()
-        self._create_overlay("⚡ TRANSCRIBING", "#ffaa00", persistent=True)
-        self._show_terminal_notification("⚡ TRANSCRIBING AUDIO...")
-    
-    def show_completed(self):
-        self._cleanup_overlays()
-        self._create_overlay("✅ TYPED", "#00aaff", persistent=False)
-        self._show_terminal_notification("✅ TRANSCRIPTION TYPED")
-        threading.Timer(2.0, self.hide_notification).start()
-    
-    def _create_overlay(self, text, color, persistent=False):
-        if VISUAL_NOTIFICATIONS_AVAILABLE:
-            try:
-                self._create_tkinter_overlay(text, color, persistent)
-                return
-            except Exception as e:
-                logger.debug(f"Tkinter overlay failed: {e}")
-        
-        if 'zenity' in self.available_tools:
-            try:
-                cmd = [
-                    'zenity', '--info',
-                    '--title=T3 Voice Transcriber',
-                    f'--text=<span font="20" weight="bold">{text}</span>',
-                    '--width=400', '--height=150'
-                ]
-                if not persistent:
-                    cmd.append('--timeout=3')
-                
-                process = subprocess.Popen(cmd, stderr=subprocess.DEVNULL)
-                self.overlay_processes.append(process)
-                return
-            except Exception as e:
-                logger.debug(f"Zenity overlay failed: {e}")
-    
-    def _create_tkinter_overlay(self, text, color, persistent):
-        overlay_script = f'''
-import tkinter as tk
-import time
-
-def create_overlay():
-    try:
-        root = tk.Tk()
-        root.title("T3 Voice Transcriber")
-        root.overrideredirect(True)
-        root.attributes('-topmost', True)
-        root.attributes('-alpha', 0.95)
-        root.configure(bg='{color}')
-        
-        screen_width = root.winfo_screenwidth()
-        window_width = 500
-        window_height = 120
-        x = (screen_width - window_width) // 2
-        y = 100
-        
-        root.geometry(f"{{window_width}}x{{window_height}}+{{x}}+{{y}}")
-        
-        border_frame = tk.Frame(root, bg='black', bd=3)
-        border_frame.pack(fill='both', expand=True, padx=3, pady=3)
-        
-        inner_frame = tk.Frame(border_frame, bg='{color}')
-        inner_frame.pack(fill='both', expand=True, padx=2, pady=2)
-        
-        label = tk.Label(
-            inner_frame,
-            text="{text}",
-            bg='{color}',
-            fg='black',
-            font=('Arial', 24, 'bold'),
-            pady=20
-        )
-        label.pack(expand=True)
-        
-        if {str(persistent).lower()}:
-            root.mainloop()
-        else:
-            root.after(3000, root.quit)
-            root.mainloop()
-            
-    except Exception as e:
-        print(f"Overlay error: {{e}}")
-
-if __name__ == "__main__":
-    create_overlay()
-'''
-        
-        overlay_file = f'/tmp/t3_overlay_{int(time.time())}.py'
-        with open(overlay_file, 'w') as f:
-            f.write(overlay_script)
-        
-        process = subprocess.Popen(['python3', overlay_file], stderr=subprocess.DEVNULL)
-        self.overlay_processes.append(process)
-        
-        threading.Timer(10.0, lambda: self._cleanup_temp_file(overlay_file)).start()
-    
-    def _cleanup_temp_file(self, filepath):
-        try:
-            os.remove(filepath)
-        except:
-            pass
-    
-    def _cleanup_overlays(self):
-        for process in self.overlay_processes:
-            try:
-                process.terminate()
-            except:
-                pass
-        self.overlay_processes = []
-    
-    def _show_terminal_notification(self, text):
-        try:
-            print(f"\033[2J\033[H", end='')
-            
-            if "RECORDING" in text:
-                print("\033[92m" + "█" * 70)
-                print("█" + " " * 68 + "█")
-                print("█" + f"🔴 RECORDING IN PROGRESS".center(68) + "█")
-                print("█" + f"Release Alt+Shift to stop".center(68) + "█")
-                print("█" + " " * 68 + "█")
-                print("█" * 70 + "\033[0m")
-            elif "TRANSCRIBING" in text:
-                print("\033[93m" + "█" * 70)
-                print("█" + " " * 68 + "█")
-                print("█" + f"⚡ TRANSCRIBING AUDIO".center(68) + "█")
-                print("█" + f"Processing speech to text...".center(68) + "█")
-                print("█" + " " * 68 + "█")
-                print("█" * 70 + "\033[0m")
-            elif "TYPED" in text:
-                print("\033[94m" + "█" * 70)
-                print("█" + " " * 68 + "█")
-                print("█" + f"✅ TEXT TYPED SUCCESSFULLY!".center(68) + "█")
-                print("█" + f"Transcription complete".center(68) + "█")
-                print("█" + " " * 68 + "█")
-                print("█" * 70 + "\033[0m")
-                
-        except Exception as e:
-            logger.debug(f"Terminal notification failed: {e}")
-    
-    def hide_notification(self):
-        if not self.active:
-            return
-        self.active = False
-        self._cleanup_overlays()
-        try:
-            print(f"\033[2J\033[H", end='')
-            print("🎤 T3 Voice Transcriber Ready")
-            print("Hold Alt+Shift to record")
-        except:
-            pass
 
 class WaylandGlobalHotkeys:
     """Global hotkey system using evdev"""
@@ -323,7 +139,18 @@ class WaylandGlobalHotkeys:
     def is_hotkey_pressed(self):
         alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
         shift_pressed = any(self.key_states.get(key, False) for key in self.SHIFT_KEYS)
-        return alt_pressed and shift_pressed
+        result = alt_pressed and shift_pressed
+        
+        # Debug log the key states occasionally
+        if hasattr(self, '_debug_counter'):
+            self._debug_counter += 1
+        else:
+            self._debug_counter = 0
+            
+        if self._debug_counter % 100 == 0:  # Log every 100 calls to avoid spam
+            hotkey_logger.debug(f"Key states - Alt: {alt_pressed}, Shift: {shift_pressed}, Hotkey: {result}")
+            
+        return result
     
     def is_hotkey_released(self):
         alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
@@ -335,17 +162,27 @@ class WaylandGlobalHotkeys:
             return
         
         key_code = event.code
-        key_state = event.value
+        key_state = event.value  # 0=release, 1=press, 2=repeat
         
+        # Handle press and release (ignore repeat events for now)
         if key_state in [0, 1]:
             self.key_states[key_code] = (key_state == 1)
+            
+            # Debug key state changes for Alt and Shift keys
+            if key_code in self.ALT_KEYS + self.SHIFT_KEYS:
+                key_name = "ALT" if key_code in self.ALT_KEYS else "SHIFT"
+                state_name = "PRESSED" if key_state == 1 else "RELEASED"
+                hotkey_logger.debug(f"{key_name} key {state_name} (code: {key_code})")
         
-        if self.is_hotkey_pressed() and not self.hotkey_active:
-            logger.debug("Hotkey activated")
+        # Check if hotkey combination is now active
+        hotkey_currently_pressed = self.is_hotkey_pressed()
+        
+        if hotkey_currently_pressed and not self.hotkey_active:
+            hotkey_logger.debug("Hotkey combination activated - starting recording")
             self.hotkey_active = True
             self.callback_start()
-        elif self.hotkey_active and self.is_hotkey_released():
-            logger.debug("Hotkey released")
+        elif not hotkey_currently_pressed and self.hotkey_active:
+            hotkey_logger.debug("Hotkey combination released - stopping recording")
             self.hotkey_active = False
             self.callback_stop()
     
@@ -628,7 +465,6 @@ def record_audio_stream(interactive_mode=False):
                 # Read small chunks very frequently like browsers do
                 data = stream.read(working_chunk, exception_on_overflow=False)
                 frames.append(data)
-                audio_buffer.put(data)
                 total_chunks += 1
                 
                 # Monitor audio levels for debugging
@@ -649,22 +485,31 @@ def record_audio_stream(interactive_mode=False):
                 break
     else:
         # Global hotkey mode - record until stop signal with browser-like frequent reads
+        logger.debug("Starting continuous recording loop (hotkey mode)")
+        chunk_count = 0
         while not stop_recording.is_set():
             try:
                 # Very frequent small reads like browsers
                 data = stream.read(working_chunk, exception_on_overflow=False)
                 frames.append(data)
-                audio_buffer.put(data)
                 total_chunks += 1
+                chunk_count += 1
                 
                 # Monitor audio levels
                 audio_data = np.frombuffer(data, dtype=np.int16)
                 amplitude = np.max(np.abs(audio_data))
                 max_amplitude = max(max_amplitude, amplitude)
+                
+                # Log progress every 50 chunks to avoid spam
+                if chunk_count % 50 == 0:
+                    logger.debug(f"Recording... captured {chunk_count} chunks, max amplitude: {max_amplitude}")
                     
             except Exception as e:
                 logger.error(f"Recording error: {e}")
                 break
+        
+        logger.debug(f"Recording loop ended. Total chunks captured: {chunk_count}")
+        logger.debug(f"stop_recording.is_set() = {stop_recording.is_set()}")
     
     if interactive_mode:
         print(f"\nFinished recording - Max audio level: {max_amplitude}")
@@ -682,8 +527,8 @@ def record_audio_stream(interactive_mode=False):
         if max_amplitude < 500:
             logger.warning("Very low audio levels detected!")
     
-    # Add a None to mark the end of the stream
-    audio_buffer.put(None)
+    # No longer needed - we process frames directly instead of using buffer
+    # audio_buffer.put(None)
     
     # Clean up
     stream.stop_stream()
@@ -728,24 +573,16 @@ def record_audio_stream(interactive_mode=False):
     
     return frames
 
-def process_audio_stream():
-    """Process the audio stream as it's being recorded - exact copy from t2.py"""
+def process_audio_stream(audio_frames):
+    """Process the audio frames directly - no longer uses the buffer"""
     # Get preloaded model
     model = get_model(device=DEVICE)
     
-    # Collect audio data until we get None (end of stream)
-    chunks = []
-    while True:
-        chunk = audio_buffer.get()
-        if chunk is None:
-            break
-        chunks.append(chunk)
-    
-    if not chunks:
+    if not audio_frames:
         return "", 0
     
     # Convert audio data to proper format for transcription
-    audio_data = b''.join(chunks)
+    audio_data = b''.join(audio_frames)
     
     # Start transcription immediately
     transcribe_start_time = time.time()
@@ -814,12 +651,13 @@ class T3VoiceTranscriber:
         self.process_thread = None
         self.hotkey_system = None
         self.running = False
+        self.recorded_frames = []  # Store recorded audio frames
         
         # Load audio config
         load_audio_config()
         
-        # Initialize visual notification
-        self.visual_notification = VisualNotification()
+        # Initialize visual notification with app name
+        self.visual_notification = VisualNotification("T3 Voice Transcriber")
         
         # Preload model
         logger.info("Loading transcription model...")
@@ -848,8 +686,11 @@ class T3VoiceTranscriber:
 
     def start_recording(self):
         if self.recording:
+            logger.debug("Already recording, ignoring start_recording call")
             return
             
+        logger.debug("Starting recording session")
+        
         # Wait for model to load
         if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
             logger.info("Waiting for model to load...")
@@ -857,10 +698,11 @@ class T3VoiceTranscriber:
         
         self.recording = True
         stop_recording.clear()
+        logger.debug(f"stop_recording event cleared. Event state: {stop_recording.is_set()}")
         
         # Show notification
         try:
-            self.visual_notification.show_recording()
+            self.visual_notification.show_recording("Recording - Release Alt+Shift to stop")
         except Exception as e:
             logger.warning(f"Visual notification error: {e}")
         
@@ -872,20 +714,28 @@ class T3VoiceTranscriber:
             pass
         
         # Start recording
-        self.record_thread = threading.Thread(target=lambda: record_audio_stream(interactive_mode=False))
+        logger.debug("Starting recording thread")
+        self.record_thread = threading.Thread(target=self._record_wrapper)
         self.record_thread.daemon = True
         self.record_thread.start()
 
+    def _record_wrapper(self):
+        """Wrapper to capture recorded frames"""
+        self.recorded_frames = record_audio_stream(interactive_mode=False)
+
     def stop_recording(self):
         if not self.recording:
+            logger.debug("Not recording, ignoring stop_recording call")
             return
             
+        logger.debug("Stopping recording session")
         self.recording = False
         stop_recording.set()
+        logger.debug(f"stop_recording event set. Event state: {stop_recording.is_set()}")
         
         # Show processing notification
         try:
-            self.visual_notification.show_processing()
+            self.visual_notification.show_processing("Transcribing audio")
         except Exception as e:
             logger.warning(f"Visual notification error: {e}")
         
@@ -898,16 +748,19 @@ class T3VoiceTranscriber:
         
         # Wait for recording to finish
         if self.record_thread:
+            logger.debug("Waiting for recording thread to finish")
             self.record_thread.join()
+            logger.debug("Recording thread finished")
         
         # Process audio
+        logger.debug("Starting transcription thread")
         self.process_thread = threading.Thread(target=self.process_and_transcribe)
         self.process_thread.daemon = True
         self.process_thread.start()
 
     def process_and_transcribe(self):
         try:
-            result, transcribe_time = process_audio_stream()
+            result, transcribe_time = process_audio_stream(self.recorded_frames)
             transcription = result.strip()
             
             if transcription:
@@ -915,7 +768,7 @@ class T3VoiceTranscriber:
                 if type_text(transcription):
                     # Show completion notification
                     try:
-                        self.visual_notification.show_completed()
+                        self.visual_notification.show_completed("Text typed successfully")
                     except Exception as e:
                         logger.warning(f"Visual notification error: {e}")
                     
@@ -928,11 +781,16 @@ class T3VoiceTranscriber:
                     
                     logger.info(f"✅ Transcribed and typed: {transcription}")
                 else:
+                    # Show error for failed typing
+                    try:
+                        self.visual_notification.show_error("Failed to type text")
+                    except Exception as e:
+                        logger.warning(f"Visual notification error: {e}")
                     logger.error("Failed to type transcription")
             else:
-                # Hide notification
+                # Show warning for no speech detected
                 try:
-                    self.visual_notification.hide_notification()
+                    self.visual_notification.show_warning("No speech detected")
                 except Exception as e:
                     logger.warning(f"Visual notification error: {e}")
                         
@@ -941,11 +799,14 @@ class T3VoiceTranscriber:
                 
         except Exception as e:
             try:
-                self.visual_notification.hide_notification()
+                self.visual_notification.show_error("Transcription failed")
             except:
                 pass
             logger.error(f"Transcription error: {e}")
             self.offer_device_change()
+        finally:
+            # Clear recorded frames for next recording
+            self.recorded_frames = []
 
     def offer_device_change(self):
         logger.info("")
@@ -1018,10 +879,19 @@ class T3VoiceTranscriber:
             self.running = False
             if self.hotkey_system:
                 self.hotkey_system.stop()
+            self.cleanup()
             return True
         except Exception as e:
             logger.error(f"Error running hotkey system: {e}")
+            self.cleanup()
             return False
+    
+    def cleanup(self):
+        """Clean up resources when shutting down"""
+        try:
+            self.visual_notification.cleanup()
+        except Exception as e:
+            logger.debug(f"Error cleaning up visual notifications: {e}")
 
 def check_permissions():
     """Check permissions for input device access"""
@@ -1142,7 +1012,12 @@ def main():
                             stop_recording.clear()
                             
                             # Start recording
-                            record_thread = threading.Thread(target=lambda: record_audio_stream(interactive_mode=True))
+                            recorded_frames = []
+                            def record_wrapper():
+                                nonlocal recorded_frames
+                                recorded_frames = record_audio_stream(interactive_mode=True)
+                            
+                            record_thread = threading.Thread(target=record_wrapper)
                             record_thread.start()
                             
                             logger.info("Recording... Press Space to stop")
@@ -1162,7 +1037,7 @@ def main():
                             record_thread.join()
                             
                             # Process audio
-                            result, transcribe_time = process_audio_stream()
+                            result, transcribe_time = process_audio_stream(recorded_frames)
                             transcription = result.strip()
                             
                             if transcription:
@@ -1197,14 +1072,20 @@ def main():
                         if choice in ['', ' ']:
                             # Simple recording without hotkey stop
                             stop_recording.clear()
-                            record_thread = threading.Thread(target=lambda: record_audio_stream(interactive_mode=True))
+                            
+                            recorded_frames = []
+                            def record_wrapper():
+                                nonlocal recorded_frames
+                                recorded_frames = record_audio_stream(interactive_mode=True)
+                            
+                            record_thread = threading.Thread(target=record_wrapper)
                             record_thread.start()
                             
                             input("Recording... Press Enter to stop")
                             stop_recording.set()
                             record_thread.join()
                             
-                            result, _ = process_audio_stream()
+                            result, _ = process_audio_stream(recorded_frames)
                             transcription = result.strip()
                             
                             if transcription:
