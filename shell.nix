@@ -89,6 +89,8 @@ in
 
       # python app/t2.py
       # python app/simple_voice_transcriber.py
+
+      echo "sudo python app/t3.py"
     '';
   }
 
