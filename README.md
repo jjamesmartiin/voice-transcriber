@@ -1,47 +1,32 @@
 # TODO
-- [ ] REALLY make sure that it works offline and that we don't need to download anything after running it once
-- [ ] REALLY make sure that it works offline and that we don't need to download anything after running it once
-- [ ] REALLY make sure that it works offline and that we don't need to download anything after running it once
-- [ ] REALLY make sure that it works offline and that we don't need to download anything after running it once
-- [ ] add an interrupt during transcription in case it's wrong
-- [x] fix the warning from `faster-whisper` onnx stuff (surpressed but not quite fixed)
-- [x] add a test for the transcriber
-- [x] use `faster-whisper` for faster transcriptions
-- [x] add some global shortcut/gui branch
-- [ ] add a sound notification when the text is copied to clipboard, like a ding or pop 
-- [ ] try it out on wsl/hyper v
-    - [ ] fix breaking terminal output when quitting using 'q'
-        - this only breaks on windows i think
-- [x] make something to cache the nixpkgs so it works totally offline...
-    > maybe done...
-    > nope not yet these are trying to be downloaded: 
-      - /nix/store/x9d49vaqlrkw97p9ichdwrnbh013kq7z-bash-interactive-5.2p37
-      - /nix/store/k3a7dzrqphj9ksbb43i24vy6inz8ys51-ncurses-6.4.20221231
-      - /nix/store/8yff66km6d5mav6i2101kmvp78vgqfcc-readline-8.2p13
-    > maybe this is done now? I added all 3 of these the shell.nix
+- [ ] get it working on windows
+- [ ] enter the text instead of copy/paste?
+- [ ] live transcription instead of waiting for recording to finish
+- [ ] Being able to make live edits with voice to remove rambling or make the thought more cohesive
 
-# voice-transcriber
+# About
+A fast offline voice transcription tool. 
 
-A fast offline voice transcription tool with global shortcut support for GNOME/Wayland.
+I made this tool so that it would help my chronic shoulder and back pain since I have to type a lot for work and being able to just transcribe my voice makes messaging less painful for me.
+
+I hope it can help someone else too (for the same or other reasons).
+
+# Features
+- **Fast offline transcription** using faster-whisper
+- **Automatic clipboard copying** of transcribed text (working on typing the input)
+- **Visual feedback** of the transcription process
+- **Global keyboard shortcut on wayland** for completion 
+    - There is global keyboard shortcut support if you add the user to the `input` group or run as root. 
 
 ## Usage
+1. have nix installed
+2. run `nix-shell` from the root of this repo 
+3. once the nix-shell is loaded then run: 
+    ```
+    python app/t3.py
+    ```
+    OR
+    ```
+    sudo python app/t3.py
+    ```
 
-### Terminal Mode
-```shell
-nix-shell --run "python t2.py"
-
-# for working global shortcut: 
-nix-shell --run "python simple_voice_transcriber.py"
-```
-
-### Global Shortcut Mode (Command Line)
-```shell
-# Or manually:
-nix-shell --run "python3 simple_voice_transcriber.py"
-```
-## Features
-
-- **Fast offline transcription** using faster-whisper
-- **Automatic clipboard copying** of transcribed text
-- **Audio feedback** with pop sound on completion
-- **Global keyboard shortcut on wayland** for completion 
