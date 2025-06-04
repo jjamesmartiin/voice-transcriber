@@ -46,15 +46,16 @@ warnings.filterwarnings("ignore", category=UserWarning)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Audio configuration
-CHUNK = 1024
+# Audio configuration - Browser-like settings for better quality
+CHUNK = 256  # Smaller buffer like browsers use (128-256 samples)
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
-RATE = 44100
+RATE = 48000  # Default to 48kHz like browsers prefer
 RECORD_SECONDS = 20
 INPUT_DEVICE_INDEX = None
 CONFIG_FILE = 'audio_device_config.json'
-FALLBACK_RATES = [44100, 48000, 22050, 16000, 8000]
+# Prioritize 48kHz like browsers, then fallback
+FALLBACK_RATES = [48000, 44100, 22050, 16000, 8000]
 
 # Device detection
 def get_device():
@@ -510,7 +511,7 @@ def check_for_stop_key():
             pass
 
 def record_audio_stream(interactive_mode=False):
-    """Record audio directly into memory and stream to the buffer - exact copy from t2.py"""
+    """Record audio directly into memory and stream to the buffer - Browser-like WebRTC style capture"""
     global RATE
     
     # Suppress PyAudio warnings
@@ -533,39 +534,66 @@ def record_audio_stream(interactive_mode=False):
             if info['maxInputChannels'] > 0:
                 print(f"  Device {i}: {info['name']} - Rate: {info['defaultSampleRate']}")
     
-    # Try different sample rates until one works
+    # Get device info for optimal settings
+    if INPUT_DEVICE_INDEX is not None:
+        device_info = p.get_device_info_by_index(INPUT_DEVICE_INDEX)
+    else:
+        device_info = p.get_default_input_device_info()
+    
+    # Browser-like audio setup - prioritize device's native rate if it's in our list
+    device_rate = int(device_info['defaultSampleRate'])
+    if device_rate in FALLBACK_RATES:
+        test_rates = [device_rate] + [r for r in FALLBACK_RATES if r != device_rate]
+    else:
+        test_rates = FALLBACK_RATES
+    
+    # Try different configurations until one works
     stream = None
     working_rate = None
     
-    for rate in FALLBACK_RATES:
-        try:
-            stream = p.open(format=FORMAT, 
-                            channels=CHANNELS, 
-                            rate=rate, 
-                            input=True,
-                            input_device_index=INPUT_DEVICE_INDEX,
-                            frames_per_buffer=CHUNK)
-            working_rate = rate
-            device_info = p.get_device_info_by_index(INPUT_DEVICE_INDEX) if INPUT_DEVICE_INDEX else p.get_default_input_device_info()
-            if interactive_mode:
-                print(f"Using sample rate: {rate} Hz")
-                print(f"Using input device: {device_info['name']}")
-            else:
-                logger.info(f"Using sample rate: {rate} Hz")
-                logger.info(f"Using input device: {device_info['name']}")
+    for rate in test_rates:
+        # Browser-like small buffer sizes for smooth capture
+        browser_chunk_sizes = [128, 256, 512]  # WebRTC typically uses 128-512 samples
+        
+        for chunk_size in browser_chunk_sizes:
+            try:
+                # Calculate buffer time (browsers aim for 2.6-5.3ms buffers)
+                buffer_time_ms = (chunk_size / rate) * 1000
+                
+                stream = p.open(
+                    format=FORMAT, 
+                    channels=CHANNELS, 
+                    rate=rate, 
+                    input=True,
+                    input_device_index=INPUT_DEVICE_INDEX,
+                    frames_per_buffer=chunk_size
+                )
+                working_rate = rate
+                working_chunk = chunk_size
+                
+                if interactive_mode:
+                    print(f"Using: {rate} Hz, {chunk_size} samples ({buffer_time_ms:.1f}ms buffer)")
+                    print(f"Device: {device_info['name']}")
+                else:
+                    logger.info(f"Browser-like setup: {rate} Hz, {chunk_size} samples ({buffer_time_ms:.1f}ms)")
+                    logger.info(f"Device: {device_info['name']}")
+                break
+                
+            except Exception as e:
+                if interactive_mode:
+                    print(f"Config {rate}Hz/{chunk_size} failed: {e}")
+                else:
+                    logger.debug(f"Config {rate}Hz/{chunk_size} failed: {e}")
+                continue
+        
+        if stream is not None:
             break
-        except Exception as e:
-            if interactive_mode:
-                print(f"Sample rate {rate} Hz failed: {e}")
-            else:
-                logger.debug(f"Sample rate {rate} Hz failed: {e}")
-            continue
     
     if stream is None:
         if interactive_mode:
-            print("ERROR: Could not open audio stream with any sample rate")
+            print("ERROR: Could not open audio stream with any configuration")
         else:
-            logger.error("Could not open audio stream with any sample rate")
+            logger.error("Could not open audio stream with any configuration")
         p.terminate()
         return []
     
@@ -574,6 +602,7 @@ def record_audio_stream(interactive_mode=False):
     
     frames = []
     max_amplitude = 0
+    total_chunks = 0
     
     # Start countdown and keypress detection only in interactive mode
     if interactive_mode:
@@ -588,38 +617,45 @@ def record_audio_stream(interactive_mode=False):
         input_thread.start()
         
         # Calculate max chunks for the recording duration
-        max_chunks = int(RATE / CHUNK * RECORD_SECONDS)
+        max_chunks = int(RATE / working_chunk * RECORD_SECONDS)
         print("Recording... Press Space to stop")
         
-        # Record audio with timeout
+        # Browser-like recording with very frequent small reads
         for i in range(max_chunks):
             if stop_recording.is_set():
                 break
             try:
-                data = stream.read(CHUNK, exception_on_overflow=False)
+                # Read small chunks very frequently like browsers do
+                data = stream.read(working_chunk, exception_on_overflow=False)
                 frames.append(data)
-                audio_buffer.put(data)  # Add to buffer for real-time processing
+                audio_buffer.put(data)
+                total_chunks += 1
                 
                 # Monitor audio levels for debugging
                 audio_data = np.frombuffer(data, dtype=np.int16)
                 amplitude = np.max(np.abs(audio_data))
                 max_amplitude = max(max_amplitude, amplitude)
                 
-                # Show audio level indicator every 10 chunks
-                if i % 10 == 0 and amplitude > 100:
+                # Show audio level indicator every 20 chunks (less frequent display)
+                if i % 20 == 0 and amplitude > 100:
                     level_bars = int(amplitude / 1000)
                     print(f"Audio level: {'█' * min(level_bars, 20)} ({amplitude})", end='\r')
                     
             except Exception as e:
-                print(f"Recording error: {e}")
+                if interactive_mode:
+                    print(f"Recording error: {e}")
+                else:
+                    logger.warning(f"Recording error: {e}")
                 break
     else:
-        # Global hotkey mode - record until stop signal
+        # Global hotkey mode - record until stop signal with browser-like frequent reads
         while not stop_recording.is_set():
             try:
-                data = stream.read(CHUNK, exception_on_overflow=False)
+                # Very frequent small reads like browsers
+                data = stream.read(working_chunk, exception_on_overflow=False)
                 frames.append(data)
                 audio_buffer.put(data)
+                total_chunks += 1
                 
                 # Monitor audio levels
                 audio_data = np.frombuffer(data, dtype=np.int16)
@@ -632,6 +668,7 @@ def record_audio_stream(interactive_mode=False):
     
     if interactive_mode:
         print(f"\nFinished recording - Max audio level: {max_amplitude}")
+        print(f"Captured {total_chunks} chunks at {working_rate/working_chunk:.1f} chunks/sec")
         
         if max_amplitude < 500:
             print("⚠️  WARNING: Very low audio levels detected!")
@@ -640,6 +677,7 @@ def record_audio_stream(interactive_mode=False):
             print("   - Check system audio input settings")
     else:
         logger.info(f"Recording finished - Max audio level: {max_amplitude}")
+        logger.info(f"Captured {total_chunks} chunks at {working_rate/working_chunk:.1f} chunks/sec")
         
         if max_amplitude < 500:
             logger.warning("Very low audio levels detected!")
@@ -655,11 +693,29 @@ def record_audio_stream(interactive_mode=False):
     # Save to file for backup and debugging
     try:
         filename = 'output.wav' if interactive_mode else 'temp_t3_output.wav'
+        
+        # Browser-like automatic gain control - boost quiet audio
+        audio_data = b''.join(frames)
+        if len(audio_data) > 0:
+            audio_array = np.frombuffer(audio_data, dtype=np.int16)
+            current_max = np.max(np.abs(audio_array))
+            
+            # If audio is too quiet (like browsers do AGC), boost it
+            if current_max > 0 and current_max < 8000:  # Boost if below ~25% of max
+                boost_factor = min(8000 / current_max, 3.0)  # Cap boost at 3x
+                boosted_audio = (audio_array * boost_factor).astype(np.int16)
+                audio_data = boosted_audio.tobytes()
+                
+                if interactive_mode:
+                    print(f"Applied browser-like AGC: boosted {boost_factor:.1f}x (max: {current_max} -> {np.max(np.abs(boosted_audio))})")
+                else:
+                    logger.info(f"Applied AGC boost: {boost_factor:.1f}x")
+        
         with wave.open(filename, 'wb') as wf:
             wf.setnchannels(CHANNELS)
             wf.setsampwidth(2)  # 16-bit
             wf.setframerate(RATE)
-            wf.writeframes(b''.join(frames))
+            wf.writeframes(audio_data)
         if interactive_mode:
             print(f"Audio saved to {filename} for debugging")
         else:
