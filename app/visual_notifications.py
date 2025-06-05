@@ -166,36 +166,49 @@ def create_overlay():
         root.title("{self.app_name}")
         root.overrideredirect(True)
         root.attributes('-topmost', True)
-        root.attributes('-alpha', 0.95)
+        root.attributes('-alpha', 0.85)
         root.configure(bg='{color}')
         
-        # Center the window
+        # Make window thinner and less intrusive
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
-        window_width = 500
-        window_height = 120
+        window_width = 320
+        window_height = 60
         x = (screen_width - window_width) // 2
-        y = max(100, (screen_height - window_height) // 4)
+        y = max(80, (screen_height - window_height) // 6)  # Higher up on screen
         
         root.geometry(f"{{window_width}}x{{window_height}}+{{x}}+{{y}}")
         
-        # Create border frame
-        border_frame = tk.Frame(root, bg='black', bd=3)
-        border_frame.pack(fill='both', expand=True, padx=3, pady=3)
+        # Minimal border frame
+        border_frame = tk.Frame(root, bg='#333333', bd=1)
+        border_frame.pack(fill='both', expand=True, padx=1, pady=1)
         
-        # Create inner frame
-        inner_frame = tk.Frame(border_frame, bg='{color}')
-        inner_frame.pack(fill='both', expand=True, padx=2, pady=2)
+        # Create inner frame with more subtle colors
+        bg_color = '{color}'
+        if bg_color == '#ff4444':  # Recording red
+            bg_color = '#ff6666'
+        elif bg_color == '#ffaa00':  # Processing orange
+            bg_color = '#ffcc66'
+        elif bg_color == '#00aaff':  # Completed blue
+            bg_color = '#66ccff'
+        elif bg_color == '#ff0000':  # Error red
+            bg_color = '#ff4444'
+        elif bg_color == '#ff8800':  # Warning orange
+            bg_color = '#ffaa44'
         
-        # Create label
+        inner_frame = tk.Frame(border_frame, bg=bg_color)
+        inner_frame.pack(fill='both', expand=True, padx=1, pady=1)
+        
+        # Create label with smaller, less bold font
+        text_color = 'white' if bg_color in ['#ff6666', '#ff4444'] else '#333333'
         label = tk.Label(
             inner_frame,
             text="{text}",
-            bg='{color}',
-            fg='white' if '{color}' in ['#ff4444', '#ff0000'] else 'black',
-            font=('Arial', 18, 'bold'),
-            pady=20,
-            wraplength=450
+            bg=bg_color,
+            fg=text_color,
+            font=('Arial', 12, 'normal'),  # Smaller, non-bold font
+            pady=8,
+            wraplength=300
         )
         label.pack(expand=True)
         
@@ -203,7 +216,7 @@ def create_overlay():
         if {'True' if persistent else 'False'}:
             root.mainloop()
         else:
-            root.after(3000, root.quit)
+            root.after(2500, root.quit)  # Slightly shorter display time
             root.mainloop()
             
     except Exception as e:
@@ -233,11 +246,11 @@ if __name__ == "__main__":
         cmd = [
             'zenity', '--info',
             f'--title={self.app_name}',
-            f'--text=<span font="16" weight="bold">{text}</span>',
-            '--width=400', '--height=150'
+            f'--text=<span font="12">{text}</span>',  # Smaller font, removed bold
+            '--width=300', '--height=80'  # Smaller dimensions
         ]
         if not persistent:
-            cmd.append('--timeout=3')
+            cmd.append('--timeout=2')  # Shorter timeout
         
         process = subprocess.Popen(cmd, stderr=subprocess.DEVNULL)
         self.overlay_processes.append(process)
@@ -266,50 +279,44 @@ if __name__ == "__main__":
     def _show_terminal_notification(self, text):
         """Show a colorful terminal notification."""
         try:
-            # Clear screen and move cursor to top
-            print(f"\033[2J\033[H", end='')
+            # Don't clear screen, just show a minimal notification
             
             # Choose colors based on text content
             if "RECORDING" in text.upper():
                 color_code = "\033[91m"  # Red
-                box_char = "█"
+                symbol = "●"
             elif "PROCESSING" in text.upper() or "TRANSCRIBING" in text.upper():
                 color_code = "\033[93m"  # Yellow
-                box_char = "█"
+                symbol = "⚡"
             elif "COMPLETED" in text.upper() or "TYPED" in text.upper():
                 color_code = "\033[94m"  # Blue
-                box_char = "█"
+                symbol = "✅"
             elif "ERROR" in text.upper():
                 color_code = "\033[95m"  # Magenta
-                box_char = "█"
+                symbol = "❌"
             elif "WARNING" in text.upper():
                 color_code = "\033[96m"  # Cyan
-                box_char = "█"
+                symbol = "⚠️"
             else:
                 color_code = "\033[92m"  # Green
-                box_char = "█"
+                symbol = "ℹ️"
             
-            # Create notification box
-            box_width = 70
-            print(color_code + box_char * box_width)
-            print(box_char + " " * (box_width - 2) + box_char)
+            # Create minimal notification line
+            box_width = 50  # Smaller width
+            border = "─" * box_width
+            
+            print(f"\n{color_code}┌{border}┐")
             
             # Center the main text
             main_text = text[:box_width - 4]  # Ensure text fits
-            print(box_char + f"{main_text}".center(box_width - 2) + box_char)
+            print(f"│ {symbol} {main_text:<{box_width-5}} │")
             
-            # Add app name if there's space
-            if len(text) < box_width - 10:
-                app_text = f"({self.app_name})"
-                print(box_char + f"{app_text}".center(box_width - 2) + box_char)
-            
-            print(box_char + " " * (box_width - 2) + box_char)
-            print(box_char * box_width + "\033[0m")
+            print(f"└{border}┘\033[0m")
             
         except Exception as e:
             logger.debug(f"Terminal notification failed: {e}")
             # Fallback to simple print
-            print(f"\n{text}\n")
+            print(f"\n• {text}")
     
     def hide_notification(self):
         """Hide all active notifications."""
@@ -320,8 +327,8 @@ if __name__ == "__main__":
         self._cleanup_overlays()
         
         try:
-            print(f"\033[2J\033[H", end='')
-            print(f"🎤 {self.app_name} Ready")
+            # Don't clear screen, just show a minimal ready message
+            print(f"\n🎤 {self.app_name} Ready\n")
         except:
             pass
     
