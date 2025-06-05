@@ -926,6 +926,198 @@ def main():
     logger.info("T3 Voice Transcriber")
     logger.info(f"Using device: {DEVICE}")
     
+    # Check for command line arguments
+    if len(sys.argv) > 1:
+        arg = sys.argv[1].strip().lower()
+        
+        # Load audio config
+        load_audio_config()
+        
+        # Preload model
+        preload_thread = preload_model(device=DEVICE)
+        
+        # Handle command line mode selection
+        if arg == '1':
+            # Global hotkey mode
+            logger.info("Starting global hotkey mode...")
+            if not check_permissions():
+                logger.error("Cannot use global hotkeys without proper permissions")
+                logger.error("💡 Run as root or add user to input group: sudo usermod -a -G input $USER")
+                return
+            
+            transcriber = T3VoiceTranscriber()
+            transcriber.run()
+            return
+            
+        elif arg == '2':
+            # Interactive mode
+            logger.info("Starting interactive mode...")
+            logger.info("Interactive mode - Press Space to record, 'i' for device selection, 'q' to quit")
+            
+            # Wait for model
+            if preload_thread.is_alive():
+                logger.info("Waiting for model to load...")
+                preload_thread.join()
+                logger.info("Model loaded!")
+            
+            run_interactive_mode()
+            return
+            
+        elif arg == '3' or arg == 'i':
+            # Device selection
+            logger.info("Opening device selection...")
+            if select_audio_device():
+                logger.info("✅ Audio device configured!")
+            else:
+                logger.info("❌ Device selection cancelled")
+            return
+            
+        elif arg in ['4', 'exit', 'quit']:
+            logger.info("Exiting...")
+            return
+            
+        elif arg in ['help', '-h', '--help']:
+            print_usage()
+            return
+            
+        else:
+            logger.error(f"Invalid argument: {arg}")
+            print_usage()
+            return
+    
+    # No arguments provided - run interactive menu
+    run_interactive_menu()
+
+def print_usage():
+    """Print usage information"""
+    print()
+    print("Usage: python app/t3.py [MODE]")
+    print()
+    print("Modes:")
+    print("  1        Global hotkeys (Alt+Shift) - requires root/input group")
+    print("  2        Interactive mode (Space to record)")
+    print("  3 or i   Select audio device")
+    print("  4        Exit")
+    print("  help     Show this help message")
+    print()
+    print("Examples:")
+    print("  python app/t3.py 1      # Start global hotkey mode")
+    print("  python app/t3.py 2      # Start interactive mode")
+    print("  python app/t3.py i      # Open device selection")
+    print("  python app/t3.py        # Show interactive menu")
+    print()
+
+def run_interactive_mode():
+    """Run interactive mode"""
+    interactive_mode_running = True
+    while interactive_mode_running:
+        try:
+            print("> ", end="", flush=True)
+            
+            import termios, tty
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(sys.stdin.fileno())
+                ch = sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            
+            if ch in [' ', '\r', '\n']:
+                print()
+                # Record and transcribe
+                stop_recording.clear()
+                
+                # Start recording
+                recorded_frames = []
+                def record_wrapper():
+                    nonlocal recorded_frames
+                    recorded_frames = record_audio_stream(interactive_mode=True)
+                
+                record_thread = threading.Thread(target=record_wrapper)
+                record_thread.start()
+                
+                logger.info("Recording... Press Space to stop")
+                
+                # Wait for space to stop
+                while True:
+                    try:
+                        tty.setraw(sys.stdin.fileno())
+                        ch2 = sys.stdin.read(1)
+                        if ch2 == ' ':
+                            stop_recording.set()
+                            break
+                    finally:
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                
+                # Wait for recording to finish
+                record_thread.join()
+                
+                # Process audio
+                result, transcribe_time = process_audio_stream(recorded_frames)
+                transcription = result.strip()
+                
+                if transcription:
+                    if type_text(transcription):
+                        logger.info(f"✅ Typed: {transcription}")
+                    else:
+                        logger.error("Failed to type text")
+                else:
+                    logger.info("❌ No speech detected")
+                
+            elif ch.lower() == 'i':
+                print()
+                select_audio_device()
+            elif ch.lower() in ['q', 'Q']:
+                print("\nExiting interactive mode...")
+                interactive_mode_running = False
+                break
+            elif ch.lower() == 'm':
+                print("\nExiting interactive mode...")
+                interactive_mode_running = False
+                break
+            
+            print("\nReady (Space=record, i=device, q=quit)")
+            
+        except KeyboardInterrupt:
+            print("\nExiting interactive mode...")
+            interactive_mode_running = False
+            break
+        except ImportError:
+            # Fallback for systems without termios
+            choice = input("Space=record, i=device, q=quit: ").strip().lower()
+            if choice in ['', ' ']:
+                # Simple recording without hotkey stop
+                stop_recording.clear()
+                
+                recorded_frames = []
+                def record_wrapper():
+                    nonlocal recorded_frames
+                    recorded_frames = record_audio_stream(interactive_mode=True)
+                
+                record_thread = threading.Thread(target=record_wrapper)
+                record_thread.start()
+                
+                input("Recording... Press Enter to stop")
+                stop_recording.set()
+                record_thread.join()
+                
+                result, _ = process_audio_stream(recorded_frames)
+                transcription = result.strip()
+                
+                if transcription:
+                    if type_text(transcription):
+                        logger.info(f"✅ Typed: {transcription}")
+                else:
+                    logger.info("❌ No speech detected")
+            elif choice == 'i':
+                select_audio_device()
+            elif choice in ['q', 'm']:
+                interactive_mode_running = False
+                break
+
+def run_interactive_menu():
+    """Run the interactive menu"""
     # Load audio config
     load_audio_config()
     
@@ -992,113 +1184,7 @@ def main():
                     preload_thread.join()
                     logger.info("Model loaded!")
                 
-                interactive_mode_running = True
-                while interactive_mode_running:
-                    try:
-                        print("> ", end="", flush=True)
-                        
-                        import termios, tty
-                        fd = sys.stdin.fileno()
-                        old_settings = termios.tcgetattr(fd)
-                        try:
-                            tty.setraw(sys.stdin.fileno())
-                            ch = sys.stdin.read(1)
-                        finally:
-                            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                        
-                        if ch in [' ', '\r', '\n']:
-                            print()
-                            # Record and transcribe
-                            stop_recording.clear()
-                            
-                            # Start recording
-                            recorded_frames = []
-                            def record_wrapper():
-                                nonlocal recorded_frames
-                                recorded_frames = record_audio_stream(interactive_mode=True)
-                            
-                            record_thread = threading.Thread(target=record_wrapper)
-                            record_thread.start()
-                            
-                            logger.info("Recording... Press Space to stop")
-                            
-                            # Wait for space to stop
-                            while True:
-                                try:
-                                    tty.setraw(sys.stdin.fileno())
-                                    ch2 = sys.stdin.read(1)
-                                    if ch2 == ' ':
-                                        stop_recording.set()
-                                        break
-                                finally:
-                                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                            
-                            # Wait for recording to finish
-                            record_thread.join()
-                            
-                            # Process audio
-                            result, transcribe_time = process_audio_stream(recorded_frames)
-                            transcription = result.strip()
-                            
-                            if transcription:
-                                if type_text(transcription):
-                                    logger.info(f"✅ Typed: {transcription}")
-                                else:
-                                    logger.error("Failed to type text")
-                            else:
-                                logger.info("❌ No speech detected")
-                            
-                        elif ch.lower() == 'i':
-                            print()
-                            select_audio_device()
-                        elif ch.lower() in ['q', 'Q']:
-                            print("\nReturning to main menu...")
-                            interactive_mode_running = False
-                            break
-                        elif ch.lower() == 'm':
-                            print("\nReturning to main menu...")
-                            interactive_mode_running = False
-                            break
-                        
-                        print("\nReady (Space=record, i=device, q=main menu)")
-                        
-                    except KeyboardInterrupt:
-                        print("\nReturning to main menu...")
-                        interactive_mode_running = False
-                        break
-                    except ImportError:
-                        # Fallback for systems without termios
-                        choice = input("Space=record, i=device, q=main menu: ").strip().lower()
-                        if choice in ['', ' ']:
-                            # Simple recording without hotkey stop
-                            stop_recording.clear()
-                            
-                            recorded_frames = []
-                            def record_wrapper():
-                                nonlocal recorded_frames
-                                recorded_frames = record_audio_stream(interactive_mode=True)
-                            
-                            record_thread = threading.Thread(target=record_wrapper)
-                            record_thread.start()
-                            
-                            input("Recording... Press Enter to stop")
-                            stop_recording.set()
-                            record_thread.join()
-                            
-                            result, _ = process_audio_stream(recorded_frames)
-                            transcription = result.strip()
-                            
-                            if transcription:
-                                if type_text(transcription):
-                                    logger.info(f"✅ Typed: {transcription}")
-                            else:
-                                logger.info("❌ No speech detected")
-                        elif choice == 'i':
-                            select_audio_device()
-                        elif choice in ['q', 'm']:
-                            interactive_mode_running = False
-                            break
-                
+                run_interactive_mode()
                 # After interactive mode ends, return to main menu
                 continue
                 
