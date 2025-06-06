@@ -48,6 +48,10 @@
             ncurses
             readline
             mpg123
+            # GUI tools for visual notifications
+            zenity
+            yad
+            xorg.xmessage
           ];
 
           # Python environment with all packages
