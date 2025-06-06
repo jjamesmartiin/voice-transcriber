@@ -132,6 +132,7 @@
 
             shellHook = ''
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
+              export PS1='\[\033[1;32m\][\u@\h:\w]\$\[\033[0m\] '
               echo "Voice Transcriber Development Environment Ready!"
               echo "Python with all dependencies available at: ${pythonEnv}/bin/python"
               echo "To run the app: python app/t3.py"
