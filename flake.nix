@@ -49,9 +49,11 @@
             readline
             mpg123
             # GUI tools for visual notifications
-            zenity
-            yad
-            xorg.xmessage
+            # zenity # causes the new visual notificaton to work
+            # yad # not working at all
+            # xorg.xmessage # not working 
+            # X11 and GUI dependencies for tkinter
+
           ];
 
           # Python environment with all packages
@@ -77,65 +79,63 @@
             type = "app";
             program = "${pkgs.writeShellScript "voice-transcriber" ''
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
-              exec ${pythonEnv}/bin/python app/t3.py "$@"
+              ${pythonEnv}/bin/python app/t3.py "$@"
             ''}";
           };
         });
 
 
+      # nix develop
       devShells = forEachSupportedSystem ({ pkgs }:
         let
-          concatMajorMinor = v:
-            pkgs.lib.pipe v [
-              pkgs.lib.versions.splitVersion
-              (pkgs.lib.sublist 0 2)
-              pkgs.lib.concatStrings
-            ];
+          # Use the same custom python with package overrides as the app
+          python = pkgs.python3.override {
+            self = python;
+            packageOverrides = pyfinal: pyprev: {
+              faster-whisper = pyfinal.callPackage ./faster-whisper { };
+            };
+          };
 
-          python = pkgs."python${concatMajorMinor version}";
+          # Same runtime dependencies as the app
+          runtimeDeps = with pkgs; [
+            lame
+            xclip
+            libnotify
+            alsa-utils
+            bashInteractive
+            ncurses
+            readline
+            mpg123
+          ];
+
+          # Python environment with all the same packages as the app
+          pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
+            pyaudio
+            keyboard
+            wavefile
+            pyperclip
+            numpy
+            scipy
+            gtts
+            tkinter
+            evdev
+            pynput
+            python-uinput
+            faster-whisper
+            # Dev tools
+            pip
+          ]);
         in
         {
           default = pkgs.mkShell {
-            venvDir = ".venv";
+            buildInputs = [ pythonEnv ] ++ runtimeDeps;
 
-            postShellHook = ''
-              venvVersionWarn() {
-              	local venvVersion
-              	venvVersion="$("$venvDir/bin/python" -c 'import platform; print(platform.python_version())')"
-
-              	[[ "$venvVersion" == "${python.version}" ]] && return
-
-              	cat <<EOF
-              Warning: Python version mismatch: [$venvVersion (venv)] != [${python.version}]
-                       Delete '$venvDir' and reload to rebuild for version ${python.version}
-              EOF
-              }
-
-              venvVersionWarn
-
-              echo "Voice Transcriber Environment Ready!"
-
-              # python app/t2.py
-              # python app/simple_voice_transcriber.py
-
-              echo "sudo python app/t3.py"
+            shellHook = ''
+              export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
+              echo "Voice Transcriber Development Environment Ready!"
+              echo "Python with all dependencies available at: ${pythonEnv}/bin/python"
+              echo "To run the app: python app/t3.py"
             '';
-
-            packages = with python.pkgs; [
-              venvShellHook
-              pip
-
-              /* Add whatever else you'd like here. */
-              # pkgs.basedpyright
-
-              # pkgs.black
-              /* or */
-              # python.pkgs.black
-
-              # pkgs.ruff
-              /* or */
-              # python.pkgs.ruff
-            ];
           };
         });
     };
