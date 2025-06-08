@@ -30,3 +30,9 @@ I hope it can help someone else too (for the same or other reasons).
     sudo python app/t3.py
     ```
 
+
+
+# Tags
+- Text to speech tool
+- TTS
+- vt
