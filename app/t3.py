@@ -130,11 +130,11 @@ class T3VoiceTranscriber:
             logger.warning(f"Visual notification error: {e}")
         
         # Play sound
-        try:
-            subprocess.Popen(['mpg123', '-q', 'app/sounds/pop2.mp3'], 
-                           stderr=subprocess.DEVNULL)
-        except:
-            pass
+        # try:
+        #     subprocess.Popen(['mpg123', '-q', 'app/sounds/pop2.mp3'], 
+        #                    stderr=subprocess.DEVNULL)
+        # except:
+        #     pass
         
         # Wait for recording to finish
         if self.record_thread:
