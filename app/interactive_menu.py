@@ -26,12 +26,14 @@ def print_usage():
     print("  2        Interactive mode (Space to record)")
     print("  3 or i   Select audio device")
     print("  4        Exit")
+    print("  5 or w   WhisperLive test mode")
     print("  help     Show this help message")
     print()
     print("Examples:")
     print("  python app/t3_main.py 1      # Start global hotkey mode")
     print("  python app/t3_main.py 2      # Start interactive mode")
     print("  python app/t3_main.py i      # Open device selection")
+    print("  python app/t3_main.py 5      # Test WhisperLive client")
     print("  python app/t3_main.py        # Show interactive menu")
     print()
 
@@ -188,6 +190,7 @@ def run_interactive_menu():
         logger.info("3. Select audio device")
         logger.info("i. Select audio device (shortcut)")
         logger.info("4. Exit")
+        logger.info("5. WhisperLive test mode")
         
         try:
             choice = input("> ").strip().lower()
@@ -228,12 +231,21 @@ def run_interactive_menu():
                 # After device selection (whether successful or cancelled), return to menu
                 continue
                 
+            elif choice == '5' or choice == 'w':
+                # WhisperLive test mode
+                logger.info("Starting WhisperLive test mode...")
+                # Import the function from t3.py
+                from t3 import run_whisperlive_test
+                run_whisperlive_test()
+                input("Press Enter to return to main menu...")
+                continue
+                
             elif choice == '4':
                 logger.info("Exiting...")
                 break
                 
             else:
-                logger.info("Invalid choice. Please enter 1, 2, 3, i, or 4.")
+                logger.info("Invalid choice. Please enter 1, 2, 3, 4, 5, i, or w.")
                 continue
                 
         except KeyboardInterrupt:

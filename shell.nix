@@ -15,6 +15,7 @@ let
     packageOverrides = pyfinal: pyprev: {
       faster-whisper = pyfinal.callPackage ./faster-whisper { };
       whisper-live = pyfinal.callPackage ./whisper-live { };
+      whisper-streaming = pyfinal.callPackage ./whisper-streaming { };
     };
   };
 
@@ -57,6 +58,7 @@ in
         # custom ones
         python-pkgs.faster-whisper
         python-pkgs.whisper-live
+        python-pkgs.whisper-streaming
       ]))
 
       pkgs.bashInteractive

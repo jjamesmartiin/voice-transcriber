@@ -77,6 +77,51 @@ client("path/to/audio.wav")
 - **For faster startup**: Use a smaller model like `--model tiny`
 - **Verbose output**: Add `--verbose` flag to see more detailed logs
 
+# Whisper Streaming
+
+This environment also includes [Whisper Streaming](https://github.com/ufal/whisper_streaming) for real-time streaming transcription with local agreement policy.
+
+## Using Whisper Streaming
+
+The whisper_streaming package provides real-time transcription capabilities with buffering and local agreement:
+
+```python
+from whisper_streaming.whisper_online import FasterWhisperASR, OnlineASRProcessor
+
+# Initialize ASR with CPU support (auto-detects CUDA if available)
+asr = FasterWhisperASR("en", "small", device="cpu", compute_type="int8")
+
+# Create online processor
+online = OnlineASRProcessor(asr)
+
+# Process audio chunks
+while audio_has_not_ended:
+    audio_chunk = get_audio_chunk()  # Your audio data
+    online.insert_audio_chunk(audio_chunk)
+    result = online.process_iter()
+    print(result)  # Partial transcription
+
+# Get final result
+final_result = online.finish()
+print(final_result)
+```
+
+## Example Script
+
+Run the included example:
+```bash
+python example_whisper_streaming.py --help
+python example_whisper_streaming.py --model tiny --language en
+```
+
+## Features
+
+- **Real-time streaming**: Process audio as it arrives
+- **Local agreement policy**: Confirms transcripts when consecutive updates agree
+- **CPU/CUDA support**: Auto-detects available hardware
+- **Buffer management**: Handles long audio streams efficiently
+- **Multiple backends**: Supports faster-whisper and other backends
+
 # Tags
 - Text to speech tool
 - TTS

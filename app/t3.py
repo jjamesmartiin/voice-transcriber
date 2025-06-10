@@ -8,6 +8,7 @@ Features:
 - Visual notifications
 - Automatic typing of transcription
 - Wayland/X11 compatibility
+- WhisperLive client testing
 """
 
 import logging
@@ -15,6 +16,8 @@ import threading
 import subprocess
 import sys
 import warnings
+import time
+import socket
 
 # Import our modular components
 from audio_recorder import load_audio_config, record_audio_stream, stop_recording
@@ -283,6 +286,156 @@ class T3VoiceTranscriber:
         except Exception as e:
             logger.debug(f"Error cleaning up visual notifications: {e}")
 
+def check_server_connection(host="localhost", port=9090, timeout=5):
+    """Check if WhisperLive server is running"""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+def run_whisperlive_test():
+    """Test WhisperLive client functionality"""
+    logger.info("🔬 WhisperLive Test Mode")
+    logger.info("=" * 50)
+    
+    # Check if server is running
+    logger.info("🔍 Checking WhisperLive server connection...")
+    if not check_server_connection():
+        logger.error("❌ Cannot connect to WhisperLive server on localhost:9090")
+        logger.error("💡 Make sure to start the server first:")
+        logger.error("   python -m whisper_live.server --port 9090 --backend faster_whisper")
+        logger.info("")
+        
+        choice = input("Would you like to start the server now? (y/n): ").strip().lower()
+        if choice == 'y':
+            logger.info("🚀 Starting WhisperLive server...")
+            logger.info("⏳ This may take 30+ seconds to load the model...")
+            try:
+                # Start server in background
+                process = subprocess.Popen([
+                    sys.executable, "-m", "whisper_live.server", 
+                    "--port", "9090", "--backend", "faster_whisper"
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                
+                # Wait for server to start
+                logger.info("⏳ Waiting for server to start...")
+                for i in range(30):
+                    if check_server_connection():
+                        logger.info("✅ Server is running!")
+                        break
+                    time.sleep(1)
+                    if i % 5 == 0:
+                        logger.info(f"   Still waiting... ({i+1}/30 seconds)")
+                else:
+                    logger.error("❌ Server failed to start within 30 seconds")
+                    return
+                    
+            except Exception as e:
+                logger.error(f"❌ Failed to start server: {e}")
+                return
+        else:
+            logger.info("💡 Start the server manually and try again")
+            return
+    else:
+        logger.info("✅ WhisperLive server is running!")
+    
+    # Import WhisperLive client
+    try:
+        from whisper_live.client import TranscriptionClient
+    except ImportError as e:
+        logger.error(f"❌ Cannot import WhisperLive client: {e}")
+        logger.error("💡 Make sure WhisperLive is installed in your environment")
+        return
+    
+    logger.info("")
+    logger.info("🎤 WhisperLive Client Test")
+    logger.info("Options:")
+    logger.info("  1. Test microphone transcription")
+    logger.info("  2. Test audio file transcription")
+    logger.info("  3. Check server status")
+    logger.info("  q. Quit")
+    
+    while True:
+        try:
+            choice = input("\nEnter your choice: ").strip().lower()
+            
+            if choice == 'q':
+                logger.info("👋 Exiting WhisperLive test")
+                break
+                
+            elif choice == '1':
+                logger.info("🎤 Testing microphone transcription...")
+                try:
+                    client = TranscriptionClient(
+                        "localhost",
+                        9090,
+                        lang="en",
+                        model="small",
+                        use_vad=False
+                    )
+                    logger.info("✅ Client created successfully!")
+                    logger.info("🎤 Recording from microphone... (This may take a moment)")
+                    logger.info("💡 Speak now, the client will handle recording automatically")
+                    
+                    # Call the client for microphone transcription
+                    client()
+                    
+                except Exception as e:
+                    logger.error(f"❌ Microphone test failed: {e}")
+                    
+            elif choice == '2':
+                logger.info("📁 Testing audio file transcription...")
+                file_path = input("Enter path to audio file (or press Enter for default): ").strip()
+                if not file_path:
+                    file_path = "output.wav"  # Default file from the project
+                
+                try:
+                    client = TranscriptionClient(
+                        "localhost",
+                        9090,
+                        lang="en",
+                        model="small",
+                        use_vad=False
+                    )
+                    logger.info("✅ Client created successfully!")
+                    logger.info(f"🎵 Transcribing file: {file_path}")
+                    
+                    # Call the client for file transcription
+                    client(file_path)
+                    
+                except Exception as e:
+                    logger.error(f"❌ File transcription test failed: {e}")
+                    
+            elif choice == '3':
+                logger.info("🔍 Checking server status...")
+                if check_server_connection():
+                    logger.info("✅ Server is responding on localhost:9090")
+                    try:
+                        # Try to create client to test connection
+                        client = TranscriptionClient(
+                            "localhost",
+                            9090,
+                            lang="en",
+                            model="small",
+                            use_vad=False
+                        )
+                        logger.info("✅ Client can connect to server successfully!")
+                    except Exception as e:
+                        logger.error(f"❌ Client connection test failed: {e}")
+                else:
+                    logger.error("❌ Server is not responding on localhost:9090")
+                    
+            else:
+                logger.info("❌ Invalid choice. Please enter 1, 2, 3, or q")
+                
+        except (KeyboardInterrupt, EOFError):
+            logger.info("\n👋 Exiting WhisperLive test")
+            break
+
 def main():
     """Main function with interactive mode"""
     device = get_device()
@@ -333,6 +486,12 @@ def main():
                 logger.info("✅ Audio device configured!")
             else:
                 logger.info("❌ Device selection cancelled")
+            return
+            
+        elif arg == '5' or arg == 'w' or arg == 'whisper':
+            # WhisperLive test mode
+            logger.info("Starting WhisperLive test mode...")
+            run_whisperlive_test()
             return
             
         elif arg in ['4', 'exit', 'quit']:
