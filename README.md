@@ -52,6 +52,9 @@ I hope it can help someone else too (for the same or other reasons).
    # If you get an execution policy error, run this first:
    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
    .\venv\Scripts\Activate.ps1
+   # Verify you're using the virtual environment Python:
+   where python
+   python --version
    ```
 
 4. **Install required Python packages**:
@@ -62,7 +65,7 @@ I hope it can help someone else too (for the same or other reasons).
 
 5. **Run the application**:
    ```powershell
-   python app/t3.py
+   .\venv\Scripts\python.exe app/t3.py
    ```
 
 **Note**: If you encounter permission issues with PyAudio on Windows, you may need to install it separately:
@@ -79,6 +82,19 @@ pipwin install pyaudio
   Alternatively, you can activate the virtual environment using:
   ```powershell
   venv\Scripts\activate.bat
+  ```
+- **Virtual Environment Not Working**: If packages install but aren't found when importing:
+  ```powershell
+  # Check which Python you're using (should point to venv\Scripts\python.exe):
+  where python
+  # If wrong, try using the full path:
+  .\venv\Scripts\python.exe -m pip install <package>
+  .\venv\Scripts\python.exe app/t3.py
+  ```
+- **Multiple Python Installations**: If you have multiple Python versions, use the specific one:
+  ```powershell
+  # Use py launcher to select specific version
+  py -3.12 -m venv venv
   ```
 - If you get microphone permission errors, make sure Windows has microphone access enabled for Python
 - Run PowerShell as Administrator if you encounter permission issues
