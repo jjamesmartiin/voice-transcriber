@@ -1,5 +1,5 @@
 # TODO
-- [x] get it working on windows
+- [x] ✅ get it working on windows - **COMPLETE!**
 - [ ] enter the text instead of copy/paste?
 - [ ] live transcription instead of waiting for recording to finish
 - [ ] Being able to make live edits with voice to remove rambling or make the thought more cohesive
@@ -91,6 +91,18 @@ pipwin install pyaudio
   .\venv\Scripts\python.exe -m pip install <package>
   .\venv\Scripts\python.exe app/t3.py
   ```
+- **Audio Device Errors** (`[Errno -9999] Unanticipated host error`):
+  - Try **Device 0: Microsoft Sound Mapper** - usually most compatible
+  - Try simple USB microphones over complex audio software (SteelSeries Sonar, etc.)
+  - **Check Windows microphone permissions**: Settings → Privacy & Security → Microphone → Allow apps to access microphone
+  - **Run as Administrator** to bypass some audio driver restrictions
+  - **Restart audio services**:
+    ```powershell
+    # Run as Administrator
+    net stop audiosrv
+    net start audiosrv
+    ```
+  - **Try different audio devices** - USB cameras often work better than gaming headsets
 - **Multiple Python Installations**: If you have multiple Python versions, use the specific one:
   ```powershell
   # Use py launcher to select specific version
