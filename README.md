@@ -13,10 +13,12 @@ I hope it can help someone else too (for the same or other reasons).
 
 # Features
 - **Fast offline transcription** using faster-whisper
-- **Automatic clipboard copying** of transcribed text (working on typing the input)
-- **Visual feedback** of the transcription process
-- **Global keyboard shortcut on wayland** for completion 
-    - There is global keyboard shortcut support if you add the user to the `input` group or run as root. 
+- **Automatic text typing** directly into any application (Windows/Linux)
+- **Automatic clipboard copying** of transcribed text as fallback
+- **Visual feedback** of the transcription process with popup notifications
+- **Global keyboard shortcuts** that work system-wide:
+    - **Windows**: Alt+Shift hotkeys using pynput (no special permissions needed)
+    - **Linux**: Alt+Shift hotkeys using evdev (requires `input` group or root access) 
 
 ## Usage
 
@@ -67,6 +69,46 @@ I hope it can help someone else too (for the same or other reasons).
    ```powershell
    .\venv\Scripts\python.exe app/t3.py
    ```
+
+### Windows Standalone EXE
+For ease of distribution and use, you can create a standalone EXE file that works on any Windows computer without requiring Python to be installed.
+
+**Prerequisites**:
+- Complete steps 1-4 from the Windows PowerShell setup above
+- Install PyInstaller: `pip install pyinstaller`
+
+**Build the EXE**:
+```powershell
+# Make sure you're in the virtual environment
+.\venv\Scripts\Activate.ps1
+
+# Run the build script
+python build_exe.py
+```
+
+**Result**:
+- Creates: `dist/T3-Voice-Transcriber-Working.exe` (~23MB)
+- **Fully standalone** - works on any Windows computer
+- **No Python installation required** on target machines
+- **All dependencies included** (pyaudio, pynput, faster-whisper, etc.)
+
+**Usage**:
+```powershell
+# Copy the EXE to any Windows computer and run:
+.\T3-Voice-Transcriber-Working.exe help    # Show help
+.\T3-Voice-Transcriber-Working.exe 1       # Global hotkeys mode
+.\T3-Voice-Transcriber-Working.exe 2       # Interactive mode
+.\T3-Voice-Transcriber-Working.exe         # Interactive menu
+```
+
+**Features in the EXE**:
+- ✅ **Global Alt+Shift hotkeys** work system-wide
+- ✅ **Automatic text typing** using pynput
+- ✅ **Clipboard fallback** if typing fails
+- ✅ **Visual notifications** with popup overlays
+- ✅ **Audio device selection** and configuration
+- ✅ **All sound effects** included
+- ✅ **Fast offline transcription** with faster-whisper
 
 **Note**: If you encounter permission issues with PyAudio on Windows, you may need to install it separately:
 ```powershell
