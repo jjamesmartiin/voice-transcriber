@@ -7,6 +7,7 @@ Features:
 - Visual notifications
 - Automatic typing of transcription
 - Wayland/X11 compatibility
+- Windows global hotkey support
 """
 
 import logging
@@ -72,6 +73,103 @@ DEVICE = get_device()
 # Audio buffer and control
 audio_buffer = queue.Queue(maxsize=1000)  # Limit buffer size to prevent memory issues
 stop_recording = threading.Event()
+
+class WindowsGlobalHotkeys:
+    """Windows-specific global hotkey system using pynput"""
+    
+    def __init__(self, callback_start, callback_stop):
+        self.callback_start = callback_start
+        self.callback_stop = callback_stop
+        self.running = False
+        self.hotkey_active = False
+        self.listener = None
+        self.alt_pressed = False
+        self.shift_pressed = False
+        
+        # Try to import pynput
+        try:
+            from pynput import keyboard
+            self.keyboard = keyboard
+            self.available = True
+            logger.info("Windows global hotkey system initialized using pynput")
+        except ImportError as e:
+            logger.error(f"pynput not available: {e}")
+            logger.error("Install with: pip install pynput")
+            self.available = False
+    
+    def on_press(self, key):
+        """Handle key press events"""
+        if not self.available:
+            return
+            
+        try:
+            # Track Alt and Shift keys
+            if key == self.keyboard.Key.alt_l or key == self.keyboard.Key.alt_r:
+                self.alt_pressed = True
+                hotkey_logger.debug("ALT key PRESSED")
+            elif key == self.keyboard.Key.shift_l or key == self.keyboard.Key.shift_r:
+                self.shift_pressed = True
+                hotkey_logger.debug("SHIFT key PRESSED")
+            
+            # Check if hotkey combination is now active
+            if self.alt_pressed and self.shift_pressed and not self.hotkey_active:
+                hotkey_logger.debug("Hotkey combination activated - starting recording")
+                self.hotkey_active = True
+                self.callback_start()
+                
+        except Exception as e:
+            logger.error(f"Error in on_press: {e}")
+    
+    def on_release(self, key):
+        """Handle key release events"""
+        if not self.available:
+            return
+            
+        try:
+            # Track Alt and Shift keys
+            if key == self.keyboard.Key.alt_l or key == self.keyboard.Key.alt_r:
+                self.alt_pressed = False
+                hotkey_logger.debug("ALT key RELEASED")
+            elif key == self.keyboard.Key.shift_l or key == self.keyboard.Key.shift_r:
+                self.shift_pressed = False
+                hotkey_logger.debug("SHIFT key RELEASED")
+            
+            # Check if hotkey combination is no longer active
+            if self.hotkey_active and not (self.alt_pressed and self.shift_pressed):
+                hotkey_logger.debug("Hotkey combination released - stopping recording")
+                self.hotkey_active = False
+                self.callback_stop()
+                
+        except Exception as e:
+            logger.error(f"Error in on_release: {e}")
+    
+    def run(self):
+        """Start the global hotkey listener"""
+        if not self.available:
+            return False
+        
+        self.running = True
+        logger.info("Starting Windows global hotkey listener for Alt+Shift")
+        
+        try:
+            with self.keyboard.Listener(
+                on_press=self.on_press,
+                on_release=self.on_release) as listener:
+                self.listener = listener
+                listener.join()
+            return True
+        except Exception as e:
+            logger.error(f"Error running Windows hotkey listener: {e}")
+            return False
+    
+    def stop(self):
+        """Stop the hotkey listener"""
+        self.running = False
+        if self.listener:
+            try:
+                self.listener.stop()
+            except:
+                pass
 
 class WaylandGlobalHotkeys:
     """Global hotkey system using evdev"""
@@ -616,8 +714,26 @@ def process_audio_stream(audio_frames):
     
     return result, transcribe_end_time - transcribe_start_time
 
+def is_windows():
+    """Check if running on Windows"""
+    return os.name == 'nt' or sys.platform.startswith('win')
+
 def type_text(text):
     """Type text using system tools"""
+    # On Windows, try pynput for typing first
+    if is_windows():
+        try:
+            from pynput.keyboard import Controller, Key
+            keyboard_controller = Controller()
+            keyboard_controller.type(text)
+            logger.info("Text typed using pynput")
+            return True
+        except ImportError:
+            logger.debug("pynput not available for typing")
+        except Exception as e:
+            logger.debug(f"pynput typing failed: {e}")
+    
+    # Linux/Unix typing methods
     try:
         # Try xdotool first (X11)
         subprocess.run(['xdotool', 'type', text], check=True, stderr=subprocess.DEVNULL)
@@ -636,7 +752,10 @@ def type_text(text):
     if CLIPBOARD_AVAILABLE:
         try:
             pyperclip.copy(text)
-            logger.info("Text copied to clipboard (typing not available)")
+            if is_windows():
+                logger.info("Text copied to clipboard - use Ctrl+V to paste")
+            else:
+                logger.info("Text copied to clipboard (typing not available)")
             return True
         except:
             pass
@@ -668,17 +787,32 @@ class T3VoiceTranscriber:
         
     def init_hotkeys(self):
         try:
-            self.hotkey_system = WaylandGlobalHotkeys(
-                callback_start=self.start_recording,
-                callback_stop=self.stop_recording
-            )
-            
-            if self.hotkey_system.devices:
-                logger.info("Global hotkey system initialized")
-                return True
+            if is_windows():
+                # Use Windows-specific hotkey system
+                self.hotkey_system = WindowsGlobalHotkeys(
+                    callback_start=self.start_recording,
+                    callback_stop=self.stop_recording
+                )
+                
+                if self.hotkey_system.available:
+                    logger.info("Windows global hotkey system initialized")
+                    return True
+                else:
+                    logger.error("Failed to initialize Windows global hotkey system")
+                    return False
             else:
-                logger.error("Failed to initialize global hotkey system")
-                return False
+                # Use Linux/Unix hotkey system
+                self.hotkey_system = WaylandGlobalHotkeys(
+                    callback_start=self.start_recording,
+                    callback_stop=self.stop_recording
+                )
+                
+                if self.hotkey_system.devices:
+                    logger.info("Linux global hotkey system initialized")
+                    return True
+                else:
+                    logger.error("Failed to initialize Linux global hotkey system")
+                    return False
                 
         except Exception as e:
             logger.error(f"Error initializing hotkeys: {e}")
@@ -858,17 +992,38 @@ class T3VoiceTranscriber:
                 logger.info("🎤 Ready for next recording")
     
     def run(self):
-        if not self.hotkey_system or not self.hotkey_system.devices:
+        # Check if hotkey system is available
+        if not self.hotkey_system:
             logger.error("❌ No global hotkey system available")
+            if is_windows():
+                logger.error("💡 Install dependencies: pip install pynput")
+            else:
+                logger.error("💡 Run as root or add user to input group: sudo usermod -a -G input $USER")
+                logger.error("💡 Install dependencies: pip install evdev")
+            return False
+        
+        # For Windows, check if pynput is available
+        if is_windows() and not self.hotkey_system.available:
+            logger.error("❌ Windows global hotkey system not available")
+            logger.error("💡 Install dependencies: pip install pynput")
+            return False
+        
+        # For Linux, check if devices are available
+        if not is_windows() and not self.hotkey_system.devices:
+            logger.error("❌ No Linux keyboard devices available")
             logger.error("💡 Run as root or add user to input group: sudo usermod -a -G input $USER")
             logger.error("💡 Install dependencies: pip install evdev")
             return False
         
         logger.info("🎤 T3 Voice Transcriber started!")
         logger.info(f"📱 Using device: {DEVICE}")
-        logger.info("🔥 Hold Alt+Shift to record, release to transcribe and type")
+        if is_windows():
+            logger.info("🔥 Hold Alt+Shift to record, release to transcribe and type")
+            logger.info("💡 Global hotkeys work system-wide on Windows!")
+        else:
+            logger.info("🔥 Hold Alt+Shift to record, release to transcribe and type")
+            logger.info("💡 Global hotkeys work system-wide on Linux!")
         logger.info("🔄 Use Ctrl+C to exit")
-        logger.info("💡 Global hotkeys work system-wide!")
         
         self.running = True
         
@@ -895,31 +1050,43 @@ class T3VoiceTranscriber:
 
 def check_permissions():
     """Check permissions for input device access"""
-    import grp
-    import pwd
-    
-    if os.geteuid() == 0:
-        logger.info("✅ Running as root")
-        return True
-    
-    try:
-        current_user = pwd.getpwuid(os.getuid()).pw_name
-        current_gids = os.getgroups()
-        input_group = grp.getgrnam('input')
-        
-        if input_group.gr_gid in current_gids:
-            logger.info("✅ User is in input group")
+    if is_windows():
+        # On Windows, check if pynput is available
+        try:
+            from pynput import keyboard
+            logger.info("✅ pynput is available for Windows global hotkeys")
             return True
-        else:
-            logger.error("❌ Permission issue!")
-            logger.error(f"👤 Current user: {current_user}")
-            logger.error("🔧 Fix with: sudo usermod -a -G input $USER")
-            logger.error("   Then log out and back in")
+        except ImportError:
+            logger.error("❌ pynput not available!")
+            logger.error("🔧 Install with: pip install pynput")
             return False
+    else:
+        # Linux/Unix permission checks
+        import grp
+        import pwd
+        
+        if os.geteuid() == 0:
+            logger.info("✅ Running as root")
+            return True
+        
+        try:
+            current_user = pwd.getpwuid(os.getuid()).pw_name
+            current_gids = os.getgroups()
+            input_group = grp.getgrnam('input')
             
-    except Exception as e:
-        logger.error(f"❌ Error checking permissions: {e}")
-        return False
+            if input_group.gr_gid in current_gids:
+                logger.info("✅ User is in input group")
+                return True
+            else:
+                logger.error("❌ Permission issue!")
+                logger.error(f"👤 Current user: {current_user}")
+                logger.error("🔧 Fix with: sudo usermod -a -G input $USER")
+                logger.error("   Then log out and back in")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error checking permissions: {e}")
+            return False
 
 def main():
     """Main function with interactive mode"""
@@ -942,7 +1109,10 @@ def main():
             logger.info("Starting global hotkey mode...")
             if not check_permissions():
                 logger.error("Cannot use global hotkeys without proper permissions")
-                logger.error("💡 Run as root or add user to input group: sudo usermod -a -G input $USER")
+                if is_windows():
+                    logger.error("💡 Install with: pip install pynput")
+                else:
+                    logger.error("💡 Run as root or add user to input group: sudo usermod -a -G input $USER")
                 return
             
             transcriber = T3VoiceTranscriber()
@@ -994,7 +1164,10 @@ def print_usage():
     print("Usage: python app/t3.py [MODE]")
     print()
     print("Modes:")
-    print("  1        Global hotkeys (Alt+Shift) - requires root/input group")
+    if is_windows():
+        print("  1        Global hotkeys (Alt+Shift) - requires pynput")
+    else:
+        print("  1        Global hotkeys (Alt+Shift) - requires root/input group")
     print("  2        Interactive mode (Space to record)")
     print("  3 or i   Select audio device")
     print("  4        Exit")
@@ -1140,18 +1313,27 @@ def run_interactive_menu():
             logger.info("❌ No device selected - using default")
         
         logger.info("")
-        logger.info("🔧 KEYBOARD PERMISSIONS")
-        logger.info("For global hotkeys (Alt+Shift), you need:")
-        logger.info("  • Run as root, OR")
-        logger.info("  • Add user to input group: sudo usermod -a -G input $USER")
-        logger.info("  • Then log out and back in")
+        if is_windows():
+            logger.info("🔧 WINDOWS SETUP")
+            logger.info("For global hotkeys (Alt+Shift), you need:")
+            logger.info("  • Install pynput: pip install pynput")
+            logger.info("  • No special permissions required!")
+        else:
+            logger.info("🔧 LINUX KEYBOARD PERMISSIONS")
+            logger.info("For global hotkeys (Alt+Shift), you need:")
+            logger.info("  • Run as root, OR")
+            logger.info("  • Add user to input group: sudo usermod -a -G input $USER")
+            logger.info("  • Then log out and back in")
         logger.info("")
         input("Press Enter to continue to main menu...")
     
     while True:  # Main menu loop
         logger.info("")
         logger.info("Choose mode:")
-        logger.info("1. Global hotkeys (Alt+Shift) - requires root/input group")
+        if is_windows():
+            logger.info("1. Global hotkeys (Alt+Shift) - requires pynput")
+        else:
+            logger.info("1. Global hotkeys (Alt+Shift) - requires root/input group")
         logger.info("2. Interactive mode (Space to record)")
         logger.info("3. Select audio device")
         logger.info("i. Select audio device (shortcut)")
@@ -1164,6 +1346,10 @@ def run_interactive_menu():
                 # Global hotkey mode
                 if not check_permissions():
                     logger.error("Cannot use global hotkeys without proper permissions")
+                    if is_windows():
+                        logger.error("💡 Install with: pip install pynput")
+                    else:
+                        logger.error("💡 Run as root or add user to input group: sudo usermod -a -G input $USER")
                     input("Press Enter to return to main menu...")
                     continue  # Return to menu
                 
