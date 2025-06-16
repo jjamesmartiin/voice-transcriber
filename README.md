@@ -60,7 +60,7 @@ I hope it can help someone else too (for the same or other reasons).
 4. **Install required Python packages**:
    ```powershell
    pip install --upgrade pip
-   pip install faster-whisper pyaudio keyboard pyperclip numpy scipy gtts pynput
+   pip install -r requirements.txt
    ```
 
 5. **Run the application**:
@@ -103,6 +103,7 @@ pipwin install pyaudio
     net start audiosrv
     ```
   - **Try different audio devices** - USB cameras often work better than gaming headsets
+  - **Blue Snowball Microphone Setup**: If you're using a Blue Snowball microphone, select **audio input device #12** which runs at **48,000 Hz** for optimal performance. This device option typically provides the best audio quality for transcription.
 - **Multiple Python Installations**: If you have multiple Python versions, use the specific one:
   ```powershell
   # Use py launcher to select specific version
