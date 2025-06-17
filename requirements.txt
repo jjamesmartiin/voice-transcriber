@@ -6,6 +6,11 @@ colorama==0.4.6
 coloredlogs==15.0.1
 ctranslate2==4.6.0
 faster-whisper==1.1.1
+# PyTorch dependencies (fix for Windows DLL loading issues)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.7.1+cpu
+torchvision==0.22.1+cpu
+torchaudio==2.7.1+cpu
 filelock==3.18.0
 flatbuffers==25.2.10
 fsspec==2025.5.1
