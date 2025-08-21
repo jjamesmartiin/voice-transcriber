@@ -23,6 +23,8 @@ import numpy as np
 import pyaudio
 import queue
 import warnings
+import tempfile
+from pathlib import Path
 
 # Import transcription functionality
 from transcribe2 import transcribe_audio, preload_model, get_model
@@ -48,6 +50,33 @@ logger = logging.getLogger(__name__)
 hotkey_logger = logging.getLogger(__name__ + '.hotkeys')
 hotkey_logger.setLevel(logging.DEBUG)
 
+# Get appropriate directories for file storage
+def get_data_dir():
+    """Get appropriate data directory for config and temporary files"""
+    # Try XDG_DATA_HOME first (NixOS friendly)
+    if 'XDG_DATA_HOME' in os.environ:
+        data_dir = Path(os.environ['XDG_DATA_HOME']) / 'voice-transcriber'
+    # Fall back to ~/.local/share (standard on Linux)
+    elif os.name == 'posix':
+        data_dir = Path.home() / '.local' / 'share' / 'voice-transcriber'
+    # Windows fallback
+    else:
+        data_dir = Path.home() / 'AppData' / 'Local' / 'voice-transcriber'
+    
+    # Create directory if it doesn't exist
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+def get_temp_dir():
+    """Get temporary directory for audio files"""
+    # Use system temp directory or XDG_RUNTIME_DIR
+    if 'XDG_RUNTIME_DIR' in os.environ:
+        temp_dir = Path(os.environ['XDG_RUNTIME_DIR']) / 'voice-transcriber'
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        return temp_dir
+    else:
+        return Path(tempfile.gettempdir())
+
 # Audio configuration - Browser-like settings for better quality
 CHUNK = 256  # Smaller buffer like browsers use (128-256 samples)
 FORMAT = pyaudio.paInt16
@@ -55,7 +84,7 @@ CHANNELS = 1
 RATE = 48000  # Default to 48kHz like browsers prefer
 RECORD_SECONDS = 20
 INPUT_DEVICE_INDEX = None
-CONFIG_FILE = 'audio_device_config.json'
+CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 # Prioritize 48kHz like browsers, then fallback
 FALLBACK_RATES = [48000, 44100, 22050, 16000, 8000]
 
@@ -323,7 +352,7 @@ def load_audio_config():
     """Load audio device configuration"""
     global INPUT_DEVICE_INDEX
     try:
-        if os.path.exists(CONFIG_FILE):
+        if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
                 config = json.loads(f.read())
                 INPUT_DEVICE_INDEX = config.get('input_device_index')
@@ -635,7 +664,8 @@ def record_audio_stream(interactive_mode=False):
     
     # Save to file for backup and debugging
     try:
-        filename = 'output.wav' if interactive_mode else 'temp_t3_output.wav'
+        temp_dir = get_temp_dir()
+        filename = temp_dir / ('output.wav' if interactive_mode else 'temp_t3_output.wav')
         
         # Browser-like automatic gain control - boost quiet audio
         audio_data = b''.join(frames)
@@ -654,7 +684,7 @@ def record_audio_stream(interactive_mode=False):
                 else:
                     logger.info(f"Applied AGC boost: {boost_factor:.1f}x")
         
-        with wave.open(filename, 'wb') as wf:
+        with wave.open(str(filename), 'wb') as wf:
             wf.setnchannels(CHANNELS)
             wf.setsampwidth(2)  # 16-bit
             wf.setframerate(RATE)
@@ -686,8 +716,9 @@ def process_audio_stream(audio_frames):
     transcribe_start_time = time.time()
     
     # Process the complete audio
-    temp_file = "temp_t3_output.wav"
-    with wave.open(temp_file, 'wb') as wf:
+    temp_dir = get_temp_dir()
+    temp_file = temp_dir / "temp_t3_output.wav"
+    with wave.open(str(temp_file), 'wb') as wf:
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(2)  # 16-bit
         wf.setframerate(RATE)
@@ -698,7 +729,7 @@ def process_audio_stream(audio_frames):
     stderr_fd = os.dup(2)
     devnull_fd = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull_fd, 2)
-    result = transcribe_audio(audio_path=temp_file, device=DEVICE)
+    result = transcribe_audio(audio_path=str(temp_file), device=DEVICE)
     # Restore stderr
     os.dup2(stderr_fd, 2)
     os.close(devnull_fd)
@@ -708,9 +739,9 @@ def process_audio_stream(audio_frames):
     
     # Clean up temp file
     try:
-        os.remove(temp_file)
-    except:
-        pass
+        temp_file.unlink()
+    except Exception as e:
+        logger.debug(f"Could not clean up temp file: {e}")
     
     return result, transcribe_end_time - transcribe_start_time
 

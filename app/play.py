@@ -18,12 +18,16 @@ filename = "test.mp3"
 # pyaudio example:
 import wave
 import sys
-
 import pyaudio
+import tempfile
+from pathlib import Path
 
 CHUNK = 1024
 
-filename = sys.argv[1] if len(sys.argv) > 1 else "output.wav"
+# Use temp directory for default file
+temp_dir = Path(tempfile.gettempdir())
+default_file = temp_dir / "output.wav"
+filename = sys.argv[1] if len(sys.argv) > 1 else str(default_file)
 
 with wave.open(filename, 'rb') as wf:
     # Instantiate PyAudio and initialize PortAudio system resources (1)

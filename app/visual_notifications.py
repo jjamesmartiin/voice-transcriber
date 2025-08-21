@@ -18,6 +18,8 @@ import time
 import threading
 import subprocess
 import logging
+import tempfile
+from pathlib import Path
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
@@ -228,12 +230,13 @@ if __name__ == "__main__":
 '''
         
         # Create temporary script file
-        overlay_file = f'/tmp/{self.app_name.lower().replace(" ", "_")}_overlay_{int(time.time())}.py'
+        temp_dir = Path(tempfile.gettempdir())
+        overlay_file = temp_dir / f'{self.app_name.lower().replace(" ", "_")}_overlay_{int(time.time())}.py'
         with open(overlay_file, 'w') as f:
             f.write(overlay_script)
         
         # Launch overlay process
-        process = subprocess.Popen(['python3', overlay_file], 
+        process = subprocess.Popen(['python3', str(overlay_file)], 
                                  stderr=subprocess.DEVNULL, 
                                  stdout=subprocess.DEVNULL)
         self.overlay_processes.append(process)
@@ -258,7 +261,10 @@ if __name__ == "__main__":
     def _cleanup_temp_file(self, filepath):
         """Clean up temporary overlay script files."""
         try:
-            if os.path.exists(filepath):
+            if isinstance(filepath, Path):
+                if filepath.exists():
+                    filepath.unlink()
+            elif os.path.exists(filepath):
                 os.remove(filepath)
         except Exception as e:
             logger.debug(f"Failed to cleanup temp file {filepath}: {e}")

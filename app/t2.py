@@ -13,10 +13,39 @@ import queue
 import warnings
 from transcribe2 import transcribe_audio, preload_model, get_model
 import json
+import tempfile
+from pathlib import Path
 
 # Suppress ONNX warnings
 warnings.filterwarnings("ignore", message=".*Init provider bridge failed.*")
 warnings.filterwarnings("ignore", category=UserWarning)
+
+# Get appropriate directories for file storage
+def get_data_dir():
+    """Get appropriate data directory for config and temporary files"""
+    # Try XDG_DATA_HOME first (NixOS friendly)
+    if 'XDG_DATA_HOME' in os.environ:
+        data_dir = Path(os.environ['XDG_DATA_HOME']) / 'voice-transcriber'
+    # Fall back to ~/.local/share (standard on Linux)
+    elif os.name == 'posix':
+        data_dir = Path.home() / '.local' / 'share' / 'voice-transcriber'
+    # Windows fallback
+    else:
+        data_dir = Path.home() / 'AppData' / 'Local' / 'voice-transcriber'
+    
+    # Create directory if it doesn't exist
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+def get_temp_dir():
+    """Get temporary directory for audio files"""
+    # Use system temp directory or XDG_RUNTIME_DIR
+    if 'XDG_RUNTIME_DIR' in os.environ:
+        temp_dir = Path(os.environ['XDG_RUNTIME_DIR']) / 'voice-transcriber'
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        return temp_dir
+    else:
+        return Path(tempfile.gettempdir())
 
 # Audio configuration
 CHUNK = 1024
@@ -25,7 +54,7 @@ CHANNELS = 1  # Mono for faster processing
 RATE = 44100  # Use standard sample rate supported by most hardware
 RECORD_SECONDS = 20  # Default recording time
 INPUT_DEVICE_INDEX = None  # None = use system default, or specify device index
-CONFIG_FILE = 'audio_device_config.json'  # Local config file for device settings
+CONFIG_FILE = get_data_dir() / 'audio_device_config.json'  # Local config file for device settings
 
 # Fallback sample rates to try if the primary one fails
 FALLBACK_RATES = [44100, 48000, 22050, 16000, 8000]
@@ -53,7 +82,7 @@ def load_audio_config():
     """Load audio device configuration from local file"""
     global INPUT_DEVICE_INDEX
     try:
-        if os.path.exists(CONFIG_FILE):
+        if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
                 config = json.loads(f.read())
                 INPUT_DEVICE_INDEX = config.get('input_device_index')
@@ -244,12 +273,14 @@ def record_audio_stream():
     
     # Save to file for backup and debugging
     try:
-        with wave.open('output.wav', 'wb') as wf:
+        temp_dir = get_temp_dir()
+        output_file = temp_dir / 'output.wav'
+        with wave.open(str(output_file), 'wb') as wf:
             wf.setnchannels(CHANNELS)
             wf.setsampwidth(p.get_sample_size(FORMAT))
             wf.setframerate(RATE)
             wf.writeframes(b''.join(frames))
-        print(f"Audio saved to output.wav for debugging")
+        print(f"Audio saved to {output_file} for debugging")
     except Exception as e:
         print(f"Warning: Could not save audio file: {e}")
     
@@ -314,8 +345,9 @@ def process_audio_stream():
     
 
     # Process the complete audio
-    temp_file = "temp_output.wav"
-    with wave.open(temp_file, 'wb') as wf:
+    temp_dir = get_temp_dir()
+    temp_file = temp_dir / "temp_output.wav"
+    with wave.open(str(temp_file), 'wb') as wf:
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(2)  # 16-bit
         wf.setframerate(RATE)
@@ -328,7 +360,7 @@ def process_audio_stream():
     stderr_fd = os.dup(2)
     devnull_fd = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull_fd, 2)
-    result = transcribe_audio(audio_path=temp_file, device=DEVICE)
+    result = transcribe_audio(audio_path=str(temp_file), device=DEVICE)
     # Restore stderr
     os.dup2(stderr_fd, 2)
     os.close(devnull_fd)
@@ -338,9 +370,9 @@ def process_audio_stream():
 
     # Clean up temp file
     try:
-        os.remove(temp_file)
-    except:
-        pass
+        temp_file.unlink()
+    except Exception as e:
+        print(f"Could not clean up temp file: {e}")
     
     return result, transcribe_end_time - transcribe_start_time
 

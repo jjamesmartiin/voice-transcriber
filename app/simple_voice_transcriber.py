@@ -11,6 +11,8 @@ import os
 import sys
 import select
 import json
+import tempfile
+from pathlib import Path
 
 # Import transcription functionality
 from t2 import record_and_transcribe, preload_model, get_model, DEVICE, record_audio_stream, process_audio_stream, stop_recording, load_audio_config, select_audio_device
@@ -260,12 +262,13 @@ if __name__ == "__main__":
 '''
         
         # Write and execute the overlay script
-        overlay_file = f'/tmp/voice_overlay_{int(time.time())}.py'
+        temp_dir = Path(tempfile.gettempdir())
+        overlay_file = temp_dir / f'voice_overlay_{int(time.time())}.py'
         with open(overlay_file, 'w') as f:
             f.write(overlay_script)
         
         process = subprocess.Popen([
-            'python3', overlay_file
+            'python3', str(overlay_file)
         ], stderr=subprocess.DEVNULL)
         self.overlay_processes.append(process)
         
@@ -275,7 +278,11 @@ if __name__ == "__main__":
     def _cleanup_temp_file(self, filepath):
         """Clean up temporary overlay script file"""
         try:
-            os.remove(filepath)
+            if isinstance(filepath, Path):
+                if filepath.exists():
+                    filepath.unlink()
+            else:
+                os.remove(filepath)
         except:
             pass
     
