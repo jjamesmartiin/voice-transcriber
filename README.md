@@ -33,20 +33,65 @@ I hope it can help someone else too (for the same or other reasons).
     ```
 
 ### Windows (PowerShell)
-0. Download Winget: https://aka.ms/getwingetpreview
-1. **Install Python 3.8+** (if not already installed):
+
+**Prerequisites (Steps 0-1):**
+
+0. **Download Winget** (Windows Package Manager): 
+   ```
+   Download from: https://aka.ms/getwingetpreview
+   ```
+
+1. **Clean Python Environment** (Recommended if you have existing Python installations):
+   If you have existing Python installations that might be corrupted or have conflicting packages from work/other projects, consider starting fresh:
+
+   **Check your current setup first**:
+   ```powershell
+   # List all Python versions installed
+   py -0
+   # Check what pip packages are installed globally
+   pip list
+   ```
+
+   **Choose one cleanup option**:
+   
+   - **Option A - Clean install (Nuclear option)**:
+     ```powershell
+     # Uninstall Python completely and reinstall fresh
+     # Go to "Add or remove programs" and uninstall all Python versions
+     # Then we'll reinstall Python 3.12 fresh in the next step
+     ```
+
+   - **Option B - Clean pip cache and problematic packages**:
+     ```powershell
+     # Clear pip cache
+     pip cache purge
+     # Uninstall common problematic packages (if they exist)
+     pip uninstall pyaudio torch tensorflow opencv-python numpy scipy -y
+     # Clear any leftover pip temp files
+     Remove-Item -Recurse -Force $env:LOCALAPPDATA\pip\cache -ErrorAction SilentlyContinue
+     ```
+
+   - **Option C - Use isolated environment only** (Safest):
+     ```powershell
+     # Don't install anything globally, rely entirely on virtual environments
+     # Skip global package installations and jump straight to venv creation
+     ```
+
+**Installation Steps:**
+
+2. **Install Python 3.8+** (if not already installed or after clean install from Step 1):
    ```powershell
    # Download from https://www.python.org/downloads/ or use winget
    winget install Python.Python.3.12
    ```
 
-2. **Clone and navigate to the repository**:
+3. **Clone and navigate to the repository**:
    ```powershell
    git clone git@github.com:jjamesmartiin/voice-transcriber.git
    cd voice-transcriber
    ```
 
-3. **Create a virtual environment** (recommended):
+4. **Create a virtual environment** (recommended):
    ```powershell
    python -m venv venv
    # If you get an execution policy error, run this first:
@@ -57,13 +102,13 @@ I hope it can help someone else too (for the same or other reasons).
    python --version
    ```
 
-4. **Install required Python packages**:
+5. **Install required Python packages**:
    ```powershell
    pip install --upgrade pip
-   pip install faster-whisper pyaudio keyboard pyperclip numpy scipy gtts pynput
+   pip install -r requirements.txt
    ```
 
-5. **Run the application**:
+6. **Run the application**:
    ```powershell
    .\venv\Scripts\python.exe app/t3.py
    ```
@@ -103,6 +148,7 @@ pipwin install pyaudio
     net start audiosrv
     ```
   - **Try different audio devices** - USB cameras often work better than gaming headsets
+  - **Blue Snowball Microphone Setup**: If you're using a Blue Snowball microphone, select **audio input device #12** which runs at **48,000 Hz** for optimal performance. This device option typically provides the best audio quality for transcription.
 - **Multiple Python Installations**: If you have multiple Python versions, use the specific one:
   ```powershell
   # Use py launcher to select specific version

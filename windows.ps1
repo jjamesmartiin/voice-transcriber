@@ -1,0 +1,1 @@
+.\venv\Scripts\Activate.ps1; python app/t3.py 
