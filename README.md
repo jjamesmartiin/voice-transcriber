@@ -25,21 +25,21 @@ I hope it can help someone else too (for the same or other reasons).
 1. Have nix installed with flakes enabled
 2. Run the application directly:
    ```bash
-   nix run github:jjamesmartiin/voice-transcriber
+   sudo nix run github:jjamesmartiin/voice-transcriber
    ```
    OR clone the repo and run locally:
    ```bash
    git clone git@github.com:jjamesmartiin/voice-transcriber.git
    cd voice-transcriber
-   nix run .
+   sudo nix run .
    ```
 3. To run with global shortcut mode enabled:
    ```bash
-   nix run . -- 1
+   sudo nix run . -- 1
    ```
 4. For development, enter the development shell:
    ```bash
-   nix develop
+   sudo nix develop
    # Then run: python app/t3.py
    ```
 
