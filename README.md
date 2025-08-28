@@ -21,6 +21,29 @@ I hope it can help someone else too (for the same or other reasons).
 ## Usage
 
 ### Linux/Unix (Nix)
+#### Flake: 
+1. Have nix installed with flakes enabled
+2. Run the application directly:
+   ```bash
+   nix run github:jjamesmartiin/voice-transcriber
+   ```
+   OR clone the repo and run locally:
+   ```bash
+   git clone git@github.com:jjamesmartiin/voice-transcriber.git
+   cd voice-transcriber
+   nix run .
+   ```
+3. To run with global shortcut mode enabled:
+   ```bash
+   nix run . -- 1
+   ```
+4. For development, enter the development shell:
+   ```bash
+   nix develop
+   # Then run: python app/t3.py
+   ```
+
+#### Non Flake: 
 1. have nix installed
 2. run `nix-shell` from the root of this repo 
 3. once the nix-shell is loaded then run: 
