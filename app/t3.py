@@ -23,6 +23,8 @@ import numpy as np
 import pyaudio
 import queue
 import warnings
+import tempfile
+from pathlib import Path
 
 # Import transcription functionality
 from transcribe2 import transcribe_audio, preload_model, get_model
@@ -48,6 +50,33 @@ logger = logging.getLogger(__name__)
 hotkey_logger = logging.getLogger(__name__ + '.hotkeys')
 hotkey_logger.setLevel(logging.DEBUG)
 
+# Get appropriate directories for file storage
+def get_data_dir():
+    """Get appropriate data directory for config and temporary files"""
+    # Try XDG_DATA_HOME first (NixOS friendly)
+    if 'XDG_DATA_HOME' in os.environ:
+        data_dir = Path(os.environ['XDG_DATA_HOME']) / 'voice-transcriber'
+    # Fall back to ~/.local/share (standard on Linux)
+    elif os.name == 'posix':
+        data_dir = Path.home() / '.local' / 'share' / 'voice-transcriber'
+    # Windows fallback
+    else:
+        data_dir = Path.home() / 'AppData' / 'Local' / 'voice-transcriber'
+    
+    # Create directory if it doesn't exist
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+def get_temp_dir():
+    """Get temporary directory for audio files"""
+    # Use system temp directory or XDG_RUNTIME_DIR
+    if 'XDG_RUNTIME_DIR' in os.environ:
+        temp_dir = Path(os.environ['XDG_RUNTIME_DIR']) / 'voice-transcriber'
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        return temp_dir
+    else:
+        return Path(tempfile.gettempdir())
+
 # Audio configuration - Browser-like settings for better quality
 CHUNK = 256  # Smaller buffer like browsers use (128-256 samples)
 FORMAT = pyaudio.paInt16
@@ -55,7 +84,7 @@ CHANNELS = 1
 RATE = 48000  # Default to 48kHz like browsers prefer
 RECORD_SECONDS = 20
 INPUT_DEVICE_INDEX = None
-CONFIG_FILE = 'audio_device_config.json'
+CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 # Prioritize 48kHz like browsers, then fallback
 FALLBACK_RATES = [48000, 44100, 22050, 16000, 8000]
 
@@ -323,7 +352,7 @@ def load_audio_config():
     """Load audio device configuration"""
     global INPUT_DEVICE_INDEX
     try:
-        if os.path.exists(CONFIG_FILE):
+        if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
                 config = json.loads(f.read())
                 INPUT_DEVICE_INDEX = config.get('input_device_index')
@@ -635,7 +664,8 @@ def record_audio_stream(interactive_mode=False):
     
     # Save to file for backup and debugging
     try:
-        filename = 'output.wav' if interactive_mode else 'temp_t3_output.wav'
+        temp_dir = get_temp_dir()
+        filename = temp_dir / ('output.wav' if interactive_mode else 'temp_t3_output.wav')
         
         # Browser-like automatic gain control - boost quiet audio
         audio_data = b''.join(frames)
@@ -654,7 +684,7 @@ def record_audio_stream(interactive_mode=False):
                 else:
                     logger.info(f"Applied AGC boost: {boost_factor:.1f}x")
         
-        with wave.open(filename, 'wb') as wf:
+        with wave.open(str(filename), 'wb') as wf:
             wf.setnchannels(CHANNELS)
             wf.setsampwidth(2)  # 16-bit
             wf.setframerate(RATE)
@@ -686,8 +716,9 @@ def process_audio_stream(audio_frames):
     transcribe_start_time = time.time()
     
     # Process the complete audio
-    temp_file = "temp_t3_output.wav"
-    with wave.open(temp_file, 'wb') as wf:
+    temp_dir = get_temp_dir()
+    temp_file = temp_dir / "temp_t3_output.wav"
+    with wave.open(str(temp_file), 'wb') as wf:
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(2)  # 16-bit
         wf.setframerate(RATE)
@@ -698,7 +729,7 @@ def process_audio_stream(audio_frames):
     stderr_fd = os.dup(2)
     devnull_fd = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull_fd, 2)
-    result = transcribe_audio(audio_path=temp_file, device=DEVICE)
+    result = transcribe_audio(audio_path=str(temp_file), device=DEVICE)
     # Restore stderr
     os.dup2(stderr_fd, 2)
     os.close(devnull_fd)
@@ -708,9 +739,9 @@ def process_audio_stream(audio_frames):
     
     # Clean up temp file
     try:
-        os.remove(temp_file)
-    except:
-        pass
+        temp_file.unlink()
+    except Exception as e:
+        logger.debug(f"Could not clean up temp file: {e}")
     
     return result, transcribe_end_time - transcribe_start_time
 
@@ -1048,6 +1079,126 @@ class T3VoiceTranscriber:
         except Exception as e:
             logger.debug(f"Error cleaning up visual notifications: {e}")
 
+def test_overlay_styling():
+    """Test overlay styling to compare between nix run and nix develop"""
+    import inspect
+    
+    print("🧪 OVERLAY STYLING TEST")
+    print("=" * 60)
+    
+    print("🌍 ENVIRONMENT INFORMATION")
+    print(f"Python executable: {sys.executable}")
+    print(f"Working directory: {os.getcwd()}")
+    print(f"Script location: {os.path.dirname(os.path.abspath(__file__))}")
+    print(f"Python path (first 3): {sys.path[:3]}")
+    
+    # Check for Nix environment indicators
+    if '/nix/store/' in sys.executable:
+        print("🏪 Running from Nix store")
+    
+    if 'nix-shell' in os.environ.get('PATH', ''):
+        print("🐚 In nix-shell environment")
+    
+    if os.environ.get('IN_NIX_SHELL'):
+        print("🔧 IN_NIX_SHELL environment variable set")
+    
+    print()
+    
+    # Check Tkinter availability first
+    print("🔍 CHECKING TKINTER AVAILABILITY")
+    try:
+        import tkinter as tk
+        print("✅ Tkinter is available")
+        tkinter_available = True
+    except ImportError as e:
+        print(f"❌ Tkinter is NOT available: {e}")
+        tkinter_available = False
+    
+    try:
+        # Import exactly like t3.py does (which we are!)
+        from visual_notifications import VisualNotification
+        
+        print(f"✅ Successfully imported VisualNotification from: {VisualNotification.__module__}")
+        
+        # Check the font configuration by examining the source
+        source = inspect.getsource(VisualNotification._create_tkinter_overlay)
+        
+        if "font=('Arial', 24, 'bold')" in source:
+            print("🔍 Font style: Arial 24 bold (OLD/LARGE STYLE)")
+            font_style = "LARGE"
+        elif "font=('Arial', 12, 'normal')" in source:
+            print("🔍 Font style: Arial 12 normal (NEW/SMALL STYLE)")
+            font_style = "SMALL"
+        else:
+            print("🔍 Font style: Unknown/Other")
+            font_style = "UNKNOWN"
+        
+        # Show test notifications
+        notifier = VisualNotification("OVERLAY TEST", enable_logging=True)  # Enable logging to see what method is used
+        print(f"🔧 Display environment: {notifier.display_env}")
+        print(f"🛠️  Available tools: {notifier.available_tools}")
+        
+        # Check the TKINTER_AVAILABLE flag
+        from visual_notifications import TKINTER_AVAILABLE
+        print(f"🖼️  TKINTER_AVAILABLE flag: {TKINTER_AVAILABLE}")
+        
+        print("🧪 TESTING INDIVIDUAL NOTIFICATION METHODS")
+        print("=" * 50)
+        
+        # Test 1: Tkinter overlay
+        print("1️⃣ TESTING TKINTER OVERLAY...")
+        try:
+            notifier._create_tkinter_overlay(f"TKINTER: {font_style} font", "#4CAF50", False)
+            print("   ✅ Tkinter overlay launched successfully")
+            print("   🎨 Should show: Sleek, flat, colorful overlay window")
+        except Exception as e:
+            print(f"   ❌ Tkinter overlay failed: {e}")
+        
+        time.sleep(3)
+        
+        # Test 2: Zenity notification
+        print("\n2️⃣ TESTING ZENITY NOTIFICATION...")
+        try:
+            if 'zenity' in notifier.available_tools:
+                notifier._create_zenity_notification(f"ZENITY: {font_style} font", False)
+                print("   ✅ Zenity notification launched successfully")
+                print("   🎨 Should show: Grey, GNOME-like, rounded dialog")
+            else:
+                print("   ❌ Zenity not available in this environment")
+        except Exception as e:
+            print(f"   ❌ Zenity notification failed: {e}")
+        
+        time.sleep(3)
+        
+        # Test 3: Regular notification method (what the app actually uses)
+        print("\n3️⃣ TESTING REGULAR NOTIFICATION METHOD...")
+        print("   (This is what the app normally uses - shows fallback behavior)")
+        notifier.show_notification(f"NORMAL: {font_style} font style", "#FF9800", persistent=False)
+        
+        time.sleep(4)  # Give time to see the overlay
+        
+        # Show recording notification
+        print("📱 Showing recording notification...")
+        notifier.show_recording("RECORDING TEST")
+        
+        time.sleep(4)
+        
+        notifier.cleanup()
+        
+        print(f"\n✅ Test completed! You should have seen {font_style} font overlays.")
+        print("\n📊 SUMMARY:")
+        print("🔍 Compare what you saw:")
+        print("   1️⃣ Tkinter = Sleek, flat, colorful (the good one)")
+        print("   2️⃣ Zenity = Grey, GNOME-like, rounded (the fallback)")
+        print("   3️⃣ Normal = What the app actually uses")
+        print("\n💡 If you see different styles between 'nix run' and 'nix develop',")
+        print("   it means one environment can use Tkinter while the other falls back to Zenity!")
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+
 def check_permissions():
     """Check permissions for input device access"""
     if is_windows():
@@ -1148,6 +1299,12 @@ def main():
             
         elif arg in ['help', '-h', '--help']:
             print_usage()
+            return
+            
+        elif arg == 'test-overlay':
+            # Test overlay styling in current environment
+            logger.info("Testing overlay styling in current environment...")
+            test_overlay_styling()
             return
             
         else:

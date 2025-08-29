@@ -13,6 +13,8 @@ import sys
 import os
 import pyaudio
 import select
+import tempfile
+from pathlib import Path
 
 # Redirect stderr temporarily to suppress ALSA warnings
 stderr_fd = os.dup(2)
@@ -93,7 +95,10 @@ def input_thread_func():
                     break
             time.sleep(0.1)
 
-with wave.open('output.wav', 'wb') as wf:
+temp_dir = Path(tempfile.gettempdir())
+output_file = temp_dir / 'output.wav'
+
+with wave.open(str(output_file), 'wb') as wf:
     # Redirect stderr again for PyAudio operations
     stderr_fd = os.dup(2)
     devnull_fd = os.open(os.devnull, os.O_WRONLY)

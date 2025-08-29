@@ -28,6 +28,92 @@
       version = "3.13";
     in
     {
+      packages = forEachSupportedSystem ({ pkgs }:
+        let
+          # Custom python with package overrides (from shell.nix)
+          python = pkgs.python3.override {
+            self = python;
+            packageOverrides = pyfinal: pyprev: {
+              faster-whisper = pyfinal.callPackage ./faster-whisper { };
+            };
+          };
+
+          # Runtime dependencies (from shell.nix)
+          runtimeDeps = with pkgs; [
+            lame
+            xclip
+            libnotify
+            alsa-utils
+            bashInteractive
+            ncurses
+            readline
+            mpg123
+            # GUI tools for visual notifications
+            zenity # for fallback GUI notifications
+            # X11 and GUI dependencies for tkinter overlays
+            xorg.libX11
+            xorg.libXext
+            xorg.libXrender
+            xorg.libXinerama
+            xorg.libXrandr
+            xorg.libXcursor
+            xorg.libXcomposite
+            xorg.libXdamage
+            xorg.libXfixes
+            xorg.libXScrnSaver
+            # Additional GUI libraries
+            gtk3
+            glib
+            fontconfig
+            freetype
+          ];
+
+          # Python environment with all packages
+          pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
+            pyaudio
+            keyboard
+            wavefile
+            pyperclip
+            numpy
+            scipy
+            gtts
+            tkinter
+            evdev
+            pynput
+            python-uinput
+            faster-whisper
+          ]);
+        in
+        {
+          default = pkgs.stdenv.mkDerivation {
+            pname = "voice-transcriber";
+            version = "0.1.0";
+            src = ./.;
+            
+            installPhase = ''
+              mkdir -p $out/share/voice-transcriber
+              cp -r app/* $out/share/voice-transcriber/
+              
+              mkdir -p $out/bin
+              cat > $out/bin/voice-transcriber << EOF
+              #!${pkgs.bash}/bin/bash
+              export PATH="${pkgs.lib.makeBinPath runtimeDeps}:\$PATH"
+              cd $out/share/voice-transcriber
+              exec ${pythonEnv}/bin/python t3.py "\$@"
+              EOF
+              chmod +x $out/bin/voice-transcriber
+              
+              cat > $out/bin/test-overlay << EOF
+              #!${pkgs.bash}/bin/bash
+              export PATH="${pkgs.lib.makeBinPath runtimeDeps}:\$PATH"
+              cd $out/share/voice-transcriber
+              exec ${pythonEnv}/bin/python t3.py test-overlay "\$@"
+              EOF
+              chmod +x $out/bin/test-overlay
+            '';
+          };
+        });
+
       apps = forEachSupportedSystem ({ pkgs }:
         let
           # Custom python with package overrides (from shell.nix)
@@ -49,11 +135,23 @@
             readline
             mpg123
             # GUI tools for visual notifications
-            # zenity # causes the new visual notificaton to work
-            # yad # not working at all
-            # xorg.xmessage # not working 
-            # X11 and GUI dependencies for tkinter
-
+            zenity # for fallback GUI notifications
+            # X11 and GUI dependencies for tkinter overlays
+            xorg.libX11
+            xorg.libXext
+            xorg.libXrender
+            xorg.libXinerama
+            xorg.libXrandr
+            xorg.libXcursor
+            xorg.libXcomposite
+            xorg.libXdamage
+            xorg.libXfixes
+            xorg.libXScrnSaver
+            # Additional GUI libraries
+            gtk3
+            glib
+            fontconfig
+            freetype
           ];
 
           # Python environment with all packages
@@ -71,16 +169,48 @@
             python-uinput
             faster-whisper
           ]);
+
+          # Create a package for the voice transcriber
+          voice-transcriber = pkgs.stdenv.mkDerivation {
+            pname = "voice-transcriber";
+            version = "0.1.0";
+            src = ./.;
+            
+            installPhase = ''
+              mkdir -p $out/share/voice-transcriber
+              cp -r app/* $out/share/voice-transcriber/
+              
+              mkdir -p $out/bin
+              cat > $out/bin/voice-transcriber << EOF
+              #!${pkgs.bash}/bin/bash
+              export PATH="${pkgs.lib.makeBinPath runtimeDeps}:\$PATH"
+              cd $out/share/voice-transcriber
+              exec ${pythonEnv}/bin/python t3.py "\$@"
+              EOF
+              chmod +x $out/bin/voice-transcriber
+              
+              cat > $out/bin/test-overlay << EOF
+              #!${pkgs.bash}/bin/bash
+              export PATH="${pkgs.lib.makeBinPath runtimeDeps}:\$PATH"
+              cd $out/share/voice-transcriber
+              exec ${pythonEnv}/bin/python t3.py test-overlay "\$@"
+              EOF
+              chmod +x $out/bin/test-overlay
+            '';
+          };
         in
         {
           # run with `nix run . -- 1` 
           # to automatically start with the global shortcut mode
           default = {
             type = "app";
-            program = "${pkgs.writeShellScript "voice-transcriber" ''
-              export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
-              ${pythonEnv}/bin/python app/t3.py "$@"
-            ''}";
+            program = "${voice-transcriber}/bin/voice-transcriber";
+          };
+          
+          # Test app to check overlay styling in nix run environment  
+          test-overlay = {
+            type = "app";
+            program = "${voice-transcriber}/bin/test-overlay";
           };
         });
 
@@ -106,6 +236,24 @@
             ncurses
             readline
             mpg123
+            # GUI tools for visual notifications
+            zenity # for fallback GUI notifications
+            # X11 and GUI dependencies for tkinter overlays
+            xorg.libX11
+            xorg.libXext
+            xorg.libXrender
+            xorg.libXinerama
+            xorg.libXrandr
+            xorg.libXcursor
+            xorg.libXcomposite
+            xorg.libXdamage
+            xorg.libXfixes
+            xorg.libXScrnSaver
+            # Additional GUI libraries
+            gtk3
+            glib
+            fontconfig
+            freetype
           ];
 
           # Python environment with all the same packages as the app

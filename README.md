@@ -17,7 +17,29 @@ Voice Transcriber provides real-time voice-to-text transcription with automatic 
 ## Installation & Usage
 
 ### Linux/Unix (Nix)
+#### Flake: 
+1. Have nix installed with flakes enabled
+2. Run the application directly:
+   ```bash
+   sudo nix run github:jjamesmartiin/voice-transcriber
+   ```
+   OR clone the repo and run locally:
+   ```bash
+   git clone git@github.com:jjamesmartiin/voice-transcriber.git
+   cd voice-transcriber
+   sudo nix run .
+   ```
+3. To run with global shortcut mode enabled:
+   ```bash
+   sudo nix run . -- 1
+   ```
+4. For development, enter the development shell:
+   ```bash
+   sudo nix develop
+   # Then run: python app/t3.py
+   ```
 
+#### Non Flake: 
 1. Get [Nix](https://nixos.org/download.html) installed on your system
 2. Clone the repository and navigate to it:
    ```bash
