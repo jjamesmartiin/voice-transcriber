@@ -1079,6 +1079,126 @@ class T3VoiceTranscriber:
         except Exception as e:
             logger.debug(f"Error cleaning up visual notifications: {e}")
 
+def test_overlay_styling():
+    """Test overlay styling to compare between nix run and nix develop"""
+    import inspect
+    
+    print("🧪 OVERLAY STYLING TEST")
+    print("=" * 60)
+    
+    print("🌍 ENVIRONMENT INFORMATION")
+    print(f"Python executable: {sys.executable}")
+    print(f"Working directory: {os.getcwd()}")
+    print(f"Script location: {os.path.dirname(os.path.abspath(__file__))}")
+    print(f"Python path (first 3): {sys.path[:3]}")
+    
+    # Check for Nix environment indicators
+    if '/nix/store/' in sys.executable:
+        print("🏪 Running from Nix store")
+    
+    if 'nix-shell' in os.environ.get('PATH', ''):
+        print("🐚 In nix-shell environment")
+    
+    if os.environ.get('IN_NIX_SHELL'):
+        print("🔧 IN_NIX_SHELL environment variable set")
+    
+    print()
+    
+    # Check Tkinter availability first
+    print("🔍 CHECKING TKINTER AVAILABILITY")
+    try:
+        import tkinter as tk
+        print("✅ Tkinter is available")
+        tkinter_available = True
+    except ImportError as e:
+        print(f"❌ Tkinter is NOT available: {e}")
+        tkinter_available = False
+    
+    try:
+        # Import exactly like t3.py does (which we are!)
+        from visual_notifications import VisualNotification
+        
+        print(f"✅ Successfully imported VisualNotification from: {VisualNotification.__module__}")
+        
+        # Check the font configuration by examining the source
+        source = inspect.getsource(VisualNotification._create_tkinter_overlay)
+        
+        if "font=('Arial', 24, 'bold')" in source:
+            print("🔍 Font style: Arial 24 bold (OLD/LARGE STYLE)")
+            font_style = "LARGE"
+        elif "font=('Arial', 12, 'normal')" in source:
+            print("🔍 Font style: Arial 12 normal (NEW/SMALL STYLE)")
+            font_style = "SMALL"
+        else:
+            print("🔍 Font style: Unknown/Other")
+            font_style = "UNKNOWN"
+        
+        # Show test notifications
+        notifier = VisualNotification("OVERLAY TEST", enable_logging=True)  # Enable logging to see what method is used
+        print(f"🔧 Display environment: {notifier.display_env}")
+        print(f"🛠️  Available tools: {notifier.available_tools}")
+        
+        # Check the TKINTER_AVAILABLE flag
+        from visual_notifications import TKINTER_AVAILABLE
+        print(f"🖼️  TKINTER_AVAILABLE flag: {TKINTER_AVAILABLE}")
+        
+        print("🧪 TESTING INDIVIDUAL NOTIFICATION METHODS")
+        print("=" * 50)
+        
+        # Test 1: Tkinter overlay
+        print("1️⃣ TESTING TKINTER OVERLAY...")
+        try:
+            notifier._create_tkinter_overlay(f"TKINTER: {font_style} font", "#4CAF50", False)
+            print("   ✅ Tkinter overlay launched successfully")
+            print("   🎨 Should show: Sleek, flat, colorful overlay window")
+        except Exception as e:
+            print(f"   ❌ Tkinter overlay failed: {e}")
+        
+        time.sleep(3)
+        
+        # Test 2: Zenity notification
+        print("\n2️⃣ TESTING ZENITY NOTIFICATION...")
+        try:
+            if 'zenity' in notifier.available_tools:
+                notifier._create_zenity_notification(f"ZENITY: {font_style} font", False)
+                print("   ✅ Zenity notification launched successfully")
+                print("   🎨 Should show: Grey, GNOME-like, rounded dialog")
+            else:
+                print("   ❌ Zenity not available in this environment")
+        except Exception as e:
+            print(f"   ❌ Zenity notification failed: {e}")
+        
+        time.sleep(3)
+        
+        # Test 3: Regular notification method (what the app actually uses)
+        print("\n3️⃣ TESTING REGULAR NOTIFICATION METHOD...")
+        print("   (This is what the app normally uses - shows fallback behavior)")
+        notifier.show_notification(f"NORMAL: {font_style} font style", "#FF9800", persistent=False)
+        
+        time.sleep(4)  # Give time to see the overlay
+        
+        # Show recording notification
+        print("📱 Showing recording notification...")
+        notifier.show_recording("RECORDING TEST")
+        
+        time.sleep(4)
+        
+        notifier.cleanup()
+        
+        print(f"\n✅ Test completed! You should have seen {font_style} font overlays.")
+        print("\n📊 SUMMARY:")
+        print("🔍 Compare what you saw:")
+        print("   1️⃣ Tkinter = Sleek, flat, colorful (the good one)")
+        print("   2️⃣ Zenity = Grey, GNOME-like, rounded (the fallback)")
+        print("   3️⃣ Normal = What the app actually uses")
+        print("\n💡 If you see different styles between 'nix run' and 'nix develop',")
+        print("   it means one environment can use Tkinter while the other falls back to Zenity!")
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+
 def check_permissions():
     """Check permissions for input device access"""
     if is_windows():
@@ -1179,6 +1299,12 @@ def main():
             
         elif arg in ['help', '-h', '--help']:
             print_usage()
+            return
+            
+        elif arg == 'test-overlay':
+            # Test overlay styling in current environment
+            logger.info("Testing overlay styling in current environment...")
+            test_overlay_styling()
             return
             
         else:

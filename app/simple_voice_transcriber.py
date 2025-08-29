@@ -267,8 +267,9 @@ if __name__ == "__main__":
         with open(overlay_file, 'w') as f:
             f.write(overlay_script)
         
+        import sys
         process = subprocess.Popen([
-            'python3', str(overlay_file)
+            sys.executable, str(overlay_file)
         ], stderr=subprocess.DEVNULL)
         self.overlay_processes.append(process)
         

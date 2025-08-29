@@ -48,6 +48,24 @@
             ncurses
             readline
             mpg123
+            # GUI tools for visual notifications
+            zenity # for fallback GUI notifications
+            # X11 and GUI dependencies for tkinter overlays
+            xorg.libX11
+            xorg.libXext
+            xorg.libXrender
+            xorg.libXinerama
+            xorg.libXrandr
+            xorg.libXcursor
+            xorg.libXcomposite
+            xorg.libXdamage
+            xorg.libXfixes
+            xorg.libXScrnSaver
+            # Additional GUI libraries
+            gtk3
+            glib
+            fontconfig
+            freetype
           ];
 
           # Python environment with all packages
@@ -84,6 +102,14 @@
               exec ${pythonEnv}/bin/python t3.py "\$@"
               EOF
               chmod +x $out/bin/voice-transcriber
+              
+              cat > $out/bin/test-overlay << EOF
+              #!${pkgs.bash}/bin/bash
+              export PATH="${pkgs.lib.makeBinPath runtimeDeps}:\$PATH"
+              cd $out/share/voice-transcriber
+              exec ${pythonEnv}/bin/python t3.py test-overlay "\$@"
+              EOF
+              chmod +x $out/bin/test-overlay
             '';
           };
         });
@@ -109,11 +135,23 @@
             readline
             mpg123
             # GUI tools for visual notifications
-            # zenity # causes the new visual notificaton to work
-            # yad # not working at all
-            # xorg.xmessage # not working 
-            # X11 and GUI dependencies for tkinter
-
+            zenity # for fallback GUI notifications
+            # X11 and GUI dependencies for tkinter overlays
+            xorg.libX11
+            xorg.libXext
+            xorg.libXrender
+            xorg.libXinerama
+            xorg.libXrandr
+            xorg.libXcursor
+            xorg.libXcomposite
+            xorg.libXdamage
+            xorg.libXfixes
+            xorg.libXScrnSaver
+            # Additional GUI libraries
+            gtk3
+            glib
+            fontconfig
+            freetype
           ];
 
           # Python environment with all packages
@@ -150,6 +188,14 @@
               exec ${pythonEnv}/bin/python t3.py "\$@"
               EOF
               chmod +x $out/bin/voice-transcriber
+              
+              cat > $out/bin/test-overlay << EOF
+              #!${pkgs.bash}/bin/bash
+              export PATH="${pkgs.lib.makeBinPath runtimeDeps}:\$PATH"
+              cd $out/share/voice-transcriber
+              exec ${pythonEnv}/bin/python t3.py test-overlay "\$@"
+              EOF
+              chmod +x $out/bin/test-overlay
             '';
           };
         in
@@ -159,6 +205,12 @@
           default = {
             type = "app";
             program = "${voice-transcriber}/bin/voice-transcriber";
+          };
+          
+          # Test app to check overlay styling in nix run environment  
+          test-overlay = {
+            type = "app";
+            program = "${voice-transcriber}/bin/test-overlay";
           };
         });
 
@@ -184,6 +236,24 @@
             ncurses
             readline
             mpg123
+            # GUI tools for visual notifications
+            zenity # for fallback GUI notifications
+            # X11 and GUI dependencies for tkinter overlays
+            xorg.libX11
+            xorg.libXext
+            xorg.libXrender
+            xorg.libXinerama
+            xorg.libXrandr
+            xorg.libXcursor
+            xorg.libXcomposite
+            xorg.libXdamage
+            xorg.libXfixes
+            xorg.libXScrnSaver
+            # Additional GUI libraries
+            gtk3
+            glib
+            fontconfig
+            freetype
           ];
 
           # Python environment with all the same packages as the app
