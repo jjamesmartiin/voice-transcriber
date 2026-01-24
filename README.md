@@ -10,10 +10,10 @@ This project uses Nix Flakes for reproducible environments.
 ```bash
 # add your user to the input group 
 # then run this: 
-nix run .
+nix run github:jjamesmartiin/voice-transcriber
 
 # or just run as root (bad practice)
-sudo nix run .
+sudo nix run github::jjamesmartiin/voice-transcriber
 ```
 
 
