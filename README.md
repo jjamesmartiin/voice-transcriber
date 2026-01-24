@@ -1,96 +1,57 @@
-# Voice Transcriber
+# VT (Voice Transcriber)
 
-A fast, offline voice transcription tool built with faster-whisper for efficient speech-to-text conversion.
+A robust, modular voice transcription tool for Linux (Wayland/X11).
 
-## Overview
+## Installation & Usage (Nix)
 
-Voice Transcriber provides real-time voice-to-text transcription with automatic clipboard integration. Designed for accessibility and productivity, it helps reduce typing strain while maintaining privacy through offline processing.
+This project uses Nix Flakes for reproducible environments.
+
+### Running Immediately
+```bash
+# add your user to the input group 
+# then run this: 
+nix run .
+
+# or just run as root (bad practice)
+sudo nix run .
+```
+
 
 ## Features
+- **Global Hotkeys**: Hold `Alt+Shift` to record, release to transcribe.
+- **Visual Feedback**: visual overlays and terminal notifications.
+- **Low Latency**: Optimized for quick transcription.
+- **Privacy-focused**: Runs locally using Faster Whisper.
 
-- **Fast offline transcription** using faster-whisper
-- **Automatic clipboard copying** of transcribed text
-- **Visual feedback** during transcription process
-- **Global keyboard shortcuts** (Linux/Wayland with proper permissions)
-- **Cross-platform support** (Linux/Unix via Nix, Windows)
-
-## Installation & Usage
-
-### Linux/Unix (Nix)
-#### Flake: 
-1. Have nix installed with flakes enabled
-2. Run the application directly:
-   ```bash
-   sudo nix run github:jjamesmartiin/voice-transcriber
-   ```
-   OR clone the repo and run locally:
-   ```bash
-   git clone git@github.com:jjamesmartiin/voice-transcriber.git
-   cd voice-transcriber
-   sudo nix run .
-   ```
-3. To run with global shortcut mode enabled:
-   ```bash
-   sudo nix run . -- 1
-   ```
-4. For development, enter the development shell:
-   ```bash
-   sudo nix develop
-   # Then run: python app/t3.py
-   ```
-
-#### Non Flake: 
-1. Get [Nix](https://nixos.org/download.html) installed on your system
-2. Clone the repository and navigate to it:
-   ```bash
-   git clone https://github.com/jjamesmartiin/voice-transcriber.git
-   cd voice-transcriber
-   ```
-3. Run the Nix shell:
-   ```bash
-   nix-shell
-   ```
-4. Start the application:
-   ```bash
-   python app/t3.py
-   # Or with elevated permissions for global shortcuts:
-   sudo python app/t3.py
-   ```
-
-**Note**: For global keyboard shortcut support on Wayland, add your user to the `input` group or run with elevated permissions.
-
-### Windows
-
-For Windows installation and usage instructions, please see the [Windows branch](https://github.com/jjamesmartiin/voice-transcriber/tree/main-windows) which contains detailed setup instructions and Windows-specific optimizations.
-
-## How It Works
-
-1. Press and hold the designated hotkey to start recording
-2. Speak your message clearly
-3. Release the hotkey to stop recording
-4. The transcribed text is automatically copied to your clipboard
-5. Paste the text wherever needed
+## Project Structure
+- `src/`: Source code
+  - `main.py`: Entry point and orchestration.
+  - `notifications.py`: Visual notification system.
+  - `hotkeys.py`: Global hotkey handling.
+  - `t2.py` / `transcribe2.py`: Audio recording and transcription logic.
+- `tests/`: Feature parity tests.
 
 ## Requirements
+- Linux (Wayland or X11)
+- Nix package manager
+- User must be in `input` group for global hotkeys (or run as root).
 
-- Python 3.8+
-- Microphone access
-- Internet connection for initial model download (subsequent usage is offline)
+### Development Environment
+To enter a shell with all dependencies (including Python environment):
+```bash
+nix develop
+```
 
-## Contributing
+Then inside the shell:
+- Run app: `python src/main.py`
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+### Testing
+- Run all tests: `python -m pytest tests/` (or `nix run .#test`)
+- Run specific tests or pass arguments to pytest:
+```bash
+# Filter tests by keyword
+nix run .#test -- -k transcription
 
-## License
-
-This project is open source. Please check the license file for details.
-
----
-
-## Development Roadmap
-- [ ] Live transcription during recording
-
-
-## Tags
-
-`voice-to-text` `transcription` `accessibility` `offline` `faster-whisper` `speech-recognition`
+# Run with verbose output
+nix run .#test -- -v
+```

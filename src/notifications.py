@@ -369,38 +369,3 @@ def show_error_notification(app_name="App", text="ERROR"):
     notifier = VisualNotification(app_name, enable_logging=False)
     notifier.show_error(text)
     return notifier
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Demo of the notification system
-    print("Visual Notifications Demo")
-    print("=" * 40)
-    
-    # Create notification instance
-    notifier = VisualNotification("Demo App")
-    
-    # Test different notification types
-    print("Testing recording notification...")
-    notifier.show_recording("Recording Audio")
-    time.sleep(3)
-    
-    print("Testing processing notification...")
-    notifier.show_processing("Processing Data")
-    time.sleep(3)
-    
-    print("Testing completion notification...")
-    notifier.show_completed("Task Finished")
-    time.sleep(3)
-    
-    print("Testing custom notification...")
-    notifier.show_notification("Custom Message", "#00ff00", False, "🎉")
-    time.sleep(3)
-    
-    print("Testing error notification...")
-    notifier.show_error("Something went wrong")
-    time.sleep(3)
-    
-    # Cleanup
-    notifier.cleanup()
-    print("Demo completed!") 

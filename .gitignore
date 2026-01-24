@@ -1,12 +1,9 @@
-# Virtual environments
-.venv
-venv/
-env/
-ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
 .env
-
-*pycache*
-*.wav
-result-build
-audio_device_config.json
-
+.venv
+env/
+venv/
+result

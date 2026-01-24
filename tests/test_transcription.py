@@ -6,6 +6,8 @@ and to measure performance improvements.
 
 import time
 import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../src'))
 from transcribe2 import get_model, transcribe_audio, preload_model
 
 def test_preloading():
@@ -37,11 +39,14 @@ def test_preloading():
     print(f"Performance improvement: {cold_load_time/warm_load_time:.1f}x faster")
     
     # 3. Test transcription with preloaded model
-    if len(sys.argv) > 1:
+    # Only run this if an actual file is provided (and it's not the test directory itself)
+    if len(sys.argv) > 1 and os.path.isfile(sys.argv[1]):
         audio_file = sys.argv[1]
         print(f"\n--- Test 3: Transcription with file: {audio_file} ---")
         result = transcribe_audio(audio_file, device=device)
         print(f"Transcription result: {result}")
+    else:
+        print("\n--- Test 3: Skipped (no audio file provided) ---")
 
 if __name__ == "__main__":
     test_preloading() 
