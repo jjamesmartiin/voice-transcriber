@@ -129,10 +129,15 @@ def select_audio_device():
         print("❌ No input devices found!")
         return False
     
-    print("=" * 60)
-    print("Enter the number (0-{}) of the device you want to use, or 'c' to cancel:".format(len(input_devices)-1))
-    
     try:
+        # Clear any pending input
+        try:
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIOFLUSH)
+        except:
+            pass
+            
+        print("Enter the number (0-{}) of the device you want to use, or 'c' to cancel:".format(len(input_devices)-1))
         choice = input("> ").strip().lower()
         if choice == 'c': return False
         
@@ -188,13 +193,14 @@ def record_audio_stream(interactive_mode=False):
     
     for rate in test_rates:
         # Browser-like small buffer sizes for smooth capture
-        browser_chunk_sizes = [128, 256, 512]  # WebRTC typically uses 128-512 samples
+        browser_chunk_sizes = [128, 256, 512]
         
         for chunk_size in browser_chunk_sizes:
             try:
                 # Calculate buffer time (browsers aim for 2.6-5.3ms buffers)
                 buffer_time_ms = (chunk_size / rate) * 1000
                 
+                # print(f"DEBUG: Opening stream rate={rate}, chunk={chunk_size}, device={INPUT_DEVICE_INDEX}")
                 stream = p.open(
                     format=FORMAT, 
                     channels=CHANNELS, 

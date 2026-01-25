@@ -49,7 +49,8 @@ class SimpleVoiceTranscriber:
         try:
             self.hotkey_system = WaylandGlobalHotkeys(
                 callback_start=self.start_recording,
-                callback_stop=self.stop_recording
+                callback_stop=self.stop_recording,
+                callback_config=self.change_input_device
             )
             
             if self.hotkey_system.devices:
@@ -244,6 +245,28 @@ class SimpleVoiceTranscriber:
                     logger.info("🎤 Ready for next recording")
             except (KeyboardInterrupt, EOFError):
                 logger.info("🎤 Ready for next recording")
+
+    def change_input_device(self):
+        """Open audio device selection menu via hotkey"""
+        if self.recording:
+            logger.warning("⚠️  Cannot change settings while recording is active")
+            return
+            
+        logger.info("")
+        logger.info("⚙️  Settings hotkey detected!")
+        logger.info("🎤 Opening audio device selection...")
+        logger.info("💡 Please interact with the terminal window")
+        
+        try:
+            if select_audio_device():
+                logger.info("✅ Audio device updated!")
+            else:
+                logger.info("❌ Device selection cancelled.")
+        except Exception as e:
+            logger.error(f"Error in device selection: {e}")
+            
+        logger.info("🎤 Ready to record - hold Alt+Shift when ready")
+
     
     def run(self):
         """Run the voice transcriber"""
@@ -256,6 +279,7 @@ class SimpleVoiceTranscriber:
         logger.info("🎤 Voice Transcriber started!")
         logger.info(f"📱 Using device: {DEVICE}")
         logger.info("🔥 Hold Alt+Shift to record, release to transcribe")
+        logger.info("⚙️  Press Ctrl+Alt+I to change input device")
         logger.info("🔄 Use Ctrl+C to exit")
         logger.info("💡 Global hotkeys work even when Alacritty is in focus!")
         

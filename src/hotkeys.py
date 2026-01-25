@@ -14,9 +14,10 @@ logger = logging.getLogger(__name__)
 class WaylandGlobalHotkeys:
     """Wayland-compatible global hotkey system using evdev + uinput"""
     
-    def __init__(self, callback_start, callback_stop):
+    def __init__(self, callback_start, callback_stop, callback_config=None):
         self.callback_start = callback_start
         self.callback_stop = callback_stop
+        self.callback_config = callback_config
         self.running = False
         self.devices = []
         self.virtual_keyboard = None
@@ -25,7 +26,11 @@ class WaylandGlobalHotkeys:
         
         # Key codes for our hotkey combination (Alt+Shift)
         self.ALT_KEYS = [56, 100]  # KEY_LEFTALT, KEY_RIGHTALT
-        self.SHIFT_KEYS = [42, 54]  # KEY_LEFTSHIFT, KEY_RIGHTSHIFT  
+        self.SHIFT_KEYS = [42, 54]  # KEY_LEFTSHIFT, KEY_RIGHTSHIFT
+        
+        # Key codes for config hotkey (Ctrl+Alt+I)
+        self.CTRL_KEYS = [29, 97]   # KEY_LEFTCTRL, KEY_RIGHTCTRL
+        self.KEY_I = [23]           # KEY_I
         
         self.init_devices()
     
@@ -152,6 +157,14 @@ class WaylandGlobalHotkeys:
         
         return alt_pressed and shift_pressed
     
+    def is_config_hotkey_pressed(self):
+        """Check if config hotkey (Ctrl+Alt+I) is currently pressed"""
+        alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
+        ctrl_pressed = any(self.key_states.get(key, False) for key in self.CTRL_KEYS)
+        i_pressed = any(self.key_states.get(key, False) for key in self.KEY_I)
+        
+        return alt_pressed and ctrl_pressed and i_pressed
+    
     def is_hotkey_released(self):
         """Check if hotkey combination is no longer fully pressed"""
         alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
@@ -171,6 +184,15 @@ class WaylandGlobalHotkeys:
         if key_state in [0, 1]:  # Only track press/release, ignore repeat
             self.key_states[key_code] = (key_state == 1)
         
+        # Check for config hotkey (Ctrl + Alt + I)
+        # We check this first to allow accessing config even if something else is going on
+        if key_state == 1 and self.is_config_hotkey_pressed() and self.callback_config:
+            logger.debug("⚙️ Config hotkey activated")
+            self.callback_config()
+            # Clear key states to prevent stuck keys after menu interaction
+            self.key_states.clear()
+            return
+
         # Check for hotkey activation
         if self.is_hotkey_pressed() and not self.hotkey_active:
             logger.debug("🎙️ Hotkey activated - starting recording")
