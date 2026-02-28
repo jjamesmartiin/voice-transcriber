@@ -64,10 +64,45 @@ class WaylandGlobalHotkeys:
         # Initial scan
         return self.scan_for_devices()
         
+    def _is_keyboard_device(self, device):
+        """Check if a device looks like a keyboard we want to monitor"""
+        try:
+            caps = device.capabilities()
+            if self.evdev.ecodes.EV_KEY not in caps:
+                return False
+                
+            key_caps = caps[self.evdev.ecodes.EV_KEY]
+            
+            # More flexible keyboard detection
+            has_letters = any(key in key_caps for key in [
+                self.evdev.ecodes.KEY_A, self.evdev.ecodes.KEY_B, self.evdev.ecodes.KEY_C,
+                self.evdev.ecodes.KEY_Q, self.evdev.ecodes.KEY_W, self.evdev.ecodes.KEY_E
+            ])
+            has_modifiers = any(key in key_caps for key in [
+                self.evdev.ecodes.KEY_LEFTALT, self.evdev.ecodes.KEY_RIGHTALT,
+                self.evdev.ecodes.KEY_LEFTSHIFT, self.evdev.ecodes.KEY_RIGHTSHIFT,
+                self.evdev.ecodes.KEY_LEFTCTRL, self.evdev.ecodes.KEY_RIGHTCTRL
+            ])
+            has_space_enter = any(key in key_caps for key in [
+                self.evdev.ecodes.KEY_SPACE, self.evdev.ecodes.KEY_ENTER
+            ])
+            
+            # Check if it has our specific hotkey keys
+            has_alt = any(key in key_caps for key in [self.evdev.ecodes.KEY_LEFTALT, self.evdev.ecodes.KEY_RIGHTALT])
+            has_shift = any(key in key_caps for key in [self.evdev.ecodes.KEY_LEFTSHIFT, self.evdev.ecodes.KEY_RIGHTSHIFT])
+            
+            # Accept device if it looks like a keyboard and has our hotkey keys
+            return (has_letters or has_modifiers or has_space_enter) and has_alt and has_shift
+        except Exception:
+            return False
+
     def scan_for_devices(self):
-        """Scan for keyboard devices"""
+        """Scan for new keyboard devices"""
         try:
             evdev = self.evdev
+            
+            # Get current device paths to avoid re-opening
+            current_paths = set(d.path for d in self.devices)
             
             # Try to get devices from evdev.list_devices() first
             device_paths = evdev.list_devices()
@@ -79,52 +114,28 @@ class WaylandGlobalHotkeys:
                 if path not in device_paths:
                     device_paths.append(path)
             
-            devices = []
-            keyboards = []
+            new_devices = []
             
             for path in device_paths:
+                if path in current_paths:
+                    continue
+                    
                 try:
                     device = evdev.InputDevice(path)
-                    devices.append(device)
+                    if self._is_keyboard_device(device):
+                        new_devices.append(device)
+                        logger.info(f"Found new keyboard device: {device.name} at {device.path}")
+                    else:
+                        device.close()
                 except (PermissionError, OSError):
                     continue
             
-            for device in devices:
-                caps = device.capabilities()
-                if evdev.ecodes.EV_KEY in caps:
-                    key_caps = caps[evdev.ecodes.EV_KEY]
-                    
-                    # More flexible keyboard detection
-                    has_letters = any(key in key_caps for key in [
-                        evdev.ecodes.KEY_A, evdev.ecodes.KEY_B, evdev.ecodes.KEY_C,
-                        evdev.ecodes.KEY_Q, evdev.ecodes.KEY_W, evdev.ecodes.KEY_E
-                    ])
-                    has_modifiers = any(key in key_caps for key in [
-                        evdev.ecodes.KEY_LEFTALT, evdev.ecodes.KEY_RIGHTALT,
-                        evdev.ecodes.KEY_LEFTSHIFT, evdev.ecodes.KEY_RIGHTSHIFT,
-                        evdev.ecodes.KEY_LEFTCTRL, evdev.ecodes.KEY_RIGHTCTRL
-                    ])
-                    has_space_enter = any(key in key_caps for key in [
-                        evdev.ecodes.KEY_SPACE, evdev.ecodes.KEY_ENTER
-                    ])
-                    
-                    # Check if it has our specific hotkey keys
-                    has_alt = any(key in key_caps for key in [evdev.ecodes.KEY_LEFTALT, evdev.ecodes.KEY_RIGHTALT])
-                    has_shift = any(key in key_caps for key in [evdev.ecodes.KEY_LEFTSHIFT, evdev.ecodes.KEY_RIGHTSHIFT])
-                    
-                    # Accept device if it looks like a keyboard and has our hotkey keys
-                    if (has_letters or has_modifiers or has_space_enter) and has_alt and has_shift:
-                        keyboards.append(device)
+            if new_devices:
+                self.devices.extend(new_devices)
+                logger.info(f"Added {len(new_devices)} new device(s). Total: {len(self.devices)}")
+                return True
             
-            if not keyboards:
-                # Close open handles
-                for device in devices:
-                    device.close()
-                return False
-                
-            self.devices = keyboards
-            logger.info(f"Found {len(self.devices)} keyboard device(s)")
-            return True
+            return False
             
         except Exception as e:
             logger.error(f"Error scanning for devices: {e}")
@@ -191,24 +202,28 @@ class WaylandGlobalHotkeys:
         
         while self.running:
             try:
-                # If no devices, try to find some
+                # Periodic device scan
+                current_time = time.time()
+                if current_time - last_scan_time > scan_interval:
+                    # Scan for new devices periodically
+                    if self.scan_for_devices():
+                         # If we found new devices, we might need to update our select list
+                         pass
+                    last_scan_time = current_time
+                
                 if not self.devices:
-                    current_time = time.time()
-                    if current_time - last_scan_time > scan_interval:
-                        logger.debug("Scanning for input devices...")
-                        self.scan_for_devices()
-                        last_scan_time = current_time
-                    
-                    if not self.devices:
-                        time.sleep(0.5)
-                        continue
+                    time.sleep(0.5)
+                    continue
                         
                 # Monitor existing devices
                 devices_map = {dev.fd: dev for dev in self.devices if dev.fd is not None}
                 
                 if not devices_map:
                     # Devices might have been closed/lost
+                    if self.devices: # If we had devices but map is empty
+                        logger.warning("Devices lost (fd invalid). clearing list.")
                     self.devices = []
+                    self.key_states.clear() # Clear potential stuck keys
                     continue
                 
                 r, w, x = select.select(devices_map, [], [], 1.0)
@@ -219,7 +234,11 @@ class WaylandGlobalHotkeys:
                         for event in device.read():
                             self.handle_key_event(event)
                     except OSError as e:
-                        if e.errno == 19: # No such device
+                        # Check for device disconnection (Errno 19: No such device)
+                        # extended check because sometimes errno might be missing or different wrapper
+                        is_disconnect = (e.errno == 19) or ("No such device" in str(e))
+                        
+                        if is_disconnect:
                             logger.warning(f"Device disconnected: {device.name}")
                         else:
                             logger.warning(f"Device {device.path} error: {e}")
@@ -231,6 +250,10 @@ class WaylandGlobalHotkeys:
                                 device.close()
                             except:
                                 pass
+                        
+                        # If we lost all devices, clear state immediately
+                        if not self.devices:
+                             self.key_states.clear()
                         continue
                         
             except Exception as e:
