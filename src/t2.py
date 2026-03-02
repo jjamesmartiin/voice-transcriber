@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # Optimized script to record audio and transcribe it with minimal latency
-# Updated with browser-like audio capture and AGC from t3.py
+# Updated with sounddevice for robust audio capture
 
+import queue
 import sys
 import os
 import pyperclip
 import threading
 import time
-import wave
 import numpy as np
-import pyaudio
-import queue
+import sounddevice as sd
+import soundfile as sf
 import warnings
 from transcribe2 import transcribe_audio, preload_model, get_model
 import json
@@ -43,16 +43,12 @@ def get_temp_dir():
     else:
         return Path(tempfile.gettempdir())
 
-# Audio configuration - Browser-like settings for better quality
-CHUNK = 256  # Smaller buffer like browsers use (128-256 samples)
-FORMAT = pyaudio.paInt16
+# Audio configuration
 CHANNELS = 1
-RATE = 48000  # Default to 48kHz like browsers prefer
+RATE = 48000
 RECORD_SECONDS = 20
 INPUT_DEVICE_INDEX = None
 CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
-# Prioritize 48kHz like browsers, then fallback
-FALLBACK_RATES = [48000, 44100, 22050, 16000, 8000]
 
 # Global device variable
 def get_device():
@@ -70,7 +66,6 @@ preload_thread = preload_model(device=DEVICE)
 
 # Audio buffering
 stop_recording = threading.Event()
-# We don't use the queue for streaming frames anymore, but we'll return frames directly
 
 def load_audio_config():
     """Load audio device configuration from local file"""
@@ -80,6 +75,7 @@ def load_audio_config():
             with open(CONFIG_FILE, 'r') as f:
                 config = json.loads(f.read())
                 INPUT_DEVICE_INDEX = config.get('input_device_index')
+                sd.default.device = INPUT_DEVICE_INDEX
                 print(f"Loaded saved audio device: {INPUT_DEVICE_INDEX}")
     except Exception as e:
         print(f"Could not load audio config: {e}")
@@ -98,54 +94,29 @@ def select_audio_device():
     """Interactive audio device selection"""
     global INPUT_DEVICE_INDEX
     
-    # Suppress PyAudio warnings
-    stderr_fd = os.dup(2)
-    devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(devnull_fd, 2)
-    
-    p = pyaudio.PyAudio()
-    
-    # Restore stderr
-    os.dup2(stderr_fd, 2)
-    os.close(devnull_fd)
-    os.close(stderr_fd)
-    
     print("\n🎤 Available Audio Input Devices:")
     print("=" * 60)
     
-    input_devices = []
-    for i in range(p.get_device_count()):
-        info = p.get_device_info_by_index(i)
-        if info['maxInputChannels'] > 0:
-            input_devices.append((i, info))
-            current_marker = " ← CURRENT" if i == INPUT_DEVICE_INDEX else ""
-            print(f"  {len(input_devices)-1}: Device {i} - {info['name']}")
-            print(f"      Rate: {info['defaultSampleRate']} Hz, Channels: {info['maxInputChannels']}{current_marker}")
-            print()
+    devices = sd.query_devices()
+    input_devices = [(i, d) for i, d in enumerate(devices) if d['max_input_channels'] > 0]
     
-    p.terminate()
+    for i, (device_idx, device_info) in enumerate(input_devices):
+        current_marker = " ← CURRENT" if device_idx == sd.default.device[0] else ""
+        print(f"  {i}: {device_info['name']}{current_marker}")
     
     if not input_devices:
         print("❌ No input devices found!")
         return False
     
     try:
-        # Clear any pending input
-        try:
-            import termios
-            termios.tcflush(sys.stdin, termios.TCIOFLUSH)
-        except:
-            pass
-            
-        print("Enter the number (0-{}) of the device you want to use, or 'c' to cancel:".format(len(input_devices)-1))
-        choice = input("> ").strip().lower()
+        choice = input(f"Enter the number (0-{len(input_devices)-1}) of the device you want to use, or 'c' to cancel: ").strip().lower()
         if choice == 'c': return False
         
         device_idx = int(choice)
         if 0 <= device_idx < len(input_devices):
-            device_id, device_info = input_devices[device_idx]
-            INPUT_DEVICE_INDEX = device_id
-            print(f"✅ Selected: {device_info['name']}")
+            INPUT_DEVICE_INDEX = input_devices[device_idx][0]
+            sd.default.device = INPUT_DEVICE_INDEX
+            print(f"✅ Selected: {sd.query_devices()[INPUT_DEVICE_INDEX]['name']}")
             save_audio_config()
             return True
         else:
@@ -155,84 +126,15 @@ def select_audio_device():
         return False
 
 def record_audio_stream(interactive_mode=False):
-    """Record audio directly into memory and stream to the buffer - Browser-like WebRTC style capture"""
-    global RATE
-    
-    # Suppress PyAudio warnings
-    stderr_fd = os.dup(2)
-    devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(devnull_fd, 2)
-    
-    p = pyaudio.PyAudio()
-    
-    # Restore stderr
-    os.dup2(stderr_fd, 2)
-    os.close(devnull_fd)
-    os.close(stderr_fd)
-    
-    # Get device info for optimal settings
-    if INPUT_DEVICE_INDEX is not None:
-        try:
-            device_info = p.get_device_info_by_index(INPUT_DEVICE_INDEX)
-        except:
-            device_info = p.get_default_input_device_info()
-    else:
-        device_info = p.get_default_input_device_info()
-    
-    # Browser-like audio setup - prioritize device's native rate if it's in our list
-    device_rate = int(device_info['defaultSampleRate'])
-    if device_rate in FALLBACK_RATES:
-        test_rates = [device_rate] + [r for r in FALLBACK_RATES if r != device_rate]
-    else:
-        test_rates = FALLBACK_RATES
-    
-    # Try different configurations until one works
-    stream = None
-    working_rate = None
-    working_chunk = CHUNK
-    
-    for rate in test_rates:
-        # Browser-like small buffer sizes for smooth capture
-        browser_chunk_sizes = [128, 256, 512]
-        
-        for chunk_size in browser_chunk_sizes:
-            try:
-                # Calculate buffer time (browsers aim for 2.6-5.3ms buffers)
-                buffer_time_ms = (chunk_size / rate) * 1000
-                
-                # print(f"DEBUG: Opening stream rate={rate}, chunk={chunk_size}, device={INPUT_DEVICE_INDEX}")
-                stream = p.open(
-                    format=FORMAT, 
-                    channels=CHANNELS, 
-                    rate=rate, 
-                    input=True,
-                    input_device_index=INPUT_DEVICE_INDEX,
-                    frames_per_buffer=chunk_size
-                )
-                working_rate = rate
-                working_chunk = chunk_size
-                
-                print(f"Audio setup: {rate} Hz, {chunk_size} samples ({buffer_time_ms:.1f}ms)")
-                break
-                
-            except Exception as e:
-                continue
-        
-        if stream is not None:
-            break
-    
-    if stream is None:
-        print("ERROR: Could not open audio stream")
-        p.terminate()
-        return []
-    
-    # Update global RATE
-    RATE = working_rate
-    
-    frames = []
-    max_amplitude = 0
-    total_chunks = 0
-    
+    """Record audio using sounddevice"""
+    q = queue.Queue()
+
+    def callback(indata, frames, time, status):
+        """This is called (from a separate thread) for each audio block."""
+        if status:
+            print(status, file=sys.stderr)
+        q.put(indata.copy())
+
     # Interactive mode helpers
     if interactive_mode:
         countdown_thread = threading.Thread(target=countdown_timer)
@@ -245,60 +147,13 @@ def record_audio_stream(interactive_mode=False):
         
         print("Recording... Press Space to stop")
     
-    # Record loop
-    # If not interactive, we rely on external stop_recording event
-    while not stop_recording.is_set():
-        try:
-            data = stream.read(working_chunk, exception_on_overflow=False)
-            frames.append(data)
-            total_chunks += 1
-            
-            # Monitor audio levels
-            audio_data = np.frombuffer(data, dtype=np.int16)
-            amplitude = np.max(np.abs(audio_data))
-            max_amplitude = max(max_amplitude, amplitude)
-            
-            # Show level in interactive mode
-            if interactive_mode and total_chunks % 20 == 0 and amplitude > 100:
-                level_bars = int(amplitude / 1000)
-                print(f"Audio level: {'█' * min(level_bars, 20)} ({amplitude})", end='\r')
-                
-        except Exception as e:
-            print(f"Recording error: {e}")
-            break
-            
-        # Limit recording time if in interactive/fixed mode
-        if interactive_mode and total_chunks * working_chunk / working_rate > RECORD_SECONDS:
-            break
-    
-    if interactive_mode:
-        print(f"\nFinished recording - Max audio: {max_amplitude}")
-    
-    if max_amplitude < 500:
-        print("⚠️  WARNING: Very low audio levels detected!")
-    
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
-    
-    # Apply Browser-like AGC (Automatic Gain Control)
-    # Boost quiet audio before returning
-    if frames:
-        full_audio = b''.join(frames)
-        audio_array = np.frombuffer(full_audio, dtype=np.int16)
-        current_max = np.max(np.abs(audio_array))
-        
-        if current_max > 0 and current_max < 8000:
-            boost_factor = min(8000 / current_max, 3.0)
-            boosted_audio = (audio_array * boost_factor).astype(np.int16)
-            print(f"Applied AGC: Boosted audio {boost_factor:.1f}x")
-            
-            # Convert back to frames
-            # This is a bit inefficient but keeps compatibility with frame-based return
-            new_bytes = boosted_audio.tobytes()
-            frames = [new_bytes[i:i+working_chunk*2] for i in range(0, len(new_bytes), working_chunk*2)]
-            
-    return frames
+    frames = []
+    with sd.InputStream(samplerate=RATE, channels=CHANNELS, callback=callback, device=INPUT_DEVICE_INDEX):
+        while not stop_recording.is_set():
+            frames.append(q.get())
+
+    return np.concatenate(frames, axis=0) if frames else np.array([])
+
 
 def countdown_timer():
     """Display countdown timer"""
@@ -325,40 +180,25 @@ def check_for_stop_key():
     except:
         pass
 
-def process_audio_stream(audio_frames=None):
+def process_audio_stream(audio_data=None):
     """Process audio frames. If None, it's expected to be passed in."""
-    # Note: original t2.py pulled from queue. New version expects frames passed in.
-    # To maintain backward compatibility if something calls it without args (unlikely in new flow):
-    if audio_frames is None:
+    if audio_data is None or len(audio_data) == 0:
         return "", 0
         
     model = get_model(device=DEVICE)
-    
-    if not audio_frames:
-        return "", 0
-    
-    audio_data = b''.join(audio_frames)
     
     transcribe_start_time = time.time()
     
     temp_dir = get_temp_dir()
     temp_file = temp_dir / "temp_output.wav"
-    with wave.open(str(temp_file), 'wb') as wf:
-        wf.setnchannels(CHANNELS)
-        wf.setsampwidth(2)
-        wf.setframerate(RATE)
-        wf.writeframes(audio_data)
+    
+    sf.write(str(temp_file), audio_data, RATE)
         
     # Transcribe
-    stderr_fd = os.dup(2)
-    devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(devnull_fd, 2)
     try:
         result = transcribe_audio(audio_path=str(temp_file), device=DEVICE)
     finally:
-        os.dup2(stderr_fd, 2)
-        os.close(devnull_fd)
-        os.close(stderr_fd)
+        pass
         
     transcribe_end_time = time.time()
     
@@ -374,8 +214,6 @@ def record_and_transcribe():
     process_start_time = time.time()
     stop_recording.clear()
     
-    # Record synchronously (since we moved away from real-time stream processing)
-    # This aligns with t3.py's robust approach
     frames = record_audio_stream(interactive_mode=True)
     
     # Transcribe
@@ -386,8 +224,6 @@ def record_and_transcribe():
     try:
         pyperclip.copy(transcription)
         print("Transcription copied to clipboard")
-        sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
-        subprocess.Popen(['mpg123', '-q', sound_path], stderr=subprocess.DEVNULL)
     except:
         pass
         
@@ -437,45 +273,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# ok now we should focus on automating the process of transcribing the audio
-
-# we have rec.py to record the audio and save it as a wav file
-# we have transcribe.py to transcribe the audio
-
-# now we need to combine these two files
-
-# first we need to record the audio
-# import rec
-
-# # then we need to transcribe the audio
-# import transcribe
-# import pyperclip
-
-# # Write transcription to a temporary file
-# with open('/tmp/transcription.txt', 'w') as f:
-#     f.write(transcribe.result["text"].strip())
-
-
-# import subprocess
-
-# # Copy transcription to clipboard
-# subprocess.run(['xclip', '-selection', 'clipboard'], input=transcribe.result["text"].strip().encode())
-
-# Execute vim to read and copy the transcription
-# subprocess.run(['vim', '-c', 'normal! ggdG', '-c', ':r /tmp/transcription.txt', '-c', 'normal! ggVG"*y', '-c', 'q!', '/tmp/transcription.txt'])
-
-# the above command is working sort of, it copies but 
-
-# 
-# Hello, test12.
-#
-# it has extra return before and after 
-# so we need to remove the extra return
-
-
-
-
-
-
-

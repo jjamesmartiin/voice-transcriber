@@ -54,9 +54,9 @@
 
           # Python environment
           pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
-            pyaudio
+            sounddevice
+            soundfile
             keyboard
-            wavefile
             pyperclip
             numpy
             scipy
@@ -101,9 +101,9 @@
           };
           
           pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
-            pyaudio
+            sounddevice
+            soundfile
             keyboard
-            wavefile
             pyperclip
             numpy
             scipy
@@ -196,9 +196,9 @@
           ];
 
           pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
-            pyaudio
+            sounddevice
+            soundfile
             keyboard
-            wavefile
             pyperclip
             numpy
             scipy

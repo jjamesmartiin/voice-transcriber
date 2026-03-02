@@ -3,12 +3,14 @@
 Simple Voice Transcriber with Alt+Shift+K shortcut
 Enhanced with Wayland-compatible global hotkeys using evdev+uinput
 """
+import numpy as np
 import logging
 import threading
 import subprocess
 import time
 import os
 import sys
+import atexit
 
 # Import core modules
 from notifications import VisualNotification
@@ -43,6 +45,11 @@ class SimpleVoiceTranscriber:
         
         # Initialize global hotkey system
         self.init_hotkeys()
+        
+    def cleanup(self):
+        """Clean up all resources."""
+        if hasattr(self, 'visual_notification'):
+            self.visual_notification.cleanup()
         
     def init_hotkeys(self):
         """Initialize the global hotkey system"""
@@ -140,7 +147,7 @@ class SimpleVoiceTranscriber:
         """Process recorded audio and transcribe"""
         try:
             # Check if we have audio
-            if not self.audio_frames:
+            if self.audio_frames.size == 0:
                 logger.warning("No audio frames recorded")
                 self.visual_notification.hide_notification()
                 return
@@ -287,16 +294,19 @@ class SimpleVoiceTranscriber:
         
         try:
             # Run the hotkey monitoring system
-            return self.hotkey_system.run()
+            hotkey_result = self.hotkey_system.run()
+            return hotkey_result
         except KeyboardInterrupt:
             logger.info("👋 Shutting down...")
-            self.running = False
-            if self.hotkey_system:
-                self.hotkey_system.stop()
             return True
         except Exception as e:
             logger.error(f"Error running hotkey system: {e}")
             return False
+        finally:
+            self.cleanup()
+            self.running = False
+            if self.hotkey_system:
+                self.hotkey_system.stop()
 
 if __name__ == "__main__":
     def check_permissions():
@@ -409,4 +419,6 @@ if __name__ == "__main__":
     logger.info("")
     
     transcriber = SimpleVoiceTranscriber()
+    import atexit
+    atexit.register(transcriber.cleanup)
     transcriber.run()
