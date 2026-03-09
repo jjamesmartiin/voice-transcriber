@@ -230,6 +230,7 @@ class SimpleVoiceTranscriber:
                     logger.info("✅ Audio device updated!")
                 else:
                     logger.info("❌ Device selection cancelled.")
+                reset_terminal()
                 logger.info("🎤 Ready to record - hold Alt+Shift when ready")
             elif ch.lower() == 'r':  # Reset terminal
                 logger.info("🔄 Resetting terminal...")
@@ -237,6 +238,7 @@ class SimpleVoiceTranscriber:
                 logger.info("✅ Terminal reset complete.")
                 logger.info("🎤 Ready to record - hold Alt+Shift when ready")
             else:
+                reset_terminal()
                 logger.info("🎤 Ready for next recording")
                 
         except (KeyboardInterrupt, EOFError):
@@ -280,8 +282,10 @@ class SimpleVoiceTranscriber:
                 logger.info("✅ Audio device updated!")
             else:
                 logger.info("❌ Device selection cancelled.")
+            reset_terminal()
         except Exception as e:
             logger.error(f"Error in device selection: {e}")
+            reset_terminal()
             
         logger.info("🎤 Ready to record - hold Alt+Shift when ready")
 

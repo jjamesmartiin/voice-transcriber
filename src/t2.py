@@ -164,7 +164,9 @@ def select_audio_device():
     choice = getch().lower()
     print() # Newline after getch
     
-    if choice == 'c': return False
+    if choice == 'c': 
+        reset_terminal()
+        return False
     if choice == '3':
         reset_terminal()
         return select_audio_device()
@@ -218,18 +220,37 @@ def select_audio_device():
             
             print(f"✅ {label} Selected: {selected_name}")
             save_audio_config()
+            reset_terminal()
             return True
         else:
             print("❌ Invalid choice")
+            reset_terminal()
             return False
     except Exception as e:
         print(f"❌ Selection error: {e}")
+        reset_terminal()
         return False
 
 def record_audio_stream(interactive_mode=False):
-    """Record audio using sounddevice with fallback support"""
+    """Record audio using sounddevice with fallback and auto-recovery support"""
     global INPUT_DEVICE_INDEX
     
+    # Auto-recovery: Always try to see if the primary device has returned before starting
+    if PRIMARY_DEVICE_NAME:
+        primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
+        if primary_idx is not None:
+            if INPUT_DEVICE_INDEX != primary_idx:
+                print(f"✨ Primary device '{PRIMARY_DEVICE_NAME}' detected! Switching back.")
+                INPUT_DEVICE_INDEX = primary_idx
+                sd.default.device = INPUT_DEVICE_INDEX
+        elif SECONDARY_DEVICE_NAME:
+            # If primary is gone, ensure we at least use the secondary if it's available
+            secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
+            if secondary_idx is not None and INPUT_DEVICE_INDEX != secondary_idx:
+                print(f"ℹ️ Using secondary device: {SECONDARY_DEVICE_NAME}")
+                INPUT_DEVICE_INDEX = secondary_idx
+                sd.default.device = INPUT_DEVICE_INDEX
+
     q = queue.Queue()
 
     def callback(indata, frames, time, status):
