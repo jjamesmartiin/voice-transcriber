@@ -48,7 +48,35 @@ CHANNELS = 1
 RATE = 48000
 RECORD_SECONDS = 20
 INPUT_DEVICE_INDEX = None
+PRIMARY_DEVICE_NAME = None
+SECONDARY_DEVICE_NAME = None
 CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
+
+def find_device_index(name):
+    """Find device index by name substring match"""
+    if not name:
+        return None
+    devices = sd.query_devices()
+    for i, d in enumerate(devices):
+        if d['max_input_channels'] > 0 and name.lower() in d['name'].lower():
+            return i
+    return None
+
+def reset_terminal():
+    """Reset terminal settings if they become wonky"""
+    try:
+        import os
+        os.system('reset')
+        # Also re-initialize termios just in case
+        import termios, sys
+        fd = sys.stdin.fileno()
+        try:
+            termios.tcgetattr(fd)
+        except:
+            # If it's already broken, this might help
+            pass
+    except:
+        pass
 
 # Global device variable
 def get_device():
@@ -68,22 +96,51 @@ preload_thread = preload_model(device=DEVICE)
 stop_recording = threading.Event()
 
 def load_audio_config():
-    """Load audio device configuration from local file"""
-    global INPUT_DEVICE_INDEX
+    """Load audio device configuration from local file with fallback"""
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME
     try:
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
                 config = json.loads(f.read())
-                INPUT_DEVICE_INDEX = config.get('input_device_index')
-                sd.default.device = INPUT_DEVICE_INDEX
-                print(f"Loaded saved audio device: {INPUT_DEVICE_INDEX}")
+                PRIMARY_DEVICE_NAME = config.get('primary_device_name')
+                SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
+                
+                # Attempt to find primary
+                idx = find_device_index(PRIMARY_DEVICE_NAME)
+                if idx is not None:
+                    INPUT_DEVICE_INDEX = idx
+                    print(f"✅ Using primary audio device: {PRIMARY_DEVICE_NAME} (index {idx})")
+                else:
+                    # Attempt to find secondary
+                    idx = find_device_index(SECONDARY_DEVICE_NAME)
+                    if idx is not None:
+                        INPUT_DEVICE_INDEX = idx
+                        print(f"⚠️ Primary device '{PRIMARY_DEVICE_NAME}' not found. Falling back to secondary: {SECONDARY_DEVICE_NAME} (index {idx})")
+                    else:
+                        # Fallback to index if names fail (for backward compatibility or if names are not set)
+                        INPUT_DEVICE_INDEX = config.get('input_device_index')
+                        if INPUT_DEVICE_INDEX is not None:
+                            try:
+                                d = sd.query_devices(INPUT_DEVICE_INDEX)
+                                print(f"ℹ️ Falling back to saved device index {INPUT_DEVICE_INDEX}: {d['name']}")
+                            except:
+                                INPUT_DEVICE_INDEX = None
+                
+                if INPUT_DEVICE_INDEX is not None:
+                    sd.default.device = INPUT_DEVICE_INDEX
+                else:
+                    print("⚠️ No configured audio devices found. Using system default.")
     except Exception as e:
         print(f"Could not load audio config: {e}")
 
 def save_audio_config():
     """Save audio device configuration to local file"""
     try:
-        config = {'input_device_index': INPUT_DEVICE_INDEX}
+        config = {
+            'input_device_index': INPUT_DEVICE_INDEX,
+            'primary_device_name': PRIMARY_DEVICE_NAME,
+            'secondary_device_name': SECONDARY_DEVICE_NAME
+        }
         with open(CONFIG_FILE, 'w') as f:
             f.write(json.dumps(config, indent=2))
         print(f"Saved audio device config to {CONFIG_FILE}")
@@ -91,42 +148,88 @@ def save_audio_config():
         print(f"Could not save audio config: {e}")
 
 def select_audio_device():
-    """Interactive audio device selection"""
-    global INPUT_DEVICE_INDEX
+    """Interactive audio device selection with Primary/Secondary support"""
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME
     
-    print("\n🎤 Available Audio Input Devices:")
+    # Always reset terminal before interaction to fix terminal state
+    reset_terminal() 
+    
+    print("\n🎤 Configure Audio Input Devices:")
+    print("1. Set Primary Device (currently: {})".format(PRIMARY_DEVICE_NAME or "Not Set"))
+    print("2. Set Secondary Device (currently: {})".format(SECONDARY_DEVICE_NAME or "Not Set"))
+    print("3. Reset Terminal (if text is invisible or wonky)")
+    print("c. Cancel")
+    
+    print("\nYour choice: ", end="", flush=True)
+    choice = getch().lower()
+    print() # Newline after getch
+    
+    if choice == 'c': return False
+    if choice == '3':
+        reset_terminal()
+        return select_audio_device()
+        
+    if choice not in ['1', '2']:
+        print("Invalid choice.")
+        return False
+        
+    is_primary = (choice == '1')
+    label = "Primary" if is_primary else "Secondary"
+    
+    print(f"\n🎤 Available Audio Input Devices for {label}:")
     print("=" * 60)
     
     devices = sd.query_devices()
     input_devices = [(i, d) for i, d in enumerate(devices) if d['max_input_channels'] > 0]
     
     for i, (device_idx, device_info) in enumerate(input_devices):
-        current_marker = " ← CURRENT" if device_idx == sd.default.device[0] else ""
-        print(f"  {i}: {device_info['name']}{current_marker}")
+        markers = []
+        if PRIMARY_DEVICE_NAME and PRIMARY_DEVICE_NAME.lower() in device_info['name'].lower():
+            markers.append("PRIMARY")
+        if SECONDARY_DEVICE_NAME and SECONDARY_DEVICE_NAME.lower() in device_info['name'].lower():
+            markers.append("SECONDARY")
+            
+        marker_str = " ← " + " & ".join(markers) if markers else ""
+        print(f"  {i}: {device_info['name']}{marker_str}")
     
     if not input_devices:
         print("❌ No input devices found!")
         return False
     
     try:
-        choice = input(f"Enter the number (0-{len(input_devices)-1}) of the device you want to use, or 'c' to cancel: ").strip().lower()
-        if choice == 'c': return False
+        prompt = f"Enter the number (0-{len(input_devices)-1}) of the device you want to use as {label}, or 'c' to cancel: "
+        # Use regular input here because we need numbers (could be multi-digit)
+        # But ensure we are in a sane terminal state
+        print(prompt, end="", flush=True)
+        choice = input().strip().lower()
+        if choice == 'c' or not choice: return False
         
         device_idx = int(choice)
         if 0 <= device_idx < len(input_devices):
-            INPUT_DEVICE_INDEX = input_devices[device_idx][0]
-            sd.default.device = INPUT_DEVICE_INDEX
-            print(f"✅ Selected: {sd.query_devices()[INPUT_DEVICE_INDEX]['name']}")
+            selected_idx = input_devices[device_idx][0]
+            selected_name = input_devices[device_idx][1]['name']
+            
+            if is_primary:
+                PRIMARY_DEVICE_NAME = selected_name
+                INPUT_DEVICE_INDEX = selected_idx
+                sd.default.device = INPUT_DEVICE_INDEX
+            else:
+                SECONDARY_DEVICE_NAME = selected_name
+            
+            print(f"✅ {label} Selected: {selected_name}")
             save_audio_config()
             return True
         else:
             print("❌ Invalid choice")
             return False
-    except:
+    except Exception as e:
+        print(f"❌ Selection error: {e}")
         return False
 
 def record_audio_stream(interactive_mode=False):
-    """Record audio using sounddevice"""
+    """Record audio using sounddevice with fallback support"""
+    global INPUT_DEVICE_INDEX
+    
     q = queue.Queue()
 
     def callback(indata, frames, time, status):
@@ -134,6 +237,21 @@ def record_audio_stream(interactive_mode=False):
         if status:
             print(status, file=sys.stderr)
         q.put(indata.copy())
+
+    def perform_recording(device_idx):
+        nonlocal q
+        frames = []
+        try:
+            with sd.InputStream(samplerate=RATE, channels=CHANNELS, callback=callback, device=device_idx):
+                while not stop_recording.is_set():
+                    try:
+                        frames.append(q.get(timeout=0.2))
+                    except queue.Empty:
+                        continue
+            return frames
+        except Exception as e:
+            print(f"Error opening audio device {device_idx}: {e}")
+            return None
 
     # Interactive mode helpers
     if interactive_mode:
@@ -147,10 +265,23 @@ def record_audio_stream(interactive_mode=False):
         
         print("Recording... Press Space to stop")
     
-    frames = []
-    with sd.InputStream(samplerate=RATE, channels=CHANNELS, callback=callback, device=INPUT_DEVICE_INDEX):
-        while not stop_recording.is_set():
-            frames.append(q.get())
+    # Try primary/current device
+    frames = perform_recording(INPUT_DEVICE_INDEX)
+    
+    # If it failed, try to find a fallback
+    if frames is None:
+        print("🔄 Attempting fallback to secondary device...")
+        fallback_idx = find_device_index(SECONDARY_DEVICE_NAME)
+        if fallback_idx is not None and fallback_idx != INPUT_DEVICE_INDEX:
+            print(f"⚠️ Primary device failed. Trying secondary: {SECONDARY_DEVICE_NAME} (index {fallback_idx})")
+            frames = perform_recording(fallback_idx)
+            if frames is not None:
+                # Update current device if fallback succeeded
+                INPUT_DEVICE_INDEX = fallback_idx
+                sd.default.device = INPUT_DEVICE_INDEX
+                print("✅ Fallback successful!")
+        else:
+            print("❌ No valid secondary device found or secondary device is the same as failed device.")
 
     return np.concatenate(frames, axis=0) if frames else np.array([])
 
@@ -232,14 +363,17 @@ def record_and_transcribe():
     return transcription
 
 def getch():
-    """Get single character"""
+    """Get single character with echo"""
     try:
         import termios, tty
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         try:
-            tty.setraw(fd)
+            tty.setcbreak(fd)
             ch = sys.stdin.read(1)
+            # Echo the character manually to be sure it shows up
+            sys.stdout.write(ch)
+            sys.stdout.flush()
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch
@@ -266,6 +400,9 @@ def main():
             elif ch.lower() == 'i':
                 print()
                 select_audio_device()
+            elif ch.lower() == 'r':
+                print("\nResetting terminal...")
+                reset_terminal()
             elif ch.lower() == 'q':
                 break
         except KeyboardInterrupt:

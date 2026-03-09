@@ -19,7 +19,7 @@ from hotkeys import WaylandGlobalHotkeys
 # Import transcription functionality
 # Ensure we can find t2
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from t2 import preload_model, DEVICE, record_audio_stream, process_audio_stream, stop_recording, load_audio_config, select_audio_device
+from t2 import preload_model, DEVICE, record_audio_stream, process_audio_stream, stop_recording, load_audio_config, select_audio_device, reset_terminal
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -207,6 +207,7 @@ class SimpleVoiceTranscriber:
         logger.info("🔧 What would you like to do?")
         logger.info("   Space: Try recording again")
         logger.info("   i: Change audio input device")
+        logger.info("   r: Reset terminal (if text is wonky)")
         logger.info("   Any other key: Continue")
         logger.info("")
         
@@ -230,6 +231,11 @@ class SimpleVoiceTranscriber:
                 else:
                     logger.info("❌ Device selection cancelled.")
                 logger.info("🎤 Ready to record - hold Alt+Shift when ready")
+            elif ch.lower() == 'r':  # Reset terminal
+                logger.info("🔄 Resetting terminal...")
+                reset_terminal()
+                logger.info("✅ Terminal reset complete.")
+                logger.info("🎤 Ready to record - hold Alt+Shift when ready")
             else:
                 logger.info("🎤 Ready for next recording")
                 
@@ -238,7 +244,7 @@ class SimpleVoiceTranscriber:
         except ImportError:
             # Windows fallback - use regular input
             try:
-                choice = input("Enter choice (Space/i/other): ").strip().lower()
+                choice = input("Enter choice (Space/i/r/other): ").strip().lower()
                 if choice == ' ' or choice == '':
                     logger.info("🎤 Ready to record - hold Alt+Shift when ready")
                 elif choice == 'i':
@@ -247,6 +253,11 @@ class SimpleVoiceTranscriber:
                         logger.info("✅ Audio device updated!")
                     else:
                         logger.info("❌ Device selection cancelled.")
+                    logger.info("🎤 Ready to record - hold Alt+Shift when ready")
+                elif choice == 'r':
+                    logger.info("🔄 Resetting terminal...")
+                    reset_terminal()
+                    logger.info("✅ Terminal reset complete.")
                     logger.info("🎤 Ready to record - hold Alt+Shift when ready")
                 else:
                     logger.info("🎤 Ready for next recording")

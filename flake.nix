@@ -50,6 +50,9 @@
             glib
             fontconfig
             freetype
+
+            # wayland
+            wl-clipboard
           ];
 
           # Python environment
@@ -140,6 +143,9 @@
             glib
             fontconfig
             freetype
+
+            # wayland
+            wl-clipboard
           ];
 
           vt_pkg = self.packages.${pkgs.system}.default;
@@ -193,6 +199,8 @@
             glib
             fontconfig
             freetype
+            # wayland
+            wl-clipboard
           ];
 
           pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
