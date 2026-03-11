@@ -13,7 +13,7 @@ This project uses Nix Flakes for reproducible environments.
 nix run github:jjamesmartiin/voice-transcriber
 
 # or just run as root (bad practice)
-sudo nix run github::jjamesmartiin/voice-transcriber
+sudo nix run github:jjamesmartiin/voice-transcriber
 ```
 
 
