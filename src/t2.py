@@ -176,13 +176,28 @@ def select_audio_device():
     reset_terminal() 
     
     print("\n🎤 Configure Audio Input Devices:")
+    
+    # Display current mode status
+    mode_display = {
+        'auto': "Automatic Selection",
+        'primary': "Manual Override (Primary)",
+        'secondary': "Manual Override (Secondary)"
+    }.get(OVERRIDE_MODE, "Unknown")
+    print(f"Current Mode: {mode_display}")
+    print("-" * 30)
+
     print("P. Set Primary Device (currently: {})".format(PRIMARY_DEVICE_NAME or "Not Set"))
     print("S. Set Secondary Device (currently: {})".format(SECONDARY_DEVICE_NAME or "Not Set"))
     print("R. Reset Terminal (if text is invisible or wonky)")
     print("-" * 30)
-    print("p. Use Primary Device (Manual Override)")
-    print("s. Use Secondary Device (Manual Override)")
-    print("a. Automatic Selection (Default)")
+    
+    p_marker = " [ACTIVE]" if OVERRIDE_MODE == 'primary' else ""
+    s_marker = " [ACTIVE]" if OVERRIDE_MODE == 'secondary' else ""
+    a_marker = " [ACTIVE]" if OVERRIDE_MODE == 'auto' else ""
+    
+    print(f"p. Use Primary Device (Manual Override){p_marker}")
+    print(f"s. Use Secondary Device (Manual Override){s_marker}")
+    print(f"a. Automatic Selection (Default){a_marker}")
     print("-" * 30)
     print("c. Cancel")
     
