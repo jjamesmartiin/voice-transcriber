@@ -176,9 +176,9 @@ def select_audio_device():
     reset_terminal() 
     
     print("\n🎤 Configure Audio Input Devices:")
-    print("1. Set Primary Device (currently: {})".format(PRIMARY_DEVICE_NAME or "Not Set"))
-    print("2. Set Secondary Device (currently: {})".format(SECONDARY_DEVICE_NAME or "Not Set"))
-    print("3. Reset Terminal (if text is invisible or wonky)")
+    print("P. Set Primary Device (currently: {})".format(PRIMARY_DEVICE_NAME or "Not Set"))
+    print("S. Set Secondary Device (currently: {})".format(SECONDARY_DEVICE_NAME or "Not Set"))
+    print("R. Reset Terminal (if text is invisible or wonky)")
     print("-" * 30)
     print("p. Use Primary Device (Manual Override)")
     print("s. Use Secondary Device (Manual Override)")
@@ -187,13 +187,13 @@ def select_audio_device():
     print("c. Cancel")
     
     print("\nYour choice: ", end="", flush=True)
-    choice = getch().lower()
+    choice = getch()
     print() # Newline after getch
     
-    if choice == 'c': 
+    if choice.lower() == 'c': 
         reset_terminal()
         return False
-    if choice == '3':
+    if choice.lower() == 'r':
         reset_terminal()
         return select_audio_device()
         
@@ -225,18 +225,18 @@ def select_audio_device():
             print("⚠️ Secondary device not configured yet.")
         save_audio_config()
         return True
-    elif choice == 'a':
+    elif choice.lower() == 'a':
         OVERRIDE_MODE = 'auto'
         print("✅ Mode: Automatic Selection")
         # Let record_audio_stream handle the logic for auto selection
         save_audio_config()
         return True
 
-    if choice not in ['1', '2']:
+    if choice not in ['P', 'S']:
         print("Invalid choice.")
         return False
         
-    is_primary = (choice == '1')
+    is_primary = (choice == 'P')
     label = "Primary" if is_primary else "Secondary"
     
     print(f"\n🎤 Available Audio Input Devices for {label}:")
