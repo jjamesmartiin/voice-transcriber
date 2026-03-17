@@ -19,7 +19,8 @@ from hotkeys import WaylandGlobalHotkeys
 # Import transcription functionality
 # Ensure we can find t2
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from t2 import preload_model, DEVICE, record_audio_stream, process_audio_stream, stop_recording, load_audio_config, select_audio_device, reset_terminal
+import t2
+from t2 import preload_model, DEVICE, record_audio_stream, process_audio_stream, stop_recording, load_audio_config, select_audio_device, reset_terminal, IS_MUTED
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -93,9 +94,10 @@ class SimpleVoiceTranscriber:
         
         # Play start recording sound
         try:
-            sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop2.mp3')
-            subprocess.Popen(['mpg123', '-q', sound_path], 
-                           stderr=subprocess.DEVNULL)
+            if not t2.IS_MUTED:
+                sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop2.mp3')
+                subprocess.Popen(['mpg123', '-q', sound_path], 
+                               stderr=subprocess.DEVNULL)
         except:
             pass
         
@@ -120,9 +122,10 @@ class SimpleVoiceTranscriber:
         
         # Play stop recording sound
         try:
-            sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop2.mp3')
-            subprocess.Popen(['mpg123', '-q', sound_path], 
-                           stderr=subprocess.DEVNULL)
+            if not t2.IS_MUTED:
+                sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop2.mp3')
+                subprocess.Popen(['mpg123', '-q', sound_path], 
+                               stderr=subprocess.DEVNULL)
         except:
             pass
         
@@ -171,9 +174,10 @@ class SimpleVoiceTranscriber:
                 
                 # Play sound
                 try:
-                    sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
-                    subprocess.Popen(['mpg123', '-q', sound_path], 
-                                   stderr=subprocess.DEVNULL)
+                    if not t2.IS_MUTED:
+                        sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
+                        subprocess.Popen(['mpg123', '-q', sound_path], 
+                                       stderr=subprocess.DEVNULL)
                 except:
                     pass
                 

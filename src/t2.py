@@ -51,6 +51,7 @@ INPUT_DEVICE_INDEX = None
 PRIMARY_DEVICE_NAME = None
 SECONDARY_DEVICE_NAME = None
 OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
+IS_MUTED = False
 CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 
 def find_device_index(name):
@@ -98,7 +99,7 @@ stop_recording = threading.Event()
 
 def load_audio_config():
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, IS_MUTED
     try:
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
@@ -106,6 +107,7 @@ def load_audio_config():
                 PRIMARY_DEVICE_NAME = config.get('primary_device_name')
                 SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
                 OVERRIDE_MODE = config.get('override_mode', 'auto')
+                IS_MUTED = config.get('is_muted', False)
                 
                 # If we have an override, try that first
                 if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
@@ -160,7 +162,8 @@ def save_audio_config():
             'input_device_index': INPUT_DEVICE_INDEX,
             'primary_device_name': PRIMARY_DEVICE_NAME,
             'secondary_device_name': SECONDARY_DEVICE_NAME,
-            'override_mode': OVERRIDE_MODE
+            'override_mode': OVERRIDE_MODE,
+            'is_muted': IS_MUTED
         }
         with open(CONFIG_FILE, 'w') as f:
             f.write(json.dumps(config, indent=2))
@@ -170,7 +173,7 @@ def save_audio_config():
 
 def select_audio_device():
     """Interactive audio device selection with Primary/Secondary support"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, IS_MUTED
     
     # Always reset terminal before interaction to fix terminal state
     reset_terminal() 
@@ -184,10 +187,14 @@ def select_audio_device():
         'secondary': "Manual Override (Secondary)"
     }.get(OVERRIDE_MODE, "Unknown")
     print(f"Current Mode: {mode_display}")
+    
+    mute_status = " [MUTED]" if IS_MUTED else ""
+    print(f"Sounds: {'Muted' if IS_MUTED else 'On'}{mute_status}")
     print("-" * 30)
 
     print("P. Set Primary Device (currently: {})".format(PRIMARY_DEVICE_NAME or "Not Set"))
     print("S. Set Secondary Device (currently: {})".format(SECONDARY_DEVICE_NAME or "Not Set"))
+    print("M. Toggle Mute (currently: {})".format("MUTED" if IS_MUTED else "Sound On"))
     print("R. Reset Terminal (if text is invisible or wonky)")
     print("-" * 30)
     
@@ -210,6 +217,12 @@ def select_audio_device():
         return False
     if choice.lower() == 'r':
         reset_terminal()
+        return select_audio_device()
+    if choice.lower() == 'm':
+        IS_MUTED = not IS_MUTED
+        print(f"✅ Sounds {'Muted' if IS_MUTED else 'Enabled'}")
+        save_audio_config()
+        # Stay in the menu after toggling mute
         return select_audio_device()
         
     if choice == 'p':
