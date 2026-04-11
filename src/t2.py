@@ -269,6 +269,7 @@ def select_audio_device():
     print_option("P", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
     print_option("S", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
     print_option("M", "Toggle Mute", mute_display)
+    print_option("B", "Switch Model (whisper/cohere)", MODEL_BACKEND)
     print_option("T", "Toggle Auto-Type (auto-type to screen)", copy_display)
     print(f"  R. {'Reset Terminal (if text is invisible or wonky)':<53}")
     print("-" * 85)
@@ -302,6 +303,17 @@ def select_audio_device():
     if choice.lower() == 'm':
         IS_MUTED = not IS_MUTED
         print(f"Sounds {'Muted' if IS_MUTED else 'Enabled'}")
+        save_audio_config()
+        reset_terminal()
+        return select_audio_device()
+    
+    if choice == 'B':
+        if MODEL_BACKEND == 'whisper':
+            MODEL_BACKEND = 'cohere'
+        else:
+            MODEL_BACKEND = 'whisper'
+        print(f"Model backend set to: {MODEL_BACKEND}")
+        transcribe2.set_backend(MODEL_BACKEND)
         save_audio_config()
         reset_terminal()
         return select_audio_device()

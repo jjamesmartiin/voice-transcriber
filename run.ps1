@@ -98,12 +98,20 @@ if (-not (Test-Path $tokenFile)) {
     Write-Host "`n[NOTE] Create 'HF_TOKEN' file in project root if using Cohere model (optional)" -ForegroundColor Yellow
 }
 
+# Check for test mode
+$python = Join-Path $VenvDir "Scripts\python.exe"
+$env:PYTHONPATH = $SrcDir
+
+if ($args -and $args[0] -eq "test") {
+    Write-Host "[TEST] Running transcription tests..." -ForegroundColor Cyan
+    & $python "tests/test_transcribe.py"
+    exit $LASTEXITCODE
+}
+
 # Run
 Write-Step "Starting Voice Transcriber..."
 Write-Host "  VT_MODEL_BACKEND: $env:VT_MODEL_BACKEND" -ForegroundColor Cyan
 
-$python = Join-Path $VenvDir "Scripts\python.exe"
-$env:PYTHONPATH = $SrcDir
 $env:VT_MODEL_BACKEND = $env:VT_MODEL_BACKEND
 
 & $python (Join-Path $SrcDir "main_windows.py")
