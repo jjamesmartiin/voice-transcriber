@@ -6,6 +6,10 @@ This is a self-contained Windows version that uses Windows-specific modules
 import sys
 import os
 
+# Set default backend to Whisper for Windows (works offline)
+os.environ.setdefault("VT_MODEL_BACKEND", "whisper")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
 # Get the src directory
 src_dir = os.path.dirname(os.path.abspath(__file__))
 if src_dir not in sys.path:

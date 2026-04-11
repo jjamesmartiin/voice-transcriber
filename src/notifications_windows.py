@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Windows Notifications Module
-Uses Windows-native notifications and sound
+Uses Tkinter overlay for visual notifications (no focus stealing)
 """
 import logging
 import threading
@@ -11,33 +11,87 @@ import sys
 
 logger = logging.getLogger(__name__)
 
-try:
-    import winsound
-except ImportError:
-    winsound = None
-
 class VisualNotification:
-    """Windows visual notification system"""
+    """Windows visual notification system using Tkinter overlay"""
     
     def __init__(self, app_name="Voice Transcriber"):
         self.app_name = app_name
-        self.notification_window = None
-        self.window_visible = False
-        self._notification_thread = None
+        self.active_overlay = None
     
-    def _play_sound_async(self, sound_type):
-        """Play sound asynchronously"""
+    def _show_tkinter_overlay(self, text, color="#0066cc"):
+        """Show a Tkinter overlay window - does not steal focus"""
+        def create_overlay():
+            try:
+                import tkinter as tk
+                
+                root = tk.Tk()
+                root.title(self.app_name)
+                root.overrideredirect(True)
+                root.attributes('-topmost', True)
+                root.attributes('-alpha', 0.9)
+                # Extra flags to avoid stealing focus
+                root.attributes('-disabled', True)  # Makes window non-interactive
+                root.configure(bg=color)
+                
+                screen_width = root.winfo_screenwidth()
+                screen_height = root.winfo_screenheight()
+                window_width = 320
+                window_height = 60
+                x = (screen_width - window_width) // 2
+                y = 100
+                
+                root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+                
+                # Make window appear on all virtual desktops (Windows 10+)
+                try:
+                    # CS_DROPSHADE = 0x00000008, LWA_NOREDIRECT = 0x00000002
+                    import ctypes
+                    GWL_EXSTYLE = -20
+                    WS_EX_NOACTIVATE = 0x08000000
+                    WS_EX_TOOLWINDOW = 0x00000080
+                    ex_style = ctypes.windll.user32.GetWindowLongW(root.winfo_id(), GWL_EXSTYLE)
+                    ctypes.windll.user32.SetWindowLongW(root.winfo_id(), GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
+                except:
+                    pass
+                
+                label = tk.Label(
+                    root,
+                    text=text,
+                    bg=color,
+                    fg="white",
+                    font=("Arial", 12, "bold")
+                )
+                label.pack(expand=True)
+                
+                root.after(2500, root.destroy)
+                root.mainloop()
+            except Exception as e:
+                logger.debug(f"Tkinter overlay failed: {e}")
+        
+        # Kill any existing overlay first
+        if self.active_overlay and self.active_overlay.is_alive():
+            try:
+                # The previous overlay will auto-close after its timer
+                pass
+            except:
+                pass
+        
+        self.active_overlay = threading.Thread(target=create_overlay, daemon=True)
+        self.active_overlay.start()
+    
+    def _play_sound(self, sound_type):
+        """Play system sound"""
         def play():
             try:
-                if winsound:
-                    if sound_type == "start":
-                        winsound.PlaySound("SystemExclamation", winsound.SND_ASYNC)
-                    elif sound_type == "stop":
-                        winsound.PlaySound("SystemAsterisk", winsound.SND_ASYNC)
-                    elif sound_type == "complete":
-                        winsound.PlaySound("SystemExit", winsound.SND_ASYNC)
-            except Exception:
-                pass
+                import winsound
+                if sound_type == "start":
+                    winsound.PlaySound("SystemExclamation", winsound.SND_ASYNC)
+                elif sound_type == "stop":
+                    winsound.PlaySound("SystemAsterisk", winsound.SND_ASYNC)
+                elif sound_type == "complete":
+                    winsound.PlaySound("SystemExit", winsound.SND_ASYNC)
+            except Exception as e:
+                logger.debug(f"Sound failed: {e}")
         
         thread = threading.Thread(target=play, daemon=True)
         thread.start()
@@ -45,85 +99,32 @@ class VisualNotification:
     def show_recording(self):
         """Show recording notification"""
         logger.info("Recording...")
-        self._play_sound_async("start")
-        self._show_toast_notification("Voice Transcriber", "Recording... (release Alt+Shift to transcribe)")
+        self._play_sound("start")
+        self._show_tkinter_overlay("● RECORDING", "#ff4444")
     
     def show_processing(self, message="Processing"):
         """Show processing notification"""
         logger.info(message)
-        self._show_toast_notification("Voice Transcriber", message)
+        self._show_tkinter_overlay(f"LOADING {message.upper()}", "#ffaa00")
     
     def show_completed(self, sub_text=None):
         """Show completed notification"""
-        message = "Transcription complete!"
+        message = "✓ COMPLETED"
         if sub_text:
-            if len(sub_text) > 50:
-                sub_text = sub_text[:47] + "..."
-            message = f"{message}\n{sub_text}"
+            message = f"✓ {sub_text[:30]}..."
         
         logger.info(f"Transcription: {sub_text}")
-        self._play_sound_async("complete")
-        self._show_toast_notification("Voice Transcriber", message)
+        self._play_sound("complete")
+        self._show_tkinter_overlay(message, "#00aa44")
     
     def hide_notification(self):
-        """Hide notification"""
-        self.window_visible = False
+        """Hide notification (overlay auto-closes after 2.5s)"""
+        pass
     
     def set_active_device(self, device_name):
-        """Set the active device name for display"""
+        """Set active device for display"""
         self.active_device = device_name
-    
-    def _show_toast_notification(self, title, message):
-        """Show Windows toast notification via PowerShell"""
-        try:
-            import subprocess
-            
-            ps_script = f'''
-[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-[Windows.Data.Xml.Dom.XmlDom.XmlDocument, Windows.Data.Xml.Dom.XmlDom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-
-$template = @"
-<toast>
-    <visual>
-        <binding template="ToastText02">
-            <text id="1">{title}</text>
-            <text id="2">{message}</text>
-        </binding>
-    </visual>
-</toast>
-"@
-
-$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
-$xml.LoadXml($template)
-$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("VoiceTranscriber").Show($toast)
-'''
-            
-            temp_script = os.path.join(os.path.dirname(__file__), "_toast_temp.ps1")
-            with open(temp_script, "w", encoding="utf-8") as f:
-                f.write(ps_script)
-            
-            subprocess.Popen(
-                ["powershell", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", temp_script],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
-            )
-            
-            def cleanup():
-                try:
-                    time.sleep(2)
-                    if os.path.exists(temp_script):
-                        os.remove(temp_script)
-                except:
-                    pass
-            
-            threading.Thread(target=cleanup, daemon=True).start()
-            
-        except Exception as e:
-            logger.debug(f"Toast notification failed: {e}")
     
     def cleanup(self):
         """Clean up resources"""
-        self.hide_notification()
-
-# Alias for compatibility
-VisualNotification = VisualNotification
+        pass
