@@ -15,13 +15,8 @@ function Write-Err { param([string]$m) Write-Host "[ERROR] $m" -ForegroundColor 
 
 Write-Host @"
 
-  _   _          _ _         
- | \ | |        | (_)        
- |  \| | ___  __| |_  ___    
- | . ` |/ _ \/ _` | |/ _ \   
- | |\  |  __/ (_| | | (_) |  
- |_| \_|\___|\__,_|_|\___/   
-     Windows Launcher
+  Voice Transcriber
+  Windows Launcher
 "@ -ForegroundColor Magenta
 
 # Suppress pip warnings
