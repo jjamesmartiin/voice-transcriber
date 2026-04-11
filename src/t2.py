@@ -75,7 +75,7 @@ SECONDARY_DEVICE_NAME = None
 LAST_USED_DEVICE_NAME = "Unknown"
 ACTUAL_RATE = RATE
 OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
-MODEL_BACKEND = 'whisper' # 'cohere' or 'whisper'
+MODEL_BACKEND = os.environ.get("VT_MODEL_BACKEND", "whisper").lower() # 'cohere' or 'whisper'
 COPY_TO_CLIPBOARD = True
 IS_MUTED = False
 CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
@@ -171,7 +171,9 @@ def load_audio_config():
                 SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
                 OVERRIDE_MODE = config.get('override_mode', 'auto')
                 IS_MUTED = config.get('is_muted', False)
-                MODEL_BACKEND = config.get('model_backend', 'cohere')
+                # Environment variable takes priority, then config, then default to whisper
+                env_backend = os.environ.get("VT_MODEL_BACKEND", "").lower()
+                MODEL_BACKEND = env_backend or config.get('model_backend', 'whisper')
                 COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
                 
                 # Update backend in transcribe2
@@ -267,7 +269,6 @@ def select_audio_device():
     print_option("P", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
     print_option("S", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
     print_option("M", "Toggle Mute", mute_display)
-    print_option("B", "Switch Model Backend (cohere/whisper)", model_display)
     print_option("T", "Toggle Auto-Type (auto-type to screen)", copy_display)
     print(f"  R. {'Reset Terminal (if text is invisible or wonky)':<53}")
     print("-" * 85)
@@ -309,24 +310,6 @@ def select_audio_device():
         COPY_TO_CLIPBOARD = not COPY_TO_CLIPBOARD
         print(f"Auto-Type set to: {'Enabled' if COPY_TO_CLIPBOARD else 'Disabled'}")
         save_audio_config()
-        reset_terminal()
-        return select_audio_device()
-    
-    if choice == 'B':
-        if MODEL_BACKEND == 'cohere':
-            MODEL_BACKEND = 'whisper'
-        else:
-            MODEL_BACKEND = 'cohere'
-        
-        print(f"Model backend set to: {MODEL_BACKEND.capitalize()}")
-        transcribe2.set_backend(MODEL_BACKEND)
-        save_audio_config()
-        
-        # Always preload the new model automatically
-        print(f"Preloading {MODEL_BACKEND.capitalize()} model in background...")
-        preload_model(device=DEVICE)
-        
-        time.sleep(1) # Brief pause to show message
         reset_terminal()
         return select_audio_device()
         

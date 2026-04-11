@@ -46,7 +46,7 @@ main.py / main_windows.py
 
 ### Hotkeys
 - **Alt+Shift** (hold) - Start recording, (release) - Stop and transcribe
-- **Ctrl+Alt+I** - Open settings menu (device selection, model toggle)
+- **Ctrl+Alt+I** - Open settings menu (device selection)
 
 ---
 
@@ -77,10 +77,15 @@ To download the necessary models from Hugging Face, you need to provide your API
 - **Privacy-focused**: Runs locally.
 
 ## Model Configuration
-You can switch between transcription models in the configuration menu:
-1. Press **Ctrl+Alt+I** (or run the app and press **i** in the terminal).
-2. Press **M** to toggle between **Cohere** and **Whisper** backends.
-3. The setting is saved persistently in your configuration.
+The model backend is set via the `VT_MODEL_BACKEND` environment variable:
+- `"whisper"` (default) - Faster Whisper, works offline
+- `"cohere"` - Cohere Transcribe, requires HF_TOKEN file
+
+Set before running:
+```powershell
+$env:VT_MODEL_BACKEND = "cohere"
+.\run.ps1
+```
 
 ### Model Details
 - **Cohere Transcribe**: Uses `CohereLabs/cohere-transcribe-03-2026`. Requires a Hugging Face token and access to the gated model.
@@ -126,7 +131,7 @@ src/
 
 ### Configuration
 - Audio device config: `~/.local/share/vt/audio_device_config.json` (Linux) or `%APPDATA%/vt/` (Windows)
-- Model backend toggle: Press `M` in settings menu or set `VT_MODEL_BACKEND` env var
+- Model backend: Set `VT_MODEL_BACKEND` env var before running
 
 ## Contributing
 
@@ -168,7 +173,7 @@ We value all types of contributions, including:
 
 # Hotkeys
 Alt+Shift     # Hold to record, release to transcribe
-Ctrl+Alt+I    # Settings (device selection, model toggle)
+Ctrl+Alt+I    # Settings (device selection)
 
 # The app uses Whisper by default (offline, no token needed)
 # For Cohere model: create HF_TOKEN file with your HuggingFace token

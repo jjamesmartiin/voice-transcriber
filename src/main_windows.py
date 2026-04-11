@@ -7,7 +7,7 @@ import sys
 import os
 
 # Set default backend to Whisper for Windows (works offline)
-os.environ.setdefault("VT_MODEL_BACKEND", "whisper")
+# os.environ.setdefault("VT_MODEL_BACKEND", "whisper")
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 # Get the src directory

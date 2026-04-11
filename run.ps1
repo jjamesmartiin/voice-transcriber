@@ -41,7 +41,11 @@ $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
 $env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
 
 # Set default to Whisper (works offline, no token needed)
-$env:VT_MODEL_BACKEND = "whisper"
+# User can override by setting $env:VT_MODEL_BACKEND before running
+if (-not $env:VT_MODEL_BACKEND) {
+    $env:VT_MODEL_BACKEND = "whisper"
+    # $env:VT_MODEL_BACKEND = "cohere" # Uncomment to use Cohere's model (requires HF_TOKEN)
+}
 
 # Check Python
 try {
@@ -83,7 +87,7 @@ if (-not $depsInstalled) {
     Write-Step "Installing dependencies..."
     & $pip install --upgrade pip --quiet 2>&1 | Out-Null
     & $pip install sounddevice soundfile numpy scipy --quiet
-    & $pip install torch transformers huggingface-hub faster-whisper sentencepiece protobuf accelerate librosa datasets --quiet
+    & $pip install torch "transformers>=4.52,<5.0" huggingface-hub faster-whisper sentencepiece protobuf accelerate librosa datasets --quiet
     & $pip install pynput pyperclip keyboard --quiet
     Write-Success "Dependencies installed"
 }
@@ -96,8 +100,10 @@ if (-not (Test-Path $tokenFile)) {
 
 # Run
 Write-Step "Starting Voice Transcriber..."
+Write-Host "  VT_MODEL_BACKEND: $env:VT_MODEL_BACKEND" -ForegroundColor Cyan
 
 $python = Join-Path $VenvDir "Scripts\python.exe"
 $env:PYTHONPATH = $SrcDir
+$env:VT_MODEL_BACKEND = $env:VT_MODEL_BACKEND
 
 & $python (Join-Path $SrcDir "main_windows.py")
