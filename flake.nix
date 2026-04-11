@@ -20,7 +20,7 @@
           python = pkgs.python3.override {
             self = python;
             packageOverrides = pyfinal: pyprev: {
-              faster-whisper = pyfinal.callPackage ./faster-whisper { };
+              faster-whisper = pyfinal.callPackage ./src/faster-whisper { };
             };
           };
 
@@ -108,7 +108,7 @@
           python = pkgs.python3.override {
             self = python;
             packageOverrides = pyfinal: pyprev: {
-              faster-whisper = pyfinal.callPackage ./faster-whisper { };
+              faster-whisper = pyfinal.callPackage ./src/faster-whisper { };
             };
           };
           
@@ -188,7 +188,7 @@
           python = pkgs.python3.override {
             self = python;
             packageOverrides = pyfinal: pyprev: {
-              faster-whisper = pyfinal.callPackage ./faster-whisper { };
+              faster-whisper = pyfinal.callPackage ./src/faster-whisper { };
             };
           };
 
