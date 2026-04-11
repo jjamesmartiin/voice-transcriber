@@ -1,6 +1,54 @@
 # VT (Voice Transcriber)
 
-A robust, modular voice transcription tool for Linux (Wayland/X11).
+A robust, modular voice transcription tool for Linux (Wayland/X11) and Windows.
+
+---
+
+## Quick Start
+
+### Windows
+```powershell
+# Run the app (auto-installs dependencies on first run)
+.\run.ps1
+```
+
+### Linux (Nix)
+```bash
+nix run github:jjamesmartiin/voice-transcriber
+```
+
+---
+
+## AI Context (For Code Navigation)
+
+### Entry Points
+| Platform | File | Description |
+|-----------|------|-------------|
+| Windows | `run.ps1` | PowerShell launcher - run this to start on Windows |
+| Windows | `src/main_windows.py` | Windows-specific entry point |
+| Linux | `src/main.py` | Main application loop |
+| CLI | `src/t2.py` | Standalone recording/transcription script |
+
+### Architecture
+```
+main.py / main_windows.py
+    ├── hotkeys.py / hotkeys_windows.py   # Global hotkey handling (Alt+Shift)
+    ├── t2.py                              # Audio recording logic
+    │       └── transcribe2.py             # Model dispatcher
+    │               ├── transcribe_whisper.py   # Faster-Whisper (offline)
+    │               └── transcribe_cohere.py   # Cohere API (requires token)
+    └── notifications.py / notifications_windows.py  # Visual overlay
+```
+
+### Key Variables
+- `VT_MODEL_BACKEND` - Set to "whisper" (default/offline) or "cohere" (requires HF_TOKEN)
+- `INPUT_DEVICE_INDEX` - Audio input device (auto-detected, configurable via Ctrl+Alt+I)
+
+### Hotkeys
+- **Alt+Shift** (hold) - Start recording, (release) - Stop and transcribe
+- **Ctrl+Alt+I** - Open settings menu (device selection, model toggle)
+
+---
 
 ## Installation & Usage (Nix)
 
@@ -41,25 +89,44 @@ You can switch between transcription models in the configuration menu:
 
 ## Codebase Context 
 
-This section provides a high-level overview of the project's architecture and technology stack to help AI models and developers understand the codebase quickly.
+This section provides a high-level overview of the project's architecture and technology stack.
 
-- **Purpose**: Low-latency, privacy-focused voice transcription for Linux desktops (Wayland/X11).
-- **Tech Stack**: 
-  - **Core**: Python 3.x
-  - **Transcription Engines**:
-    - **Cohere**: `CohereLabs/cohere-transcribe-03-2026` via `transformers` (Higher quality, requires gating access).
-    - **Faster Whisper**: Using `faster-whisper` (Fast, fully local/offline).
-  - **Global Hotkeys**: `evdev` + `uinput` for Wayland-compatible global keyboard interception.
-  - **Audio Engine**: `sounddevice` / `PortAudio`.
-  - **Visuals**: `Tkinter` (overlays) or `zenity` (fallback) for desktop notifications.
-  - **Packaging**: `Nix` (Flakes) for reproducible builds and environments.
-- **Main Entry Points**:
-  - `src/main.py`: The main application loop and orchestration.
-  - `src/t2.py`: Optimized CLI-based recording and transcription script (standalone).
-- **Core Logic**:
-  - `src/transcribe2.py`: Model loading, pre-loading, and transcription execution.
-  - `src/hotkeys.py`: Low-level keyboard event handling and virtual keyboard device creation.
-  - `src/notifications.py`: Multi-platform notification logic (terminal + GUI).
+### Purpose
+Low-latency, privacy-focused voice transcription for Linux (Wayland/X11) and Windows desktops.
+
+### Tech Stack
+- **Core**: Python 3.x
+- **Transcription Engines**:
+  - **Cohere**: `CohereLabs/cohere-transcribe-03-2026` via `transformers` (higher quality, requires gating)
+  - **Faster Whisper**: `faster-whisper` (fast, fully local/offline)
+- **Global Hotkeys**: 
+  - Linux: `evdev` + `uinput`
+  - Windows: `pynput`
+- **Audio Engine**: `sounddevice` / `PortAudio`
+- **Visuals**: 
+  - Linux: `Tkinter` or `zenity`
+  - Windows: `Tkinter` overlay + `winsound`
+- **Packaging**: Nix Flakes (Linux), PowerShell (Windows)
+
+### File Structure
+```
+src/
+├── main.py             # Linux main application
+├── main_windows.py    # Windows entry point
+├── t2.py              # Audio recording & transcription logic
+├── transcribe2.py      # Model dispatcher (whisper/cohere)
+├── transcribe_whisper.py  # Whisper transcription
+├── transcribe_cohere.py   # Cohere transcription
+├── hotkeys.py         # Linux global hotkeys (evdev)
+├── hotkeys_windows.py # Windows global hotkeys (pynput)
+├── notifications.py   # Linux notifications
+├── notifications_windows.py # Windows overlay notifications
+└── sounds/            # Audio feedback files
+```
+
+### Configuration
+- Audio device config: `~/.local/share/vt/audio_device_config.json` (Linux) or `%APPDATA%/vt/` (Windows)
+- Model backend toggle: Press `M` in settings menu or set `VT_MODEL_BACKEND` env var
 
 ## Contributing
 
@@ -79,9 +146,33 @@ We value all types of contributions, including:
 - **Design**: Improving visual notifications or UI elements.
 
 ## Requirements
+
+### Windows
+- Windows 10+
+- Python 3.10+
+- Run `.\run.ps1` (auto-installs dependencies)
+
+### Linux
 - Linux (Wayland or X11)
 - Nix package manager
 - User must be in `input` group for global hotkeys (or run as root).
+
+## Windows Setup
+
+```powershell
+# Clone and run
+.\run.ps1
+
+# First run: creates .venv, installs dependencies, downloads Whisper model (~75MB)
+# Subsequent runs: just starts the app
+
+# Hotkeys
+Alt+Shift     # Hold to record, release to transcribe
+Ctrl+Alt+I    # Settings (device selection, model toggle)
+
+# The app uses Whisper by default (offline, no token needed)
+# For Cohere model: create HF_TOKEN file with your HuggingFace token
+```
 
 ## Troubleshooting
 
