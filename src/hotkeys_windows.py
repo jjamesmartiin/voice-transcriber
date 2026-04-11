@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Windows Global Hotkeys Module
-Uses pynput for cross-platform global hotkey support on Windows
+Uses pynput for Alt+Shift recording, keyboard library for Ctrl+Alt+I menu
 """
 import logging
 import threading
@@ -11,21 +11,26 @@ import sys
 logger = logging.getLogger(__name__)
 
 try:
-    from pynput import keyboard
+    from pynput import keyboard as pynput_keyboard
     from pynput.keyboard import Key, KeyCode
 except ImportError:
     logger.error("pynput not installed. Run: pip install pynput")
     raise
 
+try:
+    import keyboard as kb_lib
+except ImportError:
+    logger.error("keyboard not installed. Run: pip install keyboard")
+    raise
+
 class WindowsGlobalHotkeys:
-    """Windows-compatible global hotkey system using pynput"""
+    """Windows-compatible global hotkey system using pynput + keyboard library"""
     
     def __init__(self, callback_start, callback_stop, callback_config=None):
         self.callback_start = callback_start
         self.callback_stop = callback_stop
         self.callback_config = callback_config
         self.running = False
-        self.listener = None
         self.hotkey_active = False
         self.copy_to_clipboard_mode = False
         
@@ -42,50 +47,56 @@ class WindowsGlobalHotkeys:
     def _start_listener(self):
         """Start the keyboard listener"""
         try:
-            self.listener = keyboard.Listener(
+            self.listener = pynput_keyboard.Listener(
                 on_press=self._on_press,
                 on_release=self._on_release
             )
             self.listener.start()
+            
+            kb_lib.on_press(self._on_config_press, suppress=False)
+            
             logger.info("Windows hotkey listener started")
         except Exception as e:
             logger.error(f"Failed to start keyboard listener: {e}")
             self.devices = []
     
+    def _on_config_press(self, e):
+        """Handle Ctrl+Alt+I for config menu using keyboard library"""
+        key_name = e.name
+        if key_name == 'i' and (kb_lib.is_pressed('ctrl') or kb_lib.is_pressed('left ctrl') or kb_lib.is_pressed('right ctrl')) and (kb_lib.is_pressed('alt') or kb_lib.is_pressed('left alt') or kb_lib.is_pressed('right alt')):
+            logger.info("⚙️  Config hotkey (Ctrl+Alt+I) activated")
+            if self.callback_config:
+                self.callback_config()
+    
     def _on_press(self, key):
-        """Handle key press"""
+        """Handle key press using pynput"""
         try:
             key_val = key if isinstance(key, KeyCode) else key
             self.pressed_keys.add(key_val)
             
-            if self._is_config_hotkey_pressed():
-                if self.callback_config:
-                    logger.debug("Config hotkey activated")
-                    self.callback_config()
-                self.pressed_keys.clear()
-                return
-            
             if self._is_main_hotkey_pressed() and not self.hotkey_active:
-                logger.debug("Hotkey activated - starting recording")
+                logger.info("🎤 Starting recording...")
                 self.hotkey_active = True
                 self.copy_to_clipboard_mode = Key.ctrl_l in self.pressed_keys or Key.ctrl_r in self.pressed_keys
-                self.callback_start()
-                
+                if self.callback_start:
+                    self.callback_start()
+                    
         except Exception as e:
             logger.error(f"Error in key press handler: {e}")
     
     def _on_release(self, key):
-        """Handle key release"""
+        """Handle key release using pynput"""
         try:
             key_val = key if isinstance(key, KeyCode) else key
             if key_val in self.pressed_keys:
                 self.pressed_keys.remove(key_val)
             
             if self.hotkey_active and not self._is_main_hotkey_pressed():
-                logger.debug("Hotkey released - stopping recording")
+                logger.info("🛑 Stopping recording...")
                 self.hotkey_active = False
-                self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
-                
+                if self.callback_stop:
+                    self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
+                    
         except Exception as e:
             logger.error(f"Error in key release handler: {e}")
     
@@ -95,33 +106,14 @@ class WindowsGlobalHotkeys:
         shift_pressed = bool(self.pressed_keys & self.SHIFT_KEYS)
         return alt_pressed and shift_pressed
     
-    def _is_config_hotkey_pressed(self):
-        """Check if Ctrl+Alt+I is pressed"""
-        alt_pressed = bool(self.pressed_keys & self.ALT_KEYS)
-        ctrl_pressed = bool(self.pressed_keys & self.CTRL_KEYS)
-        i_pressed = any(
-            (isinstance(k, KeyCode) and getattr(k, 'char', None) == 'i')
-            for k in self.pressed_keys
-        )
-        return alt_pressed and ctrl_pressed and i_pressed
-    
     def are_modifiers_pressed(self):
         """Check if any modifier keys are still pressed"""
         return bool(self.pressed_keys & (self.ALT_KEYS | self.SHIFT_KEYS | self.CTRL_KEYS))
     
     def type_text(self, text):
-        """Type text using pynput keyboard"""
+        """Type text using keyboard library"""
         try:
-            from pynput.keyboard import Controller
-            keyboard_controller = Controller()
-            
-            for char in text:
-                try:
-                    keyboard_controller.type(char)
-                except:
-                    pass
-                time.sleep(0.01)
-            
+            kb_lib.write(text)
             return True
         except Exception as e:
             logger.error(f"Error typing text: {e}")
@@ -152,6 +144,9 @@ class WindowsGlobalHotkeys:
                 pass
         self.listener = None
         self.pressed_keys.clear()
+        try:
+            kb_lib.unhook_all()
+        except:
+            pass
 
-# Alias for compatibility with main.py import
 WaylandGlobalHotkeys = WindowsGlobalHotkeys

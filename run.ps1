@@ -14,14 +14,24 @@ function Write-Success { param([string]$m) Write-Host "[OK] $m" -ForegroundColor
 function Write-Err { param([string]$m) Write-Host "[ERROR] $m" -ForegroundColor Red }
 
 Write-Host @"
-
-  _   _                  _ _     _______          
- | \ | |                | (_)   |__   __|         
- |  \| | ___  __ _ _ __ | |_ ___   | | __ _  ___ 
- | .  |/ _ \/ _` | '_ \| | / _ \  | |/ _` |/ _ \
- | |\  |  __/ (_| | | | | | (_) | | | (_| |  __/
- |_| \_|\___|\__,_|_| |_|_|\___/  |_|\__,_|\___|
-      Windows Launcher
+/\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\ 
+( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )
+ > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ < 
+ /\_/\                                                                 /\_/\ 
+( o.o )    __     __    _                                             ( o.o )
+ > ^ <     \ \   / /__ (_) ___ ___                                     > ^ < 
+ /\_/\      \ \ / / _ \| |/ __/ _ \                                    /\_/\ 
+( o.o )      \ V / (_) | | (_|  __/                                   ( o.o )
+ > ^ <      __\_/ \___/|_|\___\___|            _ _                     > ^ < 
+ /\_/\     |_   _| __ __ _ _ __  ___  ___ _ __(_) |__   ___ _ __       /\_/\ 
+( o.o )      | || '__/ _` | '_ \/ __|/ __| '__| | '_ \ / _ \ '__|     ( o.o )
+ > ^ <       | || | | (_| | | | \__ \ (__| |  | | |_) |  __/ |         > ^ < 
+ /\_/\       |_||_|  \__,_|_| |_|___/\___|_|  |_|_.__/ \___|_|         /\_/\ 
+( o.o )                                                               ( o.o )
+ > ^ <                                                                 > ^ < 
+ /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\ 
+( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )
+ > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ < 
 "@ -ForegroundColor Magenta
 
 # Suppress pip warnings
@@ -74,7 +84,7 @@ if (-not $depsInstalled) {
     & $pip install --upgrade pip --quiet 2>&1 | Out-Null
     & $pip install sounddevice soundfile numpy scipy --quiet
     & $pip install torch transformers huggingface-hub faster-whisper sentencepiece protobuf accelerate librosa datasets --quiet
-    & $pip install pynput pyperclip --quiet
+    & $pip install pynput pyperclip keyboard --quiet
     Write-Success "Dependencies installed"
 }
 
