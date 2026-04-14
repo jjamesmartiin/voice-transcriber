@@ -108,12 +108,15 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
         text_parts.append(segment.text)
     
     elapsed = time.time() - start_time
+    transcription = " ".join(text_parts).strip()
     print(f"Transcription completed in {elapsed:.2f} seconds")
+    if transcription:
+        print(transcription)
     if info:
         print(f"Detected language '{info.language}' with probability {info.language_probability:.2f}")
-    
+
     # Return the full transcript
-    return " ".join(text_parts).strip()
+    return transcription
 
 def unload_model():
     """Unload the model to free up memory"""

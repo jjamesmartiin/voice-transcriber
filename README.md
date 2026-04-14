@@ -179,6 +179,37 @@ Ctrl+Alt+I    # Settings (device selection)
 # For Cohere model: create HF_TOKEN file with your HuggingFace token
 ```
 
+### Building .exe
+
+Build `.exe` that bundles dependencies:
+
+1. **Install dependencies** (if not using `run.ps1`):
+   ```powershell
+   pip install -r requirements.txt
+   ```
+
+2. **Build the executable**:
+   ```powershell
+   python build_windows.py
+   ```
+
+   Or manually with PyInstaller:
+   ```powershell
+   python -m PyInstaller voice_transcriber.spec --clean --noconfirm
+   ```
+
+3. **Output**: The executable is at `dist\VoiceTranscriber.exe`
+
+4. **Run**:
+   ```powershell
+   .\dist\VoiceTranscriber.exe
+   ```
+
+**Notes:**
+- The first run downloads the Whisper model (~75MB) to `~/.cache/whisper/`.
+- For the Cohere model, place an `HF_TOKEN` file in the same directory as the executable.
+- The build includes `torch` and `transformers`, so the final .exe will be large (~1-2GB).
+
 ## Troubleshooting
 
 ### Clipboard Issues (Wayland)
@@ -209,12 +240,20 @@ Then inside the shell:
 - Run app: `python src/main.py`
 
 ### Testing
-- Run all tests: `python -m pytest tests/` (or `nix run .#test`)
-- Run specific tests or pass arguments to pytest:
-```bash
-# Filter tests by keyword
-nix run .#test -- -k transcription
 
-# Run with verbose output
-nix run .#test -- -v
+Run the full test suite:
+```bash
+python -m pytest tests/ -v
+nix run .#test
+.\run.ps1 test
+```
+
+```bash
+python -m pytest tests/test_transcribe_whisper.py -v
+python -m pytest tests/test_transcribe_cohere.py -v
+python -m pytest tests/test_transcribe2.py -v
+python -m pytest tests/test_hotkeys.py -v
+python -m pytest tests/test_hotkeys_windows.py -v
+python -m pytest tests/test_notifications.py -v
+python -m pytest tests/test_notifications_windows.py -v
 ```

@@ -13,6 +13,15 @@ import sys
 import pyperclip
 import atexit
 
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
 # Import core modules
 from notifications import VisualNotification
 from hotkeys import WaylandGlobalHotkeys
@@ -115,7 +124,7 @@ class SimpleVoiceTranscriber:
         # Play sound
         try:
             if not t2.IS_MUTED:
-                sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/start.mp3')
+                sound_path = resource_path('sounds/start.mp3')
                 subprocess.Popen(['mpg123', '-q', sound_path], 
                                stderr=subprocess.DEVNULL)
         except:
@@ -236,7 +245,7 @@ class SimpleVoiceTranscriber:
                 # Play sound
                 try:
                     if not t2.IS_MUTED:
-                        sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
+                        sound_path = resource_path('sounds/pop.mp3')
                         subprocess.Popen(['mpg123', '-q', sound_path], 
                                        stderr=subprocess.DEVNULL)
                 except:
