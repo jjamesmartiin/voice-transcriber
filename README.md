@@ -5,14 +5,32 @@ A voice transcription tool with global hotkeys for Windows and Linux.
 ## Quick Start
 
 ### Windows
-```powershell
+```
+# Clone the repository
+git clone git@github.com:jjamesmartiin/voice-transcriber.git
+cd voice-transcriber
+
+# Run
 .\run.ps1
 ```
 
 ### Linux
 ```bash
+# Add user to input group for global hotkeys
+sudo usermod -a -G input $USER
+# Log out and back in, then run:
 nix run github:jjamesmartiin/voice-transcriber
+
+# Or run as root (not recommended)
+sudo nix run github:jjamesmartiin/voice-transcriber
 ```
+
+#### NixOS Example
+```nix
+users.users.yourusername.extraGroups = [ "input" ];
+```
+
+See [NixOS options](https://search.nixos.org/options?channel=25.11&include_modular_service_options=1&include_nixos_options=1&query=users.users.*.extra) for more info.
 
 ## Usage
 
@@ -25,7 +43,6 @@ nix run github:jjamesmartiin/voice-transcriber
 - M - Toggle mute
 - B - Switch model (whisper/cohere)
 - T - Toggle auto-type to screen
-- p/s/a - Manual device override
 - c - Save and exit
 
 ### Model Options
