@@ -76,8 +76,8 @@ LAST_USED_DEVICE_NAME = "Unknown"
 ACTUAL_RATE = RATE
 OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
 MODEL_BACKEND = os.environ.get("VT_MODEL_BACKEND", "whisper").lower() # 'cohere' or 'whisper'
-COPY_TO_CLIPBOARD = True
-IS_MUTED = False
+COPY_TO_CLIPBOARD = False
+IS_MUTED = True
 CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 
 def find_device_index(name):
@@ -174,7 +174,7 @@ def load_audio_config():
                 # Environment variable takes priority, then config, then default to whisper
                 env_backend = os.environ.get("VT_MODEL_BACKEND", "").lower()
                 MODEL_BACKEND = env_backend or config.get('model_backend', 'whisper')
-                COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
+                COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', False)
                 
                 # Update backend in transcribe2
                 transcribe2.set_backend(MODEL_BACKEND)
