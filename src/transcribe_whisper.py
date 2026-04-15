@@ -1,13 +1,28 @@
 # Optimized whisper transcription with performance focus
 
-MODEL = "small"  # The smallest model that provides acceptable accuracy
+MODEL = "small"
 
 import warnings
 import threading
 import os
+import sys
 import time
 import numpy as np
 from faster_whisper import WhisperModel, BatchedInferencePipeline
+
+def get_bundled_model_dir():
+    """Get the model directory - bundled in EXE or use default cache"""
+    if getattr(sys, 'frozen', False):
+        meipass = sys._MEIPASS
+        # Check for models in extracted bundle
+        bundled_models = os.path.join(meipass, 'models', 'whisper')
+        if os.path.exists(bundled_models):
+            return bundled_models
+        # Also check if models are in cache dir within bundle
+        cache_dir = os.path.join(meipass, '.cache', 'whisper')
+        if os.path.exists(cache_dir):
+            return cache_dir
+    return os.path.expanduser("~/.cache/whisper")
 
 # Filter out UserWarning about FP16 not supported on CPU
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
@@ -20,14 +35,18 @@ _model_lock = threading.Lock()
 
 def load_model(model_name=MODEL, device="cpu", compute_type=None):
     """Load model with optimized parameters for the current device"""
-    # Automatically select the best compute type for the device
     if compute_type is None:
         if device == "cuda":
-            compute_type = "float16"  # Best performance on CUDA with reduced precision
+            compute_type = "float16"
         else:
-            compute_type = "int8"  # Best for CPU
+            compute_type = "int8"
 
-    model = WhisperModel(model_name, device=device, compute_type=compute_type, download_root=os.path.expanduser("~/.cache/whisper"))
+    model = WhisperModel(
+        model_name, 
+        device=device, 
+        compute_type=compute_type, 
+        download_root=get_bundled_model_dir()
+    )
     
     # Use batched inference pipeline for performance
     batched_model = BatchedInferencePipeline(model=model)

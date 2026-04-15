@@ -106,6 +106,36 @@ if ($args -and $args[0] -eq "test") {
     exit $LASTEXITCODE
 }
 
+# Build mode - create offline EXE
+if ($args -and $args[0] -eq "build") {
+    Write-Host "[BUILD] Building offline EXE..." -ForegroundColor Cyan
+    
+    # Check PyInstaller (use global pip, not venv)
+    python -m pip show pyinstaller --quiet 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Step "Installing PyInstaller..."
+        python -m pip install pyinstaller --quiet
+    }
+    
+    $buildScript = Join-Path $ProjectRoot "build_offline.py"
+    $logFile = Join-Path $ProjectRoot "build.log"
+    
+    Write-Host "[BUILD] Running build script, logging to $logFile" -ForegroundColor Cyan
+    python $buildScript 2>&1 | Tee-Object -FilePath $logFile
+    
+    # Check result
+    $exePath = Join-Path $ProjectRoot "dist\VoiceTranscriber.exe"
+    if (Test-Path $exePath) {
+        $size = (Get-Item $exePath).Length / 1MB
+        Write-Success "EXE built: $exePath"
+        Write-Host "Size: $([math]::Round($size, 1)) MB" -ForegroundColor Cyan
+    } else {
+        Write-Err "Build failed - check $logFile for details"
+        exit 1
+    }
+    exit 0
+}
+
 # Run
 Write-Step "Starting Voice Transcriber..."
 Write-Host "  VT_MODEL_BACKEND: $env:VT_MODEL_BACKEND" -ForegroundColor Cyan
