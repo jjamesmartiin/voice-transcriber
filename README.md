@@ -54,7 +54,11 @@ $env:VT_MODEL_BACKEND = "cohere"
 - Nix package manager
 
 ## Testing
-```bash
+```powershell
+# Windows
+.\run.ps1 test
+
+# Linux
 nix run .#test
 ```
 
