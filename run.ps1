@@ -118,10 +118,9 @@ if ($args -and $args[0] -eq "build") {
     }
     
     $buildScript = Join-Path $ProjectRoot "build_offline.py"
-    $logFile = Join-Path $ProjectRoot "build.log"
     
-    Write-Host "[BUILD] Running build script, logging to $logFile" -ForegroundColor Cyan
-    python $buildScript 2>&1 | Tee-Object -FilePath $logFile
+    Write-Host "[BUILD] Running build script..." -ForegroundColor Cyan
+    python $buildScript
     
     # Check result
     $exePath = Join-Path $ProjectRoot "dist\VoiceTranscriber.exe"
@@ -130,7 +129,7 @@ if ($args -and $args[0] -eq "build") {
         Write-Success "EXE built: $exePath"
         Write-Host "Size: $([math]::Round($size, 1)) MB" -ForegroundColor Cyan
     } else {
-        Write-Err "Build failed - check $logFile for details"
+        Write-Err "Build failed"
         exit 1
     }
     exit 0

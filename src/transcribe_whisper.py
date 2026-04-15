@@ -12,17 +12,50 @@ from faster_whisper import WhisperModel, BatchedInferencePipeline
 
 def get_bundled_model_dir():
     """Get the model directory - bundled in EXE or use default cache"""
+    local_model_dir = os.path.join(os.path.dirname(sys.executable), "models", "whisper")
+    if os.path.isdir(local_model_dir):
+        return local_model_dir
+    
     if getattr(sys, 'frozen', False):
         meipass = sys._MEIPASS
-        # Check for models in extracted bundle
         bundled_models = os.path.join(meipass, 'models', 'whisper')
-        if os.path.exists(bundled_models):
+        if os.path.isdir(bundled_models):
             return bundled_models
-        # Also check if models are in cache dir within bundle
         cache_dir = os.path.join(meipass, '.cache', 'whisper')
-        if os.path.exists(cache_dir):
+        if os.path.isdir(cache_dir):
             return cache_dir
     return os.path.expanduser("~/.cache/whisper")
+
+
+def extract_bundled_models():
+    """Extract bundled models to local directory on first run"""
+    if not getattr(sys, 'frozen', False):
+        return None
+    
+    meipass = sys._MEIPASS
+    source_models = os.path.join(meipass, 'models', 'whisper')
+    
+    if not os.path.isdir(source_models):
+        return None
+    
+    local_models_dir = os.path.join(os.path.dirname(sys.executable), "models")
+    local_whisper_dir = os.path.join(local_models_dir, "whisper")
+    
+    if os.path.isdir(local_whisper_dir):
+        return local_whisper_dir
+    
+    print(f"Extracting bundled Whisper models to {local_models_dir}...")
+    print("This may take a minute...")
+    
+    import shutil
+    try:
+        os.makedirs(local_whisper_dir, exist_ok=True)
+        shutil.copytree(source_models, local_whisper_dir, dirs_exist_ok=True)
+        print("Whisper model extraction complete!")
+        return local_whisper_dir
+    except Exception as e:
+        print(f"Error extracting Whisper models: {e}")
+        return None
 
 # Filter out UserWarning about FP16 not supported on CPU
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
@@ -35,6 +68,8 @@ _model_lock = threading.Lock()
 
 def load_model(model_name=MODEL, device="cpu", compute_type=None):
     """Load model with optimized parameters for the current device"""
+    extract_bundled_models()
+    
     if compute_type is None:
         if device == "cuda":
             compute_type = "float16"

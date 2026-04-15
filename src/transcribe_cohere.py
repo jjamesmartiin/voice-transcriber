@@ -16,33 +16,65 @@ MODEL_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 
 def get_bundled_model_dir():
     """Get the model directory - bundled in EXE or use default cache"""
+    local_model_dir = os.path.join(os.path.dirname(sys.executable), "models", "huggingface")
+    if os.path.isdir(local_model_dir):
+        return local_model_dir
+    
     if getattr(sys, 'frozen', False):
         meipass = sys._MEIPASS
-        # Check for models in extracted bundle
         bundled_models = os.path.join(meipass, 'models', 'huggingface')
-        if os.path.exists(bundled_models):
+        if os.path.isdir(bundled_models):
             return bundled_models
-        # Also check if HF_TOKEN is bundled (models might be in default cache location inside bundle)
-        token_file = os.path.join(meipass, 'HF_TOKEN')
-        if os.path.exists(token_file):
-            # Models should be in cache dir within bundle
-            cache_dir = os.path.join(meipass, '.cache', 'huggingface', 'hub')
-            if os.path.exists(cache_dir):
-                return cache_dir
-    return None  # Will use default ~/.cache/huggingface/hub
+    
+    local_cache = os.path.expanduser("~/.cache/huggingface/hub")
+    if os.path.isdir(local_cache):
+        return local_cache
+    return None
+
+
+def extract_bundled_models():
+    """Extract bundled models to local directory on first run"""
+    if not getattr(sys, 'frozen', False):
+        return None
+    
+    meipass = sys._MEIPASS
+    source_models = os.path.join(meipass, 'models', 'huggingface')
+    
+    if not os.path.isdir(source_models):
+        return None
+    
+    local_models_dir = os.path.join(os.path.dirname(sys.executable), "models")
+    local_hf_dir = os.path.join(local_models_dir, "huggingface")
+    
+    if os.path.isdir(local_hf_dir):
+        return local_hf_dir
+    
+    print(f"Extracting bundled models to {local_models_dir}...")
+    print("This may take a minute...")
+    
+    import shutil
+    try:
+        os.makedirs(local_hf_dir, exist_ok=True)
+        shutil.copytree(source_models, local_hf_dir, dirs_exist_ok=True)
+        print("Model extraction complete!")
+        return local_hf_dir
+    except Exception as e:
+        print(f"Error extracting models: {e}")
+        return None
 
 def get_hf_token_location():
     """Get HF_TOKEN location - bundled in EXE or local files"""
     if getattr(sys, 'frozen', False):
         meipass = sys._MEIPASS
-        # Check direct location
-        token_file = os.path.join(meipass, 'HF_TOKEN')
-        if os.path.exists(token_file):
-            return token_file
-        # Also check in models folder
-        token_file = os.path.join(meipass, 'models', 'HF_TOKEN')
-        if os.path.exists(token_file):
-            return token_file
+        try:
+            token_file = os.path.join(meipass, 'HF_TOKEN')
+            if os.path.isfile(token_file):
+                return token_file
+            token_file = os.path.join(meipass, 'models', 'HF_TOKEN')
+            if os.path.isfile(token_file):
+                return token_file
+        except OSError:
+            pass
     return None
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -142,6 +174,7 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
     token = get_token()
     dtype = torch.float16 if device == "cuda" else torch.float32
     
+    extract_bundled_models()
     bundled_dir = get_bundled_model_dir()
     cache_dir = bundled_dir if bundled_dir else os.path.expanduser("~/.cache/huggingface/hub")
     
@@ -184,7 +217,8 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
                 revision=revision,
                 trust_remote_code=True,
                 token=token,
-                cache_dir=cache_dir
+                local_files_only=False,
+                cache_dir=os.path.expanduser("~/.cache/huggingface/hub")
             )
             
             model = AutoModelForSpeechSeq2Seq.from_pretrained(
@@ -193,7 +227,8 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
                 torch_dtype=dtype,
                 trust_remote_code=True,
                 token=token,
-                cache_dir=cache_dir
+                local_files_only=False,
+                cache_dir=os.path.expanduser("~/.cache/huggingface/hub")
             ).to(device)
             
             return model, processor
