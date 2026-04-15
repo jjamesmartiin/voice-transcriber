@@ -15,22 +15,8 @@ cd voice-transcriber
 ```
 
 ### Linux
-```bash
-# Add user to input group for global hotkeys
-sudo usermod -a -G input $USER
-# Log out and back in, then run:
-nix run github:jjamesmartiin/voice-transcriber
+See the [main](https://github.com/jjamesmartiin/voice-transcriber/tree/main) branch.
 
-# Or run as root (not recommended)
-sudo nix run github:jjamesmartiin/voice-transcriber
-```
-
-#### NixOS Example
-```nix
-users.users.yourusername.extraGroups = [ "input" ];
-```
-
-See [NixOS options](https://search.nixos.org/options?channel=25.11&include_modular_service_options=1&include_nixos_options=1&query=users.users.*.extra) for more info.
 
 ## Usage
 
