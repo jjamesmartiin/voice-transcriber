@@ -144,9 +144,10 @@ def build_exe():
         sys.executable, "-m", "PyInstaller",
         str(SRC_DIR / "main_windows.py"),
         "--name=VoiceTranscriber",
-        "--onefile",
+        "--onedir",
         "--console",
         "--clean",
+        "-y",
         "--log-level=INFO",
         
         # Add models directory
@@ -177,9 +178,11 @@ def build_exe():
         "--collect-all=torch",
         "--collect-all=tokenizers",
         "--collect-all=ctranslate2",
+        
+        # Disable upx to avoid issues with large bundles
+        "--upx-dir=NONE",
     ]
     
-    # Add icon if it exists
     icon_path = PROJECT_ROOT / "icon.ico"
     if icon_path.exists():
         pyinstaller_args.append(f"--icon={icon_path}")
