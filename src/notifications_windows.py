@@ -81,6 +81,13 @@ class VisualNotification:
     
     def _play_sound(self, sound_type):
         """Play system sound"""
+        try:
+            import t2
+            if t2.IS_MUTED:
+                return
+        except:
+            pass
+        
         def play():
             try:
                 import winsound

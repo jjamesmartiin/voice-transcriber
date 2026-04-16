@@ -70,12 +70,13 @@ if (-not (Test-Path $VenvDir)) {
     Write-Success "Virtual environment created"
 }
 
-$pip = Join-Path $VenvDir "Scripts\pip.exe"
+$pipExe = Join-Path $VenvDir "Scripts\pip.exe"
+$reqFile = Join-Path $ProjectRoot "requirements.txt"
 
-# Check if core dependencies are installed, install if not
+# Check if dependencies need installing
 $depsInstalled = $false
 try {
-    $pkgs = & $pip list --format=json 2>&1 | ConvertFrom-Json
+    $pkgs = & $pipExe list --format=json 2>&1 | ConvertFrom-Json
     $hasSounddevice = $pkgs | Where-Object { $_.name -eq "sounddevice" }
     $hasPynput = $pkgs | Where-Object { $_.name -eq "pynput" }
     if ($hasSounddevice -and $hasPynput) {
@@ -84,11 +85,8 @@ try {
 } catch {}
 
 if (-not $depsInstalled) {
-    Write-Step "Installing dependencies..."
-    & $pip install --upgrade pip --quiet 2>&1 | Out-Null
-    & $pip install sounddevice soundfile numpy scipy --quiet
-    & $pip install torch "transformers>=4.52,<5.0" huggingface-hub faster-whisper sentencepiece protobuf accelerate librosa datasets --quiet
-    & $pip install pynput pyperclip keyboard --quiet
+    Write-Step "Installing dependencies from requirements.txt..."
+    & $pipExe install -r $reqFile --quiet
     Write-Success "Dependencies installed"
 }
 
