@@ -221,7 +221,9 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     
     elapsed = time.time() - start_time
     print(f"Transcription completed in {elapsed:.2f} seconds")
-    
+    if transcription:
+        print(transcription)
+
     return transcription
 
 def unload_model():
