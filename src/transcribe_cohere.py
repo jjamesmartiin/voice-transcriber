@@ -16,46 +16,85 @@ MODEL_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 
 def get_bundled_model_dir():
     """Get the model directory - bundled in EXE or use default cache"""
-    local_model_dir = os.path.join(os.path.dirname(sys.executable), "models", "huggingface")
+    # First check if models were extracted next to EXE
+    local_model_dir = os.path.join(os.path.dirname(sys.executable), "models", "huggingface", "hub")
     if os.path.isdir(local_model_dir):
+        print(f"Found extracted models at: {local_model_dir}")
         return local_model_dir
     
+    # Check bundled in EXE (MEIPASS)
     if getattr(sys, 'frozen', False):
         meipass = sys._MEIPASS
-        bundled_models = os.path.join(meipass, 'models', 'huggingface')
+        bundled_models = os.path.join(meipass, 'models', 'huggingface', 'hub')
         if os.path.isdir(bundled_models):
+            print(f"Found bundled models at: {bundled_models}")
             return bundled_models
+        
+        # Also check without hub subfolder
+        bundled_models_alt = os.path.join(meipass, 'models', 'huggingface')
+        if os.path.isdir(bundled_models_alt):
+            print(f"Found bundled models at: {bundled_models_alt}")
+            return bundled_models_alt
     
+    # Fall back to default HuggingFace cache
     local_cache = os.path.expanduser("~/.cache/huggingface/hub")
     if os.path.isdir(local_cache):
+        print(f"Using HuggingFace cache: {local_cache}")
         return local_cache
+    print("No model directory found!")
     return None
 
 
 def extract_bundled_models():
     """Extract bundled models to local directory on first run"""
     if not getattr(sys, 'frozen', False):
+        print("Not running as frozen EXE, skipping extraction")
         return None
     
     meipass = sys._MEIPASS
-    source_models = os.path.join(meipass, 'models', 'huggingface')
+    source_models = os.path.join(meipass, 'models', 'huggingface', 'hub')
     
     if not os.path.isdir(source_models):
-        return None
+        # Try alternative location
+        source_models_alt = os.path.join(meipass, 'models', 'huggingface')
+        if os.path.isdir(source_models_alt):
+            source_models = source_models_alt
+        else:
+            print(f"No bundled models found at: {meipass}/models/huggingface/")
+            return None
     
     local_models_dir = os.path.join(os.path.dirname(sys.executable), "models")
-    local_hf_dir = os.path.join(local_models_dir, "huggingface")
+    local_hf_dir = os.path.join(local_models_dir, "huggingface", "hub")
     
     if os.path.isdir(local_hf_dir):
+        print(f"Using previously extracted models: {local_hf_dir}")
         return local_hf_dir
     
-    print(f"Extracting bundled models to {local_models_dir}...")
-    print("This may take a minute...")
+    print(f"\nExtracting bundled models to: {local_models_dir}")
+    print("This may take a few minutes for the ~4GB model...")
+    print("Progress will be shown below as files are copied...")
     
     import shutil
     try:
         os.makedirs(local_hf_dir, exist_ok=True)
-        shutil.copytree(source_models, local_hf_dir, dirs_exist_ok=True)
+        
+        # Copy each model directory with progress
+        for item in os.listdir(source_models):
+            src_item = os.path.join(source_models, item)
+            if os.path.isdir(src_item):
+                dst_item = os.path.join(local_hf_dir, item)
+                size_mb = sum(f.stat().st_size for f in os.walk(src_item) for f in [f[2]] or [])
+                print(f"  Extracting {item} ({size_mb/(1024*1024):.0f} MB)...")
+                shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                print(f"    {item} complete")
+        
+        # Also copy HF_TOKEN if it exists in bundle
+        token_src = os.path.join(meipass, 'HF_TOKEN')
+        if os.path.isfile(token_src):
+            token_dst = os.path.join(os.path.dirname(sys.executable), 'HF_TOKEN')
+            shutil.copy2(token_src, token_dst)
+            print(f"  Copied HF_TOKEN next to EXE")
+        
         print("Model extraction complete!")
         return local_hf_dir
     except Exception as e:
@@ -156,15 +195,7 @@ def check_auth():
 
     print("\nHugging Face Authentication Info")
     print(f"The model '{MODEL_ID}' is gated and requires access.")
-    print(f"  - A file named 'HF_TOKEN' exists in your current directory")
-    print(f"  - The HF_TOKEN environment variable is set")
-    print(f"  - You have logged in via 'huggingface-cli login'")
-    print(f"Access must be granted at: https://huggingface.co/{MODEL_ID}\n")
-    return False
-
-    print("\nHugging Face Authentication Info")
-    print(f"The model '{MODEL_ID}' is gated and requires access.")
-    print(f"  - A file named 'HF_TOKEN' exists in your current directory")
+    print(f"  - A file named 'HF_TOKEN' in the EXE folder or current directory")
     print(f"  - The HF_TOKEN environment variable is set")
     print(f"  - You have logged in via 'huggingface-cli login'")
     print(f"Access must be granted at: https://huggingface.co/{MODEL_ID}\n")

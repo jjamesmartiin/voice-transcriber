@@ -8,6 +8,42 @@ import sys
 import shutil
 import subprocess
 from pathlib import Path
+import threading
+import time
+
+def copy_with_progress(src, dst, desc="Copying"):
+    """Copy file/directory with progress feedback for large files"""
+    total_size = 0
+    if src.is_dir():
+        for item in src.rglob("*"):
+            if item.is_file():
+                total_size += item.stat().st_size
+    else:
+        total_size = src.stat().st_size
+    
+    size_mb = total_size / (1024 * 1024)
+    print(f"{desc}: {src.name} ({size_mb:.1f} MB)...")
+    
+    copied = [0]
+    def progress_copy():
+        if src.is_dir():
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+            copied[0] = total_size
+        else:
+            shutil.copy2(src, dst)
+            copied[0] = total_size
+        print(f"{desc} complete: {size_mb:.1f} MB")
+    
+    if size_mb > 100:
+        thread = threading.Thread(target=progress_copy)
+        thread.start()
+        while thread.is_alive():
+            time.sleep(2)
+            pct = (copied[0] / total_size * 100) if total_size > 0 else 0
+            print(f"  {desc}: {pct:.0f}% complete ({size_mb:.1f} MB total)")
+            thread.join(timeout=0.5)
+    else:
+        progress_copy()
 
 # Configuration
 PROJECT_ROOT = Path(__file__).parent
@@ -50,31 +86,29 @@ def prepare_bundled_models():
     
     # Clean up old models
     if MODELS_DIR.exists():
+        print("Cleaning up old build models...")
         shutil.rmtree(MODELS_DIR)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     
     # Copy Whisper cache
     if WHISPER_CACHE.exists():
         dest_whisper = MODELS_DIR / "whisper"
-        print(f"Copying Whisper cache to {dest_whisper}...")
-        shutil.copytree(WHISPER_CACHE, dest_whisper, dirs_exist_ok=True)
+        copy_with_progress(WHISPER_CACHE, dest_whisper, "Copying Whisper cache")
     else:
         print("WARNING: No Whisper cache found - will be downloaded on first run")
     
-    # Copy HuggingFace cache
-    if HF_CACHE.exists():
+    # Copy HuggingFace cache - Cohere model
+    cohere_src = HF_CACHE / "models--CohereLabs--cohere-transcribe-03-2026"
+    if cohere_src.exists():
+        print(f"\nFound Cohere model in cache: {cohere_src.name}")
         dest_hf = MODELS_DIR / "huggingface" / "hub"
-        print(f"Copying HuggingFace cache to {dest_hf}...")
-        # Only copy the Cohere model to save space
-        cohere_src = HF_CACHE / "models--CohereLabs--cohere-transcribe-03-2026"
-        if cohere_src.exists():
-            dest_cohere = dest_hf / "models--CohereLabs--cohere-transcribe-03-2026"
-            print(f"  Copying Cohere model...")
-            shutil.copytree(cohere_src, dest_cohere, dirs_exist_ok=True)
-        else:
-            print("WARNING: No Cohere cache found - will be downloaded on first run")
+        dest_cohere = dest_hf / "models--CohereLabs--cohere-transcribe-03-2026"
+        os.makedirs(dest_hf, exist_ok=True)
+        copy_with_progress(cohere_src, dest_cohere, "Copying Cohere model")
     else:
-        print("WARNING: No HuggingFace cache found - will be downloaded on first run")
+        print("\nWARNING: No Cohere model cache found!")
+        print("  The model will be downloaded on first run of the EXE")
+        print("  To avoid this, run the app while connected to the internet first")
     
     # Copy HF_TOKEN if it exists
     token_locations = [
@@ -88,9 +122,15 @@ def prepare_bundled_models():
             print(f"Copied HF_TOKEN to {dest_token}")
             break
     else:
-        print("NOTE: No HF_TOKEN found - will need to be provided at runtime for Cohere")
+        print("\nNOTE: No HF_TOKEN found in project root")
+        print("  If the Cohere model is gated, you'll need to provide HF_TOKEN at runtime")
+        print("  Create a file named 'HF_TOKEN' next to the EXE with your token")
     
-    print(f"Bundle prepared at: {MODELS_DIR}")
+    print(f"\nBundle prepared at: {MODELS_DIR}")
+    
+    # Print summary of what's being bundled
+    total_size = sum(f.stat().st_size for f in MODELS_DIR.rglob("*") if f.is_file())
+    print(f"Total bundle size: {total_size / (1024*1024):.1f} MB")
     print()
 
 def build_exe():
