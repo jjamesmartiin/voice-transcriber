@@ -1,124 +1,87 @@
-# VT (Voice Transcriber)
+# Voice Transcriber
 
-A robust, modular voice transcription tool for Linux (Wayland/X11).
+A voice transcription tool with global hotkeys for Windows and Linux.
 
-## Installation & Usage (Nix)
+## Quick Start
 
-This project uses Nix Flakes for reproducible environments.
+### Windows
+See my other branch [main-windows](https://github.com/jjamesmartiin/voice-transcriber/tree/main-windows)
 
-### Running Immediately
+### Linux
 ```bash
-# add your user to the input group 
-# then run this: 
+# Add user to input group for global hotkeys
+sudo usermod -a -G input $USER
+# Log out and back in, then run:
 nix run github:jjamesmartiin/voice-transcriber
 
-# or just run as root (bad practice)
+# Or run as root (not recommended)
 sudo nix run github:jjamesmartiin/voice-transcriber
 ```
 
-### Hugging Face API Token (for first run)
-To download the necessary models from Hugging Face, you need to provide your API token. Create a file named `HF_TOKEN` in the project root directory and paste your token into it. This file is in `.gitignore` and will not be committed. This is only required for the initial download.
-
-**TODO**: Remove this requirement once the model is fully public and does not require access-based authentication.
-
-## Features
-- **Global Hotkeys**: Hold `Alt+Shift` to record, release to transcribe & copy to clipboard.
-- **Multi-Model Support**: Switch between **Cohere Transcribe** (high quality) and **Faster Whisper** (fast/offline).
-- **Visual Feedback**: visual overlays and terminal notifications.
-- **Low Latency**: Optimized for quick transcription.
-- **Privacy-focused**: Runs locally.
-
-## Model Configuration
-You can switch between transcription models in the configuration menu:
-1. Press **Ctrl+Alt+I** (or run the app and press **i** in the terminal).
-2. Press **M** to toggle between **Cohere** and **Whisper** backends.
-3. The setting is saved persistently in your configuration.
-
-### Model Details
-- **Cohere Transcribe**: Uses `CohereLabs/cohere-transcribe-03-2026`. Requires a Hugging Face token and access to the gated model.
-- **Faster Whisper**: Uses the Whisper `small` model. Fully local and does not require authentication.
-
-
-## Codebase Context 
-
-This section provides a high-level overview of the project's architecture and technology stack to help AI models and developers understand the codebase quickly.
-
-- **Purpose**: Low-latency, privacy-focused voice transcription for Linux desktops (Wayland/X11).
-- **Tech Stack**: 
-  - **Core**: Python 3.x
-  - **Transcription Engines**:
-    - **Cohere**: `CohereLabs/cohere-transcribe-03-2026` via `transformers` (Higher quality, requires gating access).
-    - **Faster Whisper**: Using `faster-whisper` (Fast, fully local/offline).
-  - **Global Hotkeys**: `evdev` + `uinput` for Wayland-compatible global keyboard interception.
-  - **Audio Engine**: `sounddevice` / `PortAudio`.
-  - **Visuals**: `Tkinter` (overlays) or `zenity` (fallback) for desktop notifications.
-  - **Packaging**: `Nix` (Flakes) for reproducible builds and environments.
-- **Main Entry Points**:
-  - `src/main.py`: The main application loop and orchestration.
-  - `src/t2.py`: Optimized CLI-based recording and transcription script (standalone).
-- **Core Logic**:
-  - `src/transcribe2.py`: Model loading, pre-loading, and transcription execution.
-  - `src/hotkeys.py`: Low-level keyboard event handling and virtual keyboard device creation.
-  - `src/notifications.py`: Multi-platform notification logic (terminal + GUI).
-
-## Contributing
-
-We welcome contributions from everyone and of any type! Whether you're fixing a bug, adding a feature, improving documentation, or just sharing an idea, your help is appreciated.
-
-### How to Contribute
-1. **Fork** the repository.
-2. **Create a branch** for your feature or fix.
-3. **Make your changes**.
-4. **Run tests** to ensure everything is working correctly (`nix run .#test`).
-5. **Submit a Pull Request** with a clear description of what you've done.
-
-We value all types of contributions, including:
-- **Code**: Bug fixes, new features, or performance improvements.
-- **Documentation**: Fixing typos, improving clarity, or adding examples.
-- **Feedback**: Reporting bugs or suggesting new features via Issues.
-- **Design**: Improving visual notifications or UI elements.
-
-## Requirements
-- Linux (Wayland or X11)
-- Nix package manager
-- User must be in `input` group for global hotkeys (or run as root).
-
-## Troubleshooting
-
-### Clipboard Issues (Wayland)
-If `wl-clipboard` fails to copy text or seems stuck:
-- The app now includes a retry mechanism (3 attempts).
-- You can manually reset clipboard processes by pressing `r` in the terminal menu after a recording (if prompted) to reset both the terminal and clipboard.
-- Alternatively, run:
-  ```bash
-  pkill wl-copy
-  pkill wl-paste
-  ```
-- Ensure `wl-clipboard` is installed (it is included in the Nix flake).
-
-### Hotkey Issues
-- Ensure you have permissions to `/dev/input/`. Add your user to the `input` group:
-  ```bash
-  sudo usermod -a -G input $USER
-  ```
-- Then reboot or log out and back in.
-
-### Development Environment
-To enter a shell with all dependencies (including Python environment):
-```bash
-nix develop
+#### NixOS Example
+```nix
+users.users.yourusername.extraGroups = [ "input" ];
 ```
 
-Then inside the shell:
-- Run app: `python src/main.py`
+See [NixOS options](https://search.nixos.org/options?channel=25.11&include_modular_service_options=1&include_nixos_options=1&query=users.users.*.extra) for more info.
 
-### Testing
-- Run all tests: `python -m pytest tests/` (or `nix run .#test`)
-- Run specific tests or pass arguments to pytest:
-```bash
-# Filter tests by keyword
-nix run .#test -- -k transcription
+## Usage
 
-# Run with verbose output
-nix run .#test -- -v
+### Controls
+- **Alt+Shift** (hold) - Start recording, release to transcribe
+- **Ctrl+Alt+I** - Open settings menu
+
+### Settings Menu
+- P/S - Set primary/secondary audio device
+- M - Toggle mute
+- B - Switch model (whisper/cohere)
+- T - Toggle auto-type to screen
+- c - Save and exit
+
+### Model Options
+- **whisper** (default) - Faster Whisper, works offline
+- **cohere** - Cohere Transcribe, higher quality
+
+Set model:
+```powershell
+$env:VT_MODEL_BACKEND = "cohere"
+.\run.ps1
+```
+
+## Configuration
+
+- Config file: `%APPDATA%/vt/audio_device_config.json` (Windows) or `~/.local/share/vt/` (Linux)
+- Cohere model: Requires `HF_TOKEN` file in project root
+
+## Requirements
+
+### Windows
+- Windows 10+
+- Python 3.10+
+
+### Linux
+- Linux (Wayland/X11)
+- Nix package manager
+
+## Testing
+```powershell
+# Windows
+.\run.ps1 test
+
+# Linux
+nix run .#test
+```
+
+## File Structure
+```
+src/
+├── main.py              # Linux entry point
+├── main_windows.py     # Windows entry point
+├── t2.py               # Recording/transcription logic
+├── transcribe2.py      # Model dispatcher
+├── transcribe_whisper.py
+├── transcribe_cohere.py
+├── hotkeys.py          # Linux hotkeys (evdev)
+├── hotkeys_windows.py # Windows hotkeys (pynput)
+└── notifications*.py # Visual notifications
 ```
