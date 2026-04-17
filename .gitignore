@@ -11,3 +11,4 @@ build/
 dist/
 *.spec
 *.log
+build_log.txt
