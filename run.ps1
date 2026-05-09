@@ -14,7 +14,7 @@ function Write-Success { param([string]$m) Write-Host "[OK] $m" -ForegroundColor
 function Write-Err { param([string]$m) Write-Host "[ERROR] $m" -ForegroundColor Red }
 
 Write-Host @"
-/\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\ 
+ /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  /\_/\  
 ( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )( o.o )
  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ <  > ^ < 
  /\_/\                                                                 /\_/\ 

@@ -26,10 +26,11 @@ except ImportError:
 class WindowsGlobalHotkeys:
     """Windows-compatible global hotkey system using pynput + keyboard library"""
     
-    def __init__(self, callback_start, callback_stop, callback_config=None):
+    def __init__(self, callback_start, callback_stop, callback_config=None, callback_toggle_ui=None):
         self.callback_start = callback_start
         self.callback_stop = callback_stop
         self.callback_config = callback_config
+        self.callback_toggle_ui = callback_toggle_ui
         self.running = False
         self.hotkey_active = False
         self.copy_to_clipboard_mode = False
@@ -54,6 +55,7 @@ class WindowsGlobalHotkeys:
             self.listener.start()
             
             kb_lib.on_press(self._on_config_press, suppress=False)
+            kb_lib.on_press(self._on_toggle_ui_press, suppress=False)
             
             logger.info("Windows hotkey listener started")
         except Exception as e:
@@ -67,6 +69,14 @@ class WindowsGlobalHotkeys:
             logger.info("⚙️  Config hotkey (Ctrl+Alt+I) activated")
             if self.callback_config:
                 self.callback_config()
+    
+    def _on_toggle_ui_press(self, e):
+        """Handle Ctrl+Alt+O for UI mode toggle using keyboard library"""
+        key_name = e.name
+        if key_name == 'o' and (kb_lib.is_pressed('ctrl') or kb_lib.is_pressed('left ctrl') or kb_lib.is_pressed('right ctrl')) and (kb_lib.is_pressed('alt') or kb_lib.is_pressed('left alt') or kb_lib.is_pressed('right alt')):
+            logger.info("🔄 UI Mode Toggle hotkey (Ctrl+Alt+O) activated")
+            if self.callback_toggle_ui:
+                self.callback_toggle_ui()
     
     def _on_press(self, key):
         """Handle key press using pynput"""

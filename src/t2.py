@@ -78,6 +78,7 @@ OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
 MODEL_BACKEND = os.environ.get("VT_MODEL_BACKEND", "whisper").lower() # 'cohere' or 'whisper'
 COPY_TO_CLIPBOARD = False
 IS_MUTED = True
+USE_GUI_MODE = False
 CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 
 def find_device_index(name):
@@ -162,7 +163,7 @@ import transcribe2
 
 def load_audio_config():
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, USE_GUI_MODE
     try:
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
@@ -175,6 +176,7 @@ def load_audio_config():
                 env_backend = os.environ.get("VT_MODEL_BACKEND", "").lower()
                 MODEL_BACKEND = env_backend or config.get('model_backend', 'whisper')
                 COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', False)
+                USE_GUI_MODE = config.get('use_gui_mode', False)
                 
                 # Update backend in transcribe2
                 transcribe2.set_backend(MODEL_BACKEND)
@@ -240,7 +242,8 @@ def save_audio_config():
             'override_mode': OVERRIDE_MODE,
             'is_muted': IS_MUTED,
             'model_backend': MODEL_BACKEND,
-            'copy_to_clipboard': COPY_TO_CLIPBOARD
+            'copy_to_clipboard': COPY_TO_CLIPBOARD,
+            'use_gui_mode': USE_GUI_MODE
         }
         with open(CONFIG_FILE, 'w') as f:
             f.write(json.dumps(config, indent=2))
