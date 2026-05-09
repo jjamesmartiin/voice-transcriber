@@ -14,10 +14,11 @@ logger = logging.getLogger(__name__)
 class WaylandGlobalHotkeys:
     """Wayland-compatible global hotkey system using evdev + uinput"""
     
-    def __init__(self, callback_start, callback_stop, callback_config=None):
+    def __init__(self, callback_start, callback_stop, callback_config=None, callback_toggle_ui=None):
         self.callback_start = callback_start
         self.callback_stop = callback_stop
         self.callback_config = callback_config
+        self.callback_toggle_ui = callback_toggle_ui
         self.running = False
         self.devices = []
         self.virtual_keyboard = None

@@ -73,11 +73,16 @@ class SimpleVoiceTranscriber:
     def init_hotkeys(self):
         """Initialize the global hotkey system"""
         try:
-            self.hotkey_system = WaylandGlobalHotkeys(
-                callback_start=self.start_recording,
-                callback_stop=self.stop_recording,
-                callback_config=self.change_input_device
-            )
+            callback_toggle_ui = getattr(self, 'toggle_ui_mode', None)
+            hotkey_kwargs = {
+                'callback_start': self.start_recording,
+                'callback_stop': self.stop_recording,
+                'callback_config': self.change_input_device
+            }
+            if callback_toggle_ui is not None:
+                hotkey_kwargs['callback_toggle_ui'] = callback_toggle_ui
+            
+            self.hotkey_system = WaylandGlobalHotkeys(**hotkey_kwargs)
             
             if self.hotkey_system.devices:
                 logger.debug("Global hotkey system initialized")
@@ -341,27 +346,48 @@ class SimpleVoiceTranscriber:
             except (KeyboardInterrupt, EOFError):
                 logger.info("Ready for next recording")
 
+    def toggle_ui_mode(self):
+        """Toggle between CLI and GUI mode via Ctrl+Alt+O hotkey"""
+        import t2
+        t2.USE_GUI_MODE = not t2.USE_GUI_MODE
+        t2.save_audio_config()
+        mode_name = "GUI" if t2.USE_GUI_MODE else "CLI"
+        logger.info(f"🔄 UI Mode switched to: {mode_name}")
+        logger.info("Press Ctrl+Alt+I to open settings")
+    
     def change_input_device(self):
         """Open audio device selection menu via hotkey"""
         if self.recording:
             logger.warning("Cannot change settings while recording is active")
             return
-            
-        logger.info("")
-        logger.info("⚙️  Settings hotkey detected!")
-        logger.info("Opening audio device selection...")
-        logger.info("Please interact with the terminal window")
         
-        try:
-            if select_audio_device():
-                logger.info("Audio device updated!")
-            else:
-                logger.info("Device selection cancelled.")
-            reset_terminal()
-        except Exception as e:
-            logger.error(f"Error in device selection: {e}")
-            reset_terminal()
+        import t2
+        if t2.USE_GUI_MODE:
+            logger.info("")
+            logger.info("⚙️  Settings hotkey detected!")
+            logger.info("Opening GUI settings window...")
+            try:
+                import settings_gui
+                settings_gui.show_settings_gui()
+                logger.info("Settings updated!")
+            except Exception as e:
+                logger.error(f"Error opening GUI settings: {e}")
+        else:
+            logger.info("")
+            logger.info("⚙️  Settings hotkey detected!")
+            logger.info("Opening audio device selection...")
+            logger.info("Please interact with the terminal window")
             
+            try:
+                if select_audio_device():
+                    logger.info("Audio device updated!")
+                else:
+                    logger.info("Device selection cancelled.")
+                reset_terminal()
+            except Exception as e:
+                logger.error(f"Error in device selection: {e}")
+                reset_terminal()
+        
         logger.info("Ready to record - hold Alt+Shift when ready")
 
     
