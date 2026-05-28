@@ -7,6 +7,10 @@ A voice transcription tool with global hotkeys for Windows and Linux.
 ### Windows
 See my other branch [main-windows](https://github.com/jjamesmartiin/voice-transcriber/tree/main-windows)
 
+#### Features that need to be replicated
+- [ ] reversing the capitalization for the settings
+
+
 ### Linux
 ```bash
 # Add user to input group for global hotkeys

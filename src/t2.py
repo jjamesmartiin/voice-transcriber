@@ -264,20 +264,20 @@ def select_audio_device():
     def print_option(key, description, value):
         print(f"  {key}. {description:<53} (currently: {value})")
 
-    print_option("P", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
-    print_option("S", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
-    print_option("M", "Toggle Mute", mute_display)
-    print_option("B", "Switch Model Backend (cohere/whisper)", model_display)
-    print_option("T", "Toggle Auto-Type (auto-type to screen)", copy_display)
-    print(f"  R. {'Reset Terminal (if text is invisible or wonky)':<53}")
+    print_option("p", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
+    print_option("s", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
+    print_option("m", "Toggle Mute", mute_display)
+    print_option("b", "Switch Model Backend (cohere/whisper)", model_display)
+    print_option("t", "Toggle Auto-Type (auto-type to screen)", copy_display)
+    print(f"  r. {'Reset Terminal (if text is invisible or wonky)':<53}")
     print("-" * 85)
     
     p_marker = "[ACTIVE]" if OVERRIDE_MODE == 'primary' else ""
     s_marker = "[ACTIVE]" if OVERRIDE_MODE == 'secondary' else ""
     a_marker = "[ACTIVE]" if OVERRIDE_MODE == 'auto' else ""
     
-    print(f"  p. {'Use Primary Device (Manual Override)':<53} {p_marker}")
-    print(f"  s. {'Use Secondary Device (Manual Override)':<53} {s_marker}")
+    print(f"  P. {'Use Primary Device (Manual Override)':<53} {p_marker}")
+    print(f"  S. {'Use Secondary Device (Manual Override)':<53} {s_marker}")
     print(f"  a. {'Automatic Selection (Default)':<53} {a_marker}")
     print("-" * 85)
     print("  c or \"↵\". to save/exit")
@@ -286,7 +286,7 @@ def select_audio_device():
     choice = getch()
     print() # Newline after getch
     
-    if choice.lower() == 'c': 
+    if choice == 'c': 
         reset_terminal()
         return False
     
@@ -294,25 +294,25 @@ def select_audio_device():
         reset_terminal()
         return True
     
-    if choice.lower() == 'r':
+    if choice == 'r':
         reset_terminal()
         return select_audio_device()
     
-    if choice.lower() == 'm':
+    if choice == 'm':
         IS_MUTED = not IS_MUTED
         print(f"Sounds {'Muted' if IS_MUTED else 'Enabled'}")
         save_audio_config()
         reset_terminal()
         return select_audio_device()
     
-    if choice == 'T':
+    if choice == 't':
         COPY_TO_CLIPBOARD = not COPY_TO_CLIPBOARD
         print(f"Auto-Type set to: {'Enabled' if COPY_TO_CLIPBOARD else 'Disabled'}")
         save_audio_config()
         reset_terminal()
         return select_audio_device()
     
-    if choice == 'B':
+    if choice == 'b':
         if MODEL_BACKEND == 'cohere':
             MODEL_BACKEND = 'whisper'
         else:
@@ -330,7 +330,7 @@ def select_audio_device():
         reset_terminal()
         return select_audio_device()
         
-    if choice == 'p':
+    if choice == 'P':
         OVERRIDE_MODE = 'primary'
         if PRIMARY_DEVICE_NAME:
             idx = find_device_index(PRIMARY_DEVICE_NAME)
@@ -344,7 +344,7 @@ def select_audio_device():
             print("Primary device not configured yet.")
         save_audio_config()
         return True
-    elif choice == 's':
+    elif choice == 'S':
         OVERRIDE_MODE = 'secondary'
         if SECONDARY_DEVICE_NAME:
             idx = find_device_index(SECONDARY_DEVICE_NAME)
@@ -358,18 +358,18 @@ def select_audio_device():
             print("Secondary device not configured yet.")
         save_audio_config()
         return True
-    elif choice.lower() == 'a':
+    elif choice == 'a':
         OVERRIDE_MODE = 'auto'
         print("Mode: Automatic Selection")
         # Let record_audio_stream handle the logic for auto selection
         save_audio_config()
         return True
 
-    if choice not in ['P', 'S']:
+    if choice not in ['p', 's']:
         print("Invalid choice.")
         return False
         
-    is_primary = (choice == 'P')
+    is_primary = (choice == 'p')
     label = "Primary" if is_primary else "Secondary"
     
     print(f"\nAvailable Audio Input Devices for {label}:")
