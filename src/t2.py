@@ -590,12 +590,12 @@ def check_for_stop_key():
         old_settings = termios.tcgetattr(sys.stdin)
         tty.setcbreak(sys.stdin.fileno())
         while not stop_recording.is_set():
-            if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
+            r, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if r:
                 c = sys.stdin.read(1)
                 if c == ' ':
                     stop_recording.set()
                     break
-            time.sleep(0.1)
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
     except:
         pass

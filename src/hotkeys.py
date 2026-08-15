@@ -212,6 +212,8 @@ class WaylandGlobalHotkeys:
                     device = evdev.InputDevice(path)
                     if self._is_keyboard_device(device):
                         new_devices.append(device)
+                    else:
+                        device.close()
                 except (PermissionError, OSError):
                     continue
             
@@ -296,17 +298,14 @@ class WaylandGlobalHotkeys:
         logger.info("Started hotkey monitor loop")
         
         last_scan_time = 0
-        scan_interval = 5.0  # Seconds between scans when no devices found
         
         while self.running:
             try:
-                # Periodic device scan
+                # Dynamic scan interval: if devices are already active, scan less frequently to save power/CPU
+                scan_interval = 30.0 if self.devices else 5.0
                 current_time = time.time()
                 if current_time - last_scan_time > scan_interval:
-                    # Scan for new devices periodically
-                    if self.scan_for_devices():
-                         # If we found new devices, we might need to update our select list
-                         pass
+                    self.scan_for_devices()
                     last_scan_time = current_time
                 
                 if not self.devices:

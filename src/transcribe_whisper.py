@@ -27,7 +27,15 @@ def load_model(model_name=MODEL, device="cpu", compute_type=None):
         else:
             compute_type = "int8"  # Best for CPU
 
-    model = WhisperModel(model_name, device=device, compute_type=compute_type, download_root=os.path.expanduser("~/.cache/whisper"))
+    # Limit default CPU threads to prevent maxing out all CPU cores and draining battery
+    cpu_threads = int(os.environ.get("VT_CPU_THREADS", min(4, os.cpu_count() or 4)))
+    model = WhisperModel(
+        model_name,
+        device=device,
+        compute_type=compute_type,
+        cpu_threads=cpu_threads,
+        download_root=os.path.expanduser("~/.cache/whisper")
+    )
     
     # Use batched inference pipeline for performance
     batched_model = BatchedInferencePipeline(model=model)

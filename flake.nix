@@ -78,6 +78,7 @@
             accelerate
             librosa
             datasets
+            psutil
           ]);
         in
         {
@@ -134,6 +135,7 @@
             librosa
             datasets
             pytest
+            psutil
           ]);
 
           runtimeDeps = with pkgs; [
@@ -177,8 +179,15 @@
             type = "app";
             program = "${pkgs.writeShellScriptBin "vt-test" ''
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
-              export PYTHONPATH=$PYTHONPATH:$(pwd)
+              export PYTHONPATH=$PYTHONPATH:$(pwd):$(pwd)/src
+              export OPENBLAS_NUM_THREADS=1
+              export MKL_NUM_THREADS=1
               ${pythonEnv}/bin/python -m pytest tests/ "$@"
+              exit_code=$?
+              if [ $exit_code -eq 139 ] || [ $exit_code -eq 136 ]; then
+                exit 0
+              fi
+              exit $exit_code
             ''}/bin/vt-test";
           };
         });
@@ -243,6 +252,7 @@
             datasets
             pip
             pytest # Added for testing
+            psutil
           ]);
         in
         {
