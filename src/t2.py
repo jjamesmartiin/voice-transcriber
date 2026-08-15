@@ -78,7 +78,65 @@ OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
 MODEL_BACKEND = 'cohere' # 'cohere' or 'whisper'
 COPY_TO_CLIPBOARD = True
 IS_MUTED = False
+CPU_AFFINITY = os.environ.get("VT_CPU_AFFINITY")  # e.g. "0,1" or "last_2"
+HIGH_PRIORITY = True
 CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
+
+def apply_cpu_affinity_and_priority(affinity_setting=None, high_priority=True):
+    """
+    Configure dedicated CPU core affinity (pinning) and high process scheduling priority
+    so background compilation tasks (gcc/rustc/nix) don't starve voice transcription.
+    """
+    global CPU_AFFINITY, HIGH_PRIORITY
+    
+    # 1. Dedicated CPU Core Affinity (Core Pinning)
+    target_affinity = os.environ.get("VT_CPU_AFFINITY") or affinity_setting
+    if target_affinity:
+        try:
+            total_cpus = os.cpu_count() or 1
+            cores_to_pin = set()
+            
+            if isinstance(target_affinity, (list, set, tuple)):
+                cores_to_pin = set(target_affinity)
+            elif str(target_affinity).lower() in ["last", "last_1", "last_core"]:
+                cores_to_pin = {total_cpus - 1}
+            elif str(target_affinity).lower() in ["last_2", "last_two", "dedicated"]:
+                cores_to_pin = {max(0, total_cpus - 2), total_cpus - 1}
+            elif str(target_affinity).lower() in ["first", "core_0"]:
+                cores_to_pin = {0}
+            else:
+                for part in str(target_affinity).split(","):
+                    part = part.strip()
+                    if "-" in part:
+                        start, end = map(int, part.split("-"))
+                        cores_to_pin.update(range(start, end + 1))
+                    elif part.isdigit():
+                        cores_to_pin.add(int(part))
+            
+            valid_cores = {c for c in cores_to_pin if 0 <= c < total_cpus}
+            if valid_cores and hasattr(os, "sched_setaffinity"):
+                os.sched_setaffinity(0, valid_cores)
+                CPU_AFFINITY = sorted(list(valid_cores))
+                print(f"📌 [CPU Pinning] Process bound to dedicated CPU core(s): {CPU_AFFINITY} (out of {total_cpus} system cores)")
+        except Exception as e:
+            print(f"Could not set CPU affinity: {e}")
+
+    # 2. Scheduling Priority (Preemption over compilers)
+    if high_priority:
+        HIGH_PRIORITY = True
+        try:
+            # Set high scheduling priority (nice: -10)
+            if hasattr(os, "setpriority"):
+                os.setpriority(os.PRIO_PROCESS, 0, -10)
+                actual_nice = os.getpriority(os.PRIO_PROCESS, 0)
+                print(f"⚡ [Process Priority] High scheduling priority set (nice: {actual_nice}). Transcriber will preempt background compilers.")
+        except PermissionError:
+            try:
+                os.setpriority(os.PRIO_PROCESS, 0, 0)
+            except Exception:
+                pass
+        except Exception as e:
+            pass
 
 def find_device_index(name):
     """Find device index by name substring match"""
@@ -162,7 +220,7 @@ import transcribe2
 
 def load_audio_config():
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, CPU_AFFINITY, HIGH_PRIORITY
     try:
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
@@ -173,7 +231,12 @@ def load_audio_config():
                 IS_MUTED = config.get('is_muted', False)
                 MODEL_BACKEND = config.get('model_backend', 'cohere')
                 COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
+                CPU_AFFINITY = config.get('cpu_affinity')
+                HIGH_PRIORITY = config.get('high_priority', True)
                 
+                # Apply CPU pinning and process priority
+                apply_cpu_affinity_and_priority(CPU_AFFINITY, HIGH_PRIORITY)
+
                 # Update backend in transcribe2
                 transcribe2.set_backend(MODEL_BACKEND)
                 
@@ -225,6 +288,8 @@ def load_audio_config():
                             print(f"Secondary audio device: {SECONDARY_DEVICE_NAME} (index {sec_idx})")
                 else:
                     print("No configured audio devices found. Using system default.")
+        else:
+            apply_cpu_affinity_and_priority(CPU_AFFINITY, HIGH_PRIORITY)
     except Exception as e:
         print(f"Could not load audio config: {e}")
 
@@ -238,7 +303,9 @@ def save_audio_config():
             'override_mode': OVERRIDE_MODE,
             'is_muted': IS_MUTED,
             'model_backend': MODEL_BACKEND,
-            'copy_to_clipboard': COPY_TO_CLIPBOARD
+            'copy_to_clipboard': COPY_TO_CLIPBOARD,
+            'cpu_affinity': CPU_AFFINITY,
+            'high_priority': HIGH_PRIORITY
         }
         with open(CONFIG_FILE, 'w') as f:
             f.write(json.dumps(config, indent=2))
