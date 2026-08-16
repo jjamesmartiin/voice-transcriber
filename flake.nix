@@ -26,6 +26,8 @@
 
           # Runtime dependencies
           runtimeDeps = with pkgs; [
+            pulseaudio
+            portaudio
             lame
             xclip
             libnotify
@@ -137,6 +139,8 @@
           ]);
 
           runtimeDeps = with pkgs; [
+            pulseaudio
+            portaudio
             lame
             xclip
             libnotify

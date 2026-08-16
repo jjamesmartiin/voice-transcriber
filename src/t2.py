@@ -2,9 +2,17 @@
 # Optimized script to record audio and transcribe it with minimal latency
 # Updated with sounddevice for robust audio capture
 
-import queue
-import sys
 import os
+import sys
+
+# Auto-configure WSL2 audio passthrough via WSLg PulseAudio socket if running in WSL
+if "PULSE_SERVER" not in os.environ:
+    if os.path.exists("/mnt/wslg/runtime-dir/pulse/native"):
+        os.environ["PULSE_SERVER"] = "unix:/mnt/wslg/runtime-dir/pulse/native"
+    elif os.path.exists("/mnt/wslg/PulseServer"):
+        os.environ["PULSE_SERVER"] = "/mnt/wslg/PulseServer"
+
+import queue
 import pyperclip
 import threading
 import time
