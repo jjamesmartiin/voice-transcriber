@@ -119,10 +119,18 @@ def get_active_device_name():
         if idx is not None:
             return f"{MODEL_BACKEND.capitalize()}: Primary: {PRIMARY_DEVICE_NAME}"
     
-    if SECONDARY_DEVICE_NAME:
-        idx = find_device_index(SECONDARY_DEVICE_NAME)
-        if idx is not None:
-            return f"{MODEL_BACKEND.capitalize()}: Secondary: {SECONDARY_DEVICE_NAME} (Fallback)"
+    try:
+        if INPUT_DEVICE_INDEX is not None:
+            with silence_stderr():
+                d = sd.query_devices(INPUT_DEVICE_INDEX)
+                return f"{MODEL_BACKEND.capitalize()}: {d['name']}"
+        default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else sd.default.device
+        if default_in is not None and default_in >= 0:
+            with silence_stderr():
+                d = sd.query_devices(default_in)
+                return f"{MODEL_BACKEND.capitalize()}: {d['name']} (Default)"
+    except Exception:
+        pass
             
     return f"{MODEL_BACKEND.capitalize()}: {LAST_USED_DEVICE_NAME}"
 

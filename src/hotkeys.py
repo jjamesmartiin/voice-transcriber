@@ -465,11 +465,15 @@ class WSLGlobalHotkeys:
 
     def run(self):
         """Main event loop for WSL hotkey bridge"""
-        while self.running and self.process and self.process.poll() is None:
-            try:
+        try:
+            while self.running:
+                if self.process and self.process.poll() is not None:
+                    exit_code = self.process.poll()
+                    logger.error(f"WSL Windows hotkey bridge process exited with code {exit_code}")
+                    break
                 time.sleep(0.2)
-            except KeyboardInterrupt:
-                break
+        except KeyboardInterrupt:
+            logger.info("Shutting down hotkey monitor...")
         return True
 
     def stop(self):

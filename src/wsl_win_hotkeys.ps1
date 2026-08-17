@@ -53,14 +53,21 @@ Add-Type -TypeDefinition $csharpCode -ReferencedAssemblies "System.Windows.Forms
 
 # Stdin listener thread for PASTE commands
 [System.Threading.ThreadPool]::QueueUserWorkItem({
-    while ($true) {
-        $line = [Console]::In.ReadLine()
-        if ($null -eq $line -or $line -eq "EXIT") {
-            [System.Environment]::Exit(0)
+    try {
+        $reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput())
+        while ($true) {
+            $line = $reader.ReadLine()
+            if ($line -eq "EXIT") {
+                [System.Environment]::Exit(0)
+            } elseif ($line -eq "PASTE") {
+                [WinInterop]::SendCtrlV()
+            } elseif ($null -eq $line) {
+                # Null means end of stream or no data yet, do NOT exit immediately
+                [System.Threading.Thread]::Sleep(200)
+            }
         }
-        if ($line -eq "PASTE") {
-            [WinInterop]::SendCtrlV()
-        }
+    } catch {
+        # ignore read errors
     }
 }) | Out-Null
 
