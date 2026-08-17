@@ -92,6 +92,13 @@ def run_all_tests():
         audio = load_audio(test_file)
         
         for backend_name, backend_id in backends:
+            if backend_id == "cohere":
+                token_file = os.path.join(os.path.dirname(__file__), "..", "HF_TOKEN")
+                if not os.path.exists(token_file) and not os.environ.get("HF_TOKEN"):
+                    print(f"Skipping {backend_name}: HF_TOKEN not set (gated model)")
+                    all_results.append((test_num, backend_name, 1.0, "SKIP", "Skipped (Requires HF_TOKEN)", 0.0, 0.0, 0.0))
+                    continue
+
             os.environ["VT_MODEL_BACKEND"] = backend_id
             # Reset and reload backend
             transcribe2._backend = None
@@ -122,11 +129,13 @@ def run_all_tests():
     
     print("="*80)
     
+    fail_count = sum(1 for _, _, _, s, _, _, _, _ in all_results if s == "FAIL")
     pass_count = sum(1 for _, _, _, s, _, _, _, _ in all_results if s == "PASS")
+    skip_count = sum(1 for _, _, _, s, _, _, _, _ in all_results if s == "SKIP")
     total_count = len(all_results)
     
-    print(f"\nTotal: {pass_count}/{total_count} tests passed")
-    return pass_count == total_count
+    print(f"\nTotal: {pass_count} passed, {skip_count} skipped, {fail_count} failed ({total_count} total)")
+    return fail_count == 0
 
 def test_transcription_accuracy():
     """Pytest entrypoint for automated CI and flake testing"""

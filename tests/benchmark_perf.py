@@ -42,6 +42,12 @@ def benchmark():
     summary_results = []
     
     for backend_name in backends:
+        if backend_name == "cohere":
+            token_file = os.path.join(os.path.dirname(__file__), "..", "HF_TOKEN")
+            if not os.path.exists(token_file) and not os.environ.get("HF_TOKEN"):
+                print(f"\nEvaluating Backend: [{backend_name.upper()}]... (Skipped: HF_TOKEN not set for gated Cohere model)")
+                continue
+
         print(f"\nEvaluating Backend: [{backend_name.upper()}]...")
         
         # Reset backend state
@@ -49,47 +55,50 @@ def benchmark():
         transcribe2._current_backend_name = backend_name
         os.environ["VT_MODEL_BACKEND"] = backend_name
         
-        # 1. Measure Cold Init Latency
-        t0 = time.perf_counter()
-        _ = transcribe2.get_backend()
-        cold_init_sec = time.perf_counter() - t0
-        
-        # 2. Warmup run
-        _ = transcribe2.transcribe_audio(audio_data=audio_16k)
-        
-        # 3. Multiple Warm Inference Runs
-        latencies = []
-        last_output = ""
-        NUM_RUNS = 5
-        for i in range(NUM_RUNS):
-            t1 = time.perf_counter()
-            last_output = transcribe2.transcribe_audio(audio_data=audio_16k)
-            dur = time.perf_counter() - t1
-            latencies.append(dur)
-        
-        avg_lat = sum(latencies) / len(latencies)
-        min_lat = min(latencies)
-        max_lat = max(latencies)
-        rtf = avg_lat / audio_duration # Real-Time Factor (< 1.0 means faster than real-time)
-        speedup = audio_duration / avg_lat
-        
-        summary_results.append({
-            "backend": backend_name.capitalize(),
-            "cold_init_s": cold_init_sec,
-            "avg_latency_s": avg_lat,
-            "min_latency_s": min_lat,
-            "max_latency_s": max_lat,
-            "audio_duration_s": audio_duration,
-            "rtf": rtf,
-            "speedup": speedup,
-            "output": last_output.strip()
-        })
-        
-        print(f"  • Cold Model Load:      {cold_init_sec*1000:7.1f} ms ({cold_init_sec:.3f} s)")
-        print(f"  • Avg Warm Latency:     {avg_lat*1000:7.1f} ms ({avg_lat:.3f} s)")
-        print(f"  • Min / Max Latency:    {min_lat*1000:7.1f} ms / {max_lat*1000:7.1f} ms")
-        print(f"  • Real-Time Factor:     {rtf:7.3f}x (Processing {speedup:5.1f}x faster than real-time)")
-        print(f"  • Transcribed Text:     \"{last_output.strip()}\"")
+        try:
+            # 1. Measure Cold Init Latency
+            t0 = time.perf_counter()
+            _ = transcribe2.get_backend()
+            cold_init_sec = time.perf_counter() - t0
+            
+            # 2. Warmup run
+            _ = transcribe2.transcribe_audio(audio_data=audio_16k)
+            
+            # 3. Multiple Warm Inference Runs
+            latencies = []
+            last_output = ""
+            NUM_RUNS = 5
+            for i in range(NUM_RUNS):
+                t1 = time.perf_counter()
+                last_output = transcribe2.transcribe_audio(audio_data=audio_16k)
+                dur = time.perf_counter() - t1
+                latencies.append(dur)
+            
+            avg_lat = sum(latencies) / len(latencies)
+            min_lat = min(latencies)
+            max_lat = max(latencies)
+            rtf = avg_lat / audio_duration # Real-Time Factor (< 1.0 means faster than real-time)
+            speedup = audio_duration / avg_lat
+            
+            summary_results.append({
+                "backend": backend_name.capitalize(),
+                "cold_init_s": cold_init_sec,
+                "avg_latency_s": avg_lat,
+                "min_latency_s": min_lat,
+                "max_latency_s": max_lat,
+                "audio_duration_s": audio_duration,
+                "rtf": rtf,
+                "speedup": speedup,
+                "output": last_output.strip()
+            })
+            
+            print(f"  • Cold Model Load:      {cold_init_sec*1000:7.1f} ms ({cold_init_sec:.3f} s)")
+            print(f"  • Avg Warm Latency:     {avg_lat*1000:7.1f} ms ({avg_lat:.3f} s)")
+            print(f"  • Min / Max Latency:    {min_lat*1000:7.1f} ms / {max_lat*1000:7.1f} ms")
+            print(f"  • Real-Time Factor:     {rtf:7.3f}x (Processing {speedup:5.1f}x faster than real-time)")
+            print(f"  • Transcribed Text:     \"{last_output.strip()}\"")
+        except Exception as e:
+            print(f"  [!] Failed to benchmark {backend_name}: {e}")
     
     print("\n" + "=" * 80)
     print("SUMMARY PERFORMANCE COMPARISON TABLE")
