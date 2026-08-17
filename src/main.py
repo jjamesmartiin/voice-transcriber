@@ -15,7 +15,7 @@ import atexit
 
 # Import core modules
 from notifications import VisualNotification
-from hotkeys import WaylandGlobalHotkeys
+from hotkeys import create_global_hotkeys
 
 # Import transcription functionality
 # Ensure we can find t2
@@ -29,6 +29,23 @@ from t2 import (
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+def copy_to_clipboard_crossplatform(text):
+    """Copies to clipboard on Linux or Windows (via WSL interop)"""
+    copied = False
+    if os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop") or os.environ.get("WSL_DISTRO_NAME"):
+        try:
+            p = subprocess.Popen(["clip.exe"], stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            p.communicate(input=text.encode('utf-16le'))
+            copied = True
+        except Exception:
+            pass
+    try:
+        pyperclip.copy(text)
+        copied = True
+    except Exception:
+        pass
+    return copied
 
 class SimpleVoiceTranscriber:
     def __init__(self):
@@ -60,11 +77,13 @@ class SimpleVoiceTranscriber:
         """Clean up all resources."""
         if hasattr(self, 'visual_notification'):
             self.visual_notification.cleanup()
+        if hasattr(self, 'hotkey_system') and self.hotkey_system:
+            self.hotkey_system.cleanup()
         
     def init_hotkeys(self):
         """Initialize the global hotkey system"""
         try:
-            self.hotkey_system = WaylandGlobalHotkeys(
+            self.hotkey_system = create_global_hotkeys(
                 callback_start=self.start_recording,
                 callback_stop=self.stop_recording,
                 callback_config=self.change_input_device
@@ -191,20 +210,11 @@ class SimpleVoiceTranscriber:
             if transcription:
                 from t2 import COPY_TO_CLIPBOARD
                 should_type = COPY_TO_CLIPBOARD != self.copy_to_clipboard
-                copy_success = False
-                max_retries = 3
-                for attempt in range(max_retries):
-                    try:
-                        pyperclip.copy(transcription)
-                        copy_success = True
-                        logger.info(f"Copied to clipboard: {transcription}")
-                        break
-                    except Exception as e:
-                        if attempt < max_retries - 1:
-                            logger.warning(f"Clipboard copy failed (attempt {attempt+1}), retrying...")
-                            time.sleep(0.5)
-                        else:
-                            logger.error(f"Failed to copy to clipboard after {max_retries} attempts: {e}")
+                if copy_to_clipboard_crossplatform(transcription):
+                    copy_success = True
+                    logger.info(f"Copied to clipboard: {transcription}")
+                else:
+                    logger.error("Failed to copy transcription to clipboard")
 
                 if should_type:
                     try:
@@ -400,6 +410,10 @@ class SimpleVoiceTranscriber:
 if __name__ == "__main__":
     def check_permissions():
         """Check if user has proper permissions for input device access"""
+        from hotkeys import is_running_in_wsl
+        if is_running_in_wsl():
+            return True
+            
         import grp
         import pwd
         

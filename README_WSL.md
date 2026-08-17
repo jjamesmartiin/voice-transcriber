@@ -79,30 +79,34 @@ Ensure Windows privacy settings allow WSL to access your microphone:
 
 ---
 
-## 3. Running the App
+## 3. Running the App (100% Inside NixOS WSL)
 
-### Test Audio Devices inside NixOS WSL
-To check detected input devices:
-```powershell
-.\run_wsl.ps1 check-audio
+**Zero setup needed on Windows!** You do NOT need Python or any packages installed on Windows. Everything runs inside NixOS WSL.
+
+### Start the Voice Transcriber
+Inside your NixOS WSL terminal:
+```bash
+cd /mnt/c/Users/jjame/gitprojects/voice-transcriber
+./run.sh
+# or: nix run .
 ```
 
-### Run Voice Transcriber via Nix Flake
-To run the full application with all dependencies handled by Nix:
-```powershell
-.\run_wsl.ps1
-```
+> **How it works:**
+> 1. Nix provides Faster-Whisper, PyTorch, PortAudio, and all Python dependencies in an isolated sandbox.
+> 2. The app detects WSL and automatically connects to your Windows microphone via WSLg PulseAudio (`RDPSource`).
+> 3. It automatically connects a lightweight background bridge to Windows so you can press and hold **`Alt+Shift`** anywhere in Windows (Chrome, VS Code, Discord, etc.) to speak!
+> 4. When you release **`Alt+Shift`**, it transcribes in **~230ms** and pastes the text directly at your cursor in Windows.
+
+---
 
 ### Run Test Suite
-```powershell
-.\run_wsl.ps1 test
+```bash
+nix run .#test
 ```
 
 ### Run Performance Latency Benchmark
-To measure inference speed, cold load time, and Real-Time Factor (RTF):
-```powershell
-# Via Nix Flake
-wsl -d NixOS -- bash -c "cd $(wslpath -u (Get-Location)) && nix run .#benchmark"
+```bash
+nix run .#benchmark
 ```
 
 ---
@@ -112,27 +116,11 @@ wsl -d NixOS -- bash -c "cd $(wslpath -u (Get-Location)) && nix run .#benchmark"
 Tested on NixOS WSL2 with sample audio (3.80s speech, 16000Hz 1ch PCM):
 
 | Transcription Engine | Model Size | Cold Load | Avg Warm Latency | Min / Max Latency | Real-Time Factor (RTF) | Throughput / Speedup | Accuracy Score |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Faster Whisper** | `small` (offline) | 0.609 s | **240.2 ms** | 236 ms / 245 ms | **0.063x** | **15.8x faster** than real-time | **100% PASS** |
-| **Cohere Transcribe** | `03-2026` | 0.000 s | **392.3 ms** | 385 ms / 402 ms | **0.103x** | **9.7x faster** than real-time | **100% PASS** |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Faster Whisper** | `small` (offline) | 0.58 s | **231.8 ms** | 227 ms / 236 ms | **0.061x** | **16.4x faster** than real-time | **100% PASS** |
+| **Cohere Transcribe** | `03-2026` | 0.90 s | **377.3 ms** | 374 ms / 380 ms | **0.099x** | **10.1x faster** than real-time | **100% PASS** |
 
 ### Benchmark Highlights:
-- **Instant Response**: Warm latency is only **~240ms** for Whisper and **~392ms** for Cohere, producing near-instantaneous transcription after releasing the hotkey.
-- **Ultra-low RTF (0.063x)**: The pipeline transcribes almost **16 seconds of speech per second**.
-- **Microphone Passthrough**: Captured through WSLg PulseAudio UNIX socket (`RDPSource` 16000Hz PCM) with negligible latency overhead.
-
----
-
-## 5. Hybrid Host-Guest Mode (Windows Hotkeys + NixOS Backend)
-
-To use Windows system-wide global hotkeys (`Alt+Shift`) with automatic paste into active Windows applications while running the transcription backend in NixOS WSL:
-
-```powershell
-.\run_wsl_bridge.ps1
-```
-
-1. Starts the lightweight NixOS WSL transcription daemon in the background (`src/wsl_bridge.py`).
-2. Starts the Windows global keyboard listener (`src/wsl_bridge_host.py`).
-3. Press and hold `Alt+Shift` anywhere in Windows to speak.
-4. Release `Alt+Shift` to transcribe; text is automatically copied to the Windows clipboard and pasted into your active application.
-
+- **Instant Response**: Warm latency is only **~231ms** for Whisper and **~377ms** for Cohere, producing near-instantaneous transcription after releasing the hotkey.
+- **Ultra-low RTF (0.061x)**: The pipeline transcribes over **16 seconds of speech per second**.
+- **Microphone Passthrough**: Captured through WSLg PulseAudio UNIX socket (`RDPSource` 16000Hz PCM) with zero perceived latency.

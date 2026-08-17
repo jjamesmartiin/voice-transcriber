@@ -15,6 +15,7 @@
     
     # Automatically configure interop and paths
     interop.includePath = true;
+    interop.register = true;
     useWindowsDriver = true;
   };
 
