@@ -70,7 +70,6 @@
             tkinter
             evdev
             pynput
-            python-uinput
             faster-whisper
             torch
             transformers
@@ -125,7 +124,6 @@
             tkinter
             evdev
             pynput
-            python-uinput
             faster-whisper
             torch
             transformers
@@ -182,8 +180,17 @@
             program = "${pkgs.writeShellScriptBin "vt-test" ''
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
               export PYTHONPATH=$PYTHONPATH:$(pwd)
-              ${pythonEnv}/bin/python -m pytest tests/ "$@"
+              exec ${pythonEnv}/bin/python -m pytest tests/ "$@"
             ''}/bin/vt-test";
+          };
+
+          benchmark = {
+            type = "app";
+            program = "${pkgs.writeShellScriptBin "vt-benchmark" ''
+              export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
+              export PYTHONPATH=$PYTHONPATH:$(pwd)
+              exec ${pythonEnv}/bin/python tests/benchmark_perf.py "$@"
+            ''}/bin/vt-benchmark";
           };
         });
 
@@ -235,7 +242,6 @@
             tkinter
             evdev
             pynput
-            python-uinput
             faster-whisper
             torch
             transformers

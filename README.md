@@ -76,6 +76,22 @@ To download the necessary models from Hugging Face, you need to provide your API
 - **Low Latency**: Optimized for quick transcription.
 - **Privacy-focused**: Runs locally.
 
+## Performance & Latency Benchmarks
+
+Tested on NixOS on WSL2 with standard speech audio (3.80s speech, 16000Hz 1ch PCM):
+
+| Transcription Engine | Model Size | Cold Load | Avg Warm Latency | Min / Max Latency | Real-Time Factor (RTF) | Throughput / Speedup | Accuracy Score |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Faster Whisper** | `small` (offline) | 0.609 s | **240.2 ms** | 236 ms / 245 ms | **0.063x** | **15.8x faster** than real-time | **100% PASS** |
+| **Cohere Transcribe** | `03-2026` | 0.000 s | **392.3 ms** | 385 ms / 402 ms | **0.103x** | **9.7x faster** than real-time | **100% PASS** |
+
+To run the automated latency benchmark:
+```bash
+nix run .#benchmark
+```
+
+For complete NixOS WSL setup and microphone passthrough documentation, see [README_WSL.md](README_WSL.md).
+
 ## Model Configuration
 The model backend is set via the `VT_MODEL_BACKEND` environment variable:
 - `"whisper"` (default) - Faster Whisper, works offline

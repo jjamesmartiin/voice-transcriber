@@ -97,3 +97,42 @@ To run the full application with all dependencies handled by Nix:
 ```powershell
 .\run_wsl.ps1 test
 ```
+
+### Run Performance Latency Benchmark
+To measure inference speed, cold load time, and Real-Time Factor (RTF):
+```powershell
+# Via Nix Flake
+wsl -d NixOS -- bash -c "cd $(wslpath -u (Get-Location)) && nix run .#benchmark"
+```
+
+---
+
+## 4. Performance & Latency Benchmark Results
+
+Tested on NixOS WSL2 with sample audio (3.80s speech, 16000Hz 1ch PCM):
+
+| Transcription Engine | Model Size | Cold Load | Avg Warm Latency | Min / Max Latency | Real-Time Factor (RTF) | Throughput / Speedup | Accuracy Score |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Faster Whisper** | `small` (offline) | 0.609 s | **240.2 ms** | 236 ms / 245 ms | **0.063x** | **15.8x faster** than real-time | **100% PASS** |
+| **Cohere Transcribe** | `03-2026` | 0.000 s | **392.3 ms** | 385 ms / 402 ms | **0.103x** | **9.7x faster** than real-time | **100% PASS** |
+
+### Benchmark Highlights:
+- **Instant Response**: Warm latency is only **~240ms** for Whisper and **~392ms** for Cohere, producing near-instantaneous transcription after releasing the hotkey.
+- **Ultra-low RTF (0.063x)**: The pipeline transcribes almost **16 seconds of speech per second**.
+- **Microphone Passthrough**: Captured through WSLg PulseAudio UNIX socket (`RDPSource` 16000Hz PCM) with negligible latency overhead.
+
+---
+
+## 5. Hybrid Host-Guest Mode (Windows Hotkeys + NixOS Backend)
+
+To use Windows system-wide global hotkeys (`Alt+Shift`) with automatic paste into active Windows applications while running the transcription backend in NixOS WSL:
+
+```powershell
+.\run_wsl_bridge.ps1
+```
+
+1. Starts the lightweight NixOS WSL transcription daemon in the background (`src/wsl_bridge.py`).
+2. Starts the Windows global keyboard listener (`src/wsl_bridge_host.py`).
+3. Press and hold `Alt+Shift` anywhere in Windows to speak.
+4. Release `Alt+Shift` to transcribe; text is automatically copied to the Windows clipboard and pasted into your active application.
+

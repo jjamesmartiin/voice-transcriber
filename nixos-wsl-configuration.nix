@@ -15,9 +15,7 @@
     
     # Automatically configure interop and paths
     interop.includePath = true;
-    
-    # Enable WSLg integration (Wayland, X11, and PulseAudio audio bridge)
-    wslg.enable = true;
+    useWindowsDriver = true;
   };
 
   # Enable Nix Flakes and modern CLI tools

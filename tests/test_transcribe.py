@@ -56,7 +56,7 @@ def score_transcription(expected, actual):
         return match_ratio, "FAIL"
 
 
-def main():
+def run_all_tests():
     import transcribe2
     import time
     
@@ -65,12 +65,6 @@ def main():
     if not test_files:
         print(f"No test files found in {test_dir}")
         return 1
-    
-    # Set backends explicitly
-    os.environ["VT_MODEL_BACKEND"] = "whisper"
-    whisper_result = transcribe2.get_backend()
-    os.environ["VT_MODEL_BACKEND"] = "cohere"
-    cohere_result = transcribe2.get_backend()
     
     backends = [
         ("Whisper", "whisper"),
@@ -128,13 +122,19 @@ def main():
     
     print("="*80)
     
-    pass_count = sum(1 for _, _, _, s, _ in all_results if s == "PASS")
+    pass_count = sum(1 for _, _, _, s, _, _, _, _ in all_results if s == "PASS")
     total_count = len(all_results)
     
     print(f"\nTotal: {pass_count}/{total_count} tests passed")
-    
-    return 0 if pass_count == total_count else 1
+    return pass_count == total_count
 
+def test_transcription_accuracy():
+    """Pytest entrypoint for automated CI and flake testing"""
+    assert run_all_tests() is True
+
+def main():
+    success = run_all_tests()
+    return 0 if success else 1
 
 if __name__ == "__main__":
     sys.exit(main())
