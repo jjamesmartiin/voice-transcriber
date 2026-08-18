@@ -131,12 +131,14 @@ class SimpleVoiceTranscriber:
         # Update notification
         self.visual_notification.show_recording()
         
-        # Play sound
+        # Play sound (Windows bridge plays native chime directly on Windows host)
         try:
             if not t2.IS_MUTED:
-                sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/start.mp3')
-                subprocess.Popen(['mpg123', '-q', sound_path], 
-                               stderr=subprocess.DEVNULL)
+                from hotkeys import is_running_in_wsl
+                if not is_running_in_wsl():
+                    sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/start.mp3')
+                    subprocess.Popen(['mpg123', '-q', sound_path], 
+                                   stderr=subprocess.DEVNULL)
         except:
             pass
 
@@ -246,9 +248,12 @@ class SimpleVoiceTranscriber:
                 # Play sound
                 try:
                     if not t2.IS_MUTED:
-                        sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
-                        subprocess.Popen(['mpg123', '-q', sound_path], 
-                                       stderr=subprocess.DEVNULL)
+                        if self.hotkey_system and hasattr(self.hotkey_system, 'play_done_sound') and not should_type:
+                            self.hotkey_system.play_done_sound()
+                        else:
+                            sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
+                            subprocess.Popen(['mpg123', '-q', sound_path], 
+                                           stderr=subprocess.DEVNULL)
                 except:
                     pass
                 

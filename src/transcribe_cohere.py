@@ -208,27 +208,32 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     start_time = time.time()
     
     try:
-        if audio_data is not None:
-            if hasattr(audio_data, "flatten"):
-                audio_data = audio_data.flatten()
+        # Set optimal CPU thread count
+        if device == "cpu" and hasattr(torch, "set_num_threads"):
+            torch.set_num_threads(max(1, min(os.cpu_count() or 4, 8)))
             
-            results = model.transcribe(
-                processor=processor,
-                audio_arrays=[audio_data],
-                sample_rates=[sample_rate],
-                language=language
-            )
-        else:
-            results = model.transcribe(
-                processor=processor,
-                audio_files=[audio_path],
-                language=language
-            )
-        
-        if isinstance(results, list):
-            transcription = " ".join(results)
-        else:
-            transcription = str(results)
+        with torch.inference_mode():
+            if audio_data is not None:
+                if hasattr(audio_data, "flatten"):
+                    audio_data = audio_data.flatten()
+                
+                results = model.transcribe(
+                    processor=processor,
+                    audio_arrays=[audio_data],
+                    sample_rates=[sample_rate],
+                    language=language
+                )
+            else:
+                results = model.transcribe(
+                    processor=processor,
+                    audio_files=[audio_path],
+                    language=language
+                )
+            
+            if isinstance(results, list):
+                transcription = " ".join(results)
+            else:
+                transcription = str(results)
             
     except Exception as e:
         print(f"Transcription error: {e}")

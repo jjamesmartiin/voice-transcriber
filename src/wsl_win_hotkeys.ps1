@@ -23,6 +23,36 @@ public class WinInterop {
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const byte VK_V = 0x56;
 
+    private static System.Media.SoundPlayer startPlayer = null;
+    private static System.Media.SoundPlayer donePlayer = null;
+
+    public static void InitSounds() {
+        try {
+            string onPath = @"C:\Windows\Media\Speech On.wav";
+            if (!System.IO.File.Exists(onPath)) onPath = @"C:\Windows\Media\Windows Navigation Start.wav";
+            if (System.IO.File.Exists(onPath)) {
+                startPlayer = new System.Media.SoundPlayer(onPath);
+                startPlayer.LoadAsync();
+            }
+
+            string donePath = @"C:\Windows\Media\Windows Proximity Notification.wav";
+            if (!System.IO.File.Exists(donePath)) donePath = @"C:\Windows\Media\Speech Off.wav";
+            if (!System.IO.File.Exists(donePath)) donePath = @"C:\Windows\Media\Windows Notify.wav";
+            if (System.IO.File.Exists(donePath)) {
+                donePlayer = new System.Media.SoundPlayer(donePath);
+                donePlayer.LoadAsync();
+            }
+        } catch { }
+    }
+
+    public static void PlayStartSound() {
+        try { if (startPlayer != null) startPlayer.Play(); } catch { }
+    }
+
+    public static void PlayDoneSound() {
+        try { if (donePlayer != null) donePlayer.Play(); } catch { }
+    }
+
     public static bool IsAltShiftPressed() {
         bool alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
         bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -42,6 +72,7 @@ public class WinInterop {
         keybd_event(VK_V, 0, 0, UIntPtr.Zero);
         keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
         keybd_event((byte)VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        PlayDoneSound();
     }
 
     public static void StartStdinListener() {
@@ -54,8 +85,10 @@ public class WinInterop {
                             Environment.Exit(0);
                         } else if (line == "PASTE") {
                             SendCtrlV();
+                        } else if (line == "PLAY_DONE") {
+                            PlayDoneSound();
                         } else if (line == null) {
-                            System.Threading.Thread.Sleep(200);
+                            System.Threading.Thread.Sleep(50);
                         }
                     }
                 }
@@ -71,6 +104,7 @@ public class WinInterop {
 
 Add-Type -TypeDefinition $csharpCode -ReferencedAssemblies "System.Windows.Forms"
 
+[WinInterop]::InitSounds()
 [Console]::WriteLine("READY")
 [Console]::Out.Flush()
 
@@ -84,6 +118,7 @@ while ($true) {
     $isHotkeyDown = [WinInterop]::IsAltShiftPressed()
     if ($isHotkeyDown -and -not $wasHotkeyDown) {
         $wasHotkeyDown = $true
+        [WinInterop]::PlayStartSound()
         [Console]::WriteLine("HOTKEY_DOWN")
         [Console]::Out.Flush()
     } elseif (-not $isHotkeyDown -and $wasHotkeyDown) {
@@ -102,5 +137,5 @@ while ($true) {
         $wasConfigDown = $false
     }
 
-    [System.Threading.Thread]::Sleep(20)
+    [System.Threading.Thread]::Sleep(10)
 }

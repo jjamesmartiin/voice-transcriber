@@ -463,6 +463,17 @@ class WSLGlobalHotkeys:
                 logger.warning(f"Failed to trigger paste via WSL bridge: {e}")
         return False
 
+    def play_done_sound(self):
+        """Trigger instant Windows notification sound via bridge"""
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.stdin.write("PLAY_DONE\n")
+                self.process.stdin.flush()
+                return True
+            except Exception:
+                pass
+        return False
+
     def run(self):
         """Main event loop for WSL hotkey bridge"""
         try:
