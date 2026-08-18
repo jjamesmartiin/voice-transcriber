@@ -123,6 +123,11 @@ class SimpleVoiceTranscriber:
         stop_recording.clear()
         self.audio_frames = []
         
+        # Start streaming micro-batcher
+        from micro_batcher import StreamingMicroBatcher
+        self.micro_batcher = StreamingMicroBatcher(sample_rate=16000)
+        self.micro_batcher.start()
+        
         # Start recording in background thread IMMEDIATELY
         self.record_thread = threading.Thread(target=self.record_audio)
         self.record_thread.daemon = True
@@ -162,14 +167,15 @@ class SimpleVoiceTranscriber:
     def record_audio(self):
         """Recording worker thread"""
         try:
-            self.audio_frames = record_audio_stream()
+            cb = self.micro_batcher.feed_audio if hasattr(self, 'micro_batcher') and self.micro_batcher else None
+            self.audio_frames = record_audio_stream(stream_callback=cb)
         except Exception as e:
             logger.error(f"Recording error: {e}")
             self.recording = False
 
     def process_recording(self):
         """Process the recorded audio frames"""
-        if self.audio_frames is None or self.audio_frames.size == 0:
+        if (self.audio_frames is None or self.audio_frames.size == 0) and not getattr(self, 'micro_batcher', None):
             # Hide recording notification
             try:
                 self.visual_notification.hide_notification()
@@ -199,11 +205,12 @@ class SimpleVoiceTranscriber:
             if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
                 self.preload_thread.join()
 
-            # Process the audio
-            result, transcribe_time = process_audio_stream(self.audio_frames)
-            
-            # Clean up result
-            transcription = result.strip()
+            # Retrieve text from micro-batcher or fallback
+            if hasattr(self, 'micro_batcher') and self.micro_batcher:
+                transcription = self.micro_batcher.finish_and_get_text().strip()
+            else:
+                result, transcribe_time = process_audio_stream(self.audio_frames)
+                transcription = result.strip()
             
             # Explicitly free the audio data memory after processing
             del self.audio_frames

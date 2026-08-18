@@ -479,7 +479,7 @@ def select_audio_device():
         reset_terminal()
         return False
 
-def record_audio_stream(interactive_mode=False):
+def record_audio_stream(interactive_mode=False, stream_callback=None):
     """Record audio using sounddevice with fallback and auto-recovery support"""
     global INPUT_DEVICE_INDEX, ACTUAL_RATE, LAST_USED_DEVICE_NAME
     
@@ -543,14 +543,20 @@ def record_audio_stream(interactive_mode=False):
                     while not stop_recording.is_set():
                         try:
                             # Use a shorter timeout for better responsiveness to the stop event
-                            frames.append(q.get(timeout=0.05))
+                            frame = q.get(timeout=0.05)
+                            frames.append(frame)
+                            if stream_callback:
+                                stream_callback(frame)
                         except queue.Empty:
                             continue
                     
                     # Drain any remaining frames in the queue
                     while not q.empty():
                         try:
-                            frames.append(q.get_nowait())
+                            frame = q.get_nowait()
+                            frames.append(frame)
+                            if stream_callback:
+                                stream_callback(frame)
                         except queue.Empty:
                             break
             return frames
