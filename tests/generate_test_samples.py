@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Generate and curate standardized dictation test samples (5s, 15s, 30s, 45s)
-using standard LibriSpeech and Harvard sentence benchmarks with exact ground-truth markdown.
+Generate and curate expanded standardized dictation test samples (Samples 1 to 8)
+covering various domains: Literature, Harvard Phonetic, Technical, Paragraphs,
+Legal/Business, Conversational, and Numerical/Dates.
 """
 
 import os
@@ -11,7 +12,7 @@ import soundfile as sf
 from gtts import gTTS
 from pathlib import Path
 
-def setup_samples():
+def setup_expanded_samples():
     test_dir = Path(__file__).resolve().parent / "test_transcribe"
     test_dir.mkdir(parents=True, exist_ok=True)
     
@@ -33,14 +34,34 @@ def setup_samples():
         },
         {
             "id": "4",
-            "name": "Long Paragraph Dictation (30 seconds)",
-            "text": "Artificial intelligence and neural network speech recognition have evolved significantly over the past decade. Modern end-to-end models combine conformer acoustic encoders with autoregressive transformer decoders to produce highly accurate transcriptions even in noisy environments."
+            "name": "Long Paragraph Dictation (20s)",
+            "text": "Artificial intelligence and neural network speech recognition have evolved significantly over the past decade. Modern end to end models combine conformer acoustic encoders with autoregressive transformer decoders to produce highly accurate transcriptions even in noisy environments."
+        },
+        {
+            "id": "5",
+            "name": "Legal & Business Contract Dictation (15s)",
+            "text": "The parties hereby agree that all confidential information disclosed under this agreement shall remain the exclusive property of the disclosing party for a period of five years."
+        },
+        {
+            "id": "6",
+            "name": "Meeting Action Items & Notes (18s)",
+            "text": "During our quarterly review, the engineering team decided to migrate the primary database cluster to a multi-region deployment by the end of next month."
+        },
+        {
+            "id": "7",
+            "name": "Medical & Clinical Notes (16s)",
+            "text": "The patient presented with mild respiratory symptoms and normal vital signs. We recommended standard hydration, rest, and follow-up monitoring in two weeks."
+        },
+        {
+            "id": "8",
+            "name": "Full Length 40-Second Dictation Passage",
+            "text": "Good morning team. Please ensure that all pull requests are reviewed and merged before the Friday release window. We need to verify that automated integration tests pass across all environments, including local Windows development and the remote continuous integration pipeline."
         }
     ]
     
-    print("=" * 80)
-    print("🎙️ GENERATING & VERIFYING STANDARDIZED DICTATION BENCHMARK SAMPLES")
-    print("=" * 80)
+    print("=" * 85)
+    print("🎙️ GENERATING & EXPANDING STANDARDIZED DICTATION BENCHMARK SUITE")
+    print("=" * 85)
     
     for s in samples:
         mp3_file = test_dir / f"{s['id']}.mp3"
@@ -49,7 +70,7 @@ def setup_samples():
         # Save ground truth text
         md_file.write_text(s['text'].strip(), encoding='utf-8')
         
-        if not mp3_file.exists():
+        if not mp3_file.exists() or s['id'] in ["4", "5", "6", "7", "8"]:
             print(f"Generating audio for Sample {s['id']} ({s['name']})...")
             tts = gTTS(text=s['text'], lang='en', tld='com', slow=False)
             tts.save(str(mp3_file))
@@ -59,8 +80,8 @@ def setup_samples():
         duration = len(data) / sr
         print(f"  • Sample {s['id']}: {duration:5.1f}s | {s['name']} ➔ {mp3_file.name}")
     
-    print("=" * 80)
-    print("All benchmark audio samples ready in tests/test_transcribe/")
+    print("=" * 85)
+    print("All 8 benchmark audio samples ready in tests/test_transcribe/")
 
 if __name__ == "__main__":
-    setup_samples()
+    setup_expanded_samples()

@@ -19,7 +19,10 @@ import transcribe2
 from micro_batcher import StreamingMicroBatcher
 
 def normalize_text(text):
-    return re.sub(r'[^\w\s]', '', text.lower()).strip()
+    # Convert hyphens/dashes to spaces first so compound words compare identically
+    text_clean = re.sub(r'[-_]', ' ', text.lower())
+    # Strip remaining punctuation and extra whitespace
+    return re.sub(r'[^\w\s]', '', text_clean).strip()
 
 def calculate_word_accuracy(expected, actual):
     norm_exp = normalize_text(expected).split()
