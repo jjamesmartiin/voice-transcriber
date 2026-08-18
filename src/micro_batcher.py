@@ -3,7 +3,7 @@
 VAD-Guided Micro-Batching Streaming Transcription Engine:
 Chunks incoming audio on natural voice pauses during live speech,
 transcribes concurrent chunks in the background with acoustic context overlap,
-cleans silence hallucinations, and delivers 100% accurate transcription with ultra-low latency.
+trims trailing dead silence from audio tail, and cleans silence hallucinations.
 """
 
 import os
@@ -34,7 +34,36 @@ def clean_hallucinations(text):
     # Strip isolated trailing pronouns or junk attached to end
     cleaned = re.sub(r'\s+,\s*you\s*$', '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'\s+you\s*$', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+bye[.!?,]*\s*$', '', cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
+
+def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence_thresh=0.012, min_speech_cushion_ms=100):
+    """
+    Trim trailing room silence from the end of an audio buffer,
+    leaving a safe 100ms cushion for soft final consonants (s, f, th, t, you).
+    """
+    if audio_pcm is None or len(audio_pcm) == 0:
+        return audio_pcm
+        
+    flat = audio_pcm.flatten().astype(np.float32)
+    frame_size = int(frame_len_ms * sample_rate / 1000)
+    cushion_size = int(min_speech_cushion_ms * sample_rate / 1000)
+    
+    # Scan from back to front to find where speech actually ended
+    last_speech_idx = len(flat)
+    found_speech = False
+    for i in range(len(flat) - frame_size, 0, -frame_size):
+        frame = flat[i:i+frame_size]
+        rms = np.sqrt(np.mean(frame**2))
+        peak = np.max(np.abs(frame))
+        if rms >= silence_thresh or peak >= silence_thresh * 2:
+            last_speech_idx = min(len(flat), i + frame_size + cushion_size)
+            found_speech = True
+            break
+            
+    if found_speech and last_speech_idx < len(flat):
+        return flat[:last_speech_idx]
+    return flat
 
 class StreamingMicroBatcher:
     def __init__(self, sample_rate=16000, min_chunk_sec=3.5, max_chunk_sec=7.0, silence_thresh=0.015, min_silence_sec=0.25, overlap_sec=0.3):
@@ -120,35 +149,7 @@ class StreamingMicroBatcher:
             should_split = True
             
         if should_split:
-            self._dispatch_current_chunk(keep_overlap=True)
-
-def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence_thresh=0.012, min_speech_cushion_ms=100):
-    """
-    Trim trailing room silence from the end of an audio buffer,
-    leaving a safe 100ms cushion for soft final consonants (s, f, th, t, you).
-    """
-    if audio_pcm is None or len(audio_pcm) == 0:
-        return audio_pcm
-        
-    flat = audio_pcm.flatten().astype(np.float32)
-    frame_size = int(frame_len_ms * sample_rate / 1000)
-    cushion_size = int(min_speech_cushion_ms * sample_rate / 1000)
-    
-    # Scan from back to front to find where speech actually ended
-    last_speech_idx = len(flat)
-    found_speech = False
-    for i in range(len(flat) - frame_size, 0, -frame_size):
-        frame = flat[i:i+frame_size]
-        rms = np.sqrt(np.mean(frame**2))
-        peak = np.max(np.abs(frame))
-        if rms >= silence_thresh or peak >= silence_thresh * 2:
-            last_speech_idx = min(len(flat), i + frame_size + cushion_size)
-            found_speech = True
-            break
-            
-    if found_speech and last_speech_idx < len(flat):
-        return flat[:last_speech_idx]
-    return flat
+            self._dispatch_current_chunk(keep_overlap=True, is_tail=False)
 
     def _dispatch_current_chunk(self, keep_overlap=False, is_tail=False):
         if not self.audio_buffer:
@@ -190,7 +191,7 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
             self.transcribed_chunks.sort(key=lambda x: x[0])
             cleaned_texts = [clean_hallucinations(t) for _, t in self.transcribed_chunks if t]
             full_text = " ".join(cleaned_texts).strip()
-            # Clean any double periods or duplicate punctuation from chunk boundaries
+            # Clean duplicate punctuation from chunk boundaries
             full_text = re.sub(r'\s+([.,!?;:])', r'\1', full_text)
             full_text = re.sub(r'([.!?])\s*\1+', r'\1', full_text)
             
