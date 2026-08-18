@@ -31,10 +31,12 @@ def clean_hallucinations(text):
     cleaned = text
     for pat in HALLUCINATION_PATTERNS:
         cleaned = pat.sub('', cleaned)
-    # Strip isolated trailing pronouns or junk attached to end
-    cleaned = re.sub(r'\s+,\s*you\s*$', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\s+you\s*$', '', cleaned, flags=re.IGNORECASE)
+    # Strip isolated trailing pronouns or sign-offs attached after punctuation or end of text
+    cleaned = re.sub(r'([.!?])\s+you[.!?,]*\s*$', r'\1', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s*,\s*you\s*$', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'([.!?])\s+bye[.!?,]*\s*$', r'\1', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'\s+bye[.!?,]*\s*$', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+you\s*$', '', cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
 
 def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence_thresh=0.012, min_speech_cushion_ms=100):
@@ -194,5 +196,6 @@ class StreamingMicroBatcher:
             # Clean duplicate punctuation from chunk boundaries
             full_text = re.sub(r'\s+([.,!?;:])', r'\1', full_text)
             full_text = re.sub(r'([.!?])\s*\1+', r'\1', full_text)
+            full_text = clean_hallucinations(full_text)
             
         return full_text

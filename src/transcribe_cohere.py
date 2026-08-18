@@ -229,33 +229,31 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
                 if hasattr(audio_data, "flatten"):
                     audio_data = audio_data.flatten()
                 
-                duration_sec = len(audio_data) / max(1, sample_rate)
-                # Dynamic max tokens: speech is ~3.5 words/sec, ~5 tokens/sec.
-                # Cap max tokens to prevent runaway trailing silence generation
-                max_tokens = max(12, int(duration_sec * 6.5) + 6)
-                
                 results = model.transcribe(
                     processor=processor,
                     audio_arrays=[audio_data],
                     sample_rates=[sample_rate],
-                    language=language,
-                    max_new_tokens=max_tokens,
-                    no_repeat_ngram_size=3,
-                    repetition_penalty=1.1
+                    language=language
                 )
             else:
                 results = model.transcribe(
                     processor=processor,
                     audio_files=[audio_path],
-                    language=language,
-                    no_repeat_ngram_size=3,
-                    repetition_penalty=1.1
+                    language=language
                 )
             
             if isinstance(results, list):
                 transcription = " ".join(results)
             else:
                 transcription = str(results)
+            
+            # Clean trailing silence hallucinations (. you, . Bye, etc.)
+            import re
+            transcription = re.sub(r'([.!?])\s+you[.!?,]*\s*$', r'\1', transcription, flags=re.IGNORECASE)
+            transcription = re.sub(r'\s*,\s*you\s*$', '', transcription, flags=re.IGNORECASE)
+            transcription = re.sub(r'([.!?])\s+bye[.!?,]*\s*$', r'\1', transcription, flags=re.IGNORECASE)
+            transcription = re.sub(r'\s+bye[.!?,]*\s*$', '', transcription, flags=re.IGNORECASE)
+            transcription = re.sub(r'\s+you\s*$', '', transcription, flags=re.IGNORECASE)
             
     except Exception as e:
         print(f"Transcription error: {e}")
@@ -264,7 +262,7 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     elapsed = time.time() - start_time
     print(f"Transcription completed in {elapsed:.2f} seconds")
     
-    return transcription
+    return transcription.strip()
 
 def unload_model():
     global _model, _processor
