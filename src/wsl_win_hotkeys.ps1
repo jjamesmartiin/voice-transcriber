@@ -28,19 +28,15 @@ public class WinInterop {
 
     public static void InitSounds() {
         try {
-            string onPath = @"C:\Windows\Media\Speech On.wav";
-            if (!System.IO.File.Exists(onPath)) onPath = @"C:\Windows\Media\Windows Navigation Start.wav";
-            if (System.IO.File.Exists(onPath)) {
-                startPlayer = new System.Media.SoundPlayer(onPath);
-                startPlayer.LoadAsync();
-            }
+            string chimePath = @"C:\Windows\Media\Windows Proximity Notification.wav";
+            if (!System.IO.File.Exists(chimePath)) chimePath = @"C:\Windows\Media\Speech On.wav";
+            if (!System.IO.File.Exists(chimePath)) chimePath = @"C:\Windows\Media\Windows Notify.wav";
+            if (!System.IO.File.Exists(chimePath)) chimePath = @"C:\Windows\Media\Windows Navigation Start.wav";
 
-            string donePath = @"C:\Windows\Media\Windows Proximity Notification.wav";
-            if (!System.IO.File.Exists(donePath)) donePath = @"C:\Windows\Media\Speech Off.wav";
-            if (!System.IO.File.Exists(donePath)) donePath = @"C:\Windows\Media\Windows Notify.wav";
-            if (System.IO.File.Exists(donePath)) {
-                donePlayer = new System.Media.SoundPlayer(donePath);
-                donePlayer.LoadAsync();
+            if (System.IO.File.Exists(chimePath)) {
+                startPlayer = new System.Media.SoundPlayer(chimePath);
+                startPlayer.LoadAsync();
+                donePlayer = startPlayer;
             }
         } catch { }
     }
