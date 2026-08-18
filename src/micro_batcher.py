@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 VAD-Guided Micro-Batching Streaming Transcription Engine:
-Chunks incoming audio on natural voice pauses during live speech,
-transcribes concurrent chunks in the background with acoustic context overlap,
-trims trailing dead silence from audio tail, and cleans silence hallucinations.
+Supports Dynamic Dual-Path ('auto', 'always', 'disabled' via VT_MICRO_BATCHING).
+- For short clips (<4.5s): Runs high-speed single-pass direct transcription.
+- For longer dictation (>=4.5s): Concurrent background pipelining with 300ms acoustic context overlap.
+- Audio tail trimming and full-text sign-off hallucination cleaning.
 """
 
 import os
@@ -68,8 +69,19 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
     return flat
 
 class StreamingMicroBatcher:
-    def __init__(self, sample_rate=16000, min_chunk_sec=3.5, max_chunk_sec=7.0, silence_thresh=0.015, min_silence_sec=0.25, overlap_sec=0.3):
+    def __init__(self, sample_rate=16000, mode=None, min_chunk_sec=4.5, max_chunk_sec=7.0, silence_thresh=0.015, min_silence_sec=0.25, overlap_sec=0.3):
         self.sample_rate = sample_rate
+        self.mode = mode or os.environ.get("VT_MICRO_BATCHING", "auto").lower()
+        
+        # Configure thresholds based on mode
+        if self.mode == "always" or self.mode == "1" or self.mode == "true":
+            min_chunk_sec = 3.0
+            max_chunk_sec = 5.5
+        elif self.mode == "disabled" or self.mode == "0" or self.mode == "false":
+            # Disabled: large limit so it never triggers background chunks
+            min_chunk_sec = 999999.0
+            max_chunk_sec = 999999.0
+            
         self.min_chunk_len = int(min_chunk_sec * sample_rate)
         self.max_chunk_len = int(max_chunk_sec * sample_rate)
         self.silence_thresh = silence_thresh
