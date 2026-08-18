@@ -74,9 +74,17 @@ class StreamingMicroBatcher:
                     break
                 chunk_index, audio_chunk = chunk_data
                 
-                # Transcribe chunk
-                text = transcribe2.transcribe_audio(audio_data=audio_chunk, sample_rate=self.sample_rate)
-                text = clean_hallucinations(text.strip() if text else "")
+                # Check energy gate: is this chunk purely silence/background noise?
+                flat = audio_chunk.flatten().astype(np.float32)
+                peak = np.max(np.abs(flat)) if len(flat) > 0 else 0
+                rms = np.sqrt(np.mean(flat**2)) if len(flat) > 0 else 0
+                
+                if peak < 0.015 and rms < 0.0035:
+                    text = ""
+                else:
+                    # Transcribe chunk with speech signal
+                    text = transcribe2.transcribe_audio(audio_data=audio_chunk, sample_rate=self.sample_rate)
+                    text = clean_hallucinations(text.strip() if text else "")
                 
                 with self.results_lock:
                     self.transcribed_chunks.append((chunk_index, text))

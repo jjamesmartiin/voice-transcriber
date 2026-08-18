@@ -199,7 +199,19 @@ def preload_model(device="cpu"):
     thread.start()
     return thread
 
+def has_speech_activity(audio_data):
+    """Check if audio contains actual speech energy rather than silence / noise floor"""
+    if audio_data is None or len(audio_data) == 0:
+        return False
+    peak = np.max(np.abs(audio_data))
+    rms = np.sqrt(np.mean(audio_data.astype(np.float32)**2))
+    return peak >= 0.015 or rms >= 0.0035
+
 def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device="cpu", language="en"):
+    # Guard against pure silence / background noise
+    if audio_data is not None and not has_speech_activity(audio_data):
+        return ""
+        
     try:
         model, processor = get_model(device=device)
     except Exception as e:
