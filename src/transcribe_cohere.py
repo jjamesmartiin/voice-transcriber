@@ -229,17 +229,27 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
                 if hasattr(audio_data, "flatten"):
                     audio_data = audio_data.flatten()
                 
+                duration_sec = len(audio_data) / max(1, sample_rate)
+                # Dynamic max tokens: speech is ~3.5 words/sec, ~5 tokens/sec.
+                # Cap max tokens to prevent runaway trailing silence generation
+                max_tokens = max(12, int(duration_sec * 6.5) + 6)
+                
                 results = model.transcribe(
                     processor=processor,
                     audio_arrays=[audio_data],
                     sample_rates=[sample_rate],
-                    language=language
+                    language=language,
+                    max_new_tokens=max_tokens,
+                    no_repeat_ngram_size=3,
+                    repetition_penalty=1.1
                 )
             else:
                 results = model.transcribe(
                     processor=processor,
                     audio_files=[audio_path],
-                    language=language
+                    language=language,
+                    no_repeat_ngram_size=3,
+                    repetition_penalty=1.1
                 )
             
             if isinstance(results, list):
