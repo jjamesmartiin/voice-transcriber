@@ -12,6 +12,14 @@ if "PULSE_SERVER" not in os.environ:
     elif os.path.exists("/mnt/wslg/PulseServer"):
         os.environ["PULSE_SERVER"] = "/mnt/wslg/PulseServer"
 
+# In WSL, ALSA needs to be told to use PulseAudio explicitly, otherwise PortAudio finds 0 devices
+if "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg"):
+    alsa_conf_path = "/tmp/vt-alsa-pulse.conf"
+    if not os.path.exists(alsa_conf_path):
+        with open(alsa_conf_path, "w") as f:
+            f.write("pcm.!default { type pulse }\nctl.!default { type pulse }\n")
+    os.environ["ALSA_CONFIG_PATH"] = alsa_conf_path
+
 import queue
 import pyperclip
 import threading
@@ -83,7 +91,7 @@ SECONDARY_DEVICE_NAME = None
 LAST_USED_DEVICE_NAME = "Unknown"
 ACTUAL_RATE = RATE
 OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
-MODEL_BACKEND = os.environ.get("VT_MODEL_BACKEND", "whisper").lower() # 'cohere' or 'whisper'
+MODEL_BACKEND = os.environ.get("VT_MODEL_BACKEND", "cohere").lower() # 'cohere' or 'whisper'
 COPY_TO_CLIPBOARD = True
 IS_MUTED = False
 CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
@@ -189,7 +197,7 @@ def load_audio_config():
                 IS_MUTED = config.get('is_muted', False)
                 # Environment variable takes priority, then config, then default to whisper
                 env_backend = os.environ.get("VT_MODEL_BACKEND", "").lower()
-                MODEL_BACKEND = env_backend or config.get('model_backend', 'whisper')
+                MODEL_BACKEND = env_backend or config.get('model_backend', 'cohere')
                 COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
                 
                 # Update backend in transcribe2
@@ -276,28 +284,37 @@ def select_audio_device():
     copy_display = "Enabled" if COPY_TO_CLIPBOARD else "Disabled"
     mute_display = "MUTED" if IS_MUTED else "Sound On"
     
+    # Check if WSL
+    is_wsl = "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg")
+    
     print("\nVoice Transcriber Configuration:")
     print("-" * 85)
     
     def print_option(key, description, value):
         print(f"  {key}. {description:<53} (currently: {value})")
 
-    print_option("P", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
-    print_option("S", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
+    if is_wsl:
+        print_option("W", "Open Windows Microphone Settings", "WSL Bridge Active")
+    else:
+        print_option("P", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
+        print_option("S", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
+        
     print_option("M", "Toggle Mute", mute_display)
     print_option("B", "Switch Model (whisper/cohere)", MODEL_BACKEND)
     print_option("T", "Toggle Auto-Type (auto-type to screen)", copy_display)
     print(f"  R. {'Reset Terminal (if text is invisible or wonky)':<53}")
     print("-" * 85)
     
-    p_marker = "[ACTIVE]" if OVERRIDE_MODE == 'primary' else ""
-    s_marker = "[ACTIVE]" if OVERRIDE_MODE == 'secondary' else ""
-    a_marker = "[ACTIVE]" if OVERRIDE_MODE == 'auto' else ""
-    
-    print(f"  p. {'Use Primary Device (Manual Override)':<53} {p_marker}")
-    print(f"  s. {'Use Secondary Device (Manual Override)':<53} {s_marker}")
-    print(f"  a. {'Automatic Selection (Default)':<53} {a_marker}")
-    print("-" * 85)
+    if not is_wsl:
+        p_marker = "[ACTIVE]" if OVERRIDE_MODE == 'primary' else ""
+        s_marker = "[ACTIVE]" if OVERRIDE_MODE == 'secondary' else ""
+        a_marker = "[ACTIVE]" if OVERRIDE_MODE == 'auto' else ""
+        
+        print(f"  p. {'Use Primary Device (Manual Override)':<53} {p_marker}")
+        print(f"  s. {'Use Secondary Device (Manual Override)':<53} {s_marker}")
+        print(f"  a. {'Automatic Selection (Default)':<53} {a_marker}")
+        print("-" * 85)
+        
     print("  c or \"↵\". to save/exit")
     
     print("\nYour choice: ", end="", flush=True)
@@ -341,40 +358,53 @@ def select_audio_device():
         reset_terminal()
         return select_audio_device()
         
-    if choice == 'p':
-        OVERRIDE_MODE = 'primary'
-        if PRIMARY_DEVICE_NAME:
-            idx = find_device_index(PRIMARY_DEVICE_NAME)
-            if idx is not None:
-                INPUT_DEVICE_INDEX = idx
-                sd.default.device = INPUT_DEVICE_INDEX
-                print(f"Set to Primary Device: {PRIMARY_DEVICE_NAME}")
+    if is_wsl and choice.lower() == 'w':
+        print("\nWSL Environment detected. The WSL bridge automatically uses the Windows Default Microphone.")
+        print("Opening Windows Sound Settings (ms-settings:sound) to change your microphone...")
+        import subprocess
+        try:
+            subprocess.run(['powershell.exe', '-NoProfile', '-Command', 'Start-Process', 'ms-settings:sound'], 
+                           check=False, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        except:
+            pass
+        reset_terminal()
+        return select_audio_device()
+        
+    if not is_wsl:
+        if choice == 'p':
+            OVERRIDE_MODE = 'primary'
+            if PRIMARY_DEVICE_NAME:
+                idx = find_device_index(PRIMARY_DEVICE_NAME)
+                if idx is not None:
+                    INPUT_DEVICE_INDEX = idx
+                    sd.default.device = INPUT_DEVICE_INDEX
+                    print(f"Set to Primary Device: {PRIMARY_DEVICE_NAME}")
+                else:
+                    print(f"Primary device not found: {PRIMARY_DEVICE_NAME}")
             else:
-                print(f"Primary device not found: {PRIMARY_DEVICE_NAME}")
-        else:
-            print("Primary device not configured yet.")
-        save_audio_config()
-        return True
-    elif choice == 's':
-        OVERRIDE_MODE = 'secondary'
-        if SECONDARY_DEVICE_NAME:
-            idx = find_device_index(SECONDARY_DEVICE_NAME)
-            if idx is not None:
-                INPUT_DEVICE_INDEX = idx
-                sd.default.device = INPUT_DEVICE_INDEX
-                print(f"Set to Secondary Device: {SECONDARY_DEVICE_NAME}")
+                print("Primary device not configured yet.")
+            save_audio_config()
+            return True
+        elif choice == 's':
+            OVERRIDE_MODE = 'secondary'
+            if SECONDARY_DEVICE_NAME:
+                idx = find_device_index(SECONDARY_DEVICE_NAME)
+                if idx is not None:
+                    INPUT_DEVICE_INDEX = idx
+                    sd.default.device = INPUT_DEVICE_INDEX
+                    print(f"Set to Secondary Device: {SECONDARY_DEVICE_NAME}")
+                else:
+                    print(f"Secondary device not found: {SECONDARY_DEVICE_NAME}")
             else:
-                print(f"Secondary device not found: {SECONDARY_DEVICE_NAME}")
-        else:
-            print("Secondary device not configured yet.")
-        save_audio_config()
-        return True
-    elif choice.lower() == 'a':
-        OVERRIDE_MODE = 'auto'
-        print("Mode: Automatic Selection")
-        # Let record_audio_stream handle the logic for auto selection
-        save_audio_config()
-        return True
+                print("Secondary device not configured yet.")
+            save_audio_config()
+            return True
+        elif choice.lower() == 'a':
+            OVERRIDE_MODE = 'auto'
+            print("Mode: Automatic Selection")
+            # Let record_audio_stream handle the logic for auto selection
+            save_audio_config()
+            return True
 
     if choice not in ['P', 'S']:
         print("Invalid choice.")
@@ -382,6 +412,19 @@ def select_audio_device():
         
     is_primary = (choice == 'P')
     label = "Primary" if is_primary else "Secondary"
+    
+    # NEW LOGIC FOR WSL:
+    if "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg"):
+        print(f"\nWSL Environment detected. {label} device uses the Windows Default Microphone.")
+        print("Opening Windows Sound Settings (ms-settings:sound) to change your microphone...")
+        import subprocess
+        try:
+            subprocess.run(['powershell.exe', '-NoProfile', '-Command', 'Start-Process', 'ms-settings:sound'], 
+                           check=False, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        except:
+            pass
+        reset_terminal()
+        return True
     
     print(f"\nAvailable Audio Input Devices for {label}:")
     print("=" * 60)
@@ -440,40 +483,47 @@ def record_audio_stream(interactive_mode=False):
     """Record audio using sounddevice with fallback and auto-recovery support"""
     global INPUT_DEVICE_INDEX, ACTUAL_RATE, LAST_USED_DEVICE_NAME
     
-    # Manual Override Logic
-    if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
-        primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
-        if primary_idx is not None:
-            if INPUT_DEVICE_INDEX != primary_idx:
-                print(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME}")
-                INPUT_DEVICE_INDEX = primary_idx
-                sd.default.device = INPUT_DEVICE_INDEX
-        else:
-            print(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
-    elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
-        secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
-        if secondary_idx is not None:
-            if INPUT_DEVICE_INDEX != secondary_idx:
-                print(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME}")
-                INPUT_DEVICE_INDEX = secondary_idx
-                sd.default.device = INPUT_DEVICE_INDEX
-        else:
-            print(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
-    elif PRIMARY_DEVICE_NAME:
-        # Auto-recovery: Always try to see if the primary device has returned before starting
-        primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
-        if primary_idx is not None:
-            if INPUT_DEVICE_INDEX != primary_idx:
-                print(f"Switching to primary device: {PRIMARY_DEVICE_NAME}")
-                INPUT_DEVICE_INDEX = primary_idx
-                sd.default.device = INPUT_DEVICE_INDEX
-        elif SECONDARY_DEVICE_NAME:
-            # If primary is gone, ensure we at least use the secondary if it's available
+    is_wsl = "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg")
+    
+    if is_wsl:
+        # In WSL, we always rely on the single default ALSA-Pulse audio bridge
+        INPUT_DEVICE_INDEX = None
+        sd.default.device = None
+    else:
+        # Manual Override Logic for Native Windows/Linux
+        if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
+            primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
+            if primary_idx is not None:
+                if INPUT_DEVICE_INDEX != primary_idx:
+                    print(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = primary_idx
+                    sd.default.device = INPUT_DEVICE_INDEX
+            else:
+                print(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
+        elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
             secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
-            if secondary_idx is not None and INPUT_DEVICE_INDEX != secondary_idx:
-                print(f"Using secondary device: {SECONDARY_DEVICE_NAME}")
-                INPUT_DEVICE_INDEX = secondary_idx
-                sd.default.device = INPUT_DEVICE_INDEX
+            if secondary_idx is not None:
+                if INPUT_DEVICE_INDEX != secondary_idx:
+                    print(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = secondary_idx
+                    sd.default.device = INPUT_DEVICE_INDEX
+            else:
+                print(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
+        elif PRIMARY_DEVICE_NAME:
+            # Auto-recovery: Always try to see if the primary device has returned before starting
+            primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
+            if primary_idx is not None:
+                if INPUT_DEVICE_INDEX != primary_idx:
+                    print(f"Switching to primary device: {PRIMARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = primary_idx
+                    sd.default.device = INPUT_DEVICE_INDEX
+            elif SECONDARY_DEVICE_NAME:
+                # If primary is gone, ensure we at least use the secondary if it's available
+                secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
+                if secondary_idx is not None and INPUT_DEVICE_INDEX != secondary_idx:
+                    print(f"Using secondary device: {SECONDARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = secondary_idx
+                    sd.default.device = INPUT_DEVICE_INDEX
 
     q = queue.Queue()
 

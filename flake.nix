@@ -28,6 +28,7 @@
           runtimeDeps = with pkgs; [
             pulseaudio
             portaudio
+            alsa-plugins
             lame
             xclip
             libnotify
@@ -90,12 +91,19 @@
             installPhase = ''
               mkdir -p $out/share/vt
               cp -r src/* $out/share/vt/
+              if [ -d models ]; then
+                cp -r models $out/share/vt/
+              fi
               
               mkdir -p $out/bin
               cat > $out/bin/vt << EOF
               #!${pkgs.bash}/bin/bash
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:\$PATH"
               export PYTHONPATH="$out/share/vt:\$PYTHONPATH"
+              export ALSA_PLUGIN_DIR="${pkgs.alsa-plugins}/lib/alsa-lib"
+              mkdir -p /tmp/vt-alsa
+              echo -e "pcm.!default { type pulse }\nctl.!default { type pulse }" > /tmp/vt-alsa/asound.conf
+              export ALSA_CONFIG_PATH="/tmp/vt-alsa/asound.conf"
               exec ${pythonEnv}/bin/python $out/share/vt/main.py "\$@"
               EOF
               chmod +x $out/bin/vt
@@ -139,6 +147,7 @@
           runtimeDeps = with pkgs; [
             pulseaudio
             portaudio
+            alsa-plugins
             lame
             xclip
             libnotify
@@ -204,6 +213,9 @@
           };
 
           runtimeDeps = with pkgs; [
+            pulseaudio
+            portaudio
+            alsa-plugins
             lame
             xclip
             libnotify
@@ -262,6 +274,13 @@
             shellHook = ''
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
               export PS1='\[\033[1;32m\][VT-dev:\w]\$\[\033[0m\] '
+              
+              # WSL/ALSA Audio Fixes
+              export ALSA_PLUGIN_DIR="${pkgs.alsa-plugins}/lib/alsa-lib"
+              mkdir -p /tmp/vt-alsa
+              echo -e "pcm.!default { type pulse }\nctl.!default { type pulse }" > /tmp/vt-alsa/asound.conf
+              export ALSA_CONFIG_PATH="/tmp/vt-alsa/asound.conf"
+              
               echo "🎙️ VT Development Environment Ready!"
               echo "To run the app: python src/main.py"
               echo "To run tests: python -m pytest tests/"

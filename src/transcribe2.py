@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Default backend
-_current_backend_name = os.environ.get("VT_MODEL_BACKEND", "whisper").lower()
+_current_backend_name = os.environ.get("VT_MODEL_BACKEND", "cohere").lower()
 _backend = None
 
 def get_backend():

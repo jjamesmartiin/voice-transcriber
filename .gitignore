@@ -8,3 +8,6 @@ env/
 venv/
 result
 HF_TOKEN
+models/
+*.bin
+*.safetensors

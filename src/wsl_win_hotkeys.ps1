@@ -43,6 +43,29 @@ public class WinInterop {
         keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
         keybd_event((byte)VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
     }
+
+    public static void StartStdinListener() {
+        System.Threading.Thread t = new System.Threading.Thread(() => {
+            try {
+                using (var reader = new System.IO.StreamReader(Console.OpenStandardInput())) {
+                    while (true) {
+                        string line = reader.ReadLine();
+                        if (line == "EXIT") {
+                            Environment.Exit(0);
+                        } else if (line == "PASTE") {
+                            SendCtrlV();
+                        } else if (line == null) {
+                            System.Threading.Thread.Sleep(200);
+                        }
+                    }
+                }
+            } catch {
+                // ignore
+            }
+        });
+        t.IsBackground = true;
+        t.Start();
+    }
 }
 "@
 
@@ -51,25 +74,7 @@ Add-Type -TypeDefinition $csharpCode -ReferencedAssemblies "System.Windows.Forms
 [Console]::WriteLine("READY")
 [Console]::Out.Flush()
 
-# Stdin listener thread for PASTE commands
-[System.Threading.ThreadPool]::QueueUserWorkItem({
-    try {
-        $reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput())
-        while ($true) {
-            $line = $reader.ReadLine()
-            if ($line -eq "EXIT") {
-                [System.Environment]::Exit(0)
-            } elseif ($line -eq "PASTE") {
-                [WinInterop]::SendCtrlV()
-            } elseif ($null -eq $line) {
-                # Null means end of stream or no data yet, do NOT exit immediately
-                [System.Threading.Thread]::Sleep(200)
-            }
-        }
-    } catch {
-        # ignore read errors
-    }
-}) | Out-Null
+[WinInterop]::StartStdinListener()
 
 $wasHotkeyDown = $false
 $wasConfigDown = $false

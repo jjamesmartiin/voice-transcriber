@@ -94,26 +94,41 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
     token = get_token()
     dtype = torch.float16 if device == "cuda" else torch.float32
     
+    # Search local candidate directories first
+    search_dirs = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "cohere"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "cohere"),
+        os.path.join(os.getcwd(), "models", "cohere"),
+    ]
+    
+    local_path = None
+    for candidate in search_dirs:
+        if os.path.exists(candidate) and (os.path.exists(os.path.join(candidate, "model.safetensors")) or os.path.exists(os.path.join(candidate, "pytorch_model.bin"))):
+            local_path = candidate
+            break
+            
+    target_id = local_path if local_path else model_id
+    
     try:
-        print(f"Loading model from cache...")
+        print(f"Loading Cohere model from {target_id}...")
         processor = AutoProcessor.from_pretrained(
-            model_id, 
-            revision=revision,
+            target_id, 
+            revision=revision if not local_path else None,
             trust_remote_code=True,
             token=token,
-            local_files_only=True
+            local_files_only=bool(local_path)
         )
         
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
-            model_id,
-            revision=revision,
+            target_id,
+            revision=revision if not local_path else None,
             torch_dtype=dtype,
             trust_remote_code=True,
             token=token,
-            local_files_only=True
+            local_files_only=bool(local_path)
         ).to(device)
         
-        print("Loaded from local cache.")
+        print("Loaded Cohere model successfully.")
         return model, processor
     except Exception as e:
         print(f"Model not in cache or update needed: {e}")
