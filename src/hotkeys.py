@@ -399,7 +399,7 @@ class WSLGlobalHotkeys:
         try:
             subprocess.run([
                 "powershell.exe", "-NoProfile", "-Command",
-                "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*wsl_win_hotkeys.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+                "Get-CimInstance Win32_Process | Where-Object CommandLine -like '*wsl_win_hotkeys.ps1*' | Stop-Process -Force -ErrorAction SilentlyContinue"
             ], capture_output=True, timeout=3)
         except Exception:
             pass
@@ -447,13 +447,13 @@ class WSLGlobalHotkeys:
                 event = line.strip()
                 if event == "HOTKEY_DOWN":
                     self.hotkey_active = True
-                    self.callback_start()
+                    threading.Thread(target=self.callback_start, daemon=True).start()
                 elif event == "HOTKEY_UP":
                     self.hotkey_active = False
-                    self.callback_stop(copy_to_clipboard=True)
+                    threading.Thread(target=self.callback_stop, kwargs={"copy_to_clipboard": True}, daemon=True).start()
                 elif event == "CONFIG_DOWN":
                     if self.callback_config:
-                        self.callback_config()
+                        threading.Thread(target=self.callback_config, daemon=True).start()
             except Exception as e:
                 logger.error(f"Error in WSL hotkey reader: {e}")
                 break
@@ -477,6 +477,17 @@ class WSLGlobalHotkeys:
         if self.process and self.process.poll() is None:
             try:
                 self.process.stdin.write("PLAY_DONE\n")
+                self.process.stdin.flush()
+                return True
+            except Exception:
+                pass
+        return False
+
+    def set_sound_theme(self, theme):
+        """Set sound theme dynamically on Windows host"""
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.stdin.write(f"SET_SOUND:{theme}\n")
                 self.process.stdin.flush()
                 return True
             except Exception:
@@ -521,18 +532,28 @@ def is_running_in_wsl():
     )
 
 
+_current_hotkey_instance = None
+
+def set_global_sound_theme(theme):
+    global _current_hotkey_instance
+    if _current_hotkey_instance and hasattr(_current_hotkey_instance, 'set_sound_theme'):
+        _current_hotkey_instance.set_sound_theme(theme)
+
 def create_global_hotkeys(callback_start, callback_stop, callback_config=None):
     """
     Factory function to create appropriate hotkey manager:
     - In WSL: Uses zero-setup Windows hotkey bridge via powershell.exe
     - In Linux: Uses WaylandGlobalHotkeys (evdev/uinput)
     """
+    global _current_hotkey_instance
     import os
     import subprocess
 
     if is_running_in_wsl():
         logger.info("Detected NixOS WSL environment - initializing Zero-Setup Windows Host Bridge...")
-        return WSLGlobalHotkeys(callback_start, callback_stop, callback_config)
+        _current_hotkey_instance = WSLGlobalHotkeys(callback_start, callback_stop, callback_config)
     else:
-        return WaylandGlobalHotkeys(callback_start, callback_stop, callback_config)
+        _current_hotkey_instance = WaylandGlobalHotkeys(callback_start, callback_stop, callback_config)
+        
+    return _current_hotkey_instance
 

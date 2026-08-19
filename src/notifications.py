@@ -57,6 +57,7 @@ class VisualNotification:
         self.app_name = app_name
         self.active = False
         self.overlay_processes = []
+        self._lock = threading.Lock()
         self.display_env = self._detect_display_environment()
         self.available_tools = self._detect_available_tools()
         self.active_device = None
@@ -118,17 +119,7 @@ class VisualNotification:
         """Show a processing notification."""
         self._cleanup_overlays()
         self.active = True
-        
-        # Run overlay in background thread so it doesn't block
-        def create_overlay_bg():
-            try:
-                self._create_overlay(f"LOADING {text}", "#ffaa00", persistent=True)
-            except:
-                pass
-        
-        overlay_thread = threading.Thread(target=create_overlay_bg, daemon=True)
-        overlay_thread.start()
-        
+        self._create_overlay(f"LOADING {text}", "#ffaa00", persistent=True)
         self._show_terminal_notification(f"Loading {text}...")
     
     def show_completed(self, text="COMPLETED", sub_text=None):
@@ -271,16 +262,17 @@ if __name__ == "__main__":
     
     def _cleanup_overlays(self):
         """Clean up all active overlay processes."""
-        for process in self.overlay_processes:
-            try:
-                process.terminate()
-                process.wait(timeout=1)
-            except:
+        with self._lock:
+            for process in self.overlay_processes:
                 try:
-                    process.kill()
+                    process.terminate()
+                    process.wait(timeout=0.2)
                 except:
-                    pass
-        self.overlay_processes = []
+                    try:
+                        process.kill()
+                    except:
+                        pass
+            self.overlay_processes = []
     
     def _show_terminal_notification(self, text, sub_text=None):
         """Show a colorful terminal notification."""

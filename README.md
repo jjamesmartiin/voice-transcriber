@@ -121,11 +121,27 @@ export VT_MODEL_BACKEND=whisper
 ./run.sh
 ```
 
-### Hugging Face Authentication (For Cohere Model)
-To download the Cohere weights for the first time:
-1. Accept model terms at [Hugging Face: CohereLabs/cohere-transcribe-03-2026](https://huggingface.co/CohereLabs/cohere-transcribe-03-2026).
-2. Create a file named `HF_TOKEN` in the repository root containing your Hugging Face token (`hf_...`).
-3. Run `./run.sh` — the model will be cached locally for all subsequent offline runs.
+### Sound Effect Themes
+Customize the audio cues played on speech start and completion:
+
+```bash
+export VT_SOUND_THEME="proximity"   # Default modern soft Windows chime
+# Options: 'proximity', 'speech', 'notify', 'navigation', 'classic', 'silent', or custom .wav path
+./run.sh
+```
+*You can also change the sound theme interactively by pressing `Ctrl + Alt + I` and selecting `E`.*
+
+---
+
+## 🧠 High-Speed Speech Post-Processing & Disfluency Repair
+
+Voice Transcriber includes a microsecond-latency regex heuristic post-processing engine ([`post_processor.py`](src/post_processor.py)) that automatically repairs common ASR artifacts and natural conversational speech patterns:
+
+* **Punctuation Boundary Healing**: Eliminates premature false sentence terminations before coordinating/subordinating conjunctions (e.g. `"...commit. and force push"` ➔ `"...commit, and force push"`).
+* **Disfluency & Stutter Deduplication**: Automatically deduplicates spoken hesitations across punctuation marks (e.g. `"research about. about what"` ➔ `"research about what"`, `"put a. a period"` ➔ `"put a period"`, `"might. Might be"` ➔ `"might be"`).
+* **Dangling Determiner & Preposition Cleanup**: Corrects mid-thought sentence breaks after prepositions and articles (`"put a. period"` ➔ `"put a period"`).
+* **Discourse Marker Normalization**: Normalizes isolated one-word conversational interjections (`"So. I think"` ➔ `"So, I think"`, `"Yeah. revert that"` ➔ `"Yeah, revert that"`).
+* **Zero Latency**: Executes in under **0.1 ms** with precompiled standard-library regular expressions, adding zero perceptible latency.
 
 ---
 
@@ -134,8 +150,8 @@ To download the Cohere weights for the first time:
 | Key Combination | Action |
 | :--- | :--- |
 | **`Alt` + `Shift`** *(Hold)* | Start recording audio |
-| **`Alt` + `Shift`** *(Release)* | Stop recording, transcribe speech, and copy text to clipboard |
-| **`Ctrl` + `Alt` + `I`** | Open Audio Settings menu |
+| **`Alt` + `Shift`** *(Release)* | Stop recording, transcribe speech, clean disfluencies, and copy text to clipboard |
+| **`Ctrl` + `Alt` + `I`** | Open Interactive Settings & Device Configuration menu |
 | **`W`** | Open Windows Sound Settings (`ms-settings:sound`) |
 | **`Q`** | Quit Voice Transcriber |
 

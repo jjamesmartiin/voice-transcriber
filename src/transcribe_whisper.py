@@ -137,8 +137,10 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     if info:
         print(f"Detected language '{info.language}' with probability {info.language_probability:.2f}")
     
-    # Return the full transcript
-    return " ".join(text_parts).strip()
+    # Return the full cleaned transcript
+    from post_processor import clean_speech_transcription
+    full_transcript = " ".join(text_parts).strip()
+    return clean_speech_transcription(full_transcript)
 
 def unload_model():
     """Unload the model to free up memory"""

@@ -46,13 +46,15 @@ def preload_model(device="cpu"):
     return get_backend().preload_model(device=device)
 
 def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device="cpu", language="en"):
-    return get_backend().transcribe_audio(
+    from post_processor import clean_speech_transcription
+    result = get_backend().transcribe_audio(
         audio_data=audio_data, 
         audio_path=audio_path, 
         sample_rate=sample_rate, 
         device=device, 
         language=language
     )
+    return clean_speech_transcription(result)
 
 def get_model(device="cpu"):
     return get_backend().get_model(device=device)

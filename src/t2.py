@@ -142,6 +142,37 @@ def get_active_device_name():
             
     return f"{MODEL_BACKEND.capitalize()}: {LAST_USED_DEVICE_NAME}"
 
+def check_microphone_health():
+    """
+    Checks if an active microphone source is available.
+    Returns: (is_healthy: bool, issues: list of str)
+    """
+    issues = []
+    
+    # 1. PulseAudio source verification (WSL / Linux)
+    if os.path.exists("/mnt/wslg") or os.environ.get("WSL_DISTRO_NAME"):
+        try:
+            res = subprocess.run(["pactl", "list", "sources", "short"], capture_output=True, text=True, timeout=2)
+            if res.returncode == 0:
+                lines = [l for l in res.stdout.strip().split("\n") if l]
+                sources = [l.split()[1] for l in lines if len(l.split()) >= 2]
+                real_mics = [s for s in sources if not s.endswith(".monitor")]
+                if not real_mics:
+                    issues.append("WSLg audio bridge has no active microphone source (only speaker monitor was found).")
+        except Exception:
+            pass
+            
+    # 2. SoundDevice device query
+    try:
+        devs = sd.query_devices()
+        input_devs = [d for d in devs if d.get('max_input_channels', 0) > 0]
+        if not input_devs:
+            issues.append("No audio input devices detected by PortAudio.")
+    except Exception as e:
+        issues.append(f"PortAudio error: {e}")
+        
+    return (len(issues) == 0), issues
+
 def reset_terminal():
     """Reset terminal settings and clipboard processes if they become wonky"""
     try:
@@ -195,6 +226,10 @@ def load_audio_config():
                 SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
                 OVERRIDE_MODE = config.get('override_mode', 'auto')
                 IS_MUTED = config.get('is_muted', False)
+                env_sound = os.environ.get("VT_SOUND_THEME", "").strip()
+                SOUND_THEME = env_sound or config.get('sound_theme', 'proximity')
+                if SOUND_THEME.lower() in ["silent", "muted", "none"]:
+                    IS_MUTED = True
                 # Environment variable takes priority, then config, then default to whisper
                 env_backend = os.environ.get("VT_MODEL_BACKEND", "").lower()
                 MODEL_BACKEND = env_backend or config.get('model_backend', 'cohere')
@@ -263,6 +298,7 @@ def save_audio_config():
             'secondary_device_name': SECONDARY_DEVICE_NAME,
             'override_mode': OVERRIDE_MODE,
             'is_muted': IS_MUTED,
+            'sound_theme': SOUND_THEME,
             'model_backend': MODEL_BACKEND,
             'copy_to_clipboard': COPY_TO_CLIPBOARD
         }
@@ -274,7 +310,7 @@ def save_audio_config():
 
 def select_audio_device():
     """Interactive audio device selection with Primary/Secondary support"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME
     
     # Always reset terminal before interaction to fix terminal state
     reset_terminal() 
@@ -283,6 +319,7 @@ def select_audio_device():
     model_display = MODEL_BACKEND.capitalize()
     copy_display = "Enabled" if COPY_TO_CLIPBOARD else "Disabled"
     mute_display = "MUTED" if IS_MUTED else "Sound On"
+    sound_display = SOUND_THEME.capitalize() if SOUND_THEME else "Proximity"
     
     # Check if WSL
     is_wsl = "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg")
@@ -300,6 +337,7 @@ def select_audio_device():
         print_option("S", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
         
     print_option("M", "Toggle Mute", mute_display)
+    print_option("E", "Select Sound Effect Theme", sound_display)
     print_option("B", "Switch Model (whisper/cohere)", MODEL_BACKEND)
     print_option("T", "Toggle Auto-Type (auto-type to screen)", copy_display)
     print(f"  R. {'Reset Terminal (if text is invisible or wonky)':<53}")
@@ -336,6 +374,47 @@ def select_audio_device():
     if choice.lower() == 'm':
         IS_MUTED = not IS_MUTED
         print(f"Sounds {'Muted' if IS_MUTED else 'Enabled'}")
+        save_audio_config()
+        reset_terminal()
+        return select_audio_device()
+    
+    if choice.upper() == 'E':
+        reset_terminal()
+        print("\n--- Select Sound Effect Theme ---")
+        print("  1. Proximity Chime (Default - Modern soft Windows chime)")
+        print("  2. Speech Tones (Cortana Speech On/Off)")
+        print("  3. Windows Notify (Classic Ding)")
+        print("  4. Subtle Tap (Navigation Start)")
+        print("  5. Retro Classic (Tada / Chimes)")
+        print("  6. Muted (Silent)")
+        print("  7. Custom Windows .wav Path")
+        print("  b. Back to main menu")
+        print("\nYour choice (1-7): ", end="", flush=True)
+        s_choice = getch()
+        print()
+        theme_map = {
+            '1': 'proximity',
+            '2': 'speech',
+            '3': 'notify',
+            '4': 'navigation',
+            '5': 'classic',
+            '6': 'silent'
+        }
+        if s_choice in theme_map:
+            SOUND_THEME = theme_map[s_choice]
+            IS_MUTED = (SOUND_THEME == 'silent')
+        elif s_choice == '7':
+            custom_p = input("Enter full path to .wav file: ").strip()
+            if custom_p:
+                SOUND_THEME = custom_p
+                
+        # Send update to active hotkey bridge if running
+        try:
+            import hotkeys
+            hotkeys.set_global_sound_theme(SOUND_THEME)
+        except:
+            pass
+            
         save_audio_config()
         reset_terminal()
         return select_audio_device()

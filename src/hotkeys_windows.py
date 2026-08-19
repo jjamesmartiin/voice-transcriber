@@ -150,3 +150,6 @@ class WindowsGlobalHotkeys:
             pass
 
 WaylandGlobalHotkeys = WindowsGlobalHotkeys
+
+def create_global_hotkeys(callback_start, callback_stop, callback_config=None):
+    return WindowsGlobalHotkeys(callback_start, callback_stop, callback_config)

@@ -61,6 +61,21 @@ class SimpleVoiceTranscriber:
         # Load saved audio device configuration
         load_audio_config()
         
+        # Proactively check microphone health on startup
+        is_healthy, mic_issues = t2.check_microphone_health()
+        if not is_healthy:
+            print("\n" + "!" * 75)
+            print("⚠️  WARNING: HARDWARE MICROPHONE NOT DETECTED BY WSL!")
+            for issue in mic_issues:
+                print(f"   • {issue}")
+            print("\n💡 Quick 5-Second Fix for WSL:")
+            print("   1. Open Windows PowerShell and run: wsl --shutdown")
+            print("   2. Ensure Windows Settings -> Privacy -> Microphone access is ON")
+            print("   3. Restart ./run.sh")
+            print("!" * 75 + "\n")
+        else:
+            print("🎤 Microphone connection: OK")
+        
         # Initialize visual notification
         self.visual_notification = VisualNotification(app_name="Voice Transcriber")
         self.visual_notification.set_active_device(get_active_device_name())
@@ -91,6 +106,9 @@ class SimpleVoiceTranscriber:
             
             if self.hotkey_system.devices:
                 logger.debug("Global hotkey system initialized")
+                import t2
+                if hasattr(self.hotkey_system, 'set_sound_theme') and hasattr(t2, 'SOUND_THEME'):
+                    self.hotkey_system.set_sound_theme(t2.SOUND_THEME)
                 return True
             else:
                 logger.error("Failed to initialize global hotkey system")

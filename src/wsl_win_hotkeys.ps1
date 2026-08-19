@@ -26,19 +26,53 @@ public class WinInterop {
     private static System.Media.SoundPlayer startPlayer = null;
     private static System.Media.SoundPlayer donePlayer = null;
 
-    public static void InitSounds() {
+    public static void SetSoundTheme(string theme) {
         try {
-            string chimePath = @"C:\Windows\Media\Windows Proximity Notification.wav";
-            if (!System.IO.File.Exists(chimePath)) chimePath = @"C:\Windows\Media\Speech On.wav";
-            if (!System.IO.File.Exists(chimePath)) chimePath = @"C:\Windows\Media\Windows Notify.wav";
-            if (!System.IO.File.Exists(chimePath)) chimePath = @"C:\Windows\Media\Windows Navigation Start.wav";
+            theme = (theme ?? "").Trim().ToLower();
+            string startPath = "";
+            string donePath = "";
 
-            if (System.IO.File.Exists(chimePath)) {
-                startPlayer = new System.Media.SoundPlayer(chimePath);
+            if (theme == "silent" || theme == "muted" || theme == "none") {
+                startPlayer = null;
+                donePlayer = null;
+                return;
+            } else if (theme == "speech") {
+                startPath = @"C:\Windows\Media\Speech On.wav";
+                donePath = @"C:\Windows\Media\Speech Off.wav";
+            } else if (theme == "ding" || theme == "notify") {
+                startPath = @"C:\Windows\Media\Windows Notify.wav";
+                donePath = @"C:\Windows\Media\Windows Notify.wav";
+            } else if (theme == "subtle" || theme == "navigation") {
+                startPath = @"C:\Windows\Media\Windows Navigation Start.wav";
+                donePath = @"C:\Windows\Media\Windows Navigation Start.wav";
+            } else if (theme == "classic" || theme == "tada") {
+                startPath = @"C:\Windows\Media\chimes.wav";
+                donePath = @"C:\Windows\Media\tada.wav";
+            } else if (System.IO.File.Exists(theme)) {
+                startPath = theme;
+                donePath = theme;
+            } else {
+                // Default: proximity
+                startPath = @"C:\Windows\Media\Windows Proximity Notification.wav";
+                donePath = @"C:\Windows\Media\Windows Proximity Notification.wav";
+            }
+
+            if (!System.IO.File.Exists(startPath)) startPath = @"C:\Windows\Media\Speech On.wav";
+            if (!System.IO.File.Exists(donePath)) donePath = @"C:\Windows\Media\Speech Off.wav";
+
+            if (System.IO.File.Exists(startPath)) {
+                startPlayer = new System.Media.SoundPlayer(startPath);
                 startPlayer.LoadAsync();
-                donePlayer = startPlayer;
+            }
+            if (System.IO.File.Exists(donePath)) {
+                donePlayer = (startPath == donePath) ? startPlayer : new System.Media.SoundPlayer(donePath);
+                if (startPath != donePath) donePlayer.LoadAsync();
             }
         } catch { }
+    }
+
+    public static void InitSounds() {
+        SetSoundTheme("proximity");
     }
 
     public static void PlayStartSound() {
@@ -83,6 +117,8 @@ public class WinInterop {
                             SendCtrlV();
                         } else if (line == "PLAY_DONE") {
                             PlayDoneSound();
+                        } else if (line != null && line.StartsWith("SET_SOUND:")) {
+                            SetSoundTheme(line.Substring(10));
                         } else if (line == null) {
                             System.Threading.Thread.Sleep(50);
                         }

@@ -247,13 +247,8 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
             else:
                 transcription = str(results)
             
-            # Clean trailing silence hallucinations (. you, . Bye, etc.)
-            import re
-            transcription = re.sub(r'([.!?])\s+you[.!?,]*\s*$', r'\1', transcription, flags=re.IGNORECASE)
-            transcription = re.sub(r'\s*,\s*you\s*$', '', transcription, flags=re.IGNORECASE)
-            transcription = re.sub(r'([.!?])\s+bye[.!?,]*\s*$', r'\1', transcription, flags=re.IGNORECASE)
-            transcription = re.sub(r'\s+bye[.!?,]*\s*$', '', transcription, flags=re.IGNORECASE)
-            transcription = re.sub(r'\s+you\s*$', '', transcription, flags=re.IGNORECASE)
+            from post_processor import clean_speech_transcription
+            transcription = clean_speech_transcription(transcription)
             
     except Exception as e:
         print(f"Transcription error: {e}")

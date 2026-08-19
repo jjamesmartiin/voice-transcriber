@@ -19,26 +19,10 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import transcribe2
 
-HALLUCINATION_PATTERNS = [
-    re.compile(r'\bthanks?\s+(for\s+)?watching[.!?,]*\b', re.IGNORECASE),
-    re.compile(r'\bthank\s+you\s+for\s+watching[.!?,]*\b', re.IGNORECASE),
-    re.compile(r'\bsubtitles\s+by\s+.*$', re.IGNORECASE),
-    re.compile(r'\bplease\s+subscribe[.!?,]*\b', re.IGNORECASE),
-]
+from post_processor import clean_speech_transcription
 
 def clean_hallucinations(text):
-    if not text:
-        return ""
-    cleaned = text
-    for pat in HALLUCINATION_PATTERNS:
-        cleaned = pat.sub('', cleaned)
-    # Strip isolated trailing pronouns or sign-offs attached after punctuation or end of text
-    cleaned = re.sub(r'([.!?])\s+you[.!?,]*\s*$', r'\1', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\s*,\s*you\s*$', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'([.!?])\s+bye[.!?,]*\s*$', r'\1', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\s+bye[.!?,]*\s*$', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\s+you\s*$', '', cleaned, flags=re.IGNORECASE)
-    return cleaned.strip()
+    return clean_speech_transcription(text)
 
 def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence_thresh=0.012, min_speech_cushion_ms=100):
     """
@@ -111,10 +95,16 @@ class StreamingMicroBatcher:
         
     def _worker_loop(self):
         while self.running or not self.chunk_queue.empty():
+            chunk_data = None
             try:
-                chunk_data = self.chunk_queue.get(timeout=0.05)
+                try:
+                    chunk_data = self.chunk_queue.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                    
                 if chunk_data is None:
                     break
+                    
                 chunk_index, audio_chunk = chunk_data
                 
                 # Check energy gate: is this chunk purely silence/background noise?
@@ -131,11 +121,14 @@ class StreamingMicroBatcher:
                 
                 with self.results_lock:
                     self.transcribed_chunks.append((chunk_index, text))
-                self.chunk_queue.task_done()
-            except queue.Empty:
-                continue
             except Exception as e:
                 print(f"Micro-batch worker error: {e}")
+            finally:
+                if chunk_data is not None:
+                    try:
+                        self.chunk_queue.task_done()
+                    except:
+                        pass
 
     def feed_audio(self, pcm_chunk):
         """Feed a live incoming block of PCM audio (float32, 16kHz)"""
@@ -197,9 +190,13 @@ class StreamingMicroBatcher:
             self._dispatch_current_chunk(keep_overlap=False, is_tail=True)
             
         self.running = False
-        # Wait for all background chunk transcriptions to finish
-        self.chunk_queue.join()
         
+        # Put sentinel None to unblock worker loop
+        self.chunk_queue.put(None)
+        
+        if self.worker_thread and self.worker_thread.is_alive():
+            self.worker_thread.join(timeout=15.0)
+            
         with self.results_lock:
             # Sort by chunk index and stitch
             self.transcribed_chunks.sort(key=lambda x: x[0])
