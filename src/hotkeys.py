@@ -395,6 +395,15 @@ class WSLGlobalHotkeys:
         self.start()
 
     def start(self):
+        # Clean up any stale background bridge processes from previous runs
+        try:
+            subprocess.run([
+                "powershell.exe", "-NoProfile", "-Command",
+                "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*wsl_win_hotkeys.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+            ], capture_output=True, timeout=3)
+        except Exception:
+            pass
+
         script_dir = os.path.dirname(os.path.abspath(__file__))
         ps1_path = os.path.join(script_dir, "wsl_win_hotkeys.ps1")
         try:

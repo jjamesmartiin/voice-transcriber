@@ -174,6 +174,18 @@ python download_model.py
 
 ---
 
+## 🔧 Troubleshooting & FAQ
+
+Encountering issues with microphone capture, stale hotkeys, or clipboard permissions?  
+👉 See the comprehensive **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** guide for step-by-step solutions:
+
+* **Microphone capture silent / System tray mic icon missing in WSL**: Quick 5-second fix via `wsl --shutdown`.
+* **Ghost hotkey listeners**: Terminating orphaned background PowerShell processes.
+* **Wayland clipboard resets**: Clearing stuck `wl-clipboard` instances.
+* **Gated model authentication**: Setting up your `HF_TOKEN` for Cohere Transcribe.
+
+---
+
 ## 📄 License & Attribution
 
 This project is licensed under the [MIT License](LICENSE).  
