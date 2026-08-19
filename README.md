@@ -71,27 +71,18 @@ Voice Transcriber is designed from the ground up for zero-trust enterprise envir
 * **Air-Gap Capable**: Fully functional in air-gapped, firewalled, or offline environments with zero active internet access.
 * **Ephemeral In-Memory Buffers**: Audio PCM data is processed in ephemeral memory buffers and overwritten immediately following transcription.
 
-### 2. Antivirus, EDR & XDR Compliance Matrix
-Voice Transcriber is architected to safely operate in managed enterprise environments monitored by modern Endpoint Detection & Response (EDR) agents without triggering false-positive alerts, behavioral blocks, or keylogger heuristics:
+### 2. Antivirus & EDR (Endpoint Detection and Response) Considerations
+Voice Transcriber is designed to operate within standard user-space boundaries and avoid common patterns that trigger false-positive heuristics in endpoint security tools (such as Sophos, CrowdStrike, or Microsoft Defender):
 
-| EDR / XDR Platform | Compatibility | Behavioral Justification & Safeguards |
-| :--- | :---: | :--- |
-| **Sophos Intercept X / EDR** | **Verified** | No global message interception; no CryptoGuard/Exploit mitigations tripped. |
-| **Malwarebytes for Endpoint / ThreatDown** | **Verified** | Zero persistent service registration; standard user-level binary execution. |
-| **Fortinet FortiEDR** | **Verified** | No cross-process memory tampering, injection, or undocumented API calls. |
-| **Microsoft Defender for Endpoint (MDE)** | **Verified** | Compliant with Attack Surface Reduction (ASR) rules; zero child-process code injections. |
-| **CrowdStrike Falcon** | **Verified** | Clean process tree lineage; zero unauthorized credential scraping or LSASS interaction. |
-| **SentinelOne Singularity** | **Verified** | Zero behavioral anomaly events; clean standard IPC communication. |
-| **Broadcom / Symantec Endpoint Protection** | **Verified** | SONAR heuristic safe; standard Win32 input querying without raw hooks. |
-| **VMware Carbon Black** | **Verified** | No DLL hijacking, unbacked memory executable pages, or unauthorized drivers. |
-| **Trellix EDR (FireEye / McAfee)** | **Verified** | Operates strictly within user-space DACLs; zero unmonitored persistence mechanisms. |
-| **Bitdefender GravityZone** | **Verified** | Hyperdetect and ATC clean; zero illicit thread creation across security contexts. |
+| Common Heuristic Risk | Invasive Pattern (Avoided) | Voice Transcriber Design |
+| :--- | :--- | :--- |
+| **Keylogger Detection** | Installing global keyboard hooks (`SetWindowsHookEx` with `WH_KEYBOARD_LL`) that intercept all keystrokes system-wide. | Queries only the asynchronous state of the specific modifier keys (`Alt` + `Shift`) via `GetAsyncKeyState`. |
+| **Process Tampering** | Injecting threads, modifying foreign process memory, or DLL hijacking. | Operates strictly within its own process space without cross-process memory access. |
+| **Privilege Escalation** | Requiring local Administrator/root rights or installing kernel-mode drivers. | Runs entirely under standard, non-elevated user permissions. |
+| **Suspicious Persistence** | Registering hidden services, scheduled tasks, or startup registry keys. | No automated persistence mechanisms; runs only when explicitly invoked. |
+| **Data Exfiltration** | Transmitting audio buffers or transcripts to external cloud endpoints. | 100% local on-device inference; zero network egress or telemetry. |
 
-#### Specific Behavioral Safeguards:
-* **Non-Invasive Hotkey Probing**: Avoids intrusive system-wide keyboard hooks (`SetWindowsHookEx` with `WH_KEYBOARD_LL` or raw input listeners) that trigger keylogger heuristics across all major EDR engines. Only queries the explicit asynchronous state of modifier keys (`Alt` + `Shift`) via `GetAsyncKeyState`.
-* **Zero Keystroke Scraping**: The engine cannot and does not monitor, log, or store arbitrary alphanumeric keystrokes, passwords, or personal user activity.
-* **Standard User-Space Execution**: Operates entirely with non-elevated user permissions. Requires no root, `sudo`, or Windows Administrator privileges.
-* **Zero Network C2 Beacons**: Completely air-gap compatible; generates zero outbound socket connections, telemetry pings, or command-and-control communication.
+*Note: Enterprise security configurations and custom detection rules vary by organization. If your organization enforces strict application allowlisting or PowerShell execution restrictions (e.g., AppLocker or WDAC), review with your local IT/security team as appropriate.*
 
 ### 3. Supply Chain Security & Reproducibility (ISO 27001 A.8.28 & A.8.30)
 * **Hermetic Nix Flakes**: Dependency trees, shared C libraries (ALSA, PortAudio), and Python runtimes are cryptographically pinned with SHA-256 integrity hashes in [`flake.nix`](flake.nix).
