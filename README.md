@@ -8,12 +8,11 @@ A robust, modular voice transcription tool with global hotkeys for Linux (Waylan
 
 ### Windows
 - **Native Windows**: See the [main-windows](https://github.com/jjamesmartiin/voice-transcriber/tree/main-windows) branch.
-- **Windows via NixOS WSL (Recommended)**: See the **[`main-wsl`](https://github.com/jjamesmartiin/voice-transcriber/tree/main-wsl)** branch!
-  - **Zero-Setup Windows Host Bridge**: Hold `Alt+Shift` anywhere across Windows with automatic host clipboard paste.
-  - **Streaming Micro-Batching**: Real-time VAD speech chunking for near-instant post-release copying.
-  - **100% Word Accuracy**: Verified across 8 standardized dictation benchmarks.
-  - **Speech Energy Gate & Tail Trimmer**: Eliminates silence/noise hallucinations while keeping spoken phrases accurate.
-  - **Configurable Sound Themes**: Instant audio cue feedback customizable directly in `run.sh` or settings.
+- **Windows via NixOS WSL**: See the [`main-wsl`](https://github.com/jjamesmartiin/voice-transcriber/tree/main-wsl) branch.
+  - Global push-to-talk (`Alt+Shift`) with automatic host clipboard paste.
+  - Streaming VAD speech chunking for low-latency transcription.
+  - Energy gating and silence trimming to prevent background hallucinations.
+  - Audio cue feedback configurable in `run.sh` or settings.
 
 ```bash
 # To run on Windows via WSL:
