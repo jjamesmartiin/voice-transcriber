@@ -75,6 +75,17 @@ LOWERCASE_AFTER_PERIOD_REGEX = re.compile(
     r"[.]\s+([a-z])"
 )
 
+# Trailing muttered self-corrections / speech sign-offs at end of dictation
+TRAILING_MUTTERINGS_REGEX = re.compile(
+    r"([.?!,;:]|\s)\s*(?:oops|whoops|oopsy|whoopsy|oop|opps|nevermind|never\s+mind|you|bye)[.!?,;:]*\s*$",
+    re.IGNORECASE
+)
+
+STANDALONE_MUTTERINGS_REGEX = re.compile(
+    r"^\s*(?:oops|whoops|oopsy|whoopsy|oop|opps|nevermind|never\s+mind|you|bye)[.!?,;:]*\s*$",
+    re.IGNORECASE
+)
+
 def _preserve_i_casing(next_char, full_string, end_pos):
     """Ensure standalone I remains capitalized."""
     if next_char.lower() == "i" and (len(full_string) <= end_pos or not full_string[end_pos].isalpha()):
@@ -84,22 +95,24 @@ def _preserve_i_casing(next_char, full_string, end_pos):
 def clean_speech_transcription(text: str) -> str:
     """
     Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
-    repeated stutters, and trailing hallucinations.
+    repeated stutters, trailing mutterings (Oops, Whoops), and trailing hallucinations.
     """
     if not text:
         return ""
         
     cleaned = text
     
-    # 1. Hallucination stripping
+    # 1. Hallucination and trailing muttering stripping
     for pat in HALLUCINATION_PATTERNS:
         cleaned = pat.sub("", cleaned)
         
-    cleaned = re.sub(r"([.!?])\s+you[.!?,]*\s*$", r"\1", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*,\s*you\s*$", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"([.!?])\s+bye[.!?,]*\s*$", r"\1", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+bye[.!?,]*\s*$", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+you\s*$", "", cleaned, flags=re.IGNORECASE)
+    while True:
+        new_cleaned = TRAILING_MUTTERINGS_REGEX.sub(r"\1", cleaned)
+        if new_cleaned == cleaned:
+            break
+        cleaned = new_cleaned
+        
+    cleaned = STANDALONE_MUTTERINGS_REGEX.sub("", cleaned)
     
     # If the text was reduced to only punctuation / whitespace, return empty
     if re.match(r"^[.,!?;:\s]*$", cleaned):
