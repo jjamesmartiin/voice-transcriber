@@ -1,8 +1,8 @@
-# 🎙️ Voice Transcriber (VT)
+# Voice Transcriber (VT)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![ISO 27001 Compliant](https://img.shields.io/badge/ISO%2FIEC_27001-Compliant_Architecture-green.svg)](#-security--compliance-iso-27001--soc-2-type-ii)
-[![SOC 2 Type II Ready](https://img.shields.io/badge/SOC_2_Type_II-Audit_Ready-blue.svg)](#-security--compliance-iso-27001--soc-2-type-ii)
+[![ISO 27001 Compliant](https://img.shields.io/badge/ISO%2FIEC_27001-Compliant_Architecture-green.svg)](#security--compliance-iso-27001--soc-2-type-ii)
+[![SOC 2 Type II Ready](https://img.shields.io/badge/SOC_2_Type_II-Audit_Ready-blue.svg)](#security--compliance-iso-27001--soc-2-type-ii)
 [![NixOS / Nix Flakes](https://img.shields.io/badge/Nix-Flakes_Enabled-5277C3.svg)](flake.nix)
 
 A high-performance, privacy-first voice transcription daemon designed for **Windows (WSL2 / Native)** and **Linux (Wayland / X11)**.
@@ -11,7 +11,7 @@ Transcribe your speech in real-time by holding a single global hotkey anywhere i
 
 ---
 
-## ⚡ 1-Click / 1-Command Quick Start
+## Quick Start
 
 ### Option A: Windows Subsystem for Linux (WSL2 / NixOS) — *Recommended*
 Zero Windows setup required. Runs the high-performance Linux audio and ML engine inside WSL while forwarding global Windows hotkeys seamlessly.
@@ -41,7 +41,7 @@ nix run github:jjamesmartiin/voice-transcriber
 
 ---
 
-## 🛡️ Security & Compliance (ISO 27001 & SOC 2 Type II)
+## Security & Compliance (ISO 27001 & SOC 2 Type II)
 
 Voice Transcriber is designed from the ground up for zero-trust enterprise environments, defense-in-depth, and strict security compliance under **ISO/IEC 27001:2022** and **SOC 2 Type II (Security, Confidentiality & Privacy Trust Services Criteria)**.
 
@@ -76,16 +76,16 @@ Voice Transcriber is architected to safely operate in managed enterprise environ
 
 | EDR / XDR Platform | Compatibility | Behavioral Justification & Safeguards |
 | :--- | :---: | :--- |
-| **Sophos Intercept X / EDR** | ✅ **Verified** | No global message interception; no CryptoGuard/Exploit mitigations tripped. |
-| **Malwarebytes for Endpoint / ThreatDown** | ✅ **Verified** | Zero persistent service registration; standard user-level binary execution. |
-| **Fortinet FortiEDR** | ✅ **Verified** | No cross-process memory tampering, injection, or undocumented API calls. |
-| **Microsoft Defender for Endpoint (MDE)** | ✅ **Verified** | Compliant with Attack Surface Reduction (ASR) rules; zero child-process code injections. |
-| **CrowdStrike Falcon** | ✅ **Verified** | Clean process tree lineage; zero unauthorized credential scraping or LSASS interaction. |
-| **SentinelOne Singularity** | ✅ **Verified** | Zero behavioral anomaly events; clean standard IPC communication. |
-| **Broadcom / Symantec Endpoint Protection** | ✅ **Verified** | SONAR heuristic safe; standard Win32 input querying without raw hooks. |
-| **VMware Carbon Black** | ✅ **Verified** | No DLL hijacking, unbacked memory executable pages, or unauthorized drivers. |
-| **Trellix EDR (FireEye / McAfee)** | ✅ **Verified** | Operates strictly within user-space DACLs; zero unmonitored persistence mechanisms. |
-| **Bitdefender GravityZone** | ✅ **Verified** | Hyperdetect and ATC clean; zero illicit thread creation across security contexts. |
+| **Sophos Intercept X / EDR** | **Verified** | No global message interception; no CryptoGuard/Exploit mitigations tripped. |
+| **Malwarebytes for Endpoint / ThreatDown** | **Verified** | Zero persistent service registration; standard user-level binary execution. |
+| **Fortinet FortiEDR** | **Verified** | No cross-process memory tampering, injection, or undocumented API calls. |
+| **Microsoft Defender for Endpoint (MDE)** | **Verified** | Compliant with Attack Surface Reduction (ASR) rules; zero child-process code injections. |
+| **CrowdStrike Falcon** | **Verified** | Clean process tree lineage; zero unauthorized credential scraping or LSASS interaction. |
+| **SentinelOne Singularity** | **Verified** | Zero behavioral anomaly events; clean standard IPC communication. |
+| **Broadcom / Symantec Endpoint Protection** | **Verified** | SONAR heuristic safe; standard Win32 input querying without raw hooks. |
+| **VMware Carbon Black** | **Verified** | No DLL hijacking, unbacked memory executable pages, or unauthorized drivers. |
+| **Trellix EDR (FireEye / McAfee)** | **Verified** | Operates strictly within user-space DACLs; zero unmonitored persistence mechanisms. |
+| **Bitdefender GravityZone** | **Verified** | Hyperdetect and ATC clean; zero illicit thread creation across security contexts. |
 
 #### Specific Behavioral Safeguards:
 * **Non-Invasive Hotkey Probing**: Avoids intrusive system-wide keyboard hooks (`SetWindowsHookEx` with `WH_KEYBOARD_LL` or raw input listeners) that trigger keylogger heuristics across all major EDR engines. Only queries the explicit asynchronous state of modifier keys (`Alt` + `Shift`) via `GetAsyncKeyState`.
@@ -99,7 +99,7 @@ Voice Transcriber is architected to safely operate in managed enterprise environ
 
 ---
 
-## ⚙️ Model Architecture & Configuration
+## Model Architecture & Configuration
 
 Voice Transcriber supports two state-of-the-art transcription engines:
 
@@ -133,7 +133,7 @@ export VT_SOUND_THEME="proximity"   # Default modern soft Windows chime
 
 ---
 
-## 🧠 High-Speed Speech Post-Processing & Disfluency Repair
+## High-Speed Speech Post-Processing & Disfluency Repair
 
 Voice Transcriber includes a microsecond-latency regex heuristic post-processing engine ([`post_processor.py`](src/post_processor.py)) that automatically repairs common ASR artifacts and natural conversational speech patterns:
 
@@ -145,7 +145,7 @@ Voice Transcriber includes a microsecond-latency regex heuristic post-processing
 
 ---
 
-## ⌨️ Controls & Keybindings
+## Controls & Keybindings
 
 | Key Combination | Action |
 | :--- | :--- |
@@ -157,7 +157,7 @@ Voice Transcriber includes a microsecond-latency regex heuristic post-processing
 
 ---
 
-## 📊 Performance Benchmarks
+## Performance Benchmarks
 
 Tested on standard speech audio (3.80s speech sample, 16000Hz 1ch PCM) on standard x86_64 hardware:
 
@@ -173,7 +173,7 @@ nix run .#benchmark
 
 ---
 
-## 🛠️ Developer Commands
+## Developer Commands
 
 ```bash
 # Enter reproducible Nix development shell
@@ -190,10 +190,10 @@ python download_model.py
 
 ---
 
-## 🔧 Troubleshooting & FAQ
+## Troubleshooting & FAQ
 
 Encountering issues with microphone capture, stale hotkeys, or clipboard permissions?  
-👉 See the comprehensive **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** guide for step-by-step solutions:
+See the comprehensive **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** guide for step-by-step solutions:
 
 * **Microphone capture silent / System tray mic icon missing in WSL**: Quick 5-second fix via `wsl --shutdown`.
 * **Ghost hotkey listeners**: Terminating orphaned background PowerShell processes.
@@ -202,7 +202,7 @@ Encountering issues with microphone capture, stale hotkeys, or clipboard permiss
 
 ---
 
-## 📄 License & Attribution
+## License & Attribution
 
 This project is licensed under the [MIT License](LICENSE).  
 For third-party dependencies, licenses, and compliance disclosures, see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
