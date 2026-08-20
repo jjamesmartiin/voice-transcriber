@@ -12,6 +12,7 @@ Fixes common ASR artifacts, disfluencies, and punctuation errors:
 
 import os
 import re
+import time
 
 # Precompiled hallucination patterns
 HALLUCINATION_PATTERNS = [
@@ -90,9 +91,9 @@ STANDALONE_MUTTERINGS_REGEX = re.compile(
 # Verbal retractions and self-corrections (e.g. "5 PM... actually 6 PM", "John... I mean Alice", "scratch that")
 RETRACTION_REPLACEMENT_PATTERNS = [
     # "scratch that" / "strike that" / "never mind that" at end of phrase
-    re.compile(r"(?:[,.]?\s*)(?:scratch\s+that|strike\s+that|never\s+mind\s+that)[.!?,;:]*\s*$", re.IGNORECASE),
+    re.compile(r"(?:[,.]*\s*)(?:scratch\s+that|strike\s+that|never\s+mind\s+that)[.!?,;:]*\s*$", re.IGNORECASE),
     # "X... actually Y" / "X... make that Y" / "X... no wait Y" / "X... I mean Y" / "X... or rather Y"
-    re.compile(r"\b([a-zA-Z0-9$%\.:]+(?:\s+[a-zA-Z0-9$%\.:]+){0,2})\s*[,.]?\s*(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)\s+([a-zA-Z0-9$%\.:]+(?:\s+[a-zA-Z0-9$%\.:]+){0,2})\b", re.IGNORECASE),
+    re.compile(r"(?:\b(at|in|on|to|for|by|from|with|of|about)\s+)?\b([a-zA-Z0-9$%\.:]+(?:\s+[a-zA-Z0-9$%\.:]+){0,1})\s*[,.]*\s*(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)\s+([a-zA-Z0-9$%\.:]+(?:\s+[a-zA-Z0-9$%\.:]+){0,2})\b", re.IGNORECASE),
 ]
 
 def process_verbal_retractions(text: str) -> str:
@@ -110,7 +111,11 @@ def process_verbal_retractions(text: str) -> str:
     
     # 2. Handle verbal replacements ("X... actually Y", "X... I mean Y")
     def _replace_retraction(m):
-        return m.group(2)
+        prep = m.group(1)
+        target = m.group(3)
+        if prep and not re.match(r"^(?:at|in|on|to|for|by|from|with|of|about)\b", target, re.I):
+            return f"{prep} {target}"
+        return target
         
     cleaned = RETRACTION_REPLACEMENT_PATTERNS[1].sub(_replace_retraction, cleaned)
     return cleaned.strip()
@@ -130,13 +135,16 @@ VLLM_API_URL = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/comp
 #    - Llama-3.2-1B-Instruct: https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct
 # 3. Manual Download Command:
 #    sudo HF_HOME=/var/lib/vllm/huggingface huggingface-cli download Qwen/Qwen2.5-0.5B-Instruct
-def process_slm_llm_rewrite(text: str, timeout_sec: float = 0.3) -> str:
+def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
     """
     Passes speech transcript through local vLLM / SLM (Qwen2.5-0.5B / Llama-3.2-1B)
     to perform real-time speech self-correction and grammar polishing.
     """
     if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "0") != "1":
         return text
+
+    if timeout_sec is None:
+        timeout_sec = float(os.environ.get("VT_SLM_TIMEOUT", "1.5"))
         
     model_name = os.environ.get("VT_SLM_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
     payload = {
@@ -173,6 +181,16 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = 0.3) -> str:
         print(f"⚠️ [vLLM SLM Pass] Offline/Bypassed ({e}): Using ASR text")
         
     return text
+
+def _preserve_i_casing(char: str, text: str = "", pos: int = 0) -> str:
+    """Preserves uppercase 'I' pronoun while lowercasing continuation words."""
+    if not char:
+        return ""
+    if char.upper() == 'I':
+        rest = text[pos:] if pos < len(text) else ""
+        if not rest or rest[0] in " '.,!?;:\n\t":
+            return 'I'
+    return char.lower()
 
 def clean_speech_transcription(text: str) -> str:
     """
