@@ -16,7 +16,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import transcribe2
 
-from post_processor import clean_speech_transcription
+from post_processor import clean_speech_transcription, process_slm_llm_stream_concat
 
 def clean_hallucinations(text, skip_slm=False):
     return clean_speech_transcription(text, skip_slm=skip_slm)
@@ -76,6 +76,7 @@ class StreamingMicroBatcher:
         self.chunk_queue = queue.Queue()
         self.results_lock = threading.Lock()
         self.transcribed_chunks = []
+        self.accumulated_text = ""
         self.worker_thread = None
         self.running = False
         
@@ -83,6 +84,7 @@ class StreamingMicroBatcher:
         """Start the background worker"""
         self.audio_buffer = []
         self.total_samples = 0
+        self.accumulated_text = ""
         self.silence_samples = 0
         self.transcribed_chunks = []
         self.running = True
@@ -118,6 +120,11 @@ class StreamingMicroBatcher:
                 
                 with self.results_lock:
                     self.transcribed_chunks.append((chunk_index, text))
+                    if text:
+                        if self.accumulated_text:
+                            self.accumulated_text = process_slm_llm_stream_concat(self.accumulated_text, text)
+                        else:
+                            self.accumulated_text = text
             except Exception as e:
                 print(f"Micro-batch worker error: {e}")
             finally:
@@ -195,13 +202,16 @@ class StreamingMicroBatcher:
             self.worker_thread.join(timeout=15.0)
             
         with self.results_lock:
-            # Sort by chunk index and stitch
+            # Sort by chunk index and stitch fallback text
             self.transcribed_chunks.sort(key=lambda x: x[0])
             cleaned_texts = [clean_hallucinations(t, skip_slm=True) for _, t in self.transcribed_chunks if t]
-            full_text = " ".join(cleaned_texts).strip()
-            # Clean duplicate punctuation from chunk boundaries
-            full_text = re.sub(r'\s+([.,!?;:])', r'\1', full_text)
-            full_text = re.sub(r'([.!?])\s*\1+', r'\1', full_text)
-            full_text = clean_hallucinations(full_text, skip_slm=False)
+            fallback_text = " ".join(cleaned_texts).strip()
+            
+            raw_full = self.accumulated_text if self.accumulated_text else fallback_text
+            raw_full = re.sub(r'\s+([.,!?;:])', r'\1', raw_full)
+            raw_full = re.sub(r'([.!?])\s*\1+', r'\1', raw_full)
+            
+            # Final verification, retraction, and formatting pass
+            full_text = clean_hallucinations(raw_full, skip_slm=False)
             
         return full_text

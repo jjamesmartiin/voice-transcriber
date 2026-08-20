@@ -184,6 +184,59 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         
     return text
 
+def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: float = None) -> str:
+    """
+    Real-time streaming LLM fusion: smooths and concatenates incoming ASR micro-batch chunks
+    onto the rolling transcript context while the user is speaking.
+    """
+    if not prev_text:
+        return new_chunk or ""
+    if not new_chunk:
+        return prev_text
+        
+    if os.environ.get("VT_ENABLE_SLM", "1") != "1":
+        return f"{prev_text} {new_chunk}".strip()
+
+    if timeout_sec is None:
+        timeout_sec = float(os.environ.get("VT_SLM_TIMEOUT", "1.5"))
+        
+    model_name = os.environ.get("VT_SLM_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+    payload = {
+        "model": model_name,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a real-time speech dictation stream concater. Smoothly join the new incoming speech chunk onto the previous transcript. Preserve all valid words, punctuation, and proper word spacing. Output ONLY the merged transcript."
+            },
+            {
+                "role": "user",
+                "content": f"Previous Transcript: '{prev_text}'\nNew Chunk: '{new_chunk}'"
+            }
+        ],
+        "temperature": 0.0,
+        "max_tokens": 200
+    }
+    
+    t0 = time.time()
+    try:
+        req = urllib.request.Request(
+            VLLM_API_URL,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json'}
+        )
+        with urllib.request.urlopen(req, timeout=timeout_sec) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            merged_output = res_data['choices'][0]['message']['content'].strip()
+            merged_output = re.sub(r'([,.!?;:])([a-zA-Z0-9])', r'\1 \2', merged_output)
+            elapsed_ms = (time.time() - t0) * 1000
+            if merged_output:
+                print(f"🤖 [vLLM Stream Merge] Executed in {elapsed_ms:.1f}ms: + '{new_chunk}' -> '{merged_output}'")
+                return merged_output
+    except Exception as e:
+        print(f"⚠️ [vLLM Stream Merge] Offline/Bypassed ({e}): Using standard concat")
+        
+    return f"{prev_text} {new_chunk}".strip()
+
 def _preserve_i_casing(char: str, text: str = "", pos: int = 0) -> str:
     """Preserves uppercase 'I' pronoun while lowercasing continuation words."""
     if not char:
