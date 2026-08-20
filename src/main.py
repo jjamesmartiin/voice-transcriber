@@ -220,6 +220,9 @@ class SimpleVoiceTranscriber:
                 if copy_to_clipboard_crossplatform(polished):
                     self.visual_notification.show_completed(sub_text=polished, elapsed_sec=(slm_elapsed / 1000.0))
                 return
+            else:
+                print(f"⚠️ [vLLM SLM On-Demand Polish] No changes made or guardrail triggered: Clipboard preserved.")
+                return
 
         if (self.audio_frames is None or self.audio_frames.size == 0) and not getattr(self, 'micro_batcher', None):
             # Hide recording notification
