@@ -68,6 +68,15 @@ class TestMicroBatchingEngine(unittest.TestCase):
         # Discourse markers
         self.assertEqual(clean_speech_transcription("So. I think we should proceed"), "So, I think we should proceed")
 
+    def test_process_slm_llm_rewrite_fallback(self):
+        """Test vLLM SLM pass gracefully falls back when vLLM port is unavailable"""
+        from post_processor import process_slm_llm_rewrite
+        os.environ["VT_ENABLE_SLM"] = "1"
+        os.environ["VT_VLLM_URL"] = "http://localhost:59999/v1/chat/completions" # Unreachable port
+        result = process_slm_llm_rewrite("Hello world", timeout_sec=0.05)
+        self.assertEqual(result, "Hello world")
+        os.environ["VT_ENABLE_SLM"] = "0"
+
     def test_micro_batcher_buffer_splitting(self):
         """Test StreamingMicroBatcher splits chunks correctly"""
         batcher = StreamingMicroBatcher(sample_rate=16000, mode="always")
