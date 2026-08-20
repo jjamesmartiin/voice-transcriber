@@ -143,6 +143,32 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
     if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "1") != "1":
         return text
 
+REFUSAL_PHRASES = [
+    "i'm sorry", "im sorry", "cannot correct", "can't correct", "as an ai",
+    "incomplete sentence", "please provide", "does not contain", "cannot fulfill",
+    "here is the cleaned", "here is the corrected", "is there anything else", "how can i help"
+]
+
+def _is_valid_speech_rewrite(original: str, candidate: str) -> bool:
+    """Guardrail to reject LLM refusal meta-chatter or text explosions."""
+    if not candidate:
+        return False
+    cand_lower = candidate.lower()
+    for ref in REFUSAL_PHRASES:
+        if ref in cand_lower:
+            return False
+    if len(candidate) > len(original) * 2.5 + 40:
+        return False
+    return True
+
+def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
+    """
+    Passes speech transcript through local vLLM / SLM (Qwen2.5-0.5B / Llama-3.2-1B)
+    to perform real-time speech self-correction and grammar polishing.
+    """
+    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "1") != "1":
+        return text
+
     if timeout_sec is None:
         timeout_sec = float(os.environ.get("VT_SLM_TIMEOUT", "1.5"))
         
@@ -152,7 +178,23 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": "You are a speech post-processor. Correct verbal retractions and self-corrections (e.g. '5 PM... actually 6 PM' -> '6 PM'). Do not delete valid words, merge words together, or alter punctuation. Output ONLY the cleaned text."
+                "content": "You are an automated speech dictation cleaner.\nSTRICT OPERATIONAL CONTRACT:\n1. NEVER output conversational replies, apologies, or meta-explanations (e.g. NEVER say 'I cannot correct', 'Im sorry', 'Here is').\n2. ONLY clean verbal self-corrections (e.g. '5 PM... actually 6 PM' -> '6 PM') and hesitation fillers (um, uh).\n3. DO NOT rephrase, replace, or drop valid sentence words spoken by the user. Preserve exact words.\n4. Output ONLY the raw cleaned text."
+            },
+            {
+                "role": "user",
+                "content": "I went to the store um and bought some apples... actually oranges"
+            },
+            {
+                "role": "assistant",
+                "content": "I went to the store and bought oranges."
+            },
+            {
+                "role": "user",
+                "content": "It should not be removing words like this."
+            },
+            {
+                "role": "assistant",
+                "content": "It should not be removing words like this."
             },
             {
                 "role": "user",
@@ -173,12 +215,18 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         with urllib.request.urlopen(req, timeout=timeout_sec) as response:
             res_data = json.loads(response.read().decode('utf-8'))
             clean_output = res_data['choices'][0]['message']['content'].strip()
-            # Ensure standard spacing after punctuation
+            # Remove enclosing quotes if model wrapped output in quotes
+            if clean_output.startswith('"') and clean_output.endswith('"') and len(clean_output) > 2:
+                clean_output = clean_output[1:-1].strip()
             clean_output = re.sub(r'([,.!?;:])([a-zA-Z0-9])', r'\1 \2', clean_output)
             elapsed_ms = (time.time() - t0) * 1000
-            if clean_output:
+            
+            # Apply guardrail: reject refusal meta-chatter or text explosions
+            if _is_valid_speech_rewrite(text, clean_output):
                 print(f"🤖 [vLLM SLM Pass] Executed in {elapsed_ms:.1f}ms ({model_name}): '{text}' -> '{clean_output}'")
                 return clean_output
+            else:
+                print(f"⚠️ [vLLM SLM Pass] Guardrail triggered (refusal or text explosion): Bypassed -> Using ASR text")
     except Exception as e:
         print(f"⚠️ [vLLM SLM Pass] Offline/Bypassed ({e}): Using ASR text")
         
@@ -206,7 +254,7 @@ def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: f
         "messages": [
             {
                 "role": "system",
-                "content": "You are a real-time speech dictation stream concater. Smoothly join the new incoming speech chunk onto the previous transcript. Preserve all valid words, punctuation, and proper word spacing. Output ONLY the merged transcript."
+                "content": "You are an automated speech dictation stream concater.\nSTRICT OPERATIONAL CONTRACT:\n1. Smoothly join the new incoming audio chunk onto the previous transcript with natural word spacing.\n2. DO NOT delete, summarize, or rephrase valid words from either text.\n3. NEVER output conversational responses or meta-commentary.\n4. Output ONLY the merged transcript."
             },
             {
                 "role": "user",
@@ -227,11 +275,16 @@ def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: f
         with urllib.request.urlopen(req, timeout=timeout_sec) as response:
             res_data = json.loads(response.read().decode('utf-8'))
             merged_output = res_data['choices'][0]['message']['content'].strip()
+            if merged_output.startswith('"') and merged_output.endswith('"') and len(merged_output) > 2:
+                merged_output = merged_output[1:-1].strip()
             merged_output = re.sub(r'([,.!?;:])([a-zA-Z0-9])', r'\1 \2', merged_output)
             elapsed_ms = (time.time() - t0) * 1000
-            if merged_output:
+            
+            if _is_valid_speech_rewrite(f"{prev_text} {new_chunk}", merged_output):
                 print(f"🤖 [vLLM Stream Merge] Executed in {elapsed_ms:.1f}ms: + '{new_chunk}' -> '{merged_output}'")
                 return merged_output
+            else:
+                print(f"⚠️ [vLLM Stream Merge] Guardrail triggered: Using standard concat")
     except Exception as e:
         print(f"⚠️ [vLLM Stream Merge] Offline/Bypassed ({e}): Using standard concat")
         
