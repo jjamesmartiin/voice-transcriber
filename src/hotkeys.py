@@ -8,6 +8,8 @@ import threading
 import time
 import select
 import sys
+import os
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -212,8 +214,6 @@ class WaylandGlobalHotkeys:
                     device = evdev.InputDevice(path)
                     if self._is_keyboard_device(device):
                         new_devices.append(device)
-                    else:
-                        device.close()
                 except (PermissionError, OSError):
                     continue
             
@@ -298,14 +298,17 @@ class WaylandGlobalHotkeys:
         logger.info("Started hotkey monitor loop")
         
         last_scan_time = 0
+        scan_interval = 5.0  # Seconds between scans when no devices found
         
         while self.running:
             try:
-                # Dynamic scan interval: if devices are already active, scan less frequently to save power/CPU
-                scan_interval = 30.0 if self.devices else 5.0
+                # Periodic device scan
                 current_time = time.time()
                 if current_time - last_scan_time > scan_interval:
-                    self.scan_for_devices()
+                    # Scan for new devices periodically
+                    if self.scan_for_devices():
+                         # If we found new devices, we might need to update our select list
+                         pass
                     last_scan_time = current_time
                 
                 if not self.devices:
@@ -372,3 +375,185 @@ class WaylandGlobalHotkeys:
         self.key_states.clear()  # Clear key states
         if self.virtual_keyboard:
             self.virtual_keyboard.destroy()
+
+
+class WSLGlobalHotkeys:
+    """
+    Zero-setup Windows global hotkey bridge for NixOS WSL.
+    Automatically spawns a native Windows background listener via built-in PowerShell.
+    No Windows Python or extra setup needed on Windows!
+    """
+    def __init__(self, callback_start, callback_stop, callback_config=None):
+        self.callback_start = callback_start
+        self.callback_stop = callback_stop
+        self.callback_config = callback_config
+        self.running = False
+        self.process = None
+        self.reader_thread = None
+        self.hotkey_active = False
+        self.devices = ["WSL-Windows-Host-Bridge"] # Non-empty so main.py knows hotkeys are active
+        self.start()
+
+    def start(self):
+        # Clean up any stale background bridge processes from previous runs
+        try:
+            subprocess.run([
+                "powershell.exe", "-NoProfile", "-Command",
+                "Get-CimInstance Win32_Process | Where-Object CommandLine -like '*wsl_win_hotkeys.ps1*' | Stop-Process -Force -ErrorAction SilentlyContinue"
+            ], capture_output=True, timeout=3)
+        except Exception:
+            pass
+
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        ps1_path = os.path.join(script_dir, "wsl_win_hotkeys.ps1")
+        try:
+            res = subprocess.run(["wslpath", "-w", ps1_path], capture_output=True, text=True, check=True)
+            win_ps1 = res.stdout.strip()
+        except Exception:
+            win_ps1 = ps1_path
+
+        cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", win_ps1]
+        try:
+            self.process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1
+            )
+            
+            # Read first line to ensure helper is READY
+            ready_line = self.process.stdout.readline().strip()
+            if ready_line != "READY":
+                logger.warning(f"Unexpected status from WSL Windows hotkey bridge: {ready_line}")
+                
+            self.running = True
+            self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+            self.reader_thread.start()
+            logger.info("🎙️ WSL Zero-Setup Windows Hotkey Bridge active! Hold Alt+Shift anywhere in Windows to speak.")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to start WSL Windows hotkey bridge: {e}")
+            self.devices = []
+            return False
+
+    def _reader_loop(self):
+        while self.running and self.process and self.process.poll() is None:
+            try:
+                line = self.process.stdout.readline()
+                if not line:
+                    break
+                event = line.strip()
+                if event == "HOTKEY_DOWN":
+                    self.hotkey_active = True
+                    threading.Thread(target=self.callback_start, daemon=True).start()
+                elif event == "HOTKEY_UP":
+                    self.hotkey_active = False
+                    threading.Thread(target=self.callback_stop, kwargs={"copy_to_clipboard": True}, daemon=True).start()
+                elif event == "CONFIG_DOWN":
+                    if self.callback_config:
+                        threading.Thread(target=self.callback_config, daemon=True).start()
+            except Exception as e:
+                logger.error(f"Error in WSL hotkey reader: {e}")
+                break
+
+    def are_modifiers_pressed(self):
+        return self.hotkey_active
+
+    def type_text(self, text):
+        """Trigger auto-paste into active Windows window"""
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.stdin.write("PASTE\n")
+                self.process.stdin.flush()
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to trigger paste via WSL bridge: {e}")
+        return False
+
+    def play_done_sound(self):
+        """Trigger instant Windows notification sound via bridge"""
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.stdin.write("PLAY_DONE\n")
+                self.process.stdin.flush()
+                return True
+            except Exception:
+                pass
+        return False
+
+    def set_sound_theme(self, theme):
+        """Set sound theme dynamically on Windows host"""
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.stdin.write(f"SET_SOUND:{theme}\n")
+                self.process.stdin.flush()
+                return True
+            except Exception:
+                pass
+        return False
+
+    def run(self):
+        """Main event loop for WSL hotkey bridge"""
+        try:
+            while self.running:
+                if self.process and self.process.poll() is not None:
+                    exit_code = self.process.poll()
+                    logger.error(f"WSL Windows hotkey bridge process exited with code {exit_code}")
+                    break
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            logger.info("Shutting down hotkey monitor...")
+        return True
+
+    def stop(self):
+        self.running = False
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.stdin.write("EXIT\n")
+                self.process.stdin.flush()
+                self.process.terminate()
+            except Exception:
+                pass
+            self.process = None
+
+    def cleanup(self):
+        self.stop()
+
+
+def is_running_in_wsl():
+    """Detect if running inside WSL environment"""
+    return (
+        os.path.exists("/mnt/wslg") or 
+        bool(os.environ.get("WSL_DISTRO_NAME")) or 
+        os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop") or
+        "microsoft" in os.uname().release.lower()
+    )
+
+
+_current_hotkey_instance = None
+
+def set_global_sound_theme(theme):
+    global _current_hotkey_instance
+    if _current_hotkey_instance and hasattr(_current_hotkey_instance, 'set_sound_theme'):
+        _current_hotkey_instance.set_sound_theme(theme)
+
+def create_global_hotkeys(callback_start, callback_stop, callback_config=None):
+    """
+    Factory function to create appropriate hotkey manager:
+    - In WSL: Uses zero-setup Windows hotkey bridge via powershell.exe
+    - In Linux: Uses WaylandGlobalHotkeys (evdev/uinput)
+    """
+    global _current_hotkey_instance
+    import os
+    import subprocess
+
+    if is_running_in_wsl():
+        logger.info("Detected NixOS WSL environment - initializing Zero-Setup Windows Host Bridge...")
+        _current_hotkey_instance = WSLGlobalHotkeys(callback_start, callback_stop, callback_config)
+    else:
+        _current_hotkey_instance = WaylandGlobalHotkeys(callback_start, callback_stop, callback_config)
+        
+    return _current_hotkey_instance
+

@@ -1,13 +1,13 @@
 # Optimized whisper transcription with performance focus
 
-MODEL = "small"  # The smallest model that provides acceptable accuracy
-
 import warnings
 import threading
 import os
 import time
 import numpy as np
 from faster_whisper import WhisperModel, BatchedInferencePipeline
+
+MODEL = os.environ.get("VT_MODEL", "base.en")  # Use base.en for much faster English transcription
 
 # Filter out UserWarning about FP16 not supported on CPU
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
@@ -27,15 +27,32 @@ def load_model(model_name=MODEL, device="cpu", compute_type=None):
         else:
             compute_type = "int8"  # Best for CPU
 
-    # Limit default CPU threads to prevent maxing out all CPU cores and draining battery
-    cpu_threads = int(os.environ.get("VT_CPU_THREADS", min(4, os.cpu_count() or 4)))
-    model = WhisperModel(
-        model_name,
-        device=device,
-        compute_type=compute_type,
-        cpu_threads=cpu_threads,
-        download_root=os.path.expanduser("~/.cache/whisper")
-    )
+    # Search for model in various possible locations
+    search_dirs = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", model_name),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", model_name),
+        os.path.join(os.getcwd(), "models", model_name),
+        os.path.expanduser(f"~/.cache/whisper/models--Systran--faster-whisper-{model_name}"),
+        os.path.expanduser(f"~/.cache/whisper/{model_name}"),
+    ]
+    
+    local_model_path = None
+    for candidate in search_dirs:
+        if os.path.exists(candidate) and (os.path.exists(os.path.join(candidate, "model.bin")) or os.path.exists(os.path.join(candidate, "snapshots"))):
+            local_model_path = candidate
+            break
+            
+    if local_model_path:
+        model_source = local_model_path
+        download_kwargs = {}
+    else:
+        # Fallback to downloading to user's writable cache dir
+        cache_dir = os.path.expanduser("~/.cache/whisper")
+        os.makedirs(cache_dir, exist_ok=True)
+        model_source = model_name
+        download_kwargs = {"download_root": cache_dir}
+        
+    model = WhisperModel(model_source, device=device, compute_type=compute_type, **download_kwargs)
     
     # Use batched inference pipeline for performance
     batched_model = BatchedInferencePipeline(model=model)
@@ -120,8 +137,10 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     if info:
         print(f"Detected language '{info.language}' with probability {info.language_probability:.2f}")
     
-    # Return the full transcript
-    return " ".join(text_parts).strip()
+    # Return the full cleaned transcript
+    from post_processor import clean_speech_transcription
+    full_transcript = " ".join(text_parts).strip()
+    return clean_speech_transcription(full_transcript)
 
 def unload_model():
     """Unload the model to free up memory"""

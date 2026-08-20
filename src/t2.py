@@ -2,9 +2,25 @@
 # Optimized script to record audio and transcribe it with minimal latency
 # Updated with sounddevice for robust audio capture
 
-import queue
-import sys
 import os
+import sys
+
+# Auto-configure WSL2 audio passthrough via WSLg PulseAudio socket if running in WSL
+if "PULSE_SERVER" not in os.environ:
+    if os.path.exists("/mnt/wslg/runtime-dir/pulse/native"):
+        os.environ["PULSE_SERVER"] = "unix:/mnt/wslg/runtime-dir/pulse/native"
+    elif os.path.exists("/mnt/wslg/PulseServer"):
+        os.environ["PULSE_SERVER"] = "/mnt/wslg/PulseServer"
+
+# In WSL, ALSA needs to be told to use PulseAudio explicitly, otherwise PortAudio finds 0 devices
+if "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg"):
+    alsa_conf_path = "/tmp/vt-alsa-pulse.conf"
+    if not os.path.exists(alsa_conf_path):
+        with open(alsa_conf_path, "w") as f:
+            f.write("pcm.!default { type pulse }\nctl.!default { type pulse }\n")
+    os.environ["ALSA_CONFIG_PATH"] = alsa_conf_path
+
+import queue
 import pyperclip
 import threading
 import time
@@ -75,68 +91,10 @@ SECONDARY_DEVICE_NAME = None
 LAST_USED_DEVICE_NAME = "Unknown"
 ACTUAL_RATE = RATE
 OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
-MODEL_BACKEND = 'cohere' # 'cohere' or 'whisper'
+MODEL_BACKEND = os.environ.get("VT_MODEL_BACKEND", "cohere").lower() # 'cohere' or 'whisper'
 COPY_TO_CLIPBOARD = True
 IS_MUTED = False
-CPU_AFFINITY = os.environ.get("VT_CPU_AFFINITY")  # e.g. "0,1" or "last_2"
-HIGH_PRIORITY = True
 CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
-
-def apply_cpu_affinity_and_priority(affinity_setting=None, high_priority=True):
-    """
-    Configure dedicated CPU core affinity (pinning) and high process scheduling priority
-    so background compilation tasks (gcc/rustc/nix) don't starve voice transcription.
-    """
-    global CPU_AFFINITY, HIGH_PRIORITY
-    
-    # 1. Dedicated CPU Core Affinity (Core Pinning)
-    target_affinity = os.environ.get("VT_CPU_AFFINITY") or affinity_setting
-    if target_affinity:
-        try:
-            total_cpus = os.cpu_count() or 1
-            cores_to_pin = set()
-            
-            if isinstance(target_affinity, (list, set, tuple)):
-                cores_to_pin = set(target_affinity)
-            elif str(target_affinity).lower() in ["last", "last_1", "last_core"]:
-                cores_to_pin = {total_cpus - 1}
-            elif str(target_affinity).lower() in ["last_2", "last_two", "dedicated"]:
-                cores_to_pin = {max(0, total_cpus - 2), total_cpus - 1}
-            elif str(target_affinity).lower() in ["first", "core_0"]:
-                cores_to_pin = {0}
-            else:
-                for part in str(target_affinity).split(","):
-                    part = part.strip()
-                    if "-" in part:
-                        start, end = map(int, part.split("-"))
-                        cores_to_pin.update(range(start, end + 1))
-                    elif part.isdigit():
-                        cores_to_pin.add(int(part))
-            
-            valid_cores = {c for c in cores_to_pin if 0 <= c < total_cpus}
-            if valid_cores and hasattr(os, "sched_setaffinity"):
-                os.sched_setaffinity(0, valid_cores)
-                CPU_AFFINITY = sorted(list(valid_cores))
-                print(f"📌 [CPU Pinning] Process bound to dedicated CPU core(s): {CPU_AFFINITY} (out of {total_cpus} system cores)")
-        except Exception as e:
-            print(f"Could not set CPU affinity: {e}")
-
-    # 2. Scheduling Priority (Preemption over compilers)
-    if high_priority:
-        HIGH_PRIORITY = True
-        try:
-            # Set high scheduling priority (nice: -10)
-            if hasattr(os, "setpriority"):
-                os.setpriority(os.PRIO_PROCESS, 0, -10)
-                actual_nice = os.getpriority(os.PRIO_PROCESS, 0)
-                print(f"⚡ [Process Priority] High scheduling priority set (nice: {actual_nice}). Transcriber will preempt background compilers.")
-        except PermissionError:
-            try:
-                os.setpriority(os.PRIO_PROCESS, 0, 0)
-            except Exception:
-                pass
-        except Exception as e:
-            pass
 
 def find_device_index(name):
     """Find device index by name substring match"""
@@ -169,12 +127,51 @@ def get_active_device_name():
         if idx is not None:
             return f"{MODEL_BACKEND.capitalize()}: Primary: {PRIMARY_DEVICE_NAME}"
     
-    if SECONDARY_DEVICE_NAME:
-        idx = find_device_index(SECONDARY_DEVICE_NAME)
-        if idx is not None:
-            return f"{MODEL_BACKEND.capitalize()}: Secondary: {SECONDARY_DEVICE_NAME} (Fallback)"
+    try:
+        if INPUT_DEVICE_INDEX is not None:
+            with silence_stderr():
+                d = sd.query_devices(INPUT_DEVICE_INDEX)
+                return f"{MODEL_BACKEND.capitalize()}: {d['name']}"
+        default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else sd.default.device
+        if default_in is not None and default_in >= 0:
+            with silence_stderr():
+                d = sd.query_devices(default_in)
+                return f"{MODEL_BACKEND.capitalize()}: {d['name']} (Default)"
+    except Exception:
+        pass
             
     return f"{MODEL_BACKEND.capitalize()}: {LAST_USED_DEVICE_NAME}"
+
+def check_microphone_health():
+    """
+    Checks if an active microphone source is available.
+    Returns: (is_healthy: bool, issues: list of str)
+    """
+    issues = []
+    
+    # 1. PulseAudio source verification (WSL / Linux)
+    if os.path.exists("/mnt/wslg") or os.environ.get("WSL_DISTRO_NAME"):
+        try:
+            res = subprocess.run(["pactl", "list", "sources", "short"], capture_output=True, text=True, timeout=2)
+            if res.returncode == 0:
+                lines = [l for l in res.stdout.strip().split("\n") if l]
+                sources = [l.split()[1] for l in lines if len(l.split()) >= 2]
+                real_mics = [s for s in sources if not s.endswith(".monitor")]
+                if not real_mics:
+                    issues.append("WSLg audio bridge has no active microphone source (only speaker monitor was found).")
+        except Exception:
+            pass
+            
+    # 2. SoundDevice device query
+    try:
+        devs = sd.query_devices()
+        input_devs = [d for d in devs if d.get('max_input_channels', 0) > 0]
+        if not input_devs:
+            issues.append("No audio input devices detected by PortAudio.")
+    except Exception as e:
+        issues.append(f"PortAudio error: {e}")
+        
+    return (len(issues) == 0), issues
 
 def reset_terminal():
     """Reset terminal settings and clipboard processes if they become wonky"""
@@ -220,7 +217,7 @@ import transcribe2
 
 def load_audio_config():
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, CPU_AFFINITY, HIGH_PRIORITY
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED
     try:
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
@@ -229,14 +226,15 @@ def load_audio_config():
                 SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
                 OVERRIDE_MODE = config.get('override_mode', 'auto')
                 IS_MUTED = config.get('is_muted', False)
-                MODEL_BACKEND = config.get('model_backend', 'cohere')
+                env_sound = os.environ.get("VT_SOUND_THEME", "").strip()
+                SOUND_THEME = env_sound or config.get('sound_theme', 'proximity')
+                if SOUND_THEME.lower() in ["silent", "muted", "none"]:
+                    IS_MUTED = True
+                # Environment variable takes priority, then config, then default to whisper
+                env_backend = os.environ.get("VT_MODEL_BACKEND", "").lower()
+                MODEL_BACKEND = env_backend or config.get('model_backend', 'cohere')
                 COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
-                CPU_AFFINITY = config.get('cpu_affinity')
-                HIGH_PRIORITY = config.get('high_priority', True)
                 
-                # Apply CPU pinning and process priority
-                apply_cpu_affinity_and_priority(CPU_AFFINITY, HIGH_PRIORITY)
-
                 # Update backend in transcribe2
                 transcribe2.set_backend(MODEL_BACKEND)
                 
@@ -288,8 +286,6 @@ def load_audio_config():
                             print(f"Secondary audio device: {SECONDARY_DEVICE_NAME} (index {sec_idx})")
                 else:
                     print("No configured audio devices found. Using system default.")
-        else:
-            apply_cpu_affinity_and_priority(CPU_AFFINITY, HIGH_PRIORITY)
     except Exception as e:
         print(f"Could not load audio config: {e}")
 
@@ -302,10 +298,9 @@ def save_audio_config():
             'secondary_device_name': SECONDARY_DEVICE_NAME,
             'override_mode': OVERRIDE_MODE,
             'is_muted': IS_MUTED,
+            'sound_theme': SOUND_THEME,
             'model_backend': MODEL_BACKEND,
-            'copy_to_clipboard': COPY_TO_CLIPBOARD,
-            'cpu_affinity': CPU_AFFINITY,
-            'high_priority': HIGH_PRIORITY
+            'copy_to_clipboard': COPY_TO_CLIPBOARD
         }
         with open(CONFIG_FILE, 'w') as f:
             f.write(json.dumps(config, indent=2))
@@ -315,7 +310,7 @@ def save_audio_config():
 
 def select_audio_device():
     """Interactive audio device selection with Primary/Secondary support"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME
     
     # Always reset terminal before interaction to fix terminal state
     reset_terminal() 
@@ -324,6 +319,10 @@ def select_audio_device():
     model_display = MODEL_BACKEND.capitalize()
     copy_display = "Enabled" if COPY_TO_CLIPBOARD else "Disabled"
     mute_display = "MUTED" if IS_MUTED else "Sound On"
+    sound_display = SOUND_THEME.capitalize() if SOUND_THEME else "Proximity"
+    
+    # Check if WSL
+    is_wsl = "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg")
     
     print("\nVoice Transcriber Configuration:")
     print("-" * 85)
@@ -331,29 +330,36 @@ def select_audio_device():
     def print_option(key, description, value):
         print(f"  {key}. {description:<53} (currently: {value})")
 
-    print_option("p", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
-    print_option("s", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
-    print_option("m", "Toggle Mute", mute_display)
-    print_option("b", "Switch Model Backend (cohere/whisper)", model_display)
-    print_option("t", "Toggle Auto-Type (auto-type to screen)", copy_display)
-    print(f"  r. {'Reset Terminal (if text is invisible or wonky)':<53}")
+    if is_wsl:
+        print_option("W", "Open Windows Microphone Settings", "WSL Bridge Active")
+    else:
+        print_option("P", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
+        print_option("S", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
+        
+    print_option("M", "Toggle Mute", mute_display)
+    print_option("E", "Select Sound Effect Theme", sound_display)
+    print_option("B", "Switch Model (whisper/cohere)", MODEL_BACKEND)
+    print_option("T", "Toggle Auto-Type (auto-type to screen)", copy_display)
+    print(f"  R. {'Reset Terminal (if text is invisible or wonky)':<53}")
     print("-" * 85)
     
-    p_marker = "[ACTIVE]" if OVERRIDE_MODE == 'primary' else ""
-    s_marker = "[ACTIVE]" if OVERRIDE_MODE == 'secondary' else ""
-    a_marker = "[ACTIVE]" if OVERRIDE_MODE == 'auto' else ""
-    
-    print(f"  P. {'Use Primary Device (Manual Override)':<53} {p_marker}")
-    print(f"  S. {'Use Secondary Device (Manual Override)':<53} {s_marker}")
-    print(f"  a. {'Automatic Selection (Default)':<53} {a_marker}")
-    print("-" * 85)
+    if not is_wsl:
+        p_marker = "[ACTIVE]" if OVERRIDE_MODE == 'primary' else ""
+        s_marker = "[ACTIVE]" if OVERRIDE_MODE == 'secondary' else ""
+        a_marker = "[ACTIVE]" if OVERRIDE_MODE == 'auto' else ""
+        
+        print(f"  p. {'Use Primary Device (Manual Override)':<53} {p_marker}")
+        print(f"  s. {'Use Secondary Device (Manual Override)':<53} {s_marker}")
+        print(f"  a. {'Automatic Selection (Default)':<53} {a_marker}")
+        print("-" * 85)
+        
     print("  c or \"↵\". to save/exit")
     
     print("\nYour choice: ", end="", flush=True)
     choice = getch()
     print() # Newline after getch
     
-    if choice == 'c': 
+    if choice.lower() == 'c': 
         reset_terminal()
         return False
     
@@ -361,83 +367,143 @@ def select_audio_device():
         reset_terminal()
         return True
     
-    if choice == 'r':
+    if choice.lower() == 'r':
         reset_terminal()
         return select_audio_device()
     
-    if choice == 'm':
+    if choice.lower() == 'm':
         IS_MUTED = not IS_MUTED
         print(f"Sounds {'Muted' if IS_MUTED else 'Enabled'}")
         save_audio_config()
         reset_terminal()
         return select_audio_device()
     
-    if choice == 't':
+    if choice.upper() == 'E':
+        reset_terminal()
+        print("\n--- Select Sound Effect Theme ---")
+        print("  1. Proximity Chime (Default - Modern soft Windows chime)")
+        print("  2. Speech Tones (Cortana Speech On/Off)")
+        print("  3. Windows Notify (Classic Ding)")
+        print("  4. Subtle Tap (Navigation Start)")
+        print("  5. Retro Classic (Tada / Chimes)")
+        print("  6. Muted (Silent)")
+        print("  7. Custom Windows .wav Path")
+        print("  b. Back to main menu")
+        print("\nYour choice (1-7): ", end="", flush=True)
+        s_choice = getch()
+        print()
+        theme_map = {
+            '1': 'proximity',
+            '2': 'speech',
+            '3': 'notify',
+            '4': 'navigation',
+            '5': 'classic',
+            '6': 'silent'
+        }
+        if s_choice in theme_map:
+            SOUND_THEME = theme_map[s_choice]
+            IS_MUTED = (SOUND_THEME == 'silent')
+        elif s_choice == '7':
+            custom_p = input("Enter full path to .wav file: ").strip()
+            if custom_p:
+                SOUND_THEME = custom_p
+                
+        # Send update to active hotkey bridge if running
+        try:
+            import hotkeys
+            hotkeys.set_global_sound_theme(SOUND_THEME)
+        except:
+            pass
+            
+        save_audio_config()
+        reset_terminal()
+        return select_audio_device()
+    
+    if choice == 'B':
+        if MODEL_BACKEND == 'whisper':
+            MODEL_BACKEND = 'cohere'
+        else:
+            MODEL_BACKEND = 'whisper'
+        print(f"Model backend set to: {MODEL_BACKEND}")
+        transcribe2.set_backend(MODEL_BACKEND)
+        save_audio_config()
+        reset_terminal()
+        return select_audio_device()
+    
+    if choice == 'T':
         COPY_TO_CLIPBOARD = not COPY_TO_CLIPBOARD
         print(f"Auto-Type set to: {'Enabled' if COPY_TO_CLIPBOARD else 'Disabled'}")
         save_audio_config()
         reset_terminal()
         return select_audio_device()
-    
-    if choice == 'b':
-        if MODEL_BACKEND == 'cohere':
-            MODEL_BACKEND = 'whisper'
-        else:
-            MODEL_BACKEND = 'cohere'
         
-        print(f"Model backend set to: {MODEL_BACKEND.capitalize()}")
-        transcribe2.set_backend(MODEL_BACKEND)
-        save_audio_config()
-        
-        # Always preload the new model automatically
-        print(f"Preloading {MODEL_BACKEND.capitalize()} model in background...")
-        preload_model(device=DEVICE)
-        
-        time.sleep(1) # Brief pause to show message
+    if is_wsl and choice.lower() == 'w':
+        print("\nWSL Environment detected. The WSL bridge automatically uses the Windows Default Microphone.")
+        print("Opening Windows Sound Settings (ms-settings:sound) to change your microphone...")
+        import subprocess
+        try:
+            subprocess.run(['powershell.exe', '-NoProfile', '-Command', 'Start-Process', 'ms-settings:sound'], 
+                           check=False, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        except:
+            pass
         reset_terminal()
         return select_audio_device()
         
-    if choice == 'P':
-        OVERRIDE_MODE = 'primary'
-        if PRIMARY_DEVICE_NAME:
-            idx = find_device_index(PRIMARY_DEVICE_NAME)
-            if idx is not None:
-                INPUT_DEVICE_INDEX = idx
-                sd.default.device = INPUT_DEVICE_INDEX
-                print(f"Set to Primary Device: {PRIMARY_DEVICE_NAME}")
+    if not is_wsl:
+        if choice == 'p':
+            OVERRIDE_MODE = 'primary'
+            if PRIMARY_DEVICE_NAME:
+                idx = find_device_index(PRIMARY_DEVICE_NAME)
+                if idx is not None:
+                    INPUT_DEVICE_INDEX = idx
+                    sd.default.device = INPUT_DEVICE_INDEX
+                    print(f"Set to Primary Device: {PRIMARY_DEVICE_NAME}")
+                else:
+                    print(f"Primary device not found: {PRIMARY_DEVICE_NAME}")
             else:
-                print(f"Primary device not found: {PRIMARY_DEVICE_NAME}")
-        else:
-            print("Primary device not configured yet.")
-        save_audio_config()
-        return True
-    elif choice == 'S':
-        OVERRIDE_MODE = 'secondary'
-        if SECONDARY_DEVICE_NAME:
-            idx = find_device_index(SECONDARY_DEVICE_NAME)
-            if idx is not None:
-                INPUT_DEVICE_INDEX = idx
-                sd.default.device = INPUT_DEVICE_INDEX
-                print(f"Set to Secondary Device: {SECONDARY_DEVICE_NAME}")
+                print("Primary device not configured yet.")
+            save_audio_config()
+            return True
+        elif choice == 's':
+            OVERRIDE_MODE = 'secondary'
+            if SECONDARY_DEVICE_NAME:
+                idx = find_device_index(SECONDARY_DEVICE_NAME)
+                if idx is not None:
+                    INPUT_DEVICE_INDEX = idx
+                    sd.default.device = INPUT_DEVICE_INDEX
+                    print(f"Set to Secondary Device: {SECONDARY_DEVICE_NAME}")
+                else:
+                    print(f"Secondary device not found: {SECONDARY_DEVICE_NAME}")
             else:
-                print(f"Secondary device not found: {SECONDARY_DEVICE_NAME}")
-        else:
-            print("Secondary device not configured yet.")
-        save_audio_config()
-        return True
-    elif choice == 'a':
-        OVERRIDE_MODE = 'auto'
-        print("Mode: Automatic Selection")
-        # Let record_audio_stream handle the logic for auto selection
-        save_audio_config()
-        return True
+                print("Secondary device not configured yet.")
+            save_audio_config()
+            return True
+        elif choice.lower() == 'a':
+            OVERRIDE_MODE = 'auto'
+            print("Mode: Automatic Selection")
+            # Let record_audio_stream handle the logic for auto selection
+            save_audio_config()
+            return True
 
-    if choice not in ['p', 's']:
+    if choice not in ['P', 'S']:
         print("Invalid choice.")
         return False
         
-    is_primary = (choice == 'p')
+    is_primary = (choice == 'P')
     label = "Primary" if is_primary else "Secondary"
+    
+    # NEW LOGIC FOR WSL:
+    if "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg"):
+        print(f"\nWSL Environment detected. {label} device uses the Windows Default Microphone.")
+        print("Opening Windows Sound Settings (ms-settings:sound) to change your microphone...")
+        import subprocess
+        try:
+            subprocess.run(['powershell.exe', '-NoProfile', '-Command', 'Start-Process', 'ms-settings:sound'], 
+                           check=False, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        except:
+            pass
+        reset_terminal()
+        return True
     
     print(f"\nAvailable Audio Input Devices for {label}:")
     print("=" * 60)
@@ -492,44 +558,51 @@ def select_audio_device():
         reset_terminal()
         return False
 
-def record_audio_stream(interactive_mode=False):
+def record_audio_stream(interactive_mode=False, stream_callback=None):
     """Record audio using sounddevice with fallback and auto-recovery support"""
     global INPUT_DEVICE_INDEX, ACTUAL_RATE, LAST_USED_DEVICE_NAME
     
-    # Manual Override Logic
-    if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
-        primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
-        if primary_idx is not None:
-            if INPUT_DEVICE_INDEX != primary_idx:
-                print(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME}")
-                INPUT_DEVICE_INDEX = primary_idx
-                sd.default.device = INPUT_DEVICE_INDEX
-        else:
-            print(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
-    elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
-        secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
-        if secondary_idx is not None:
-            if INPUT_DEVICE_INDEX != secondary_idx:
-                print(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME}")
-                INPUT_DEVICE_INDEX = secondary_idx
-                sd.default.device = INPUT_DEVICE_INDEX
-        else:
-            print(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
-    elif PRIMARY_DEVICE_NAME:
-        # Auto-recovery: Always try to see if the primary device has returned before starting
-        primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
-        if primary_idx is not None:
-            if INPUT_DEVICE_INDEX != primary_idx:
-                print(f"Switching to primary device: {PRIMARY_DEVICE_NAME}")
-                INPUT_DEVICE_INDEX = primary_idx
-                sd.default.device = INPUT_DEVICE_INDEX
-        elif SECONDARY_DEVICE_NAME:
-            # If primary is gone, ensure we at least use the secondary if it's available
+    is_wsl = "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg")
+    
+    if is_wsl:
+        # In WSL, we always rely on the single default ALSA-Pulse audio bridge
+        INPUT_DEVICE_INDEX = None
+        sd.default.device = None
+    else:
+        # Manual Override Logic for Native Windows/Linux
+        if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
+            primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
+            if primary_idx is not None:
+                if INPUT_DEVICE_INDEX != primary_idx:
+                    print(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = primary_idx
+                    sd.default.device = INPUT_DEVICE_INDEX
+            else:
+                print(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
+        elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
             secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
-            if secondary_idx is not None and INPUT_DEVICE_INDEX != secondary_idx:
-                print(f"Using secondary device: {SECONDARY_DEVICE_NAME}")
-                INPUT_DEVICE_INDEX = secondary_idx
-                sd.default.device = INPUT_DEVICE_INDEX
+            if secondary_idx is not None:
+                if INPUT_DEVICE_INDEX != secondary_idx:
+                    print(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = secondary_idx
+                    sd.default.device = INPUT_DEVICE_INDEX
+            else:
+                print(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
+        elif PRIMARY_DEVICE_NAME:
+            # Auto-recovery: Always try to see if the primary device has returned before starting
+            primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
+            if primary_idx is not None:
+                if INPUT_DEVICE_INDEX != primary_idx:
+                    print(f"Switching to primary device: {PRIMARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = primary_idx
+                    sd.default.device = INPUT_DEVICE_INDEX
+            elif SECONDARY_DEVICE_NAME:
+                # If primary is gone, ensure we at least use the secondary if it's available
+                secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
+                if secondary_idx is not None and INPUT_DEVICE_INDEX != secondary_idx:
+                    print(f"Using secondary device: {SECONDARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = secondary_idx
+                    sd.default.device = INPUT_DEVICE_INDEX
 
     q = queue.Queue()
 
@@ -543,20 +616,43 @@ def record_audio_stream(interactive_mode=False):
         nonlocal q
         frames = []
         try:
+            import scipy.signal
+        except ImportError:
+            scipy = None
+
+        try:
             # Suppress ALSA/PortAudio errors at OS level
             with silence_stderr():
                 with sd.InputStream(samplerate=rate, channels=CHANNELS, callback=callback, device=device_idx):
                     while not stop_recording.is_set():
                         try:
                             # Use a shorter timeout for better responsiveness to the stop event
-                            frames.append(q.get(timeout=0.05))
+                            frame = q.get(timeout=0.05)
+                            if rate != 16000 and scipy is not None:
+                                frame_flat = frame.flatten().astype(np.float32)
+                                frame_processed = scipy.signal.resample_poly(frame_flat, 16000, rate).astype(np.float32)
+                            else:
+                                frame_processed = frame
+
+                            frames.append(frame_processed)
+                            if stream_callback:
+                                stream_callback(frame_processed)
                         except queue.Empty:
                             continue
                     
                     # Drain any remaining frames in the queue
                     while not q.empty():
                         try:
-                            frames.append(q.get_nowait())
+                            frame = q.get_nowait()
+                            if rate != 16000 and scipy is not None:
+                                frame_flat = frame.flatten().astype(np.float32)
+                                frame_processed = scipy.signal.resample_poly(frame_flat, 16000, rate).astype(np.float32)
+                            else:
+                                frame_processed = frame
+
+                            frames.append(frame_processed)
+                            if stream_callback:
+                                stream_callback(frame_processed)
                         except queue.Empty:
                             break
             return frames
@@ -578,7 +674,7 @@ def record_audio_stream(interactive_mode=False):
     
     # Try primary/current device
     frames = perform_recording(INPUT_DEVICE_INDEX, RATE)
-    ACTUAL_RATE = RATE
+    ACTUAL_RATE = 16000
     
     # If it failed, try current device with its default sample rate
     if frames is None:
@@ -587,10 +683,10 @@ def record_audio_stream(interactive_mode=False):
                 device_info = sd.query_devices(INPUT_DEVICE_INDEX)
             default_rate = int(device_info['default_samplerate'])
             if default_rate != RATE:
-                print(f"{RATE}Hz failed on '{device_info['name']}', trying default {default_rate}Hz...")
+                print(f"{RATE}Hz failed on '{device_info['name']}', trying default {default_rate}Hz (resampling to 16000Hz)...")
                 frames = perform_recording(INPUT_DEVICE_INDEX, default_rate)
                 if frames is not None:
-                    ACTUAL_RATE = default_rate
+                    ACTUAL_RATE = 16000
         except:
             pass
 
@@ -657,12 +753,12 @@ def check_for_stop_key():
         old_settings = termios.tcgetattr(sys.stdin)
         tty.setcbreak(sys.stdin.fileno())
         while not stop_recording.is_set():
-            r, _, _ = select.select([sys.stdin], [], [], 0.1)
-            if r:
+            if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
                 c = sys.stdin.read(1)
                 if c == ' ':
                     stop_recording.set()
                     break
+            time.sleep(0.1)
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
     except:
         pass

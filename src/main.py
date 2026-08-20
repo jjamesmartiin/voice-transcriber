@@ -15,7 +15,7 @@ import atexit
 
 # Import core modules
 from notifications import VisualNotification
-from hotkeys import WaylandGlobalHotkeys
+from hotkeys import create_global_hotkeys
 
 # Import transcription functionality
 # Ensure we can find t2
@@ -30,6 +30,23 @@ from t2 import (
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def copy_to_clipboard_crossplatform(text):
+    """Copies to clipboard on Linux or Windows (via WSL interop)"""
+    copied = False
+    if os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop") or os.environ.get("WSL_DISTRO_NAME"):
+        try:
+            p = subprocess.Popen(["clip.exe"], stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            p.communicate(input=text.encode('utf-16le'))
+            copied = True
+        except Exception:
+            pass
+    try:
+        pyperclip.copy(text)
+        copied = True
+    except Exception:
+        pass
+    return copied
+
 class SimpleVoiceTranscriber:
     def __init__(self):
         self.recording = False
@@ -43,6 +60,21 @@ class SimpleVoiceTranscriber:
         
         # Load saved audio device configuration
         load_audio_config()
+        
+        # Proactively check microphone health on startup
+        is_healthy, mic_issues = t2.check_microphone_health()
+        if not is_healthy:
+            print("\n" + "!" * 75)
+            print("⚠️  WARNING: HARDWARE MICROPHONE NOT DETECTED BY WSL!")
+            for issue in mic_issues:
+                print(f"   • {issue}")
+            print("\n💡 Quick 5-Second Fix for WSL:")
+            print("   1. Open Windows PowerShell and run: wsl --shutdown")
+            print("   2. Ensure Windows Settings -> Privacy -> Microphone access is ON")
+            print("   3. Restart ./run.sh")
+            print("!" * 75 + "\n")
+        else:
+            print("🎤 Microphone connection: OK")
         
         # Initialize visual notification
         self.visual_notification = VisualNotification(app_name="Voice Transcriber")
@@ -60,11 +92,13 @@ class SimpleVoiceTranscriber:
         """Clean up all resources."""
         if hasattr(self, 'visual_notification'):
             self.visual_notification.cleanup()
+        if hasattr(self, 'hotkey_system') and self.hotkey_system:
+            self.hotkey_system.cleanup()
         
     def init_hotkeys(self):
         """Initialize the global hotkey system"""
         try:
-            self.hotkey_system = WaylandGlobalHotkeys(
+            self.hotkey_system = create_global_hotkeys(
                 callback_start=self.start_recording,
                 callback_stop=self.stop_recording,
                 callback_config=self.change_input_device
@@ -72,6 +106,9 @@ class SimpleVoiceTranscriber:
             
             if self.hotkey_system.devices:
                 logger.debug("Global hotkey system initialized")
+                import t2
+                if hasattr(self.hotkey_system, 'set_sound_theme') and hasattr(t2, 'SOUND_THEME'):
+                    self.hotkey_system.set_sound_theme(t2.SOUND_THEME)
                 return True
             else:
                 logger.error("Failed to initialize global hotkey system")
@@ -104,6 +141,11 @@ class SimpleVoiceTranscriber:
         stop_recording.clear()
         self.audio_frames = []
         
+        # Start streaming micro-batcher
+        from micro_batcher import StreamingMicroBatcher
+        self.micro_batcher = StreamingMicroBatcher(sample_rate=16000)
+        self.micro_batcher.start()
+        
         # Start recording in background thread IMMEDIATELY
         self.record_thread = threading.Thread(target=self.record_audio)
         self.record_thread.daemon = True
@@ -112,12 +154,14 @@ class SimpleVoiceTranscriber:
         # Update notification
         self.visual_notification.show_recording()
         
-        # Play sound
+        # Play sound (Windows bridge plays native chime directly on Windows host)
         try:
             if not t2.IS_MUTED:
-                sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/start.mp3')
-                subprocess.Popen(['mpg123', '-q', sound_path], 
-                               stderr=subprocess.DEVNULL)
+                from hotkeys import is_running_in_wsl
+                if not is_running_in_wsl():
+                    sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/start.mp3')
+                    subprocess.Popen(['mpg123', '-q', sound_path], 
+                                   stderr=subprocess.DEVNULL)
         except:
             pass
 
@@ -141,14 +185,15 @@ class SimpleVoiceTranscriber:
     def record_audio(self):
         """Recording worker thread"""
         try:
-            self.audio_frames = record_audio_stream()
+            cb = self.micro_batcher.feed_audio if hasattr(self, 'micro_batcher') and self.micro_batcher else None
+            self.audio_frames = record_audio_stream(stream_callback=cb)
         except Exception as e:
             logger.error(f"Recording error: {e}")
             self.recording = False
 
     def process_recording(self):
         """Process the recorded audio frames"""
-        if self.audio_frames is None or self.audio_frames.size == 0:
+        if (self.audio_frames is None or self.audio_frames.size == 0) and not getattr(self, 'micro_batcher', None):
             # Hide recording notification
             try:
                 self.visual_notification.hide_notification()
@@ -178,11 +223,12 @@ class SimpleVoiceTranscriber:
             if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
                 self.preload_thread.join()
 
-            # Process the audio
-            result, transcribe_time = process_audio_stream(self.audio_frames)
-            
-            # Clean up result
-            transcription = result.strip()
+            # Retrieve text from micro-batcher or fallback
+            if hasattr(self, 'micro_batcher') and self.micro_batcher:
+                transcription = self.micro_batcher.finish_and_get_text().strip()
+            else:
+                result, transcribe_time = process_audio_stream(self.audio_frames)
+                transcription = result.strip()
             
             # Explicitly free the audio data memory after processing
             del self.audio_frames
@@ -191,20 +237,11 @@ class SimpleVoiceTranscriber:
             if transcription:
                 from t2 import COPY_TO_CLIPBOARD
                 should_type = COPY_TO_CLIPBOARD != self.copy_to_clipboard
-                copy_success = False
-                max_retries = 3
-                for attempt in range(max_retries):
-                    try:
-                        pyperclip.copy(transcription)
-                        copy_success = True
-                        logger.info(f"Copied to clipboard: {transcription}")
-                        break
-                    except Exception as e:
-                        if attempt < max_retries - 1:
-                            logger.warning(f"Clipboard copy failed (attempt {attempt+1}), retrying...")
-                            time.sleep(0.5)
-                        else:
-                            logger.error(f"Failed to copy to clipboard after {max_retries} attempts: {e}")
+                if copy_to_clipboard_crossplatform(transcription):
+                    copy_success = True
+                    logger.info(f"Copied to clipboard: {transcription}")
+                else:
+                    logger.error("Failed to copy transcription to clipboard")
 
                 if should_type:
                     try:
@@ -236,9 +273,12 @@ class SimpleVoiceTranscriber:
                 # Play sound
                 try:
                     if not t2.IS_MUTED:
-                        sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
-                        subprocess.Popen(['mpg123', '-q', sound_path], 
-                                       stderr=subprocess.DEVNULL)
+                        if self.hotkey_system and hasattr(self.hotkey_system, 'play_done_sound') and not should_type:
+                            self.hotkey_system.play_done_sound()
+                        else:
+                            sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
+                            subprocess.Popen(['mpg123', '-q', sound_path], 
+                                           stderr=subprocess.DEVNULL)
                 except:
                     pass
                 
@@ -400,6 +440,10 @@ class SimpleVoiceTranscriber:
 if __name__ == "__main__":
     def check_permissions():
         """Check if user has proper permissions for input device access"""
+        from hotkeys import is_running_in_wsl
+        if is_running_in_wsl():
+            return True
+            
         import grp
         import pwd
         
