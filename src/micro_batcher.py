@@ -179,10 +179,10 @@ class StreamingMicroBatcher:
             
         self.silence_samples = 0
 
-    def finish_and_get_text(self):
+    def finish_and_get_text(self, skip_slm: bool = True) -> str:
         """
-        Called on key release: dispatches trailing audio, waits for remaining queue,
-        and returns the fully stitched 100% accurate transcription.
+        Stop background worker loop, join worker thread, stitch all audio micro-chunks
+        chronologically, and execute final cleaning pass.
         """
         # Dispatch any trailing audio in buffer
         if self.audio_buffer:
@@ -204,7 +204,7 @@ class StreamingMicroBatcher:
             raw_full = re.sub(r'\s+([.,!?;:])', r'\1', raw_full)
             raw_full = re.sub(r'([.!?])\s*\1+', r'\1', raw_full)
             
-            # Execute exactly ONE high-precision vLLM SLM pass on the complete sentence context
-            full_text = clean_hallucinations(raw_full, skip_slm=False)
+            # Execute final cleaning pass (skip_slm=True for instant ASR, skip_slm=False for vLLM SLM)
+            full_text = clean_hallucinations(raw_full, skip_slm=skip_slm)
             
         return full_text

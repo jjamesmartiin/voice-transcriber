@@ -85,6 +85,10 @@ class SimpleVoiceTranscriber:
         print(f"Loading {MODEL_BACKEND.capitalize()} model from local files...")
         self.preload_thread = preload_model(device=DEVICE)
         
+        # State tracking for SLM On-Demand Quick-Tap retro-polishing
+        self.last_transcription = ""
+        self.last_finish_time = 0.0
+        
         # Initialize global hotkey system
         self.init_hotkeys()
         
@@ -194,6 +198,29 @@ class SimpleVoiceTranscriber:
 
     def process_recording(self):
         """Process the recorded audio frames"""
+        rec_duration = time.time() - getattr(self, 'start_time', time.time())
+        time_since_last = time.time() - getattr(self, 'last_finish_time', 0.0)
+        last_text = getattr(self, 'last_transcription', "").strip()
+
+        # Check for Quick-Tap SLM On-Demand retro-polish trigger
+        if rec_duration < 0.45 and time_since_last < 3.0 and last_text:
+            logger.info("🤖 Quick-Tap SLM On-Demand retro-polish triggered!")
+            self.visual_notification.show_processing()
+            from post_processor import process_slm_llm_rewrite
+            t0_slm = time.time()
+            polished = process_slm_llm_rewrite(last_text, timeout_sec=3.0).strip()
+            slm_elapsed = (time.time() - t0_slm) * 1000
+            
+            if polished and polished != last_text:
+                print(f"🤖 [vLLM SLM On-Demand Polish] Executed in {slm_elapsed:.1f}ms: '{last_text}' -> '{polished}'")
+                self.last_transcription = polished
+                self.last_finish_time = time.time()
+                
+                # Copy to clipboard and display notification
+                if copy_to_clipboard_crossplatform(polished):
+                    self.visual_notification.show_completed(sub_text=polished, elapsed_sec=(slm_elapsed / 1000.0))
+                return
+
         if (self.audio_frames is None or self.audio_frames.size == 0) and not getattr(self, 'micro_batcher', None):
             # Hide recording notification
             try:
@@ -201,13 +228,10 @@ class SimpleVoiceTranscriber:
             except Exception as e:
                 logger.warning(f"Visual notification error: {e}")
                 
-            duration = time.time() - self.start_time
-            if duration < 0.3:
-                # Just a tap, maybe show settings or ignore
+            if rec_duration < 0.3:
                 pass
             else:
                 logger.info("No audio recorded")
-                # Offer to change audio device
                 self.offer_device_change()
             return
             
@@ -215,7 +239,6 @@ class SimpleVoiceTranscriber:
         self.visual_notification.show_processing()
         
         try:
-            # Double check if we need to wait for model (should be already joined in start_recording)
             import t2
             current_thread = getattr(t2, 'active_preload_thread', None)
             if current_thread and current_thread.is_alive():
@@ -224,18 +247,21 @@ class SimpleVoiceTranscriber:
             if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
                 self.preload_thread.join()
 
-            # Retrieve text from micro-batcher or fallback
+            # Retrieve text from micro-batcher or fallback (skip_slm=True for instant ASR dictation)
             if hasattr(self, 'micro_batcher') and self.micro_batcher:
-                transcription = self.micro_batcher.finish_and_get_text().strip()
+                transcription = self.micro_batcher.finish_and_get_text(skip_slm=True).strip()
             else:
                 result, transcribe_time = process_audio_stream(self.audio_frames)
-                transcription = result.strip()
+                from post_processor import clean_speech_transcription
+                transcription = clean_speech_transcription(result.strip(), skip_slm=True)
             
             # Explicitly free the audio data memory after processing
             del self.audio_frames
             self.audio_frames = []
             
             if transcription:
+                self.last_transcription = transcription
+                self.last_finish_time = time.time()
                 from t2 import COPY_TO_CLIPBOARD
                 should_type = COPY_TO_CLIPBOARD != self.copy_to_clipboard
                 if copy_to_clipboard_crossplatform(transcription):
