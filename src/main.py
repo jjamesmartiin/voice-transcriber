@@ -170,6 +170,7 @@ class SimpleVoiceTranscriber:
         if not self.recording:
             return
             
+        self.release_time = time.time()
         self.recording = False
         self.copy_to_clipboard = copy_to_clipboard
         stop_recording.set()
@@ -261,10 +262,11 @@ class SimpleVoiceTranscriber:
                         logger.error(f"Error typing transcription: {e}")
                         logger.warning("Typing failed, but it's available in your clipboard")
                 
-                # Show completion notification with the transcribed text
+                # Show completion notification with the transcribed text and total post-release latency
                 try:
                     if copy_success:
-                        self.visual_notification.show_completed(sub_text=transcription)
+                        post_release_latency = time.time() - getattr(self, 'release_time', time.time())
+                        self.visual_notification.show_completed(sub_text=transcription, elapsed_sec=post_release_latency)
                     else:
                         logger.error("Transcription not copied to clipboard")
                 except Exception as e:

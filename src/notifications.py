@@ -131,11 +131,11 @@ class VisualNotification:
         
         self._show_terminal_notification(f"Loading {text}...")
     
-    def show_completed(self, text="COMPLETED", sub_text=None):
+    def show_completed(self, text="COMPLETED", sub_text=None, elapsed_sec=None):
         """Show a completion notification."""
         self._cleanup_overlays()
         self._create_overlay("COMPLETED", "#00aaff", persistent=False)
-        self._show_terminal_notification(text, sub_text=sub_text)
+        self._show_terminal_notification(text, sub_text=sub_text, elapsed_sec=elapsed_sec)
         timer = threading.Timer(2.0, self.hide_notification)
         timer.start()
         self._notification_timers.append(timer)
@@ -282,7 +282,7 @@ if __name__ == "__main__":
                     pass
         self.overlay_processes = []
     
-    def _show_terminal_notification(self, text, sub_text=None):
+    def _show_terminal_notification(self, text, sub_text=None, elapsed_sec=None):
         """Show a colorful terminal notification."""
         try:
             # Choose colors based on text content
@@ -309,7 +309,10 @@ if __name__ == "__main__":
             if sub_text:
                 print(f"\n{color_code}{symbol} {text}\033[0m")
                 # Print the full transcription in white, no truncation
-                print(f"{sub_text}\n")
+                print(f"{sub_text}")
+                if elapsed_sec is not None:
+                    print(f"\033[90m⏱️ [Total Post-Release Latency]: {elapsed_sec:.2f}s ({elapsed_sec * 1000:.1f}ms from key release -> clipboard)\033[0m")
+                print()
             else:
                 # Create minimal notification line for status updates
                 box_width = 70
