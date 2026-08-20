@@ -140,7 +140,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
     Passes speech transcript through local vLLM / SLM (Qwen2.5-0.5B / Llama-3.2-1B)
     to perform real-time speech self-correction and grammar polishing.
     """
-    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "0") != "1":
+    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "1") != "1":
         return text
 
     if timeout_sec is None:

@@ -48,28 +48,36 @@ class TestMicroBatchingEngine(unittest.TestCase):
 
     def test_post_processor_artifacts(self):
         """Test post processor fixes false breaks, stutters, and trailing mutterings"""
-        # Trailing mutterings (oops, whoops)
-        self.assertEqual(clean_speech_transcription("This is important oops"), "This is important")
-        self.assertEqual(clean_speech_transcription("Hello world whoops"), "Hello world")
+        old_env = os.environ.get("VT_ENABLE_SLM")
+        try:
+            os.environ["VT_ENABLE_SLM"] = "0"
+            # Trailing mutterings (oops, whoops)
+            self.assertEqual(clean_speech_transcription("This is important oops"), "This is important")
+            self.assertEqual(clean_speech_transcription("Hello world whoops"), "Hello world")
         
         # Verbal retractions & speech self-corrections
-        self.assertEqual(clean_speech_transcription("Let's meet at 5 PM... actually 6 PM"), "Let's meet at 6 PM")
-        self.assertEqual(clean_speech_transcription("Send the report to John... I mean Alice"), "Send the report to Alice")
-        self.assertEqual(clean_speech_transcription("We should deploy on Tuesday... no wait Wednesday"), "We should deploy on Wednesday")
-        self.assertEqual(clean_speech_transcription("Add the class definition... scratch that"), "Add the class definition")
-        
-        # Repeated stutters
-        self.assertEqual(clean_speech_transcription("about. about this project"), "about this project")
-        self.assertEqual(clean_speech_transcription("the the repository"), "the repository")
-        
-        # Subordinating conjunctions after period
-        self.assertEqual(clean_speech_transcription("specifically. because we might need"), "specifically because we might need")
-        
-        # Conjunction after period
-        self.assertEqual(clean_speech_transcription("commit code. and push"), "commit code, and push")
-        
-        # Discourse markers
-        self.assertEqual(clean_speech_transcription("So. I think we should proceed"), "So, I think we should proceed")
+            self.assertEqual(clean_speech_transcription("Let's meet at 5 PM... actually 6 PM"), "Let's meet at 6 PM")
+            self.assertEqual(clean_speech_transcription("Send the report to John... I mean Alice"), "Send the report to Alice")
+            self.assertEqual(clean_speech_transcription("We should deploy on Tuesday... no wait Wednesday"), "We should deploy on Wednesday")
+            self.assertEqual(clean_speech_transcription("Add the class definition... scratch that"), "Add the class definition")
+            
+            # Repeated stutters
+            self.assertEqual(clean_speech_transcription("about. about this project"), "about this project")
+            self.assertEqual(clean_speech_transcription("the the repository"), "the repository")
+            
+            # Subordinating conjunctions after period
+            self.assertEqual(clean_speech_transcription("specifically. because we might need"), "specifically because we might need")
+            
+            # Conjunction after period
+            self.assertEqual(clean_speech_transcription("commit code. and push"), "commit code, and push")
+            
+            # Discourse markers
+            self.assertEqual(clean_speech_transcription("So. I think we should proceed"), "So, I think we should proceed")
+        finally:
+            if old_env is None:
+                os.environ.pop("VT_ENABLE_SLM", None)
+            else:
+                os.environ["VT_ENABLE_SLM"] = old_env
 
     def test_process_slm_llm_rewrite_fallback(self):
         """Test vLLM SLM pass gracefully falls back when vLLM port is unavailable"""
