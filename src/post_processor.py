@@ -92,6 +92,53 @@ def _preserve_i_casing(next_char, full_string, end_pos):
         return "I"
     return next_char.lower()
 
+import json
+import urllib.request
+import urllib.error
+
+VLLM_API_URL = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/completions")
+
+def process_slm_llm_rewrite(text: str, timeout_sec: float = 0.3) -> str:
+    """
+    Passes speech transcript through local vLLM / SLM (Qwen2.5-0.5B / Llama-3.2-1B)
+    to perform real-time speech self-correction and grammar polishing.
+    """
+    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "0") != "1":
+        return text
+        
+    payload = {
+        "model": os.environ.get("VT_SLM_MODEL", "Qwen/Qwen2.5-0.5B-Instruct"),
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a real-time speech dictation cleaner. Remove filler words (um, uh) and execute verbal corrections (e.g. '5 PM... actually 6 PM' -> '6 PM'). Output ONLY the final clean text without commentary."
+            },
+            {
+                "role": "user",
+                "content": text
+            }
+        ],
+        "temperature": 0.0,
+        "max_tokens": 150
+    }
+    
+    try:
+        req = urllib.request.Request(
+            VLLM_API_URL,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json'}
+        )
+        with urllib.request.urlopen(req, timeout=timeout_sec) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            clean_output = res_data['choices'][0]['message']['content'].strip()
+            if clean_output:
+                return clean_output
+    except Exception:
+        # Fallback cleanly if vLLM service is not active
+        pass
+        
+    return text
+
 def clean_speech_transcription(text: str) -> str:
     """
     Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
@@ -101,6 +148,9 @@ def clean_speech_transcription(text: str) -> str:
         return ""
         
     cleaned = text
+    
+    # 0. Apply optional vLLM / SLM rewrite pass
+    cleaned = process_slm_llm_rewrite(cleaned)
     
     # 1. Hallucination and trailing muttering stripping
     for pat in HALLUCINATION_PATTERNS:
