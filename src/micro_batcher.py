@@ -120,11 +120,6 @@ class StreamingMicroBatcher:
                 
                 with self.results_lock:
                     self.transcribed_chunks.append((chunk_index, text))
-                    if text:
-                        if self.accumulated_text:
-                            self.accumulated_text = process_slm_llm_stream_concat(self.accumulated_text, text)
-                        else:
-                            self.accumulated_text = text
             except Exception as e:
                 print(f"Micro-batch worker error: {e}")
             finally:
@@ -202,16 +197,14 @@ class StreamingMicroBatcher:
             self.worker_thread.join(timeout=15.0)
             
         with self.results_lock:
-            # Sort by chunk index and stitch fallback text
+            # Sort by chunk index and stitch full transcript
             self.transcribed_chunks.sort(key=lambda x: x[0])
             cleaned_texts = [clean_hallucinations(t, skip_slm=True) for _, t in self.transcribed_chunks if t]
-            fallback_text = " ".join(cleaned_texts).strip()
-            
-            raw_full = self.accumulated_text if self.accumulated_text else fallback_text
+            raw_full = " ".join(cleaned_texts).strip()
             raw_full = re.sub(r'\s+([.,!?;:])', r'\1', raw_full)
             raw_full = re.sub(r'([.!?])\s*\1+', r'\1', raw_full)
             
-            # Final verification, retraction, and formatting pass
+            # Execute exactly ONE high-precision vLLM SLM pass on the complete sentence context
             full_text = clean_hallucinations(raw_full, skip_slm=False)
             
         return full_text
