@@ -18,8 +18,8 @@ import transcribe2
 
 from post_processor import clean_speech_transcription
 
-def clean_hallucinations(text):
-    return clean_speech_transcription(text)
+def clean_hallucinations(text, skip_slm=False):
+    return clean_speech_transcription(text, skip_slm=skip_slm)
 
 def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence_thresh=0.012, min_speech_cushion_ms=150):
     """
@@ -114,7 +114,7 @@ class StreamingMicroBatcher:
                 else:
                     # Transcribe chunk with speech signal
                     text = transcribe2.transcribe_audio(audio_data=audio_chunk, sample_rate=self.sample_rate)
-                    text = clean_hallucinations(text.strip() if text else "")
+                    text = clean_hallucinations(text.strip() if text else "", skip_slm=True)
                 
                 with self.results_lock:
                     self.transcribed_chunks.append((chunk_index, text))
@@ -197,11 +197,11 @@ class StreamingMicroBatcher:
         with self.results_lock:
             # Sort by chunk index and stitch
             self.transcribed_chunks.sort(key=lambda x: x[0])
-            cleaned_texts = [clean_hallucinations(t) for _, t in self.transcribed_chunks if t]
+            cleaned_texts = [clean_hallucinations(t, skip_slm=True) for _, t in self.transcribed_chunks if t]
             full_text = " ".join(cleaned_texts).strip()
             # Clean duplicate punctuation from chunk boundaries
             full_text = re.sub(r'\s+([.,!?;:])', r'\1', full_text)
             full_text = re.sub(r'([.!?])\s*\1+', r'\1', full_text)
-            full_text = clean_hallucinations(full_text)
+            full_text = clean_hallucinations(full_text, skip_slm=False)
             
         return full_text

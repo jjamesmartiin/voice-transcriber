@@ -194,7 +194,7 @@ def _preserve_i_casing(char: str, text: str = "", pos: int = 0) -> str:
             return 'I'
     return char.lower()
 
-def clean_speech_transcription(text: str) -> str:
+def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     """
     Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
     repeated stutters, verbal self-corrections, and trailing hallucinations.
@@ -207,8 +207,9 @@ def clean_speech_transcription(text: str) -> str:
     # 0. Apply verbal edit self-correction pre-pass
     cleaned = process_verbal_retractions(cleaned)
     
-    # 0. Apply optional vLLM / SLM rewrite pass
-    cleaned = process_slm_llm_rewrite(cleaned)
+    # 0. Apply optional vLLM / SLM rewrite pass (unless bypassed for intermediate streaming micro-chunks)
+    if not skip_slm:
+        cleaned = process_slm_llm_rewrite(cleaned)
     
     # 1. Hallucination and trailing muttering stripping
     for pat in HALLUCINATION_PATTERNS:
