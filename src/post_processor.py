@@ -185,7 +185,10 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         return text
 
     if timeout_sec is None:
-        timeout_sec = float(os.environ.get("VT_SLM_TIMEOUT", "1.5"))
+        base_timeout = float(os.environ.get("VT_SLM_TIMEOUT", "2.5"))
+        word_count = len(text.split())
+        # Dynamic scaling: allow extra time for longer paragraph CPU inference
+        timeout_sec = max(base_timeout, 1.5 + word_count * 0.05)
         
     model_name = os.environ.get("VT_SLM_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
     payload = {
