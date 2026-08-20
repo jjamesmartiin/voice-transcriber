@@ -202,8 +202,8 @@ class SimpleVoiceTranscriber:
         time_since_last = time.time() - getattr(self, 'last_finish_time', 0.0)
         last_text = getattr(self, 'last_transcription', "").strip()
 
-        # Check for Quick-Tap SLM On-Demand retro-polish trigger (5.0s buffer window)
-        if rec_duration < 0.45 and time_since_last < 5.0 and last_text:
+        # Check for Quick-Tap SLM On-Demand retro-polish trigger (15.0s buffer window)
+        if rec_duration < 0.45 and time_since_last < 15.0 and last_text:
             logger.info("🤖 Quick-Tap SLM On-Demand retro-polish triggered!")
             self.visual_notification.show_processing()
             from post_processor import process_slm_llm_rewrite
