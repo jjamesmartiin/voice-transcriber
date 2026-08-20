@@ -248,7 +248,7 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
                 transcription = str(results)
             
             from post_processor import clean_speech_transcription
-            transcription = clean_speech_transcription(transcription)
+            transcription = clean_speech_transcription(transcription, skip_slm=True)
             
     except Exception as e:
         print(f"Transcription error: {e}")

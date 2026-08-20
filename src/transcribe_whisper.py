@@ -140,7 +140,7 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     # Return the full cleaned transcript
     from post_processor import clean_speech_transcription
     full_transcript = " ".join(text_parts).strip()
-    return clean_speech_transcription(full_transcript)
+    return clean_speech_transcription(full_transcript, skip_slm=True)
 
 def unload_model():
     """Unload the model to free up memory"""

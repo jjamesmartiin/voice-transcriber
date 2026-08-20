@@ -149,8 +149,21 @@ REFUSAL_PHRASES = [
     "here is the cleaned", "here is the corrected", "is there anything else", "how can i help"
 ]
 
+def _has_valid_word_overlap(original: str, candidate: str, min_overlap: float = 0.35) -> bool:
+    """Guardrail: ensures candidate output preserves speaker's core words (>35% overlap)."""
+    orig_words = set(re.findall(r'\b\w+\b', original.lower()))
+    cand_words = set(re.findall(r'\b\w+\b', candidate.lower()))
+    if not orig_words or not cand_words:
+        return True
+    filler_words = {"um", "uh", "like", "so", "yeah", "actually", "scratch", "that"}
+    clean_orig = orig_words - filler_words
+    if not clean_orig:
+        return True
+    overlap_ratio = len(clean_orig.intersection(cand_words)) / float(len(clean_orig))
+    return overlap_ratio >= min_overlap
+
 def _is_valid_speech_rewrite(original: str, candidate: str) -> bool:
-    """Guardrail to reject LLM refusal meta-chatter or text explosions."""
+    """Guardrail to reject LLM refusal meta-chatter, text explosions, or hallucinated rewrites."""
     if not candidate:
         return False
     cand_lower = candidate.lower()
@@ -158,6 +171,8 @@ def _is_valid_speech_rewrite(original: str, candidate: str) -> bool:
         if ref in cand_lower:
             return False
     if len(candidate) > len(original) * 2.5 + 40:
+        return False
+    if not _has_valid_word_overlap(original, candidate):
         return False
     return True
 
@@ -178,27 +193,18 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": "You are an automated speech dictation cleaner.\nSTRICT OPERATIONAL CONTRACT:\n1. NEVER output conversational replies, apologies, or meta-explanations (e.g. NEVER say 'I cannot correct', 'Im sorry', 'Here is').\n2. ONLY clean verbal self-corrections (e.g. '5 PM... actually 6 PM' -> '6 PM') and hesitation fillers (um, uh).\n3. DO NOT rephrase, replace, or drop valid sentence words spoken by the user. Preserve exact words.\n4. Output ONLY the raw cleaned text."
+                "content": (
+                    "You are an automated speech dictation text cleaner.\n"
+                    "STRICT RULES:\n"
+                    "1. Only clean verbal retractions (e.g. 'X... actually Y' -> 'Y') and hesitation fillers (um, uh).\n"
+                    "2. NEVER invent new sentences, topics, or subjects not present in the input text.\n"
+                    "3. NEVER output conversational replies, apologies, or meta-explanations.\n"
+                    "4. Output ONLY the raw cleaned text enclosed inside <cleaned_text> tags."
+                )
             },
             {
                 "role": "user",
-                "content": "I went to the store um and bought some apples... actually oranges"
-            },
-            {
-                "role": "assistant",
-                "content": "I went to the store and bought oranges."
-            },
-            {
-                "role": "user",
-                "content": "It should not be removing words like this."
-            },
-            {
-                "role": "assistant",
-                "content": "It should not be removing words like this."
-            },
-            {
-                "role": "user",
-                "content": text
+                "content": f"<input_text>{text}</input_text>"
             }
         ],
         "temperature": 0.0,
@@ -215,18 +221,24 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         with urllib.request.urlopen(req, timeout=timeout_sec) as response:
             res_data = json.loads(response.read().decode('utf-8'))
             clean_output = res_data['choices'][0]['message']['content'].strip()
+            
+            # Extract content inside <cleaned_text> tags if present
+            xml_match = re.search(r'<cleaned_text>(.*?)</cleaned_text>', clean_output, re.DOTALL | re.IGNORECASE)
+            if xml_match:
+                clean_output = xml_match.group(1).strip()
+            
             # Remove enclosing quotes if model wrapped output in quotes
             if clean_output.startswith('"') and clean_output.endswith('"') and len(clean_output) > 2:
                 clean_output = clean_output[1:-1].strip()
             clean_output = re.sub(r'([,.!?;:])([a-zA-Z0-9])', r'\1 \2', clean_output)
             elapsed_ms = (time.time() - t0) * 1000
             
-            # Apply guardrail: reject refusal meta-chatter or text explosions
+            # Apply guardrail: reject refusal meta-chatter, text explosions, or word-overlap failures
             if _is_valid_speech_rewrite(text, clean_output):
                 print(f"🤖 [vLLM SLM Pass] Executed in {elapsed_ms:.1f}ms ({model_name}): '{text}' -> '{clean_output}'")
                 return clean_output
             else:
-                print(f"⚠️ [vLLM SLM Pass] Guardrail triggered (refusal or text explosion): Bypassed -> Using ASR text")
+                print(f"⚠️ [vLLM SLM Pass] Guardrail triggered (word-overlap or refusal failure): Bypassed -> Using ASR text")
     except Exception as e:
         print(f"⚠️ [vLLM SLM Pass] Offline/Bypassed ({e}): Using ASR text")
         
