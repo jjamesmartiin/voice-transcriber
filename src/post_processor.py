@@ -75,32 +75,57 @@ LOWERCASE_AFTER_PERIOD_REGEX = re.compile(
     r"[.]\s+([a-z])"
 )
 
-# Trailing muttered self-corrections / speech sign-offs at end of dictation
+# Trailing muttered self-corrections (oops, whoops, nevermind) at end of dictation
 TRAILING_MUTTERINGS_REGEX = re.compile(
-    r"([.?!,;:]|\s)\s*(?:oops|whoops|oopsy|whoopsy|oop|opps|nevermind|never\s+mind|you|bye)[.!?,;:]*\s*$",
+    r"([.?!,;:]|\s)\s*(?:oops|whoops|oopsy|whoopsy|oop|opps|nevermind|never\s+mind)[.!?,;:]*\s*$",
     re.IGNORECASE
 )
 
 STANDALONE_MUTTERINGS_REGEX = re.compile(
-    r"^\s*(?:oops|whoops|oopsy|whoopsy|oop|opps|nevermind|never\s+mind|you|bye)[.!?,;:]*\s*$",
+    r"^\s*(?:oops|whoops|oopsy|whoopsy|oop|opps|nevermind|never\s+mind)[.!?,;:]*\s*$",
     re.IGNORECASE
 )
 
-def _preserve_i_casing(next_char, full_string, end_pos):
-    """Ensure standalone I remains capitalized."""
-    if next_char.lower() == "i" and (len(full_string) <= end_pos or not full_string[end_pos].isalpha()):
-        return "I"
-    return next_char.lower()
+# Verbal retractions and self-corrections (e.g. "5 PM... actually 6 PM", "John... I mean Alice", "scratch that")
+RETRACTION_REPLACEMENT_PATTERNS = [
+    # "scratch that" / "strike that" / "never mind that" at end of phrase
+    re.compile(r"(?:[,.]?\s*)(?:scratch\s+that|strike\s+that|never\s+mind\s+that)[.!?,;:]*\s*$", re.IGNORECASE),
+    # "X... actually Y" / "X... make that Y" / "X... no wait Y" / "X... I mean Y" / "X... or rather Y"
+    re.compile(r"\b([a-zA-Z0-9$%\.:]+(?:\s+[a-zA-Z0-9$%\.:]+){0,2})\s*[,.]?\s*(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)\s+([a-zA-Z0-9$%\.:]+(?:\s+[a-zA-Z0-9$%\.:]+){0,2})\b", re.IGNORECASE),
+]
 
-def clean_speech_transcription(text: str) -> str:
+def process_verbal_retractions(text: str) -> str:
     """
-    Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
-    repeated stutters, trailing mutterings (Oops, Whoops), and trailing hallucinations.
+    Applies zero-latency verbal self-correction parsing:
+    Replaces retracted phrases ('5 PM... actually 6 PM' -> '6 PM')
+    and handles voice deletions ('scratch that').
     """
     if not text:
         return ""
         
     cleaned = text
+    # 1. Handle "scratch that" tail deletion
+    cleaned = RETRACTION_REPLACEMENT_PATTERNS[0].sub("", cleaned)
+    
+    # 2. Handle verbal replacements ("X... actually Y", "X... I mean Y")
+    def _replace_retraction(m):
+        return m.group(2)
+        
+    cleaned = RETRACTION_REPLACEMENT_PATTERNS[1].sub(_replace_retraction, cleaned)
+    return cleaned.strip()
+
+def clean_speech_transcription(text: str) -> str:
+    """
+    Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
+    repeated stutters, verbal self-corrections, and trailing hallucinations.
+    """
+    if not text:
+        return ""
+        
+    cleaned = text
+    
+    # 0. Apply verbal edit self-correction pre-pass
+    cleaned = process_verbal_retractions(cleaned)
     
     # 1. Hallucination and trailing muttering stripping
     for pat in HALLUCINATION_PATTERNS:
