@@ -152,7 +152,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": "You are a real-time speech dictation cleaner. Remove filler words (um, uh) and execute verbal corrections (e.g. '5 PM... actually 6 PM' -> '6 PM'). Output ONLY the final clean text without commentary."
+                "content": "You are a speech post-processor. Correct verbal retractions and self-corrections (e.g. '5 PM... actually 6 PM' -> '6 PM'). Do not delete valid words, merge words together, or alter punctuation. Output ONLY the cleaned text."
             },
             {
                 "role": "user",
@@ -173,6 +173,8 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         with urllib.request.urlopen(req, timeout=timeout_sec) as response:
             res_data = json.loads(response.read().decode('utf-8'))
             clean_output = res_data['choices'][0]['message']['content'].strip()
+            # Ensure standard spacing after punctuation
+            clean_output = re.sub(r'([,.!?;:])([a-zA-Z0-9])', r'\1 \2', clean_output)
             elapsed_ms = (time.time() - t0) * 1000
             if clean_output:
                 print(f"🤖 [vLLM SLM Pass] Executed in {elapsed_ms:.1f}ms ({model_name}): '{text}' -> '{clean_output}'")
