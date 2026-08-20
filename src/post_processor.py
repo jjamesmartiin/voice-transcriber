@@ -78,6 +78,12 @@ LOWERCASE_AFTER_PERIOD_REGEX = re.compile(
 )
 
 # Trailing muttered self-corrections (oops, whoops, nevermind) at end of dictation
+# Standalone hesitation filler words (um, uh, er, ah)
+FILLER_WORDS_REGEX = re.compile(
+    r"\b(?:um|uh|er|ah)\b\s*",
+    re.IGNORECASE
+)
+
 TRAILING_MUTTERINGS_REGEX = re.compile(
     r"([.?!,;:]|\s)\s*(?:oops|whoops|oopsy|whoopsy|oop|opps|nevermind|never\s+mind)[.!?,;:]*\s*$",
     re.IGNORECASE
@@ -327,8 +333,9 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
         
     cleaned = text
     
-    # 0. Apply verbal edit self-correction pre-pass
+    # 0. Apply verbal edit self-correction pre-pass & hesitation filler removal
     cleaned = process_verbal_retractions(cleaned)
+    cleaned = FILLER_WORDS_REGEX.sub("", cleaned)
     
     # 0. Apply optional vLLM / SLM rewrite pass (unless bypassed for intermediate streaming micro-chunks)
     if not skip_slm:
