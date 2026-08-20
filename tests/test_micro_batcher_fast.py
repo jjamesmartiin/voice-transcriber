@@ -80,6 +80,44 @@ class TestMicroBatchingEngine(unittest.TestCase):
         self.assertEqual(result, "Hello world")
         os.environ["VT_ENABLE_SLM"] = "0"
 
+    def test_live_vllm_slm_integration(self):
+        """Test live local vLLM REST API server integration on port 8000"""
+        import urllib.request
+        from post_processor import process_slm_llm_rewrite, clean_speech_transcription
+
+        vllm_url = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/completions")
+        models_url = vllm_url.replace("/chat/completions", "/models")
+        
+        # Check if local vLLM service is active
+        try:
+            req = urllib.request.Request(models_url)
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                if resp.status != 200:
+                    self.skipTest("vLLM service not responding with 200 OK")
+        except Exception:
+            self.skipTest("Local vLLM server is not running on port 8000")
+
+        # Live test against active vLLM service
+        old_env = os.environ.get("VT_ENABLE_SLM")
+        try:
+            os.environ["VT_ENABLE_SLM"] = "1"
+            os.environ["VT_VLLM_URL"] = vllm_url
+            raw_input = "i went to the store um and bought some apples... actually oranges"
+            
+            # Test direct process_slm_llm_rewrite
+            slm_result = process_slm_llm_rewrite(raw_input, timeout_sec=2.0)
+            self.assertTrue(len(slm_result) > 0)
+            
+            # Test full hybrid pipeline
+            full_result = clean_speech_transcription(raw_input)
+            self.assertTrue(len(full_result) > 0)
+            self.assertNotIn("scratch that", full_result.lower())
+        finally:
+            if old_env is None:
+                os.environ.pop("VT_ENABLE_SLM", None)
+            else:
+                os.environ["VT_ENABLE_SLM"] = old_env
+
     def test_micro_batcher_buffer_splitting(self):
         """Test StreamingMicroBatcher splits chunks correctly"""
         batcher = StreamingMicroBatcher(sample_rate=16000, mode="always")
