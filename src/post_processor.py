@@ -225,10 +225,12 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
             res_data = json.loads(response.read().decode('utf-8'))
             clean_output = res_data['choices'][0]['message']['content'].strip()
             
-            # Extract content inside <cleaned_text> tags if present
+            # Extract content inside <cleaned_text> tags if present, or strip any stray XML tags
             xml_match = re.search(r'<cleaned_text>(.*?)</cleaned_text>', clean_output, re.DOTALL | re.IGNORECASE)
             if xml_match:
                 clean_output = xml_match.group(1).strip()
+            else:
+                clean_output = re.sub(r'</?[a-zA-Z0-9_-]+>', '', clean_output).strip()
             
             # Remove enclosing quotes if model wrapped output in quotes
             if clean_output.startswith('"') and clean_output.endswith('"') and len(clean_output) > 2:
