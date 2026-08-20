@@ -62,6 +62,9 @@ class TestMicroBatchingEngine(unittest.TestCase):
         self.assertEqual(clean_speech_transcription("about. about this project"), "about this project")
         self.assertEqual(clean_speech_transcription("the the repository"), "the repository")
         
+        # Subordinating conjunctions after period
+        self.assertEqual(clean_speech_transcription("specifically. because we might need"), "specifically because we might need")
+        
         # Conjunction after period
         self.assertEqual(clean_speech_transcription("commit code. and push"), "commit code, and push")
         
