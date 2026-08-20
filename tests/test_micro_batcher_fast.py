@@ -81,7 +81,7 @@ class TestMicroBatchingEngine(unittest.TestCase):
         os.environ["VT_ENABLE_SLM"] = "0"
 
     def test_live_vllm_slm_integration(self):
-        """Test live local vLLM REST API server integration on port 8000"""
+        """Test live local vLLM REST API server integration on port 8000 (Idempotency & 100% Accuracy)"""
         import urllib.request
         from post_processor import process_slm_llm_rewrite, clean_speech_transcription
 
@@ -103,15 +103,27 @@ class TestMicroBatchingEngine(unittest.TestCase):
             os.environ["VT_ENABLE_SLM"] = "1"
             os.environ["VT_VLLM_URL"] = vllm_url
             raw_input = "i went to the store um and bought some apples... actually oranges"
+            expected_target = "I went to the store and bought oranges."
             
-            # Test direct process_slm_llm_rewrite
-            slm_result = process_slm_llm_rewrite(raw_input, timeout_sec=2.0)
-            self.assertTrue(len(slm_result) > 0)
+            # 1. Test direct process_slm_llm_rewrite (temperature=0.0 deterministic output)
+            slm_result1 = process_slm_llm_rewrite(raw_input, timeout_sec=2.0)
+            self.assertTrue(len(slm_result1) > 0)
             
-            # Test full hybrid pipeline
-            full_result = clean_speech_transcription(raw_input)
-            self.assertTrue(len(full_result) > 0)
-            self.assertNotIn("scratch that", full_result.lower())
+            # 2. Test full hybrid pipeline accuracy
+            full_result1 = clean_speech_transcription(raw_input)
+            
+            # Semantic & Accuracy Assertions
+            self.assertEqual(full_result1, expected_target, f"Expected '{expected_target}', got '{full_result1}'")
+            self.assertNotIn("apples", full_result1.lower(), "Retracted word 'apples' should be removed")
+            self.assertNotIn("um", full_result1.lower(), "Hesitation filler 'um' should be removed")
+            self.assertIn("oranges", full_result1.lower(), "Retraction target 'oranges' must be present")
+            
+            # 3. Test Idempotency (Repeatability across 3 consecutive runs)
+            full_result2 = clean_speech_transcription(raw_input)
+            full_result3 = clean_speech_transcription(raw_input)
+            
+            self.assertEqual(full_result1, full_result2, "vLLM SLM pass must be idempotent (run 1 vs run 2 mismatch)")
+            self.assertEqual(full_result2, full_result3, "vLLM SLM pass must be idempotent (run 2 vs run 3 mismatch)")
         finally:
             if old_env is None:
                 os.environ.pop("VT_ENABLE_SLM", None)
