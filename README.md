@@ -1,15 +1,26 @@
 # Voice Transcriber
 
-A voice transcription tool with global hotkeys for Windows and Linux.
+A robust, modular voice transcription tool with global hotkeys for Linux (Wayland/X11) and Windows (via NixOS WSL or Native).
+
+---
 
 ## Quick Start
 
 ### Windows
-See my other branch [main-windows](https://github.com/jjamesmartiin/voice-transcriber/tree/main-windows)
+- **Native Windows**: See the [main-windows](https://github.com/jjamesmartiin/voice-transcriber/tree/main-windows) branch.
+- **Windows via NixOS WSL**: See the [`main-wsl`](https://github.com/jjamesmartiin/voice-transcriber/tree/main-wsl) branch.
+  - Global push-to-talk (`Alt+Shift`) with automatic host clipboard paste.
+  - Streaming VAD speech chunking for low-latency transcription.
+  - Energy gating and silence trimming to prevent background hallucinations.
+  - Audio cue feedback configurable in `run.sh` or settings.
 
-#### Features that need to be replicated
-- [ ] reversing the capitalization for the settings
+```bash
+# To run on Windows via WSL:
+git checkout main-wsl
+./run.sh
+```
 
+---
 
 ### Linux
 ```bash
@@ -29,6 +40,8 @@ users.users.yourusername.extraGroups = [ "input" ];
 
 See [NixOS options](https://search.nixos.org/options?channel=25.11&include_modular_service_options=1&include_nixos_options=1&query=users.users.*.extra) for more info.
 
+---
+
 ## Usage
 
 ### Controls
@@ -42,50 +55,13 @@ See [NixOS options](https://search.nixos.org/options?channel=25.11&include_modul
 - T - Toggle auto-type to screen
 - c - Save and exit
 
-### Model Options
-- **whisper** (default) - Faster Whisper, works offline
-- **cohere** - Cohere Transcribe, higher quality
+---
 
-Set model:
-```powershell
-$env:VT_MODEL_BACKEND = "cohere"
-.\run.ps1
-```
+## Model Details
+- **Cohere Transcribe**: Uses `CohereLabs/cohere-transcribe-03-2026`. Requires a Hugging Face token on first run (`HF_TOKEN` file in root).
+- **Faster Whisper**: Uses the Whisper `small` model. Fully local and offline.
 
-## Configuration
+---
 
-- Config file: `%APPDATA%/vt/audio_device_config.json` (Windows) or `~/.local/share/vt/` (Linux)
-- Cohere model: Requires `HF_TOKEN` file in project root
-
-## Requirements
-
-### Windows
-- Windows 10+
-- Python 3.10+
-
-### Linux
-- Linux (Wayland/X11)
-- Nix package manager
-
-## Testing
-```powershell
-# Windows
-.\run.ps1 test
-
-# Linux
-nix run .#test
-```
-
-## File Structure
-```
-src/
-├── main.py              # Linux entry point
-├── main_windows.py     # Windows entry point
-├── t2.py               # Recording/transcription logic
-├── transcribe2.py      # Model dispatcher
-├── transcribe_whisper.py
-├── transcribe_cohere.py
-├── hotkeys.py          # Linux hotkeys (evdev)
-├── hotkeys_windows.py # Windows hotkeys (pynput)
-└── notifications*.py # Visual notifications
-```
+## License
+See [LICENSE](LICENSE) for details.
