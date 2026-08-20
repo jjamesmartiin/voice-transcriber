@@ -121,6 +121,8 @@ import urllib.error
 
 VLLM_API_URL = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/completions")
 
+import time
+
 def process_slm_llm_rewrite(text: str, timeout_sec: float = 0.3) -> str:
     """
     Passes speech transcript through local vLLM / SLM (Qwen2.5-0.5B / Llama-3.2-1B)
@@ -129,8 +131,9 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = 0.3) -> str:
     if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "0") != "1":
         return text
         
+    model_name = os.environ.get("VT_SLM_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
     payload = {
-        "model": os.environ.get("VT_SLM_MODEL", "Qwen/Qwen2.5-0.5B-Instruct"),
+        "model": model_name,
         "messages": [
             {
                 "role": "system",
@@ -145,6 +148,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = 0.3) -> str:
         "max_tokens": 150
     }
     
+    t0 = time.time()
     try:
         req = urllib.request.Request(
             VLLM_API_URL,
@@ -154,11 +158,12 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = 0.3) -> str:
         with urllib.request.urlopen(req, timeout=timeout_sec) as response:
             res_data = json.loads(response.read().decode('utf-8'))
             clean_output = res_data['choices'][0]['message']['content'].strip()
+            elapsed_ms = (time.time() - t0) * 1000
             if clean_output:
+                print(f"🤖 [vLLM SLM Pass] Executed in {elapsed_ms:.1f}ms ({model_name}): '{text}' -> '{clean_output}'")
                 return clean_output
-    except Exception:
-        # Fallback cleanly if vLLM service is not active
-        pass
+    except Exception as e:
+        print(f"⚠️ [vLLM SLM Pass] Offline/Bypassed ({e}): Using ASR text")
         
     return text
 
