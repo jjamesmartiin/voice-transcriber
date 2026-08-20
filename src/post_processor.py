@@ -121,8 +121,15 @@ import urllib.error
 
 VLLM_API_URL = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/completions")
 
-import time
-
+# SLM / vLLM Model Auto-Download & Manual Download Links:
+# ------------------------------------------------------------------------------
+# 1. Automatic: vLLM systemd service automatically downloads model weights on first start.
+# 2. Manual Download Links:
+#    - Qwen2.5-0.5B-Instruct: https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct
+#    - Qwen2.5-3B-Instruct-AWQ: https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-AWQ
+#    - Llama-3.2-1B-Instruct: https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct
+# 3. Manual Download Command:
+#    sudo HF_HOME=/var/lib/vllm/huggingface huggingface-cli download Qwen/Qwen2.5-0.5B-Instruct
 def process_slm_llm_rewrite(text: str, timeout_sec: float = 0.3) -> str:
     """
     Passes speech transcript through local vLLM / SLM (Qwen2.5-0.5B / Llama-3.2-1B)
