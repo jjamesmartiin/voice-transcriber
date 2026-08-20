@@ -196,7 +196,18 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         # Dynamic scaling: allow extra time for longer paragraph CPU inference
         timeout_sec = max(base_timeout, 1.5 + word_count * 0.05)
         
-    model_name = os.environ.get("VT_SLM_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+    model_name = os.environ.get("VT_SLM_MODEL", "")
+    if not model_name:
+        try:
+            req_mod = urllib.request.Request("http://localhost:8000/v1/models")
+            with urllib.request.urlopen(req_mod, timeout=0.5) as resp_mod:
+                mod_data = json.loads(resp_mod.read().decode('utf-8'))
+                if mod_data.get("data"):
+                    model_name = mod_data["data"][0]["id"]
+        except Exception:
+            pass
+    if not model_name:
+        model_name = "Qwen/Qwen2.5-1.5B-Instruct"
     payload = {
         "model": model_name,
         "messages": [
