@@ -10,6 +10,7 @@ Fixes common ASR artifacts, disfluencies, and punctuation errors:
 - ASR hallucination scrubbing ("Thanks for watching", trailing ". you", ". bye")
 """
 
+import os
 import re
 
 # Precompiled hallucination patterns
