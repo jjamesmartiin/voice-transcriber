@@ -21,6 +21,34 @@ from post_processor import clean_speech_transcription, process_slm_llm_stream_co
 def clean_hallucinations(text, skip_slm=False):
     return clean_speech_transcription(text, skip_slm=skip_slm)
 
+def deduplicate_text_overlap(prev_text: str, new_text: str) -> str:
+    """
+    Deduplicates overlapping word sequences between consecutive micro-batch transcripts.
+    e.g. ('speech recognition have evolved', 'have evolved significantly over') -> 'speech recognition have evolved significantly over'
+    """
+    if not prev_text:
+        return new_text or ""
+    if not new_text:
+        return prev_text or ""
+
+    prev_words = prev_text.strip().split()
+    new_words = new_text.strip().split()
+
+    max_overlap = min(8, len(prev_words), len(new_words))
+    best_overlap_len = 0
+
+    for overlap_len in range(1, max_overlap + 1):
+        prev_suffix = [w.lower().strip(',.!?') for w in prev_words[-overlap_len:]]
+        new_prefix = [w.lower().strip(',.!?') for w in new_words[:overlap_len]]
+        if prev_suffix == new_prefix:
+            best_overlap_len = overlap_len
+
+    if best_overlap_len > 0:
+        deduped_new = " ".join(new_words[best_overlap_len:])
+        return (prev_text.strip() + " " + deduped_new).strip() if deduped_new else prev_text.strip()
+    
+    return prev_text.strip() + " " + new_text.strip()
+
 def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence_thresh=0.012, min_speech_cushion_ms=150):
     """
     Trim trailing room silence from the end of an audio buffer,
@@ -197,10 +225,14 @@ class StreamingMicroBatcher:
             self.worker_thread.join(timeout=15.0)
             
         with self.results_lock:
-            # Sort by chunk index and stitch full transcript
+            # Sort by chunk index and stitch full transcript with overlap deduplication
             self.transcribed_chunks.sort(key=lambda x: x[0])
             cleaned_texts = [clean_hallucinations(t, skip_slm=True) for _, t in self.transcribed_chunks if t]
-            raw_full = " ".join(cleaned_texts).strip()
+            
+            raw_full = ""
+            for t in cleaned_texts:
+                raw_full = deduplicate_text_overlap(raw_full, t)
+                
             raw_full = re.sub(r'\s+([.,!?;:])', r'\1', raw_full)
             raw_full = re.sub(r'([.!?])\s*\1+', r'\1', raw_full)
             

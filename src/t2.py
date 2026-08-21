@@ -801,9 +801,8 @@ def process_audio_stream(audio_data=None):
     if audio_data is None or len(audio_data) == 0:
         return "", 0
         
-    # Check duration (Whisper needs at least some audio to avoid hallucination/noise)
     duration = len(audio_data) / ACTUAL_RATE
-    if duration < 0.5: # Half a second is a good minimum for whisper processing
+    if duration < 0.15: # Support short single-word utterances (0.2s - 0.5s)
         return "", 0
 
     get_model(device=DEVICE)
