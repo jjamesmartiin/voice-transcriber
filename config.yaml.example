@@ -1,0 +1,80 @@
+# ==============================================================================
+# Voice Transcriber Configuration
+# ==============================================================================
+# Copy this file to 'config.yaml' in the project directory to override defaults.
+# Format: YAML
+
+# ------------------------------------------------------------------------------
+# Audio Notification Mute Setting
+# Controls whether audio cue sounds (pop/chime) play when transcription finishes.
+# Available Options:
+#   - true  : Audio cues muted (silent operation)
+#   - false : Play audio cue sound on transcription complete
+# Default: true
+is_muted: true
+
+# ------------------------------------------------------------------------------
+# Auto-Typing Setting
+# Controls whether transcription text is automatically typed into active window.
+# Available Options:
+#   - false : Clipboard only (copies text to clipboard, no auto-typing)
+#   - true  : Auto-type (simulates keypresses into focused window)
+# Default: false
+auto_type: false
+
+# ------------------------------------------------------------------------------
+# Clipboard Copy Setting
+# Controls whether transcribed text is automatically placed in system clipboard.
+# Available Options:
+#   - true  : Automatically copy transcribed text to clipboard
+#   - false : Do not copy transcribed text to clipboard
+# Default: true
+copy_to_clipboard: true
+
+# ------------------------------------------------------------------------------
+# Model Backend ASR Engine
+# Specifies the speech recognition engine to load for audio transcription.
+# Available Options:
+#   - "cohere"  : Cohere Transcribe2 / Cohere ASR backend
+#   - "whisper" : Faster-Whisper / OpenAI Whisper backend
+# Default: "cohere"
+model_backend: "cohere"
+
+# ------------------------------------------------------------------------------
+# Sound Theme
+# Theme for audio feedback and completion cues.
+# Available Options:
+#   - "proximity" : Default subtle chime cue
+#   - "pop"       : Pop sound cue
+#   - "chime"     : Classic chime cue
+#   - "silent"    : Mute all sounds (same as setting is_muted: true)
+# Default: "proximity"
+sound_theme: "proximity"
+
+# ------------------------------------------------------------------------------
+# Primary Audio Input Device Name
+# Substring match for primary microphone device name.
+# Available Options:
+#   - null                 : Use system default microphone
+#   - "Microphone Substring": Partial or full device name string (e.g. "USB Audio")
+# Default: null
+primary_device_name: null
+
+# ------------------------------------------------------------------------------
+# Secondary Audio Input Device Name
+# Substring match for secondary/backup microphone device.
+# Available Options:
+#   - null                 : No secondary device specified
+#   - "Microphone Substring": Partial or full secondary device name string
+# Default: null
+secondary_device_name: null
+
+# ------------------------------------------------------------------------------
+# Device Selection Override Mode
+# Strategy used to pick between primary and secondary audio devices.
+# Available Options:
+#   - "auto"      : Try primary device first, fallback to secondary, fallback to default
+#   - "primary"   : Force use of primary device only
+#   - "secondary" : Force use of secondary device only
+# Default: "auto"
+override_mode: "auto"

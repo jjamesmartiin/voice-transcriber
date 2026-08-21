@@ -93,8 +93,20 @@ ACTUAL_RATE = RATE
 OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
 MODEL_BACKEND = os.environ.get("VT_MODEL_BACKEND", "cohere").lower() # 'cohere' or 'whisper'
 COPY_TO_CLIPBOARD = True
-IS_MUTED = False
-CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
+AUTO_TYPE = False
+IS_MUTED = True
+SOUND_THEME = "proximity"
+GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
+
+def get_config_file():
+    """Find local project config.yaml/config.yml/config.json if present, fallback to global data dir"""
+    for loc in [Path('config.yaml'), Path('config.yml'), Path('config.json'), Path('audio_device_config.json'), GLOBAL_CONFIG_FILE]:
+        if loc.exists():
+            return loc.resolve()
+    return GLOBAL_CONFIG_FILE
+
+CONFIG_FILE = get_config_file()
+
 
 def find_device_index(name):
     """Find device index by name substring match"""
@@ -217,75 +229,95 @@ import transcribe2
 
 def load_audio_config():
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, SOUND_THEME, CONFIG_FILE
+    CONFIG_FILE = get_config_file()
     try:
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
-                config = json.loads(f.read())
-                PRIMARY_DEVICE_NAME = config.get('primary_device_name')
-                SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
-                OVERRIDE_MODE = config.get('override_mode', 'auto')
-                IS_MUTED = config.get('is_muted', False)
-                env_sound = os.environ.get("VT_SOUND_THEME", "").strip()
-                SOUND_THEME = env_sound or config.get('sound_theme', 'proximity')
-                if SOUND_THEME.lower() in ["silent", "muted", "none"]:
-                    IS_MUTED = True
-                # Environment variable takes priority, then config, then default to whisper
-                env_backend = os.environ.get("VT_MODEL_BACKEND", "").lower()
-                MODEL_BACKEND = env_backend or config.get('model_backend', 'cohere')
-                COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
-                
-                # Update backend in transcribe2
-                transcribe2.set_backend(MODEL_BACKEND)
-                
-                # If we have an override, try that first
-                if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
-                    idx = find_device_index(PRIMARY_DEVICE_NAME)
-                    if idx is not None:
-                        INPUT_DEVICE_INDEX = idx
-                        print(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME} (index {idx})")
-                    else:
-                        print(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
-                elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
+                content = f.read()
+            if CONFIG_FILE.suffix in ['.yaml', '.yml']:
+                try:
+                    import yaml
+                    config = yaml.safe_load(content) or {}
+                except Exception:
+                    config = json.loads(content)
+            else:
+                config = json.loads(content)
+
+            PRIMARY_DEVICE_NAME = config.get('primary_device_name')
+            SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
+            OVERRIDE_MODE = config.get('override_mode', 'auto')
+            IS_MUTED = config.get('is_muted', True)
+            AUTO_TYPE = config.get('auto_type', False)
+            
+            env_muted = os.environ.get("VT_IS_MUTED", "").strip().lower()
+            if env_muted in ["1", "true", "yes"]:
+                IS_MUTED = True
+            
+            env_auto_type = os.environ.get("VT_AUTO_TYPE", "").strip().lower()
+            if env_auto_type in ["0", "false", "no"]:
+                AUTO_TYPE = False
+
+            env_sound = os.environ.get("VT_SOUND_THEME", "").strip()
+            SOUND_THEME = env_sound or config.get('sound_theme', 'proximity')
+            if SOUND_THEME.lower() in ["silent", "muted", "none"]:
+                IS_MUTED = True
+            # Environment variable takes priority, then config, then default to whisper
+            env_backend = os.environ.get("VT_MODEL_BACKEND", "").lower()
+            MODEL_BACKEND = env_backend or config.get('model_backend', 'cohere')
+            COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
+            
+            # Update backend in transcribe2
+            transcribe2.set_backend(MODEL_BACKEND)
+            
+            # If we have an override, try that first
+            if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
+                idx = find_device_index(PRIMARY_DEVICE_NAME)
+                if idx is not None:
+                    INPUT_DEVICE_INDEX = idx
+                    print(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME} (index {idx})")
+                else:
+                    print(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
+            elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
+                idx = find_device_index(SECONDARY_DEVICE_NAME)
+                if idx is not None:
+                    INPUT_DEVICE_INDEX = idx
+                    print(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME} (index {idx})")
+                else:
+                    print(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
+            
+            # If no override or override failed, try the standard auto logic
+            if INPUT_DEVICE_INDEX is None:
+                # Attempt to find primary
+                idx = find_device_index(PRIMARY_DEVICE_NAME)
+                if idx is not None:
+                    INPUT_DEVICE_INDEX = idx
+                    print(f"Using primary audio device: {PRIMARY_DEVICE_NAME} (index {idx})")
+                else:
+                    # Attempt to find secondary
                     idx = find_device_index(SECONDARY_DEVICE_NAME)
                     if idx is not None:
                         INPUT_DEVICE_INDEX = idx
-                        print(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME} (index {idx})")
+                        print(f"Using secondary audio device: {SECONDARY_DEVICE_NAME} (index {idx})")
                     else:
-                        print(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
-                
-                # If no override or override failed, try the standard auto logic
-                if INPUT_DEVICE_INDEX is None:
-                    # Attempt to find primary
-                    idx = find_device_index(PRIMARY_DEVICE_NAME)
-                    if idx is not None:
-                        INPUT_DEVICE_INDEX = idx
-                        print(f"Using primary audio device: {PRIMARY_DEVICE_NAME} (index {idx})")
-                    else:
-                        # Attempt to find secondary
-                        idx = find_device_index(SECONDARY_DEVICE_NAME)
-                        if idx is not None:
-                            INPUT_DEVICE_INDEX = idx
-                            print(f"Using secondary audio device: {SECONDARY_DEVICE_NAME} (index {idx})")
-                        else:
-                            # Fallback to index if names fail (for backward compatibility or if names are not set)
-                            INPUT_DEVICE_INDEX = config.get('input_device_index')
-                            if INPUT_DEVICE_INDEX is not None:
-                                try:
-                                    d = sd.query_devices(INPUT_DEVICE_INDEX)
-                                    print(f"Falling back to saved device index {INPUT_DEVICE_INDEX}: {d['name']}")
-                                except:
-                                    INPUT_DEVICE_INDEX = None
-                
-                if INPUT_DEVICE_INDEX is not None:
-                    sd.default.device = INPUT_DEVICE_INDEX
-                    # Print secondary device info
-                    if SECONDARY_DEVICE_NAME:
-                        sec_idx = find_device_index(SECONDARY_DEVICE_NAME)
-                        if sec_idx is not None:
-                            print(f"Secondary audio device: {SECONDARY_DEVICE_NAME} (index {sec_idx})")
-                else:
-                    print("No configured audio devices found. Using system default.")
+                        # Fallback to index if names fail (for backward compatibility or if names are not set)
+                        INPUT_DEVICE_INDEX = config.get('input_device_index')
+                        if INPUT_DEVICE_INDEX is not None:
+                            try:
+                                d = sd.query_devices(INPUT_DEVICE_INDEX)
+                                print(f"Falling back to saved device index {INPUT_DEVICE_INDEX}: {d['name']}")
+                            except:
+                                INPUT_DEVICE_INDEX = None
+            
+            if INPUT_DEVICE_INDEX is not None:
+                sd.default.device = INPUT_DEVICE_INDEX
+                # Print secondary device info
+                if SECONDARY_DEVICE_NAME:
+                    sec_idx = find_device_index(SECONDARY_DEVICE_NAME)
+                    if sec_idx is not None:
+                        print(f"Secondary audio device: {SECONDARY_DEVICE_NAME} (index {sec_idx})")
+            else:
+                print("No configured audio devices found. Using system default.")
     except Exception as e:
         print(f"Could not load audio config: {e}")
 
@@ -298,6 +330,7 @@ def save_audio_config():
             'secondary_device_name': SECONDARY_DEVICE_NAME,
             'override_mode': OVERRIDE_MODE,
             'is_muted': IS_MUTED,
+            'auto_type': AUTO_TYPE,
             'sound_theme': SOUND_THEME,
             'model_backend': MODEL_BACKEND,
             'copy_to_clipboard': COPY_TO_CLIPBOARD

@@ -11,5 +11,8 @@ HF_TOKEN
 models/
 *.bin
 *.safetensors
-*.zst
+config.json
+config.yaml
+config.yml
+audio_device_config.json
 

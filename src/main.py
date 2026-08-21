@@ -265,8 +265,9 @@ class SimpleVoiceTranscriber:
             if transcription:
                 self.last_transcription = transcription
                 self.last_finish_time = time.time()
-                from t2 import COPY_TO_CLIPBOARD
-                should_type = COPY_TO_CLIPBOARD != self.copy_to_clipboard
+                import t2
+                auto_type_setting = getattr(t2, 'AUTO_TYPE', True)
+                should_type = auto_type_setting and (t2.COPY_TO_CLIPBOARD != self.copy_to_clipboard)
                 if copy_to_clipboard_crossplatform(transcription):
                     copy_success = True
                     logger.info(f"Copied to clipboard: {transcription}")
