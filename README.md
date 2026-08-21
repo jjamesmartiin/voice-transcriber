@@ -109,5 +109,32 @@ nix-shell -p espeak-ng python3Packages.pytest python3Packages.numpy python3Packa
 
 ---
 
+## Customizing Acronyms & Homophone Repair Rules
+
+Voice Transcriber maintains a high-speed, zero-latency dictionary for developer acronyms, proper nouns, and zero-overhead homophone repairs (< 0.02ms overhead).
+
+### 1. Adding Technical Acronyms & Proper Nouns
+To prevent mid-sentence decapitalization of custom technical terms (e.g. `NixOS`, `vLLM`, `PyTorch`, `GraphQL`, `Kubernetes`), add your terms to `TECHNICAL_ACRONYMS_AND_PROPER_NOUNS` in `src/post_processor.py`:
+
+```python
+TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
+    "I", "vLLM", "NixOS", "PyTorch", "Python", "GitHub", "Git", "WSL", "WSLg",
+    "CPU", "GPU", "RAM", "VRAM", "HDMI", "ALSA", "PipeWire", "PortAudio",
+    "GraphQL", "Kubernetes", "Docker", "Rust", "TypeScript"  # <-- Add custom terms here
+}
+```
+
+### 2. Adding Zero-Latency Homophone Repair Rules
+To repair misheard technical terms or homophones (e.g., mishearing "VLLN" for "vLLM", "build switch" for "nixos-rebuild switch"), add regex rules to `HOMOPHONE_REPAIR_PATTERNS` in `src/post_processor.py`:
+
+```python
+HOMOPHONE_REPAIR_PATTERNS = [
+    (re.compile(r"\bVLLN\b", re.IGNORECASE), "vLLM"),
+    (re.compile(r"\bbuild\s+switch\b", re.IGNORECASE), "nixos-rebuild switch"),
+]
+```
+
+---
+
 ## License
 See [LICENSE](LICENSE) for details.
