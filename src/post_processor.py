@@ -63,6 +63,12 @@ STUTTER_DIRECT_REGEX = re.compile(
     re.IGNORECASE
 )
 
+# Preposition compound stutters (e.g. "into in to" -> "into", "in to into" -> "into", "onto on to" -> "onto")
+PREPOSITION_COMPOUND_STUTTER_REGEX = re.compile(
+    r"\b(into\s+in\s+to|in\s+to\s+into|onto\s+on\s+to|on\s+to\s+onto)\b",
+    re.IGNORECASE
+)
+
 # Coordinating conjunctions following a period
 COORD_CONJUNCTIONS_REGEX = re.compile(
     r"[.]\s+(and|or|but|so|yet|nor)\b",
@@ -416,6 +422,7 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     
     # 3. Deduplicate direct filler stutters (e.g. "about about" -> "about", "the the" -> "the")
     cleaned = STUTTER_DIRECT_REGEX.sub(r"\1", cleaned)
+    cleaned = PREPOSITION_COMPOUND_STUTTER_REGEX.sub(lambda m: "into" if "into" in m.group(0).lower() else "onto", cleaned)
     
     # 4. Fix isolated single-word discourse markers (e.g. "So. I am" -> "So, I am", "Yeah. Revert" -> "Yeah, revert")
     def _fix_discourse(m):
