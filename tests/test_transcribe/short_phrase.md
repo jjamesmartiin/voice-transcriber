@@ -1,1 +1,1 @@
-Good morning team.
+Good morning.

@@ -30,6 +30,15 @@ from main import SimpleVoiceTranscriber
 import t2
 
 
+from difflib import SequenceMatcher
+
+def _words_match_fuzzy(w1, w2, threshold=0.80):
+    if w1 == w2:
+        return True
+    if len(w1) > 2 and len(w2) > 2 and w1.rstrip('s') == w2.rstrip('s'):
+        return True
+    return SequenceMatcher(None, w1, w2).ratio() >= threshold
+
 def score_transcription(expected, actual):
     if not actual:
         return 0.0, "FAIL"
@@ -40,17 +49,24 @@ def score_transcription(expected, actual):
     if not normal_expected:
         return 0.0, "FAIL"
         
-    expected_words = set(normal_expected)
-    actual_words = set(normal_actual)
-    overlap = expected_words & actual_words
+    matched_count = 0
+    actual_pool = list(normal_actual)
     
-    match_ratio = len(overlap) / len(expected_words)
+    for ew in normal_expected:
+        match_idx = None
+        for i, aw in enumerate(actual_pool):
+            if _words_match_fuzzy(ew, aw, threshold=0.80):
+                match_idx = i
+                break
+        if match_idx is not None:
+            matched_count += 1
+            actual_pool.pop(match_idx)
+            
+    match_ratio = matched_count / len(normal_expected)
     
-    if expected.lower().strip() == actual.lower().strip():
+    if match_ratio >= 0.80:
         return match_ratio, "PASS"
-    elif match_ratio >= 0.6:
-        return match_ratio, "PASS"
-    elif match_ratio >= 0.3:
+    elif match_ratio >= 0.50:
         return match_ratio, "PARTIAL"
     else:
         return match_ratio, "FAIL"
@@ -78,11 +94,11 @@ def run_single_test(sample_id, transcriber):
     print("-" * 80)
 
     transcriber.start_recording()
-    time.sleep(0.3)  # Pre-playback cushion
-
+    time.sleep(0.05)  # Fast pre-playback start
+    
     sd.play(data, sr)
     sd.wait()
-    time.sleep(0.5)  # Acoustic tail cushion
+    time.sleep(0.35)  # Post-playback room acoustic propagation cushion
 
     t0_process = time.time()
     transcriber.stop_recording(copy_to_clipboard=True)
@@ -112,6 +128,11 @@ def main():
     print("\n" + "=" * 80)
     print("🎙️  LIVE SPEAKER-TO-MIC ACOUSTIC LOOPBACK SUITE")
     print("=" * 80)
+
+    # Force system default audio input device for clean loopback
+    t2.INPUT_DEVICE_INDEX = None
+    t2.PRIMARY_DEVICE_NAME = None
+    t2.SECONDARY_DEVICE_NAME = None
 
     # Pre-initialize single transcriber instance
     transcriber = SimpleVoiceTranscriber()

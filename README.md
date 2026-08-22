@@ -57,6 +57,44 @@ See [NixOS options](https://search.nixos.org/options?channel=25.11&include_modul
 
 ---
 
+## 📐 Architecture & Documentation
+
+For a comprehensive technical breakdown, end-to-end execution flowcharts, and mathematical decision trees, see:
+- 📑 [**Technical Architecture & Execution Flowcharts**](docs/architecture.md)
+- 🧪 [**AI Agent Quality Control & Endpoint Testing Protocol**](docs/agent_testing_workflow.md)
+
+---
+
+## 🧪 AI Agent Quality Control & Endpoint Testing Protocol
+
+Any code changes made by AI assistants or contributors must pass the automated acoustic loopback endpoint test suite before completion:
+
+- **Post-Release Latency Gate**: **$\le 1.50$ seconds (ideally $\le 1.0$s)** from key release (`stop_recording`) to clipboard paste/typing.
+- **Accuracy Gate**: **$\ge 80.0\%$ (Target 100%)** match ratio against ground truth across short words, phrases, and 30s continuous dictation.
+- **Hallucination Gate**: **0 noise tokens** (e.g., `"you"`) on ambient noise or short audio clips.
+
+```bash
+# Run automated acoustic loopback benchmark suite:
+nix develop --command python tests/test_live_speaker_mic_loopback.py all
+```
+
+See [**`docs/agent_testing_workflow.md`**](docs/agent_testing_workflow.md) for full self-validation guidelines.
+
+---
+
+## ⚙️ Configuration
+
+Voice Transcriber supports fully customizable YAML and JSON configuration files.
+
+To customize startup defaults (e.g. `is_muted: true`, `auto_type: false`), copy the template:
+```bash
+cp config/config.yaml.example config.yaml
+```
+
+Check [**`config/config.yaml.example`**](config/config.yaml.example) for detailed comments on all available options.
+
+---
+
 ## Model Details
 
 - **Cohere Transcribe (`CohereLabs/cohere-transcribe-03-2026`)**: Primary default model. High precision, low hallucination rate.

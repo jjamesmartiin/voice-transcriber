@@ -99,8 +99,19 @@ SOUND_THEME = "proximity"
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 
 def get_config_file():
-    """Find local project config.yaml/config.yml/config.json if present, fallback to global data dir"""
-    for loc in [Path('config.yaml'), Path('config.yml'), Path('config.json'), Path('audio_device_config.json'), GLOBAL_CONFIG_FILE]:
+    """Find local project config.yaml/config.yml/config.json (in root or config/ dir), fallback to global data dir"""
+    candidates = [
+        Path('config.yaml'),
+        Path('config.yml'),
+        Path('config/config.yaml'),
+        Path('config/config.yml'),
+        Path('config.json'),
+        Path('config/config.json'),
+        Path('audio_device_config.json'),
+        Path('config/audio_device_config.json'),
+        GLOBAL_CONFIG_FILE
+    ]
+    for loc in candidates:
         if loc.exists():
             return loc.resolve()
     return GLOBAL_CONFIG_FILE

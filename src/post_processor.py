@@ -22,13 +22,21 @@ HALLUCINATION_PATTERNS = [
     re.compile(r"\bplease\s+subscribe[.!?,]*\b", re.IGNORECASE),
 ]
 
+# Standalone single-word noise hallucinations on short audio clips
+STANDALONE_SHORT_HALLUCINATIONS = re.compile(
+    r"^\s*(you|bye|thank\s+you|thanks|subtitles)\s*[.?!]*$", re.IGNORECASE
+)
+
 # Words that can never grammatically end an English sentence / clause
 DANGLING_WORDS_REGEX = re.compile(
     r"\b("
-    r"a|an|the|my|your|his|her|our|their|its|"
+    r"a|an|the|my|your|his|her|our|their|its|this|that|these|those|"
     r"of|to|in|for|with|on|at|from|by|about|into|through|during|below|between|under|without|"
     r"and|or|but|because|if|while|since|until|unless|"
-    r"very|too|quite|really|such"
+    r"very|too|quite|really|such|more|less|most|least|"
+    r"two|three|four|five|several|multiple|few|many|some|another|each|every|"
+    r"different|similar|same|other|next|previous|main|"
+    r"is|are|was|were|be|been|being|have|has|had|can|could|would|should|might|must"
     r")\s*[.?!]\s+([a-zA-Z])",
     re.IGNORECASE
 )
@@ -60,6 +68,39 @@ COORD_CONJUNCTIONS_REGEX = re.compile(
     r"[.]\s+(and|or|but|so|yet|nor)\b",
     re.IGNORECASE
 )
+
+# Mid-phrase spurious question mark followed by lowercase continuation (e.g. "the right? stuff" -> "the right stuff")
+MID_PHRASE_QUESTION_MARK_REGEX = re.compile(
+    r"\b([a-zA-Z0-9]+)\s*\?\s+([a-z][a-zA-Z0-9_-]*)\b"
+)
+
+# Common technical acronyms & proper nouns to preserve casing mid-sentence
+TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
+    "I", "vLLM", "NixOS", "PyTorch", "Python", "GitHub", "Git", "WSL", "WSLg",
+    "CPU", "GPU", "RAM", "VRAM", "HDMI", "ALSA", "PipeWire", "PortAudio",
+    "REST", "API", "LLM", "SLM", "ASR", "JSON", "YAML", "ONNX", "Cohere",
+    "Whisper", "Qwen", "Linux", "Windows", "CUDA", "ID", "UI", "TUI", "CLI",
+    "OK", "IP", "URL", "HTTP", "HTTPS", "SSD", "NVMe", "USB", "PCIe", "BIOS"
+}
+
+MID_SENTENCE_CAP_REGEX = re.compile(r"(?<![.!?\n])\s+([A-Z][a-zA-Z0-9_-]+)")
+
+def normalize_mid_sentence_casing(text: str) -> str:
+    """
+    Decapitalizes words appearing mid-sentence without preceding sentence-ending punctuation,
+    unless the word is a recognized acronym or proper noun.
+    """
+    if not text:
+        return ""
+
+    def _replace_mid_sentence_cap(m):
+        word = m.group(1)
+        if word in TECHNICAL_ACRONYMS_AND_PROPER_NOUNS or word.isupper() or len(word) == 1:
+            return m.group(0)
+        lowercased = word[0].lower() + word[1:]
+        return " " + lowercased
+
+    return MID_SENTENCE_CAP_REGEX.sub(_replace_mid_sentence_cap, text)
 
 # Subordinating conjunctions / relative pronouns following a period
 SUBORD_CONJUNCTIONS_REGEX = re.compile(
@@ -363,6 +404,8 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
         cleaned = new_cleaned
         
     cleaned = STANDALONE_MUTTERINGS_REGEX.sub("", cleaned)
+    if STANDALONE_SHORT_HALLUCINATIONS.match(cleaned.strip()):
+        return ""
     
     # If the text was reduced to only punctuation / whitespace, return empty
     if re.match(r"^[.,!?;:\s]*$", cleaned):
@@ -410,8 +453,18 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     cleaned = re.sub(r"\bi\b", "I", cleaned)
     cleaned = re.sub(r"\bi('[a-z]+)\b", r"I\1", cleaned)
     
+    # 12. Normalize mid-sentence random capitalizations
+    cleaned = normalize_mid_sentence_casing(cleaned)
+    
+    # 13. Scrub mid-phrase spurious question marks
+    cleaned = MID_PHRASE_QUESTION_MARK_REGEX.sub(r"\1 \2", cleaned)
+    
     cleaned = cleaned.strip()
     if re.match(r"^[.,!?;:\s]*$", cleaned):
         return ""
+        
+    # 14. Ensure complete statement utterances end with terminal punctuation
+    if len(cleaned.split()) >= 3 and not re.search(r"[.!?:]\s*$", cleaned):
+        cleaned += "."
         
     return cleaned
