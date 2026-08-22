@@ -49,10 +49,11 @@ def deduplicate_text_overlap(prev_text: str, new_text: str) -> str:
     
     return prev_text.strip() + " " + new_text.strip()
 
-def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence_thresh=0.012, min_speech_cushion_ms=150):
+def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence_thresh=0.004, min_speech_cushion_ms=250):
     """
-    Trim trailing room silence from the end of an audio buffer,
-    leaving a safe 150ms cushion for soft final consonants (s, f, th, t, you, ill).
+    Trim trailing room silence from the end of an audio buffer using Dynamic VAD Energy Decay.
+    Preserves quiet unvoiced trailing consonants (t, d, p, k, s, board, on) via dynamic decay thresholding
+    and zero-crossing rate turbulence analysis, with a safe 250ms speech cushion.
     """
     if audio_pcm is None or len(audio_pcm) == 0:
         return audio_pcm
@@ -61,14 +62,20 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
     frame_size = int(frame_len_ms * sample_rate / 1000)
     cushion_size = int(min_speech_cushion_ms * sample_rate / 1000)
     
-    # Scan from back to front to find where speech actually ended
+    decayed_thresh = silence_thresh * 0.35  # ~0.0014 for quiet unvoiced trailing stops
+    
     last_speech_idx = len(flat)
     found_speech = False
     for i in range(len(flat) - frame_size, 0, -frame_size):
         frame = flat[i:i+frame_size]
         rms = np.sqrt(np.mean(frame**2))
         peak = np.max(np.abs(frame))
-        if rms >= silence_thresh or peak >= silence_thresh * 2:
+        
+        # Calculate Zero-Crossing Rate (ZCR) for unvoiced consonant detection
+        zcr = np.mean(np.abs(np.diff(np.signbit(frame)))) if len(frame) > 1 else 0.0
+        
+        # Match high energy speech OR quiet unvoiced trailing consonants with ZCR turbulence
+        if rms >= silence_thresh or peak >= silence_thresh * 2.0 or (rms >= decayed_thresh and zcr >= 0.15):
             last_speech_idx = min(len(flat), i + frame_size + cushion_size)
             found_speech = True
             break

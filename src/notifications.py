@@ -61,6 +61,7 @@ class VisualNotification:
         self.available_tools = self._detect_available_tools()
         self.active_device = None
         self._notification_timers = []  # Track timers for cleanup
+        self._cleanup_overlays()  # Clean up any leftover overlay processes from prior sessions
         
         if enable_logging:
             logger.debug(f"Display environment: {self.display_env}")
@@ -270,17 +271,23 @@ if __name__ == "__main__":
         self.overlay_processes.append(process)
     
     def _cleanup_overlays(self):
-        """Clean up all active overlay processes."""
+        """Clean up all active overlay processes and kill any orphaned overlay processes from prior sessions."""
         for process in self.overlay_processes:
             try:
                 process.terminate()
-                process.wait(timeout=1)
+                process.wait(timeout=0.2)
             except:
                 try:
                     process.kill()
                 except:
                     pass
         self.overlay_processes = []
+        
+        # Kill orphaned overlay processes from previous app runs/crashes
+        try:
+            subprocess.run(['pkill', '-f', 'create_overlay'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        except Exception:
+            pass
     
     def _show_terminal_notification(self, text, sub_text=None, elapsed_sec=None):
         """Show a colorful terminal notification."""

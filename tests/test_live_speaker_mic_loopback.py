@@ -148,6 +148,9 @@ def main():
         if res:
             results.append(res)
 
+    if hasattr(transcriber, 'notification'):
+        transcriber.notification.hide()
+
     print("\n" + "=" * 80)
     print("SUMMARY RESULTS TABLE")
     print("=" * 80)
