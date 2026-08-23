@@ -1,0 +1,5 @@
+# Local config overrides (the tracked config.yaml.example stays)
+config.yaml
+config.yml
+config.json
+audio_device_config.json

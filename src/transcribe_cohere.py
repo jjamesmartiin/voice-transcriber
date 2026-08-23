@@ -30,32 +30,50 @@ _model = None
 _processor = None
 _model_lock = threading.Lock()
 
-def get_token():
-    cwd_token_file = _os.path.join(_os.getcwd(), "HF_TOKEN")
-    if _os.path.exists(cwd_token_file):
+def _token_from_config():
+    """Read hf_token from local config.yaml/config.yml (root or config/ dir)."""
+    import json as _json
+    project_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    candidates = [
+        _os.path.join(_os.getcwd(), "config.yaml"),
+        _os.path.join(_os.getcwd(), "config.yml"),
+        _os.path.join(project_root, "config.yaml"),
+        _os.path.join(project_root, "config.yml"),
+        _os.path.join(project_root, "config", "config.yaml"),
+        _os.path.join(project_root, "config", "config.yml"),
+        _os.path.join(project_root, "config.json"),
+        _os.path.join(project_root, "config", "config.json"),
+    ]
+    for path in candidates:
+        if not _os.path.exists(path):
+            continue
         try:
-            with open(cwd_token_file, "r") as f:
-                token = f.read().strip()
+            with open(path, "r") as f:
+                content = f.read()
+            if path.endswith(".json"):
+                data = _json.loads(content)
+            else:
+                import yaml
+                data = yaml.safe_load(content) or {}
+            if isinstance(data, dict):
+                token = data.get("hf_token")
                 if token:
-                    return token
-        except Exception as e:
-            print(f"Error reading {cwd_token_file}: {e}")
+                    return str(token).strip()
+        except Exception:
+            continue
+    return None
 
-    root_dir = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-    hf_token_file = _os.path.join(root_dir, "HF_TOKEN")
-    if _os.path.exists(hf_token_file):
-        try:
-            with open(hf_token_file, "r") as f:
-                token = f.read().strip()
-                if token:
-                    return token
-        except:
-            pass
+
+def get_token():
+    """Resolve Hugging Face token from config.yaml, env var, or huggingface-cli login."""
+    token = _token_from_config()
+    if token:
+        return token
 
     token = _os.environ.get("HF_TOKEN")
     if token:
         return token
-    
+
     token_path = _os.path.expanduser("~/.cache/huggingface/token")
     if _os.path.exists(token_path):
         try:
@@ -65,7 +83,7 @@ def get_token():
                     return token
         except:
             pass
-            
+
     return None
 
 def check_auth():
@@ -84,9 +102,9 @@ def check_auth():
 
     print("\nHugging Face Authentication Info")
     print(f"The model '{MODEL_ID}' is gated and requires access.")
-    print(f"  - A file named 'HF_TOKEN' exists in your current directory")
-    print(f"  - The HF_TOKEN environment variable is set")
-    print(f"  - You have logged in via 'huggingface-cli login'")
+    print(f"  - Set 'hf_token' in your local config.yaml (gitignored)")
+    print(f"  - Or set the HF_TOKEN environment variable")
+    print(f"  - Or log in via 'huggingface-cli login'")
     print(f"Access must be granted at: https://huggingface.co/{MODEL_ID}\n")
     return False
 

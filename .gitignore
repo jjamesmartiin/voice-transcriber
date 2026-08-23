@@ -1,24 +1,12 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-.pytest_cache/
-
-# Environments & tokens
+# Environments & build outputs
 .env
 .venv
 env/
 venv/
 result
-HF_TOKEN
 
-# Models & binaries
-models/
-*.bin
-*.safetensors
-
-# Local user configuration overrides (ignored so local edits aren't committed)
+# Root-level local config overrides (ignored so local edits aren't committed)
 /config.json
 /config.yaml
 /config.yml
-audio_device_config.json
+/audio_device_config.json

@@ -93,6 +93,17 @@ cp config/config.yaml.example config.yaml
 
 Check [**`config/config.yaml.example`**](config/config.yaml.example) for detailed comments on all available options.
 
+### Hugging Face Token
+
+The default Cohere model is [gated](https://huggingface.co/CohereLabs/cohere-transcribe-03-2026) and requires a Hugging Face access token for download. Set `hf_token` in your local (gitignored) `config.yaml`, e.g.:
+
+```bash
+cp config/config.yaml.example config.yaml
+# then set: hf_token: "hf_..."
+```
+
+Fallbacks if `hf_token` is unset: the `HF_TOKEN` environment variable, then `huggingface-cli login` credentials. No token is needed once the model is cached locally under `models/cohere`.
+
 ---
 
 ## Model Details

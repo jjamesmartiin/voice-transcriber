@@ -1,5 +1,7 @@
 # Todo for voice-transcriber repo
-- [ ] Try to move the pytest_cache directory into to the tests/ directory.
-- [ ] Move the .gitattributes if possible?
-- [ ] Move the.gitignore into like a localize it, so that it's specific to whatever we're trying to ignore.
-- [ ] get rid of HF_TOKEN since we should have the model downloaded or distributed from another source than hugging face
+- [x] Move the pytest cache into tests/ (`pytest.ini` sets `cache_dir = tests/.pytest_cache`)
+- [x] Localize `.gitignore` per-directory (`src/`, `tests/`, `config/`) so the root stays flat
+- [x] Remove the root `HF_TOKEN` file — the token now lives in the gitignored `config.yaml` (`hf_token`), with `HF_TOKEN` env-var fallback
+- [x] Remove the duplicate root `config.yaml.example` (single canonical copy in `config/`)
+- [ ] `.gitattributes` cannot be moved — git requires it at the repo root (applies repo-wide)
+- [ ] Pre-existing failure: `test_post_processor_artifacts` expects no trailing period, but the post-processor now appends one (e.g. `"This is important."`)

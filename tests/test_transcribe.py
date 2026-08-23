@@ -93,10 +93,10 @@ def run_all_tests():
         
         for backend_name, backend_id in backends:
             if backend_id == "cohere":
-                token_file = os.path.join(os.path.dirname(__file__), "..", "HF_TOKEN")
-                if not os.path.exists(token_file) and not os.environ.get("HF_TOKEN"):
-                    print(f"Skipping {backend_name}: HF_TOKEN not set (gated model)")
-                    all_results.append((test_num, backend_name, 1.0, "SKIP", "Skipped (Requires HF_TOKEN)", 0.0, 0.0, 0.0))
+                import transcribe_cohere
+                if not transcribe_cohere.get_token():
+                    print(f"Skipping {backend_name}: no HF token configured (gated model)")
+                    all_results.append((test_num, backend_name, 1.0, "SKIP", "Skipped (No HF token)", 0.0, 0.0, 0.0))
                     continue
 
             os.environ["VT_MODEL_BACKEND"] = backend_id
