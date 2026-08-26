@@ -378,53 +378,50 @@ def save_audio_config():
         print(f"Could not save audio config: {e}")
 
 def select_audio_device():
-    """Interactive audio device selection with Primary/Secondary support"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME
+    """Interactive audio device selection with Primary/Secondary support & Rich styling"""
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE
     
     # Always reset terminal before interaction to fix terminal state
     reset_terminal() 
     
-    # Status formatting
-    model_display = MODEL_BACKEND.capitalize()
-    copy_display = "Enabled" if COPY_TO_CLIPBOARD else "Disabled"
-    mute_display = "MUTED" if IS_MUTED else "Sound On"
-    sound_display = SOUND_THEME.capitalize() if SOUND_THEME else "Proximity"
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
     
-    # Check if WSL
+    console = Console()
     is_wsl = "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg")
     
-    print("\nVoice Transcriber Configuration:")
-    print("-" * 85)
-    
-    def print_option(key, description, value):
-        print(f"  {key}. {description:<53} (currently: {value})")
+    table = Table(expand=True, border_style="cyan", show_header=True, header_style="bold yellow")
+    table.add_column("Key", style="bold cyan", width=6)
+    table.add_column("Setting Description", style="white")
+    table.add_column("Current Status", style="bold green")
 
     if is_wsl:
-        print_option("W", "Open Windows Microphone Settings", "WSL Bridge Active")
+        table.add_row("W", "Open Windows Microphone Settings", "WSL Bridge Active")
     else:
-        print_option("P", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
-        print_option("S", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
+        table.add_row("P", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
+        table.add_row("S", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
         
-    print_option("M", "Toggle Mute", mute_display)
-    print_option("E", "Select Sound Effect Theme", sound_display)
-    print_option("B", "Switch Model (whisper/cohere)", MODEL_BACKEND)
-    print_option("T", "Toggle Auto-Type (auto-type to screen)", copy_display)
-    print(f"  R. {'Reset Terminal (if text is invisible or wonky)':<53}")
-    print("-" * 85)
+    table.add_row("M", "Toggle Sound Effects", "MUTED" if IS_MUTED else "Sound On")
+    table.add_row("E", "Select Sound Effect Theme", SOUND_THEME.capitalize() if SOUND_THEME else "Proximity")
+    table.add_row("B", "Switch Model Backend", MODEL_BACKEND.capitalize())
+    table.add_row("T", "Toggle Auto-Type Output", "ENABLED" if AUTO_TYPE else "DISABLED (Clipboard Only)")
+    table.add_row("R", "Reset Terminal & Audio Bridge", "Ready")
     
     if not is_wsl:
         p_marker = "[ACTIVE]" if OVERRIDE_MODE == 'primary' else ""
         s_marker = "[ACTIVE]" if OVERRIDE_MODE == 'secondary' else ""
         a_marker = "[ACTIVE]" if OVERRIDE_MODE == 'auto' else ""
+        table.add_row("p", "Use Primary Device (Manual Override)", p_marker or "Inactive")
+        table.add_row("s", "Use Secondary Device (Manual Override)", s_marker or "Inactive")
+        table.add_row("a", "Automatic Selection (Default)", a_marker or "Inactive")
         
-        print(f"  p. {'Use Primary Device (Manual Override)':<53} {p_marker}")
-        print(f"  s. {'Use Secondary Device (Manual Override)':<53} {s_marker}")
-        print(f"  a. {'Automatic Selection (Default)':<53} {a_marker}")
-        print("-" * 85)
-        
-    print("  c or \"↵\". to save/exit")
+    table.add_row("c / ↵", "Save and Exit Configuration Menu", "Done")
+
+    panel = Panel(table, title="⚙️  Voice Transcriber Settings", border_style="bright_cyan", padding=(0, 1))
+    console.print(panel)
+    console.print("[dim white]Press choice key: [/dim white]", end="", flush=True)
     
-    print("\nYour choice: ", end="", flush=True)
     choice = getch()
     print() # Newline after getch
     

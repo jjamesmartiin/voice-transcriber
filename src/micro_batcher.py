@@ -85,9 +85,10 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
     return flat
 
 class StreamingMicroBatcher:
-    def __init__(self, sample_rate=16000, mode=None, min_chunk_sec=4.5, max_chunk_sec=7.0, silence_thresh=0.015, min_silence_sec=0.25, overlap_sec=0.3):
+    def __init__(self, sample_rate=16000, mode=None, min_chunk_sec=4.5, max_chunk_sec=7.0, silence_thresh=0.015, min_silence_sec=0.25, overlap_sec=0.3, tui=None):
         self.sample_rate = sample_rate
         self.mode = mode or os.environ.get("VT_MICRO_BATCHING", "auto").lower()
+        self.tui = tui
         
         # Configure thresholds based on mode
         if self.mode == "always" or self.mode == "1" or self.mode == "true":
@@ -175,6 +176,9 @@ class StreamingMicroBatcher:
         
         # Calculate RMS energy of this block
         rms = np.sqrt(np.mean(flat**2)) if len(flat) > 0 else 0
+        if hasattr(self, 'tui') and self.tui:
+            self.tui.update_vu_level(float(rms))
+            
         if rms < self.silence_thresh:
             self.silence_samples += len(flat)
         else:

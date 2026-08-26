@@ -46,16 +46,18 @@ class VisualNotification:
     - Terminal-based colored notifications
     """
     
-    def __init__(self, app_name="Application", enable_logging=True):
+    def __init__(self, app_name="Application", enable_logging=True, tui=None):
         """
         Initialize the visual notification system.
         
         Args:
             app_name (str): Name of the application for notification titles
             enable_logging (bool): Whether to enable debug logging
+            tui: Optional VoiceTranscriberTUI instance for rich terminal integration
         """
         self.app_name = app_name
         self.active = False
+        self.tui = tui
         self.overlay_processes = []
         self.display_env = self._detect_display_environment()
         self.available_tools = self._detect_available_tools()
@@ -102,10 +104,13 @@ class VisualNotification:
     
     def show_recording(self, text="RECORDING"):
         """Show a recording notification."""
-        if self.active:
+        if self.active and not self.tui:
             return
         self.active = True
         
+        if self.tui:
+            self.tui.update_state("RECORDING")
+            
         display_text = "RECORDING"
         terminal_text = f"{text} - Recording in progress"
         
@@ -113,12 +118,16 @@ class VisualNotification:
             terminal_text += f" (Device: {self.active_device})"
             
         self._create_overlay(display_text, "#ff4444", persistent=True)
-        self._show_terminal_notification(terminal_text)
+        if not self.tui:
+            self._show_terminal_notification(terminal_text)
     
     def show_processing(self, text="PROCESSING"):
         """Show a processing notification."""
         self._cleanup_overlays()
         self.active = True
+        
+        if self.tui:
+            self.tui.update_state("PROCESSING", text)
         
         # Run overlay in background thread so it doesn't block
         def create_overlay_bg():
@@ -130,13 +139,28 @@ class VisualNotification:
         overlay_thread = threading.Thread(target=create_overlay_bg, daemon=True)
         overlay_thread.start()
         
-        self._show_terminal_notification(f"Loading {text}...")
+        if not self.tui:
+            self._show_terminal_notification(f"Loading {text}...")
     
     def show_completed(self, text="COMPLETED", sub_text=None, elapsed_sec=None):
         """Show a completion notification."""
         self._cleanup_overlays()
         self._create_overlay("COMPLETED", "#00aaff", persistent=False)
-        self._show_terminal_notification(text, sub_text=sub_text, elapsed_sec=elapsed_sec)
+        
+        if self.tui and sub_text:
+            import t2
+            typed = getattr(t2, 'AUTO_TYPE', False)
+            self.tui.print_transcription(
+                sub_text,
+                elapsed_sec=elapsed_sec or 0.0,
+                copy_success=True,
+                typed_success=typed,
+                device_name=self.active_device
+            )
+            self.tui.update_state("READY")
+        elif not self.tui:
+            self._show_terminal_notification(text, sub_text=sub_text, elapsed_sec=elapsed_sec)
+
         timer = threading.Timer(2.0, self.hide_notification)
         timer.start()
         self._notification_timers.append(timer)
@@ -145,7 +169,11 @@ class VisualNotification:
         """Show an error notification."""
         self._cleanup_overlays()
         self._create_overlay("ERROR", "#ff0000", persistent=False)
-        self._show_terminal_notification(text)
+        if self.tui:
+            self.tui.print_error("ERROR", text)
+            self.tui.update_state("READY")
+        else:
+            self._show_terminal_notification(text)
         timer = threading.Timer(3.0, self.hide_notification)
         timer.start()
         self._notification_timers.append(timer)
@@ -154,7 +182,11 @@ class VisualNotification:
         """Show a warning notification."""
         self._cleanup_overlays()
         self._create_overlay("WARNING", "#ff8800", persistent=False)
-        self._show_terminal_notification(text)
+        if self.tui:
+            self.tui.print_warning("WARNING", text)
+            self.tui.update_state("READY")
+        else:
+            self._show_terminal_notification(text)
         timer = threading.Timer(3.0, self.hide_notification)
         timer.start()
         self._notification_timers.append(timer)
@@ -338,6 +370,8 @@ if __name__ == "__main__":
     
     def hide_notification(self):
         """Hide all active notifications."""
+        if self.tui:
+            self.tui.update_state("READY")
         if not self.active:
             return
         

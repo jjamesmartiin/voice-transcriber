@@ -13,9 +13,13 @@ import sys
 import pyperclip
 import atexit
 
+# Ensure local source directory is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 # Import core modules
 from notifications import VisualNotification
 from hotkeys import create_global_hotkeys
+from tui import VoiceTranscriberTUI
 
 # Import transcription functionality
 # Ensure we can find t2
@@ -27,7 +31,7 @@ from t2 import (
     reset_terminal, get_active_device_name, IS_MUTED
 )
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def copy_to_clipboard_crossplatform(text):
@@ -58,32 +62,29 @@ class SimpleVoiceTranscriber:
         self.copy_to_clipboard = False
         self.start_time = 0
         
+        # Initialize Rich TUI & Start display immediately on launch
+        self.tui = VoiceTranscriberTUI()
+        self._wire_tui_callbacks()
+        self.tui.start()
+        
         # Load saved audio device configuration
         load_audio_config()
+        self._sync_tui_state()
+        
+        # Preload model in background with live loading spinner animation
+        from t2 import MODEL_BACKEND
+        self.tui.update_state("PROCESSING", f"Loading {MODEL_BACKEND.capitalize()} model weights...")
+        self.preload_thread = preload_model(device=DEVICE)
         
         # Proactively check microphone health on startup
         is_healthy, mic_issues = t2.check_microphone_health()
         if not is_healthy:
-            print("\n" + "!" * 75)
-            print("⚠️  WARNING: HARDWARE MICROPHONE NOT DETECTED BY WSL!")
-            for issue in mic_issues:
-                print(f"   • {issue}")
-            print("\n💡 Quick 5-Second Fix for WSL:")
-            print("   1. Open Windows PowerShell and run: wsl --shutdown")
-            print("   2. Ensure Windows Settings -> Privacy -> Microphone access is ON")
-            print("   3. Restart ./run.sh")
-            print("!" * 75 + "\n")
-        else:
-            print("🎤 Microphone connection: OK")
+            warn_msg = "⚠️ HARDWARE MICROPHONE NOT DETECTED BY WSL!\n" + "\n".join([f" • {issue}" for issue in mic_issues])
+            self.tui.print_warning("MICROPHONE HARDWARE WARNING", warn_msg)
         
         # Initialize visual notification
-        self.visual_notification = VisualNotification(app_name="Voice Transcriber")
+        self.visual_notification = VisualNotification(app_name="Voice Transcriber", tui=self.tui)
         self.visual_notification.set_active_device(get_active_device_name())
-        
-        # Preload model in background with loading indicator
-        from t2 import MODEL_BACKEND
-        print(f"Loading {MODEL_BACKEND.capitalize()} model from local files...")
-        self.preload_thread = preload_model(device=DEVICE)
         
         # State tracking for SLM On-Demand Quick-Tap retro-polishing
         self.last_transcription = ""
@@ -92,8 +93,73 @@ class SimpleVoiceTranscriber:
         # Initialize global hotkey system
         self.init_hotkeys()
         
+    def _sync_tui_state(self):
+        """Sync t2 configuration state with TUI badges"""
+        import t2
+        self.tui.set_active_device(get_active_device_name())
+        self.tui.set_secondary_device(t2.SECONDARY_DEVICE_NAME)
+        self.tui.set_config_state(
+            backend=t2.MODEL_BACKEND,
+            muted=t2.IS_MUTED,
+            auto_type=t2.AUTO_TYPE,
+            sound_theme=t2.SOUND_THEME
+        )
+
+    def _wire_tui_callbacks(self):
+        """Wire direct terminal keyboard shortcuts from TUI"""
+        self.tui.on_toggle_record = self._on_tui_toggle_record
+        self.tui.on_change_device = self.change_input_device
+        self.tui.on_toggle_mute = self._on_tui_toggle_mute
+        self.tui.on_toggle_backend = self._on_tui_toggle_backend
+        self.tui.on_toggle_autotype = self._on_tui_toggle_autotype
+        self.tui.on_reset_terminal = self._on_tui_reset_terminal
+        self.tui.on_quit = self._on_tui_quit
+
+    def _on_tui_toggle_record(self):
+        if self.recording:
+            self.stop_recording()
+        else:
+            self.start_recording()
+
+    def _on_tui_toggle_mute(self):
+        import t2
+        t2.IS_MUTED = not t2.IS_MUTED
+        t2.save_audio_config()
+        self._sync_tui_state()
+        status = "MUTED" if t2.IS_MUTED else "SOUND ENABLED"
+        self.tui.print_event("🔊 Sound Toggle", f"Sound effects are now {status}", level="info")
+
+    def _on_tui_toggle_backend(self):
+        import t2
+        new_backend = "whisper" if t2.MODEL_BACKEND == "cohere" else "cohere"
+        t2.MODEL_BACKEND = new_backend
+        t2.save_audio_config()
+        self._sync_tui_state()
+        self.tui.print_event("⚡ Model Backend", f"Switched model backend to {new_backend.capitalize()}", level="info")
+        t2.preload_model(device=t2.DEVICE)
+
+    def _on_tui_toggle_autotype(self):
+        import t2
+        t2.AUTO_TYPE = not t2.AUTO_TYPE
+        t2.save_audio_config()
+        self._sync_tui_state()
+        status = "AUTO-TYPE ENABLED" if t2.AUTO_TYPE else "CLIPBOARD COPY ONLY"
+        self.tui.print_event("⌨️ Auto-Type Mode", f"Output mode set to {status}", level="info")
+
+    def _on_tui_reset_terminal(self):
+        import t2
+        t2.reset_terminal()
+        self._sync_tui_state()
+        self.tui.print_event("🔄 Terminal Reset", "Terminal state and clipboard bridge reset successfully.", level="info")
+
+    def _on_tui_quit(self):
+        self.cleanup()
+        sys.exit(0)
+
     def cleanup(self):
         """Clean up all resources."""
+        if hasattr(self, 'tui') and self.tui:
+            self.tui.stop()
         if hasattr(self, 'visual_notification'):
             self.visual_notification.cleanup()
         if hasattr(self, 'hotkey_system') and self.hotkey_system:
@@ -147,7 +213,7 @@ class SimpleVoiceTranscriber:
         
         # Start streaming micro-batcher
         from micro_batcher import StreamingMicroBatcher
-        self.micro_batcher = StreamingMicroBatcher(sample_rate=16000)
+        self.micro_batcher = StreamingMicroBatcher(sample_rate=16000, tui=self.tui)
         self.micro_batcher.start()
         
         # Start recording in background thread IMMEDIATELY
@@ -339,129 +405,66 @@ class SimpleVoiceTranscriber:
             self.offer_device_change()
 
     def offer_device_change(self):
-        """Offer to change audio device after failed recording"""
-        logger.info("")
-        logger.info("What would you like to do?")
-        logger.info("   Space/Enter: Try recording again")
-        logger.info("   i: Change audio input device")
-        logger.info("   r: Reset terminal & clipboard (if things are wonky)")
-        logger.info("   Any other key: Continue")
-        logger.info("")
-        
-        try:
-            # Use the same getch function pattern as t2.py
-            import termios, tty
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-            try:
-                tty.setraw(sys.stdin.fileno())
-                ch = sys.stdin.read(1)
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            
-            if ch in [' ', '\r', '\n']:  # Space or Enter
-                logger.info("Ready to record - hold Alt+Shift when ready")
-            elif ch.lower() == 'i':  # Input device selection
-                logger.info("Opening audio device selection...")
-                result = select_audio_device()
-                if result:
-                    logger.info("Audio device updated!")
-                else:
-                    logger.info("Device selection cancelled.")
-                reset_terminal()
-                logger.info("Ready to record - hold Alt+Shift when ready")
-            elif ch.lower() == 'r':  # Reset terminal
-                logger.info("Resetting terminal and clipboard...")
-                reset_terminal()
-                logger.info("Reset complete.")
-                logger.info("Ready to record - hold Alt+Shift when ready")
-            else:
-                reset_terminal()
-                logger.info("Ready for next recording")
-                
-        except (KeyboardInterrupt, EOFError):
+        """Show non-blocking notice for audio device change/retry"""
+        if hasattr(self, 'tui') and self.tui:
+            self.tui.print_warning("No Speech Detected", "No audio detected in recording. Press [i] to change input devices or [Space] to try again.")
+            self.tui.update_state("READY")
+        else:
             logger.info("Ready for next recording")
-        except ImportError:
-            # Windows fallback - use regular input
-            try:
-                choice = input("Enter choice (Space/Enter/i/r/other): ").strip().lower()
-                if choice == ' ' or choice == '':
-                    logger.info("Ready to record - hold Alt+Shift when ready")
-                elif choice == 'i':
-                    logger.info("Opening audio device selection...")
-                    if select_audio_device():
-                        logger.info("Audio device updated!")
-                    else:
-                        logger.info("Device selection cancelled.")
-                    logger.info("Ready to record - hold Alt+Shift when ready")
-                elif choice == 'r':
-                    logger.info("Resetting terminal and clipboard...")
-                    reset_terminal()
-                    logger.info("Reset complete.")
-                    logger.info("Ready to record - hold Alt+Shift when ready")
-                else:
-                    logger.info("Ready for next recording")
-            except (KeyboardInterrupt, EOFError):
-                logger.info("Ready for next recording")
 
     def change_input_device(self):
-        """Open audio device selection menu via hotkey"""
+        """Open audio device selection menu via hotkey or TUI shortcut"""
         if self.recording:
-            logger.warning("Cannot change settings while recording is active")
+            if hasattr(self, 'tui') and self.tui:
+                self.tui.print_warning("Settings Locked", "Cannot change settings while recording is active.")
             return
-            
-        logger.info("")
-        logger.info("⚙️  Settings hotkey detected!")
-        logger.info("Opening audio device selection...")
-        logger.info("Please interact with the terminal window")
-        
+
+        if hasattr(self, 'tui') and self.tui:
+            self.tui._pause_live()
+
         try:
             if select_audio_device():
-                logger.info("Audio device updated!")
-            else:
-                logger.info("Device selection cancelled.")
+                if hasattr(self, 'tui') and self.tui:
+                    self.tui.print_event("⚙️ Audio Configuration", "Audio device and settings updated successfully!", level="success")
             reset_terminal()
         except Exception as e:
-            logger.error(f"Error in device selection: {e}")
+            if hasattr(self, 'tui') and self.tui:
+                self.tui.print_error("Audio Configuration Error", str(e))
             reset_terminal()
             
-        logger.info("Ready to record - hold Alt+Shift when ready")
+        self._sync_tui_state()
+        if hasattr(self, 'tui') and self.tui:
+            self.tui._resume_live()
+            self.tui.update_state("READY")
 
-    
     def run(self):
-        """Run the voice transcriber"""
+        """Run the voice transcriber with Live TUI"""
         if not self.hotkey_system or not self.hotkey_system.devices:
-            logger.error("No global hotkey system available")
-            logger.error("Make sure you're running as root or in the input group")
-            logger.error("Install dependencies: pip install evdev python-uinput")
+            if hasattr(self, 'tui') and self.tui:
+                self.tui.print_error("Hotkey System Error", "No global hotkey system available.\nMake sure you're running as root or in the input group.\nRun: sudo usermod -aG input $USER")
             return False
-        
-        # Wait for model to load and warmup BEFORE starting the loop
+
+        # Start TUI live dashboard & input listener
+        if hasattr(self, 'tui') and self.tui:
+            self.tui.start()
+
+        # Wait for model to load BEFORE starting the loop
         if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
             self.visual_notification.show_processing("Loading model")
             self.preload_thread.join()
             self.visual_notification.hide_notification()
-        
-        print("Voice Transcriber ready!")
-        print(f"Using: {get_active_device_name()}")
-        from t2 import SECONDARY_DEVICE_NAME
-        if SECONDARY_DEVICE_NAME:
-            print(f"Secondary: {SECONDARY_DEVICE_NAME}")
-        
-        # Show ready state in terminal/notifications
-        self.visual_notification.hide_notification()
-        
+
         self.running = True
-        
+
         try:
             # Run the hotkey monitoring system
             hotkey_result = self.hotkey_system.run()
             return hotkey_result
         except KeyboardInterrupt:
-            logger.info("Shutting down...")
             return True
         except Exception as e:
-            logger.error(f"Error running hotkey system: {e}")
+            if hasattr(self, 'tui') and self.tui:
+                self.tui.print_error("Runtime Error", str(e))
             return False
         finally:
             self.cleanup()
