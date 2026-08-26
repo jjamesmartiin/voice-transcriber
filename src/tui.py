@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
 """
-TUI Module for Voice Transcriber
-Provides a clean, line-free terminal interface.
-Eliminates decorative border/rule lines around text so copying text in the terminal window never catches line characters.
+TUI Module for Voice Transcriber - Design C: Tmux Green & Blue Session Dashboard Style
+Provides a native Tmux session status bar aesthetic:
+- Solid horizontal top line defining the bottom status bar styled in classic Tmux green & dark grey
+- Window session tabs ([0] 0:vt*) with host, timestamp, and active mode widgets
+- Dynamic terminal width adjustment
+- Unlimited scrollback terminal history (pi / gemini CLI style)
+- Clean horizontal divider rules with header metadata between transcriptions
+- NO vertical left/right border lines so text copies cleanly
 """
 
 import sys
 import os
+import socket
 import time
 import select
 import threading
 import termios
 import tty
 import atexit
+import shutil
 from datetime import datetime
 
 from rich.console import Console
@@ -27,6 +34,12 @@ class VoiceTranscriberTUI:
         self.console = Console()
         self.lock = threading.Lock()
         
+        # System hostname for tmux status right widget
+        try:
+            self.hostname = socket.gethostname()
+        except Exception:
+            self.hostname = "localhost"
+
         # State tracking for bottom status bar
         self.state = "READY"  # READY, RECORDING, PROCESSING, REWRITING, CONFIG
         self.sub_state_text = ""
@@ -63,6 +76,16 @@ class VoiceTranscriberTUI:
         self.stdin_thread = None
         self.old_termios = None
         
+    def _get_term_width(self):
+        """Get current terminal width dynamically for responsive borders"""
+        try:
+            width = self.console.width
+            if width and width > 10:
+                return width
+        except Exception:
+            pass
+        return shutil.get_terminal_size((80, 24)).columns
+
     def set_active_device(self, device_name):
         with self.lock:
             self.active_device = device_name or "Default Microphone"
@@ -98,105 +121,125 @@ class VoiceTranscriberTUI:
             self.vu_level = max(level, self.vu_level * 0.7)
 
     def print_header(self):
-        """Print clean header line into history without border/divider lines"""
+        """Print Tmux Session header at start of terminal scrollback"""
+        w = self._get_term_width()
+        rule = "─" * w
+        
         header = Text()
-        header.append("Voice Transcriber ", style="bold cyan")
-        header.append(f"v{self.app_version} ", style="dim cyan")
-        header.append(f"│ Model: {self.model_backend.upper()} │ Mic: {self.active_device}\n", style="dim white")
+        header.append(f"{rule}\n", style="bold green")
+        header.append(" [0] 0:voice-transcriber* ", style="bold black on green")
+        header.append(f" (v{self.app_version}) ", style="bold white on grey23")
+        header.append(f" │ Model: {self.model_backend.upper()} │ Mic: {self.active_device}\n", style="dim white")
+        header.append(f"{rule}\n", style="bold green")
         self.console.print(header)
 
     def _render_status_bar(self):
-        """Render pinned single-line bottom status bar"""
+        """
+        Render Tmux Status Bar pinned at bottom of terminal.
+        Line 1: Solid green divider line extending full width of terminal.
+        Line 2: Tmux status bar with session badge, status widgets, host and keyhints.
+        """
+        w = self._get_term_width()
         self.spinner_index = (self.spinner_index + 1) % len(SPINNER_FRAMES)
         spinner = SPINNER_FRAMES[self.spinner_index]
         
         if self.start_time > 0:
             self.elapsed_time = time.time() - self.start_time
 
-        line = Text()
+        bar = Text()
         
+        # Solid line defining the status bar
+        bar.append("─" * w + "\n", style="bold green")
+
+        # Left Section: Tmux Session Window Tab
+        bar.append("[0] 0:vt* ", style="bold black on green")
+        bar.append(" ", style="reset")
+
+        # Middle Section: Status details & active mode
         if self.state == "READY":
-            line.append("🟢 READY ", style="green")
-            line.append("│ ", style="dim white")
+            bar.append("[READY] ", style="bold black on bright_green")
+            bar.append(" ", style="reset")
             
             mic_short = self.active_device
-            if len(mic_short) > 22:
-                mic_short = mic_short[:19] + "..."
-            line.append(f"Mic: {mic_short} ", style="cyan")
-            line.append("│ ", style="dim white")
-            
-            line.append(f"Model: {self.model_backend.upper()} ", style="cyan")
-            line.append("│ ", style="dim white")
+            if len(mic_short) > 18:
+                mic_short = mic_short[:15] + "..."
+            bar.append(f"mic: {mic_short} ", style="cyan")
+            bar.append("│ ", style="dim green")
+            bar.append(f"model: {self.model_backend.lower()} ", style="cyan")
+            bar.append("│ ", style="dim green")
             
             if self.is_muted:
-                line.append("Sound: Off ", style="dim red")
+                bar.append("sound: off ", style="dim red")
             else:
-                line.append("Sound: On ", style="green")
-            line.append("│ ", style="dim white")
+                bar.append("sound: on ", style="green")
+            bar.append("│ ", style="dim green")
 
             if self.auto_type:
-                line.append("Auto-Type ", style="magenta")
+                bar.append("auto-type ", style="magenta")
             else:
-                line.append("Clipboard ", style="cyan")
-            line.append("│ ", style="dim white")
-            
-            line.append("Alt+Shift to record • [Space] Rec  [i] Dev  [m] Mute  [b] Model  [q] Quit", style="dim white")
+                bar.append("clipboard ", style="cyan")
+            bar.append("│ ", style="dim green")
+            bar.append("[Space] Rec  [i] Mic  [m] Mute  [b] Model  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
-            line.append("🎙️ 🔴 RECORDING ", style="bold red blink")
-            line.append(f"[{self.elapsed_time:04.1f}s] ", style="yellow")
-            line.append("│ ", style="dim white")
+            bar.append(" [REC] ", style="bold black on bright_red")
+            bar.append(" ", style="reset")
+            bar.append(f"{self.elapsed_time:04.1f}s ", style="bold yellow")
+            bar.append("│ ", style="dim green")
             
-            # VU level meter bar (18 blocks)
-            bar_len = 18
+            # Dynamic VU bar
+            bar_len = 14
             filled_len = int(min(1.0, self.vu_level * 3.5) * bar_len)
             filled_len = max(1 if self.vu_level > 0.01 else 0, filled_len)
             empty_len = bar_len - filled_len
             vu_str = "█" * filled_len + "░" * empty_len
             
-            if filled_len > 14:
-                line.append(vu_str[:11], style="green")
-                line.append(vu_str[11:15], style="yellow")
-                line.append(vu_str[15:], style="red")
-            elif filled_len > 9:
-                line.append(vu_str[:9], style="green")
-                line.append(vu_str[9:], style="yellow")
+            if filled_len > 10:
+                bar.append(vu_str[:8], style="green")
+                bar.append(vu_str[8:11], style="yellow")
+                bar.append(vu_str[11:], style="red")
+            elif filled_len > 6:
+                bar.append(vu_str[:6], style="green")
+                bar.append(vu_str[6:], style="yellow")
             else:
-                line.append(vu_str, style="green")
+                bar.append(vu_str, style="green")
 
-            line.append(f" ({int(self.vu_level*100)}%) ", style="dim cyan")
-            line.append("│ ", style="dim white")
-            line.append("Release Alt+Shift or press Space to finish", style="dim white")
+            bar.append(f" ({int(self.vu_level*100)}%) ", style="dim cyan")
+            bar.append("│ ", style="dim green")
+            bar.append("Release Alt+Shift or Space to stop", style="dim white")
 
         elif self.state == "PROCESSING":
-            line.append(f"{spinner} ", style="yellow")
-            line.append("PROCESSING AUDIO ", style="yellow")
-            line.append(f"[{self.elapsed_time:04.1f}s] ", style="dim yellow")
-            line.append("│ ", style="dim white")
+            bar.append(" [PROC] ", style="bold black on yellow")
+            bar.append(" ", style="reset")
+            bar.append(f"{spinner} {self.elapsed_time:04.1f}s ", style="yellow")
+            bar.append("│ ", style="dim green")
             if self.sub_state_text:
-                line.append(f"{self.sub_state_text}", style="white")
+                bar.append(f"{self.sub_state_text}", style="white")
             else:
-                line.append(f"Transcribing audio stream with {self.model_backend.capitalize()}...", style="white")
+                bar.append(f"transcribing audio stream...", style="white")
 
         elif self.state == "REWRITING":
-            line.append(f"🤖 {spinner} ", style="magenta")
-            line.append("SLM RETRO-POLISHING ", style="magenta")
-            line.append(f"[{self.elapsed_time:04.1f}s] ", style="dim magenta")
-            line.append("│ ", style="dim white")
-            line.append("Refining grammar and formatting...", style="white")
+            bar.append(" [REWRITE] ", style="bold white on magenta")
+            bar.append(" ", style="reset")
+            bar.append(f"🤖 {spinner} {self.elapsed_time:04.1f}s ", style="magenta")
+            bar.append("│ ", style="dim green")
+            bar.append("slm grammar polishing...", style="white")
 
         else:
-            line.append(f"⚙️ {self.state} ", style="white")
+            bar.append(f" [{self.state}] ", style="bold white on grey23")
+            bar.append(" ", style="reset")
             if self.sub_state_text:
-                line.append(f"│ {self.sub_state_text}", style="dim white")
+                bar.append(f"│ {self.sub_state_text}", style="dim white")
 
-        return line
+        return bar
 
     def print_transcription(self, text, elapsed_sec=0.0, copy_success=True, typed_success=False, device_name=None):
         """
-        Print completed transcription without decorative border lines:
-        - [#15] Timestamp (1.24s)  Copied & Typed
-        - Clean word-wrapped text (no border lines to interfere with copying)
+        Print transcription into terminal scrollback history:
+        - Solid horizontal divider line across full terminal width
+        - Header line: [transcribe #1] HH:MM:SS (1.24s) -- Status: Copied
+        - Clean word-wrapped text (NO left/right side borders)
+        - Bottom solid horizontal divider line
         """
         self._pause_live()
         try:
@@ -204,48 +247,61 @@ class VoiceTranscriberTUI:
                 self.transcription_count += 1
                 count = self.transcription_count
 
+            w = self._get_term_width()
             timestamp = datetime.now().strftime("%H:%M:%S")
+            status_str = "Copied & Typed" if typed_success else ("Copied to Clipboard" if copy_success else "Clipboard Error")
+            status_color = "green" if typed_success else ("cyan" if copy_success else "red")
             
-            header = Text()
-            header.append(f"[#{count}] ", style="bold cyan")
-            header.append(f"{timestamp} ", style="dim white")
-            header.append(f"({elapsed_sec:.2f}s)  ", style="dim yellow")
-            
-            if typed_success:
-                header.append("Copied & Typed", style="green")
-            elif copy_success:
-                header.append("Copied to Clipboard", style="cyan")
-            else:
-                header.append("Clipboard Error", style="red")
+            top_rule = Text()
+            top_rule.append("─" * w + "\n", style="bold green")
+            self.console.print(top_rule)
 
+            header = Text()
+            header.append(f"[transcribe #{count}] ", style="bold green")
+            header.append(f"{timestamp} ", style="dim white")
+            header.append(f"({elapsed_sec:.2f}s) ", style="dim yellow")
+            header.append("── Status: ", style="dim green")
+            header.append(f"{status_str}\n", style=status_color)
             self.console.print(header)
 
-            # Full word-wrapped text (clean, no border lines)
+            # Transcribed text body (clean wrapped, NO vertical side borders!)
             body = Text()
             body.append(f"{text.strip()}\n", style="bold white")
             self.console.print(body)
+
+            # Bottom solid horizontal border
+            bot_rule = Text()
+            bot_rule.append("─" * w + "\n", style="green")
+            self.console.print(bot_rule)
+
         finally:
             self._resume_live()
 
     def print_event(self, title, message, level="info"):
-        """Print system event notice in clean line-free text style"""
+        """Print system event notice into terminal scrollback"""
         self._pause_live()
         try:
-            style_map = {
-                "info": "cyan",
-                "success": "green",
-                "warning": "yellow",
-                "error": "red"
-            }
+            style_map = {"info": "cyan", "success": "green", "warning": "yellow", "error": "red"}
             color = style_map.get(level, "cyan")
             timestamp = datetime.now().strftime("%H:%M:%S")
+            w = self._get_term_width()
             
-            text = Text()
-            text.append(f"⚙️  {title} ", style=f"bold {color}")
-            text.append(f"[{timestamp}]\n", style="dim white")
-            text.append(f"{message}\n", style="white")
-            
-            self.console.print(text)
+            top = Text()
+            top.append("─" * w + "\n", style=color)
+            self.console.print(top)
+
+            hdr = Text()
+            hdr.append(f"[event] {title} ", style=f"bold {color}")
+            hdr.append(f"[{timestamp}]\n", style="dim white")
+            self.console.print(hdr)
+
+            msg = Text()
+            msg.append(f"{message}\n", style="white")
+            self.console.print(msg)
+
+            bot = Text()
+            bot.append("─" * w + "\n", style=color)
+            self.console.print(bot)
         finally:
             self._resume_live()
 
@@ -264,16 +320,13 @@ class VoiceTranscriberTUI:
             self.live.start()
 
     def start(self):
-        """Start the live refreshing TUI with clean line-free status bar"""
+        """Start the live refreshing TUI with Tmux status bar"""
         if self.running:
             return
         
         self.running = True
-        
-        # Initial clean header line
         self.print_header()
 
-        # Create Rich Live display pinned at bottom
         self.live = Live(
             self._render_status_bar(),
             console=self.console,
@@ -282,8 +335,6 @@ class VoiceTranscriberTUI:
             auto_refresh=True
         )
         self.live.start()
-        
-        # Start terminal stdin keypress listener
         self._start_stdin_listener()
 
     def stop(self):
