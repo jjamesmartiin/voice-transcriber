@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
 """
-TUI Module for Voice Transcriber - Customizable Tmux Session Dashboard Style
-Provides a native Tmux session status bar aesthetic with customizable UI color themes:
-- Configurable primary UI color value (green, cyan, blue, magenta, yellow, red, white, auto/system)
-- Dynamic system theme detection (matches terminal/OS accent when set to 'auto')
-- Solid horizontal top line defining the bottom status bar
-- Window session tabs ([0] 0:vt*) with host, timestamp, and active mode widgets
-- Responsive terminal width adjustment
-- Unlimited scrollback terminal history (pi / gemini CLI style)
-- Clean horizontal divider rules with header metadata between transcriptions
-- NO vertical left/right border lines so text copies cleanly
+TUI Module for Voice Transcriber - Style 1 (Branch 1): Inline Interactive Prompt / Shell Stream
+Design Philosophy (Pi / Gemini CLI Style):
+- Radical departure from pinned bottom footers! Functions like an interactive REPL / CLI shell prompt.
+- Status bar rendered inline at the cursor prompt line.
+- When transcriptions arrive, they stream directly into shell history with clean top/bottom horizontal rules.
+- NO vertical left/right border lines so text copies 100% cleanly in terminal / Tmux.
 """
 
 import sys
 import os
-import socket
 import time
 import select
 import threading
@@ -32,11 +27,7 @@ SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇",
 COLOR_PALETTES = ["auto", "green", "cyan", "blue", "magenta", "yellow", "red", "white"]
 
 def detect_system_theme_color():
-    """
-    Detect system terminal accent color from environment variables or terminal settings.
-    Returns standard color string: 'green', 'cyan', 'blue', 'magenta', 'yellow', 'red', or 'white'.
-    """
-    # Check explicit env override
+    """Detect system terminal accent color"""
     env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
     if env_theme in COLOR_PALETTES and env_theme != "auto":
         return env_theme
@@ -45,7 +36,6 @@ def detect_system_theme_color():
     if accent in COLOR_PALETTES:
         return accent
 
-    # Check terminal program hints
     term_prog = os.environ.get("TERM_PROGRAM", "").lower()
     if "vscode" in term_prog:
         return "cyan"
@@ -56,25 +46,6 @@ def detect_system_theme_color():
     elif "alacritty" in term_prog:
         return "yellow"
         
-    # Check COLORTERM / COLORFGBG
-    fgbg = os.environ.get("COLORFGBG", "")
-    if fgbg:
-        try:
-            fg = int(fgbg.split(";")[0])
-            if fg in [2, 10]:
-                return "green"
-            elif fg in [6, 14]:
-                return "cyan"
-            elif fg in [4, 12]:
-                return "blue"
-            elif fg in [5, 13]:
-                return "magenta"
-            elif fg in [3, 11]:
-                return "yellow"
-        except Exception:
-            pass
-
-    # Default system primary accent fallback
     return "green"
 
 
@@ -83,17 +54,9 @@ class VoiceTranscriberTUI:
         self.app_version = app_version
         self.console = Console()
         self.lock = threading.Lock()
-        
-        # UI Color Theme setting ('auto', 'green', 'cyan', 'blue', 'magenta', 'yellow', 'red', 'white')
         self.ui_theme = ui_theme
         
-        # System hostname for tmux status right widget
-        try:
-            self.hostname = socket.gethostname()
-        except Exception:
-            self.hostname = "localhost"
-
-        # State tracking for bottom status bar
+        # State tracking for prompt line
         self.state = "READY"  # READY, RECORDING, PROCESSING, REWRITING, CONFIG
         self.sub_state_text = ""
         self.start_time = 0.0
@@ -131,7 +94,7 @@ class VoiceTranscriberTUI:
         self.old_termios = None
 
     def get_effective_color(self):
-        """Return resolved primary color name considering 'auto' setting"""
+        """Return resolved primary color name"""
         with self.lock:
             theme = self.ui_theme.lower()
             if theme == "auto":
@@ -151,7 +114,7 @@ class VoiceTranscriberTUI:
             self.live.update(self._render_status_bar())
 
     def cycle_ui_theme(self):
-        """Cycle through available UI color themes on the fly"""
+        """Cycle through available UI color themes"""
         with self.lock:
             try:
                 curr_idx = COLOR_PALETTES.index(self.ui_theme.lower())
@@ -212,26 +175,19 @@ class VoiceTranscriberTUI:
             self.vu_level = max(level, self.vu_level * 0.7)
 
     def print_header(self):
-        """Print Tmux Session header with customizable primary theme color"""
-        w = self._get_term_width()
-        rule = "─" * w
+        """Print CLI Prompt Session banner at start of terminal scrollback"""
         color = self.get_effective_color()
-        
         header = Text()
-        header.append(f"{rule}\n", style=f"bold {color}")
-        header.append(" [0] 0:voice-transcriber* ", style=f"bold black on {color}")
-        header.append(f" (v{self.app_version}) ", style="bold white on grey23")
-        header.append(f" │ Theme: {self.ui_theme.upper()} ({color.upper()}) │ Model: {self.model_backend.upper()} │ Mic: {self.active_device}\n", style="dim white")
-        header.append(f"{rule}\n", style=f"bold {color}")
+        header.append("vt ", style=f"bold {color}")
+        header.append("❯ ", style=f"bold bright_{color}" if color != "white" else "bold white")
+        header.append(f"voice transcriber v{self.app_version} active ", style="bold white")
+        header.append(f"(model: {self.model_backend.upper()} │ mic: {self.active_device})\n", style="dim white")
         self.console.print(header)
 
     def _render_status_bar(self):
         """
-        Render Tmux Status Bar pinned at bottom of terminal with active theme color.
-        Line 1: Solid divider line extending full width of terminal.
-        Line 2: Tmux status bar with session badge, status widgets, host and keyhints.
+        Render Style 1: Inline Interactive Prompt Line at the cursor position.
         """
-        w = self._get_term_width()
         color = self.get_effective_color()
         self.spinner_index = (self.spinner_index + 1) % len(SPINNER_FRAMES)
         spinner = SPINNER_FRAMES[self.spinner_index]
@@ -239,102 +195,87 @@ class VoiceTranscriberTUI:
         if self.start_time > 0:
             self.elapsed_time = time.time() - self.start_time
 
-        bar = Text()
-        
-        # Solid line defining the status bar using theme color
-        bar.append("─" * w + "\n", style=f"bold {color}")
+        prompt = Text()
+        prompt.append("❯ ", style=f"bold {color}")
 
-        # Left Section: Tmux Session Window Tab in theme color
-        bar.append("[0] 0:vt* ", style=f"bold black on {color}")
-        bar.append(" ", style="reset")
-
-        # Middle Section: Status details & active mode
         if self.state == "READY":
-            bar.append("[READY] ", style=f"bold black on bright_{color}" if color != "white" else "bold black on white")
-            bar.append(" ", style="reset")
+            prompt.append("ready ", style=f"bold {color}")
+            prompt.append("│ ", style="dim white")
             
             mic_short = self.active_device
             if len(mic_short) > 18:
                 mic_short = mic_short[:15] + "..."
-            bar.append(f"mic: {mic_short} ", style=color if color != "white" else "cyan")
-            bar.append("│ ", style=f"dim {color}")
-            bar.append(f"model: {self.model_backend.lower()} ", style=color if color != "white" else "cyan")
-            bar.append("│ ", style=f"dim {color}")
+            prompt.append(f"mic: {mic_short} ", style="cyan")
+            prompt.append("│ ", style="dim white")
+            prompt.append(f"model: {self.model_backend.lower()} ", style="cyan")
+            prompt.append("│ ", style="dim white")
             
             if self.is_muted:
-                bar.append("sound: off ", style="dim red")
+                prompt.append("sound: off ", style="dim red")
             else:
-                bar.append("sound: on ", style="green")
-            bar.append("│ ", style=f"dim {color}")
+                prompt.append("sound: on ", style="green")
+            prompt.append("│ ", style="dim white")
 
             if self.auto_type:
-                bar.append("auto-type ", style="magenta")
+                prompt.append("auto-type ", style="magenta")
             else:
-                bar.append("clipboard ", style="cyan")
-            bar.append("│ ", style=f"dim {color}")
-            bar.append(f"theme: {self.ui_theme} ", style=f"dim {color}")
-            bar.append("│ ", style=f"dim {color}")
-            bar.append("[Space] Rec  [i] Mic  [m] Mute  [b] Model  [c] Color  [q] Quit", style="dim white")
+                prompt.append("clipboard ", style="cyan")
+            prompt.append("│ ", style="dim white")
+            prompt.append("[Space] Rec  [i] Mic  [m] Mute  [b] Model  [c] Theme  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
-            bar.append(" [REC] ", style="bold black on bright_red")
-            bar.append(" ", style="reset")
-            bar.append(f"{self.elapsed_time:04.1f}s ", style="bold yellow")
-            bar.append("│ ", style=f"dim {color}")
+            prompt.append("RECORDING ", style="bold white on red")
+            prompt.append(" ", style="reset")
+            prompt.append(f"[{self.elapsed_time:04.1f}s] ", style="bold yellow")
+            prompt.append("│ ", style="dim white")
             
             # Dynamic VU bar
-            bar_len = 14
+            bar_len = 16
             filled_len = int(min(1.0, self.vu_level * 3.5) * bar_len)
             filled_len = max(1 if self.vu_level > 0.01 else 0, filled_len)
             empty_len = bar_len - filled_len
             vu_str = "█" * filled_len + "░" * empty_len
             
-            if filled_len > 10:
-                bar.append(vu_str[:8], style="green")
-                bar.append(vu_str[8:11], style="yellow")
-                bar.append(vu_str[11:], style="red")
-            elif filled_len > 6:
-                bar.append(vu_str[:6], style="green")
-                bar.append(vu_str[6:], style="yellow")
+            if filled_len > 12:
+                prompt.append(vu_str[:9], style="green")
+                prompt.append(vu_str[9:13], style="yellow")
+                prompt.append(vu_str[13:], style="red")
+            elif filled_len > 7:
+                prompt.append(vu_str[:7], style="green")
+                prompt.append(vu_str[7:], style="yellow")
             else:
-                bar.append(vu_str, style="green")
+                prompt.append(vu_str, style="green")
 
-            bar.append(f" ({int(self.vu_level*100)}%) ", style="dim cyan")
-            bar.append("│ ", style=f"dim {color}")
-            bar.append("Release Alt+Shift or Space to stop", style="dim white")
+            prompt.append(f" ({int(self.vu_level*100)}%) ", style="dim cyan")
+            prompt.append("│ ", style="dim white")
+            prompt.append("Release Alt+Shift or Press Space to finish", style="dim white")
 
         elif self.state == "PROCESSING":
-            bar.append(" [PROC] ", style="bold black on yellow")
-            bar.append(" ", style="reset")
-            bar.append(f"{spinner} {self.elapsed_time:04.1f}s ", style="yellow")
-            bar.append("│ ", style=f"dim {color}")
+            prompt.append(f"{spinner} PROCESSING AUDIO [{self.elapsed_time:04.1f}s] ", style="bold yellow")
+            prompt.append("│ ", style="dim white")
             if self.sub_state_text:
-                bar.append(f"{self.sub_state_text}", style="white")
+                prompt.append(f"{self.sub_state_text}", style="white")
             else:
-                bar.append(f"transcribing audio stream...", style="white")
+                prompt.append(f"Transcribing stream with {self.model_backend.capitalize()}...", style="white")
 
         elif self.state == "REWRITING":
-            bar.append(" [REWRITE] ", style="bold white on magenta")
-            bar.append(" ", style="reset")
-            bar.append(f"🤖 {spinner} {self.elapsed_time:04.1f}s ", style="magenta")
-            bar.append("│ ", style=f"dim {color}")
-            bar.append("slm grammar polishing...", style="white")
+            prompt.append(f"🤖 {spinner} REFINING GRAMMAR [{self.elapsed_time:04.1f}s] ", style="bold magenta")
+            prompt.append("│ ", style="dim white")
+            prompt.append("SLM polishing text...", style="white")
 
         else:
-            bar.append(f" [{self.state}] ", style="bold white on grey23")
-            bar.append(" ", style="reset")
+            prompt.append(f"{self.state} ", style="bold white")
             if self.sub_state_text:
-                bar.append(f"│ {self.sub_state_text}", style="dim white")
+                prompt.append(f"│ {self.sub_state_text}", style="dim white")
 
-        return bar
+        return prompt
 
     def print_transcription(self, text, elapsed_sec=0.0, copy_success=True, typed_success=False, device_name=None):
         """
-        Print transcription into terminal scrollback history:
-        - Solid horizontal divider line in active theme color
-        - Header line: [transcribe #1] HH:MM:SS (1.24s) -- Status: Copied
-        - Clean word-wrapped text (NO left/right side borders)
-        - Bottom solid horizontal divider line
+        Print transcription directly into interactive shell scrollback stream:
+        - Top horizontal divider line with prompt tag
+        - Clean word-wrapped body (NO left/right side borders)
+        - Bottom horizontal divider line
         """
         self._pause_live()
         try:
@@ -349,20 +290,18 @@ class VoiceTranscriberTUI:
             status_color = "green" if typed_success else ("cyan" if copy_success else "red")
             
             top_rule = Text()
-            top_rule.append("─" * w + "\n", style=f"bold {color}")
+            top_rule.append("─" * 4, style=f"bold {color}")
+            top_rule.append(f" ❯ #{count} ", style=f"bold {color}")
+            top_rule.append(f" {timestamp} ", style="dim white")
+            top_rule.append(f" ({elapsed_sec:.2f}s) ", style="dim yellow")
+            top_rule.append(f" {status_str} ", style=status_color)
+            right_len = max(0, w - 30 - len(status_str))
+            top_rule.append("─" * right_len + "\n", style=f"bold {color}")
             self.console.print(top_rule)
 
-            header = Text()
-            header.append(f"[transcribe #{count}] ", style=f"bold {color}")
-            header.append(f"{timestamp} ", style="dim white")
-            header.append(f"({elapsed_sec:.2f}s) ", style="dim yellow")
-            header.append("── Status: ", style=f"dim {color}")
-            header.append(f"{status_str}\n", style=status_color)
-            self.console.print(header)
-
-            # Transcribed text body (clean wrapped, NO vertical side borders!)
+            # Transcribed text body with prompt icon indent (clean wrapped, NO vertical side borders!)
             body = Text()
-            body.append(f"{text.strip()}\n", style="bold white")
+            body.append(f"  {text.strip()}\n", style="bold white")
             self.console.print(body)
 
             # Bottom solid horizontal border
@@ -384,16 +323,15 @@ class VoiceTranscriberTUI:
             w = self._get_term_width()
             
             top = Text()
-            top.append("─" * w + "\n", style=event_color)
+            top.append("─" * 4, style=event_color)
+            top.append(f" ⚙️ {title} ", style=f"bold {event_color}")
+            top.append(f" [{timestamp}] ", style="dim white")
+            right_len = max(0, w - 16 - len(title))
+            top.append("─" * right_len + "\n", style=event_color)
             self.console.print(top)
 
-            hdr = Text()
-            hdr.append(f"[event] {title} ", style=f"bold {event_color}")
-            hdr.append(f"[{timestamp}]\n", style="dim white")
-            self.console.print(hdr)
-
             msg = Text()
-            msg.append(f"{message}\n", style="white")
+            msg.append(f"  {message}\n", style="white")
             self.console.print(msg)
 
             bot = Text()
@@ -417,7 +355,7 @@ class VoiceTranscriberTUI:
             self.live.start()
 
     def start(self):
-        """Start the live refreshing TUI with customizable Tmux status bar"""
+        """Start the live refreshing TUI with prompt line"""
         if self.running:
             return
         
