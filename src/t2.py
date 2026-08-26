@@ -96,6 +96,7 @@ COPY_TO_CLIPBOARD = True
 AUTO_TYPE = False
 IS_MUTED = True
 SOUND_THEME = "proximity"
+UI_THEME = "auto"
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 
 def get_config_file():
@@ -278,6 +279,9 @@ def load_audio_config():
             MODEL_BACKEND = env_backend or config.get('model_backend', 'cohere')
             COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
             
+            env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
+            UI_THEME = env_theme or config.get('ui_theme', 'auto')
+            
             # Update backend in transcribe2
             transcribe2.set_backend(MODEL_BACKEND)
             
@@ -364,7 +368,8 @@ def save_audio_config():
             'auto_type': AUTO_TYPE,
             'sound_theme': SOUND_THEME,
             'model_backend': MODEL_BACKEND,
-            'copy_to_clipboard': COPY_TO_CLIPBOARD
+            'copy_to_clipboard': COPY_TO_CLIPBOARD,
+            'ui_theme': UI_THEME
         })
 
         with open(CONFIG_FILE, 'w') as f:
@@ -379,7 +384,7 @@ def save_audio_config():
 
 def select_audio_device():
     """Interactive audio device selection with Primary/Secondary support & Rich styling"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE, UI_THEME
     
     # Always reset terminal before interaction to fix terminal state
     reset_terminal() 
@@ -404,6 +409,7 @@ def select_audio_device():
         
     table.add_row("M", "Toggle Sound Effects", "MUTED" if IS_MUTED else "Sound On")
     table.add_row("E", "Select Sound Effect Theme", SOUND_THEME.capitalize() if SOUND_THEME else "Proximity")
+    table.add_row("C", "Select UI Color Theme", f"{UI_THEME.upper()}")
     table.add_row("B", "Switch Model Backend", MODEL_BACKEND.capitalize())
     table.add_row("T", "Toggle Auto-Type Output", "ENABLED" if AUTO_TYPE else "DISABLED (Clipboard Only)")
     table.add_row("R", "Reset Terminal & Audio Bridge", "Ready")
@@ -416,7 +422,7 @@ def select_audio_device():
         table.add_row("s", "Use Secondary Device (Manual Override)", s_marker or "Inactive")
         table.add_row("a", "Automatic Selection (Default)", a_marker or "Inactive")
         
-    table.add_row("c / ↵", "Save and Exit Configuration Menu", "Done")
+    table.add_row("q / ↵", "Save and Exit Configuration Menu", "Done")
 
     panel = Panel(table, title="⚙️  Voice Transcriber Settings", border_style="bright_cyan", padding=(0, 1))
     console.print(panel)
@@ -425,13 +431,22 @@ def select_audio_device():
     choice = getch()
     print() # Newline after getch
     
-    if choice.lower() == 'c': 
-        reset_terminal()
-        return False
-    
-    if choice in ['\r', '\n', '']:
+    if choice.lower() in ['q', '\r', '\n']: 
         reset_terminal()
         return True
+
+    if choice.upper() == 'C':
+        palettes = ["auto", "green", "cyan", "blue", "magenta", "yellow", "red", "white"]
+        try:
+            curr_idx = palettes.index(UI_THEME.lower())
+            next_idx = (curr_idx + 1) % len(palettes)
+        except ValueError:
+            next_idx = 1
+        UI_THEME = palettes[next_idx]
+        print(f"UI Color Theme set to: {UI_THEME.upper()}")
+        save_audio_config()
+        reset_terminal()
+        return select_audio_device()
     
     if choice.lower() == 'r':
         reset_terminal()

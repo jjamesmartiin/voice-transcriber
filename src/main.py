@@ -102,7 +102,8 @@ class SimpleVoiceTranscriber:
             backend=t2.MODEL_BACKEND,
             muted=t2.IS_MUTED,
             auto_type=t2.AUTO_TYPE,
-            sound_theme=t2.SOUND_THEME
+            sound_theme=t2.SOUND_THEME,
+            ui_theme=getattr(t2, 'UI_THEME', 'auto')
         )
 
     def _wire_tui_callbacks(self):
@@ -112,6 +113,7 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_mute = self._on_tui_toggle_mute
         self.tui.on_toggle_backend = self._on_tui_toggle_backend
         self.tui.on_toggle_autotype = self._on_tui_toggle_autotype
+        self.tui.on_cycle_theme = self._on_tui_cycle_theme
         self.tui.on_reset_terminal = self._on_tui_reset_terminal
         self.tui.on_quit = self._on_tui_quit
 
@@ -145,6 +147,13 @@ class SimpleVoiceTranscriber:
         self._sync_tui_state()
         status = "AUTO-TYPE ENABLED" if t2.AUTO_TYPE else "CLIPBOARD COPY ONLY"
         self.tui.print_event("⌨️ Auto-Type Mode", f"Output mode set to {status}", level="info")
+
+    def _on_tui_cycle_theme(self):
+        import t2
+        new_theme = self.tui.cycle_ui_theme()
+        t2.UI_THEME = new_theme
+        t2.save_audio_config()
+        self._sync_tui_state()
 
     def _on_tui_reset_terminal(self):
         import t2
