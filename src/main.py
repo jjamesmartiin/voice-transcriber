@@ -62,14 +62,14 @@ class SimpleVoiceTranscriber:
         self.copy_to_clipboard = False
         self.start_time = 0
         
-        # Initialize Rich TUI & Start display immediately on launch
+        # Initialize Rich TUI
         self.tui = VoiceTranscriberTUI()
         self._wire_tui_callbacks()
-        self.tui.start()
         
-        # Load saved audio device configuration
+        # Load saved audio device configuration FIRST before starting TUI live display
         load_audio_config()
         self._sync_tui_state()
+        self.tui.start()
         
         # Preload model in background with live loading spinner animation
         from t2 import MODEL_BACKEND
@@ -94,9 +94,9 @@ class SimpleVoiceTranscriber:
         self.init_hotkeys()
         
     def _sync_tui_state(self):
-        """Sync t2 configuration state with TUI badges"""
+        """Sync t2 configuration state with TUI badges and visual notification"""
         import t2
-        self.tui.set_active_device(get_active_device_name())
+        self.tui.set_active_device(get_active_device_name(include_model=False))
         self.tui.set_secondary_device(t2.SECONDARY_DEVICE_NAME)
         self.tui.set_config_state(
             backend=t2.MODEL_BACKEND,
@@ -105,6 +105,8 @@ class SimpleVoiceTranscriber:
             sound_theme=t2.SOUND_THEME,
             ui_theme=getattr(t2, 'UI_THEME', 'auto')
         )
+        if hasattr(self, 'visual_notification') and self.visual_notification:
+            self.visual_notification.set_active_device(get_active_device_name(include_model=False))
 
     def _wire_tui_callbacks(self):
         """Wire direct terminal keyboard shortcuts from TUI"""
@@ -135,6 +137,8 @@ class SimpleVoiceTranscriber:
         import t2
         new_backend = "whisper" if t2.MODEL_BACKEND == "cohere" else "cohere"
         t2.MODEL_BACKEND = new_backend
+        from transcribe2 import set_backend
+        set_backend(new_backend)
         t2.save_audio_config()
         self._sync_tui_state()
         self.tui.print_event("⚡ Model Backend", f"Switched model backend to {new_backend.capitalize()}", level="info")

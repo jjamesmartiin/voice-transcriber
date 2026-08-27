@@ -134,37 +134,37 @@ def find_device_index(name):
         pass
     return None
 
-def get_active_device_name():
+def get_active_device_name(include_model=True):
     """Return the name of the device that will be used or was last used"""
     global LAST_USED_DEVICE_NAME
     
-    model_info = f"[{MODEL_BACKEND.capitalize()}] "
+    prefix = f"{MODEL_BACKEND.capitalize()}: " if include_model else ""
     
     if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
-        return f"{MODEL_BACKEND.capitalize()}: Primary: {PRIMARY_DEVICE_NAME}"
+        return f"{prefix}Primary: {PRIMARY_DEVICE_NAME}"
     elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
-        return f"{MODEL_BACKEND.capitalize()}: Secondary: {SECONDARY_DEVICE_NAME}"
+        return f"{prefix}Secondary: {SECONDARY_DEVICE_NAME}"
     
     # In auto mode, try to find what would be used
     if PRIMARY_DEVICE_NAME:
         idx = find_device_index(PRIMARY_DEVICE_NAME)
         if idx is not None:
-            return f"{MODEL_BACKEND.capitalize()}: Primary: {PRIMARY_DEVICE_NAME}"
+            return f"{prefix}Primary: {PRIMARY_DEVICE_NAME}"
     
     try:
         if INPUT_DEVICE_INDEX is not None:
             with silence_stderr():
                 d = sd.query_devices(INPUT_DEVICE_INDEX)
-                return f"{MODEL_BACKEND.capitalize()}: {d['name']}"
+                return f"{prefix}{d['name']}"
         default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else sd.default.device
         if default_in is not None and default_in >= 0:
             with silence_stderr():
                 d = sd.query_devices(default_in)
-                return f"{MODEL_BACKEND.capitalize()}: {d['name']} (Default)"
+                return f"{prefix}{d['name']} (Default)"
     except Exception:
         pass
             
-    return f"{MODEL_BACKEND.capitalize()}: {LAST_USED_DEVICE_NAME}"
+    return f"{prefix}{LAST_USED_DEVICE_NAME}"
 
 def check_microphone_health():
     """
@@ -239,10 +239,15 @@ stop_recording = threading.Event()
 
 import transcribe2
 
-def load_audio_config():
+def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, SOUND_THEME, CONFIG_FILE
-    CONFIG_FILE = get_config_file()
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, SOUND_THEME, UI_THEME, CONFIG_FILE
+    if file_path is not None:
+        CONFIG_FILE = Path(file_path)
+    else:
+        # Always re-resolve (honors monkeypatched get_config_file in tests, and
+        # picks up any new config file created since import)
+        CONFIG_FILE = get_config_file()
     try:
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
@@ -252,9 +257,9 @@ def load_audio_config():
                     import yaml
                     config = yaml.safe_load(content) or {}
                 except Exception:
-                    config = json.loads(content)
+                    config = json.loads(content) if content.strip() else {}
             else:
-                config = json.loads(content)
+                config = json.loads(content) if content.strip() else {}
 
             PRIMARY_DEVICE_NAME = config.get('primary_device_name')
             SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
@@ -265,16 +270,20 @@ def load_audio_config():
             env_muted = os.environ.get("VT_IS_MUTED", "").strip().lower()
             if env_muted in ["1", "true", "yes"]:
                 IS_MUTED = True
+            elif env_muted in ["0", "false", "no"]:
+                IS_MUTED = False
             
             env_auto_type = os.environ.get("VT_AUTO_TYPE", "").strip().lower()
-            if env_auto_type in ["0", "false", "no"]:
+            if env_auto_type in ["1", "true", "yes"]:
+                AUTO_TYPE = True
+            elif env_auto_type in ["0", "false", "no"]:
                 AUTO_TYPE = False
 
             env_sound = os.environ.get("VT_SOUND_THEME", "").strip()
             SOUND_THEME = env_sound or config.get('sound_theme', 'proximity')
             if SOUND_THEME.lower() in ["silent", "muted", "none"]:
                 IS_MUTED = True
-            # Environment variable takes priority, then config, then default to whisper
+
             env_backend = os.environ.get("VT_MODEL_BACKEND", "").lower()
             MODEL_BACKEND = env_backend or config.get('model_backend', 'cohere')
             COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
@@ -336,11 +345,15 @@ def load_audio_config():
     except Exception as e:
         print(f"Could not load audio config: {e}")
 
-def save_audio_config():
-    """Save audio device configuration to local file, preserving extra keys and file format."""
+def save_audio_config(file_path=None):
+    """Save audio device configuration to local file preserving existing keys and format"""
+    global CONFIG_FILE
+    if file_path is not None:
+        CONFIG_FILE = Path(file_path)
+    elif CONFIG_FILE is None:
+        CONFIG_FILE = get_config_file()
     try:
-        # Load any existing config first to preserve user's extra keys (e.g. hf_token)
-        existing = {}
+        existing_config = {}
         if CONFIG_FILE.exists():
             try:
                 with open(CONFIG_FILE, 'r') as f:
@@ -348,18 +361,18 @@ def save_audio_config():
                 if CONFIG_FILE.suffix in ['.yaml', '.yml']:
                     try:
                         import yaml
-                        existing = yaml.safe_load(content) or {}
+                        existing_config = yaml.safe_load(content) or {}
                     except Exception:
-                        existing = json.loads(content)
+                        existing_config = json.loads(content) if content.strip() else {}
                 else:
-                    existing = json.loads(content)
+                    existing_config = json.loads(content) if content.strip() else {}
             except Exception:
-                existing = {}
-        if not isinstance(existing, dict):
-            existing = {}
+                existing_config = {}
+                
+        if not isinstance(existing_config, dict):
+            existing_config = {}
 
-        config = dict(existing)
-        config.update({
+        existing_config.update({
             'input_device_index': INPUT_DEVICE_INDEX,
             'primary_device_name': PRIMARY_DEVICE_NAME,
             'secondary_device_name': SECONDARY_DEVICE_NAME,
@@ -372,12 +385,17 @@ def save_audio_config():
             'ui_theme': UI_THEME
         })
 
-        with open(CONFIG_FILE, 'w') as f:
-            if CONFIG_FILE.suffix in ['.yaml', '.yml']:
+        if CONFIG_FILE.suffix in ['.yaml', '.yml']:
+            try:
                 import yaml
-                yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
-            else:
-                f.write(json.dumps(config, indent=2))
+                out_content = yaml.dump(existing_config, default_flow_style=False, sort_keys=False)
+            except Exception:
+                out_content = json.dumps(existing_config, indent=2)
+        else:
+            out_content = json.dumps(existing_config, indent=2)
+
+        with open(CONFIG_FILE, 'w') as f:
+            f.write(out_content)
         print(f"Saved audio device config to {CONFIG_FILE}")
     except Exception as e:
         print(f"Could not save audio config: {e}")
@@ -512,8 +530,8 @@ def select_audio_device():
         return select_audio_device()
     
     if choice == 'T':
-        COPY_TO_CLIPBOARD = not COPY_TO_CLIPBOARD
-        print(f"Auto-Type set to: {'Enabled' if COPY_TO_CLIPBOARD else 'Disabled'}")
+        AUTO_TYPE = not AUTO_TYPE
+        print(f"Auto-Type set to: {'Enabled' if AUTO_TYPE else 'Disabled (Clipboard Only)'}")
         save_audio_config()
         reset_terminal()
         return select_audio_device()

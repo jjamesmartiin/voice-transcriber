@@ -141,10 +141,14 @@ class VoiceTranscriberTUI:
     def set_active_device(self, device_name):
         with self.lock:
             self.active_device = device_name or "Default Microphone"
+        if self.live and self.running:
+            self.live.update(self._render_status_bar())
             
     def set_secondary_device(self, device_name):
         with self.lock:
             self.secondary_device = device_name
+        if self.live and self.running:
+            self.live.update(self._render_status_bar())
             
     def set_config_state(self, backend=None, muted=None, auto_type=None, sound_theme=None, ui_theme=None):
         with self.lock:
@@ -158,6 +162,8 @@ class VoiceTranscriberTUI:
                 self.sound_theme = sound_theme
             if ui_theme is not None:
                 self.ui_theme = ui_theme
+        if self.live and self.running:
+            self.live.update(self._render_status_bar())
 
     def update_state(self, state, sub_text=""):
         with self.lock:
@@ -221,7 +227,7 @@ class VoiceTranscriberTUI:
             else:
                 prompt.append("clipboard ", style="cyan")
             prompt.append("│ ", style="dim white")
-            prompt.append("[Space] Rec  [i] Mic  [m] Mute  [b] Model  [c] Theme  [q] Quit", style="dim white")
+            prompt.append("[Space] Rec  [i] Mic  [m] Mute  [b] Model  [t] Auto-Type  [c] Theme  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
             prompt.append("RECORDING ", style="bold white on red")
