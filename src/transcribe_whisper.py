@@ -4,6 +4,7 @@ import warnings
 import threading
 import os
 import time
+import glob
 import numpy as np
 from faster_whisper import WhisperModel, BatchedInferencePipeline
 
@@ -38,10 +39,32 @@ def load_model(model_name=MODEL, device="cpu", compute_type=None):
     
     local_model_path = None
     for candidate in search_dirs:
-        if os.path.exists(candidate) and (os.path.exists(os.path.join(candidate, "model.bin")) or os.path.exists(os.path.join(candidate, "snapshots"))):
+        if not os.path.exists(candidate):
+            continue
+        if os.path.exists(os.path.join(candidate, "model.bin")):
+            # Plain model directory layout (model.bin directly inside)
             local_model_path = candidate
             break
-            
+        # Hugging Face snapshot cache layout: models--org--name/snapshots/<commit>/model.bin
+        snapshots_dir = os.path.join(candidate, "snapshots")
+        if os.path.isdir(snapshots_dir):
+            # Prefer the commit referenced by refs/main if present
+            refs_main = os.path.join(candidate, "refs", "main")
+            preferred_commit = None
+            if os.path.exists(refs_main):
+                preferred_commit = open(refs_main).read().strip()
+            for snap in [os.path.join(snapshots_dir, preferred_commit)] if preferred_commit else []:
+                if os.path.isdir(snap) and os.path.exists(os.path.join(snap, "model.bin")):
+                    local_model_path = snap
+                    break
+            if local_model_path is None:
+                for snap in sorted(glob.glob(os.path.join(snapshots_dir, "*"))):
+                    if os.path.isdir(snap) and os.path.exists(os.path.join(snap, "model.bin")):
+                        local_model_path = snap
+                        break
+            if local_model_path:
+                break
+
     if local_model_path:
         model_source = local_model_path
         download_kwargs = {}

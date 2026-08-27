@@ -333,9 +333,29 @@ def load_audio_config():
         print(f"Could not load audio config: {e}")
 
 def save_audio_config():
-    """Save audio device configuration to local file"""
+    """Save audio device configuration to local file, preserving extra keys and file format."""
     try:
-        config = {
+        # Load any existing config first to preserve user's extra keys (e.g. hf_token)
+        existing = {}
+        if CONFIG_FILE.exists():
+            try:
+                with open(CONFIG_FILE, 'r') as f:
+                    content = f.read()
+                if CONFIG_FILE.suffix in ['.yaml', '.yml']:
+                    try:
+                        import yaml
+                        existing = yaml.safe_load(content) or {}
+                    except Exception:
+                        existing = json.loads(content)
+                else:
+                    existing = json.loads(content)
+            except Exception:
+                existing = {}
+        if not isinstance(existing, dict):
+            existing = {}
+
+        config = dict(existing)
+        config.update({
             'input_device_index': INPUT_DEVICE_INDEX,
             'primary_device_name': PRIMARY_DEVICE_NAME,
             'secondary_device_name': SECONDARY_DEVICE_NAME,
@@ -345,9 +365,14 @@ def save_audio_config():
             'sound_theme': SOUND_THEME,
             'model_backend': MODEL_BACKEND,
             'copy_to_clipboard': COPY_TO_CLIPBOARD
-        }
+        })
+
         with open(CONFIG_FILE, 'w') as f:
-            f.write(json.dumps(config, indent=2))
+            if CONFIG_FILE.suffix in ['.yaml', '.yml']:
+                import yaml
+                yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
+            else:
+                f.write(json.dumps(config, indent=2))
         print(f"Saved audio device config to {CONFIG_FILE}")
     except Exception as e:
         print(f"Could not save audio config: {e}")

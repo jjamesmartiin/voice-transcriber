@@ -91,6 +91,14 @@ TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
 
 MID_SENTENCE_CAP_REGEX = re.compile(r"(?<![.!?\n])\s+([A-Z][a-zA-Z0-9_-]+)")
 
+# Words after which a capitalized word is treated as a proper noun (name, place, day)
+# and exempted from mid-sentence decapitalization, e.g. "Send it to Alice", "on Wednesday",
+# or retraction targets like "... I mean Alice".
+PROPER_NOUN_PRECEDERS = {
+    "to", "for", "with", "at", "in", "on", "about", "from", "by", "of",
+    "mean", "wait", "rather", "actually", "that", "is", "are", "was", "were",
+}
+
 def normalize_mid_sentence_casing(text: str) -> str:
     """
     Decapitalizes words appearing mid-sentence without preceding sentence-ending punctuation,
@@ -102,6 +110,12 @@ def normalize_mid_sentence_casing(text: str) -> str:
     def _replace_mid_sentence_cap(m):
         word = m.group(1)
         if word in TECHNICAL_ACRONYMS_AND_PROPER_NOUNS or word.isupper() or len(word) == 1:
+            return m.group(0)
+        # Preserve proper nouns (names/places/days) that follow a preposition or
+        # verbal-retraction marker (e.g. "to Alice", "on Wednesday", "I mean Alice")
+        prefix = text[:m.start()].rstrip()
+        prev_word = prefix.split()[-1].rstrip(".,;:!?") if prefix else ""
+        if prev_word.lower() in PROPER_NOUN_PRECEDERS:
             return m.group(0)
         lowercased = word[0].lower() + word[1:]
         return " " + lowercased

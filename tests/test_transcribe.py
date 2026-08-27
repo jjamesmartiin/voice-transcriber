@@ -2,11 +2,17 @@
 """
 Test transcription accuracy against expected results.
 Run: python tests/test_transcribe.py
+
+Each ASR backend (Whisper / Cohere) runs in a SEPARATE subprocess because
+loading faster-whisper (CTranslate2) and torch (Cohere) in the same process
+triggers a hardware floating-point exception (SIGFPE) on some CPUs.
 """
 import os
 import sys
 import re
 import glob
+import json
+import subprocess
 
 test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_transcribe")
 src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
@@ -14,6 +20,13 @@ sys.path.insert(0, src_dir)
 
 import numpy as np
 import soundfile as sf
+
+BACKENDS = [
+    ("Whisper", "whisper"),
+    ("Cohere", "cohere"),
+]
+
+RESULT_MARKER = "__VT_RESULTS__"
 
 
 def load_audio(audio_path):
@@ -33,19 +46,19 @@ def transcribe(backend_module, audio):
 def score_transcription(expected, actual):
     if not actual:
         return 0, "FAIL"
-    
+
     normal_expected = re.sub(r'[^\w\s]', '', expected.lower()).split()
     normal_actual = re.sub(r'[^\w\s]', '', actual.lower()).split()
-    
+
     expected_words = set(normal_expected)
     actual_words = set(normal_actual)
     overlap = expected_words & actual_words
-    
+
     if not normal_expected:
         return 0, "FAIL"
-    
+
     match_ratio = len(overlap) / len(expected_words)
-    
+
     if expected.lower().strip() == actual.lower().strip():
         return match_ratio, "PASS"
     elif match_ratio >= 0.7:
@@ -56,94 +69,157 @@ def score_transcription(expected, actual):
         return match_ratio, "FAIL"
 
 
-def run_all_tests():
-    import transcribe2
+def _run_backend(backend_id, backend_name):
+    """
+    Run all transcriptions for a single backend in THIS process.
+    Returns a list of result dicts. Never runs a second ASR backend in the same process.
+    """
     import time
-    
+    import transcribe2
+
+    os.environ["VT_MODEL_BACKEND"] = backend_id
+    transcribe2._backend = None
+    transcribe2._current_backend_name = backend_id
+
+    # Gated Cohere model requires an HF token to download; skip cleanly if unavailable
+    if backend_id == "cohere":
+        import transcribe_cohere
+        if not transcribe_cohere.get_token():
+            test_files = sorted(glob.glob(os.path.join(test_dir, "*.mp3")))
+            results = []
+            for test_file in test_files:
+                test_num = os.path.basename(test_file).replace(".mp3", "")
+                results.append({
+                    "test_num": test_num,
+                    "backend_name": backend_name,
+                    "score": 1.0,
+                    "status": "SKIP",
+                    "result": "Skipped (No HF token)",
+                    "load_time": 0.0,
+                    "transcribe_time": 0.0,
+                })
+            return results
+
     test_files = sorted(glob.glob(os.path.join(test_dir, "*.mp3")))
-    
-    if not test_files:
-        print(f"No test files found in {test_dir}")
-        return 1
-    
-    backends = [
-        ("Whisper", "whisper"),
-        ("Cohere", "cohere")
-    ]
-    
-    print("VT Transcription Test")
-    print("="*100)
-    
-    all_results = []
-    
+    results = []
     for test_file in test_files:
         test_num = os.path.basename(test_file).replace(".mp3", "")
         md_file = test_file.replace(".mp3", ".md")
-        
         if not os.path.exists(md_file):
-            print(f"Skipping {test_num}: no .md file")
             continue
-        
         with open(md_file, "r") as f:
             expected = f.read().strip()
-        
-        print(f"\nTest {test_num}: {expected[:60]}...")
-        
-        audio = load_audio(test_file)
-        
-        for backend_name, backend_id in backends:
-            if backend_id == "cohere":
-                import transcribe_cohere
-                if not transcribe_cohere.get_token():
-                    print(f"Skipping {backend_name}: no HF token configured (gated model)")
-                    all_results.append((test_num, backend_name, 1.0, "SKIP", "Skipped (No HF token)", 0.0, 0.0, 0.0))
-                    continue
 
-            os.environ["VT_MODEL_BACKEND"] = backend_id
-            # Reset and reload backend
-            transcribe2._backend = None
-            transcribe2._current_backend_name = backend_id
-            
-            start_load = time.time()
-            backend = transcribe2.get_backend()
-            load_time = time.time() - start_load
-            
-            start_transcribe = time.time()
-            result = transcribe2.transcribe_audio(audio_data=audio)
-            transcribe_time = time.time() - start_transcribe
-            
-            total_time = load_time + transcribe_time
-            
-            score, status = score_transcription(expected, result)
-            all_results.append((test_num, backend_name, score, status, result, load_time, transcribe_time, total_time))
-    
+        print(f"Test {test_num}: {expected[:60]}...", flush=True)
+        audio = load_audio(test_file)
+
+        start_load = time.time()
+        backend = transcribe2.get_backend()
+        load_time = time.time() - start_load
+
+        start_transcribe = time.time()
+        result = transcribe2.transcribe_audio(audio_data=audio)
+        transcribe_time = time.time() - start_transcribe
+
+        score, status = score_transcription(expected, result)
+        results.append({
+            "test_num": test_num,
+            "backend_name": backend_name,
+            "score": score,
+            "status": status,
+            "result": result,
+            "load_time": load_time,
+            "transcribe_time": transcribe_time,
+        })
+    return results
+
+
+def _spawn_backend_subprocess(backend_id, backend_name):
+    """Run one backend in a fresh subprocess to isolate ASR library FPU state."""
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = src_dir + (os.pathsep + existing if existing else "")
+    proc = subprocess.run(
+        [sys.executable, os.path.abspath(__file__), "--backend-json", backend_id],
+        capture_output=True, text=True, env=env, timeout=900,
+    )
+    if proc.returncode != 0:
+        # Backend process crashed (e.g. library SIGFPE/SIGSEGV) — report as failures
+        stderr_tail = (proc.stderr or "")[-500:]
+        print(f"[backend {backend_id} exited with code {proc.returncode}]\n{stderr_tail}", flush=True)
+        test_files = sorted(glob.glob(os.path.join(test_dir, "*.mp3")))
+        return [{
+            "test_num": os.path.basename(t).replace(".mp3", ""),
+            "backend_name": backend_name,
+            "score": 0.0,
+            "status": "FAIL",
+            "result": f"(backend process crashed, exit {proc.returncode})",
+            "load_time": 0.0,
+            "transcribe_time": 0.0,
+        } for t in test_files]
+
+    for line in proc.stdout.splitlines():
+        if line.startswith(RESULT_MARKER):
+            return json.loads(line[len(RESULT_MARKER):])
+    print(f"[backend {backend_id} produced no results]", flush=True)
+    return []
+
+
+def run_all_tests():
+    import time
+
+    test_files = sorted(glob.glob(os.path.join(test_dir, "*.mp3")))
+
+    if not test_files:
+        print(f"No test files found in {test_dir}")
+        return 1
+
+    print("VT Transcription Test")
+    print("=" * 100)
+
+    all_results = []
+    for backend_name, backend_id in BACKENDS:
+        print(f"\n=== Backend: {backend_name} (isolated subprocess) ===", flush=True)
+        all_results.extend(_spawn_backend_subprocess(backend_id, backend_name))
+
     print(f"\n{'='*100}")
     print("RESULTS TABLE")
-    print("="*100)
+    print("=" * 100)
     print(f"{'Test':<6} {'Model':<10} {'Load':<10} {'Transcribe':<12} {'Total':<10} {'Score':<8} {'Status':<8} {'Output'}")
     print(f"{'-'*6} {'-'*10} {'-'*10} {'-'*12} {'-'*10} {'-'*8} {'-'*8} {'-'*40}")
-    
-    for test_num, backend_name, score, status, result, load_t, trans_t, total_t in all_results:
-        result_str = result if result else "None"
-        print(f"{test_num:<6} {backend_name:<10} {load_t:>9.2f}s {trans_t:>11.2f}s {total_t:>9.2f}s {score*100:>7.1f}% {status:<8} {result_str}")
-    
-    print("="*80)
-    
-    fail_count = sum(1 for _, _, _, s, _, _, _, _ in all_results if s == "FAIL")
-    pass_count = sum(1 for _, _, _, s, _, _, _, _ in all_results if s == "PASS")
-    skip_count = sum(1 for _, _, _, s, _, _, _, _ in all_results if s == "SKIP")
+
+    for r in all_results:
+        result_str = r["result"] if r["result"] else "None"
+        total_t = r["load_time"] + r["transcribe_time"]
+        print(f"{r['test_num']:<6} {r['backend_name']:<10} {r['load_time']:>9.2f}s {r['transcribe_time']:>11.2f}s {total_t:>9.2f}s {r['score']*100:>7.1f}% {r['status']:<8} {result_str}")
+
+    print("=" * 80)
+
+    fail_count = sum(1 for r in all_results if r["status"] == "FAIL")
+    pass_count = sum(1 for r in all_results if r["status"] == "PASS")
+    skip_count = sum(1 for r in all_results if r["status"] == "SKIP")
     total_count = len(all_results)
-    
+
     print(f"\nTotal: {pass_count} passed, {skip_count} skipped, {fail_count} failed ({total_count} total)")
     return fail_count == 0
+
 
 def test_transcription_accuracy():
     """Pytest entrypoint for automated CI and flake testing"""
     assert run_all_tests() is True
 
+
 def main():
+    if len(sys.argv) >= 3 and sys.argv[1] == "--backend-json":
+        backend_id = sys.argv[2]
+        backend_name = dict(BACKENDS).get(backend_id, backend_id)
+        results = _run_backend(backend_id, backend_name)
+        print(RESULT_MARKER + json.dumps(results))
+        return 0
+
     success = run_all_tests()
     return 0 if success else 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

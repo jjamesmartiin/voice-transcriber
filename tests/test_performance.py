@@ -1,3 +1,4 @@
+import os
 import time
 import pytest
 import numpy as np
@@ -80,17 +81,35 @@ def test_recording_time_and_buffer_performance():
     """
     Test audio recording duration and buffer sizing accuracy.
     Verifies that audio frames accumulated match requested sample rate and time duration.
+    Runs in a subprocess: cohere (torch) cannot run in the same process that imported
+    faster-whisper (CTranslate2) due to an FPU-state conflict on some CPUs.
     """
-    sample_rate = 16000
-    test_duration = 1.0  # 1 second of audio
-    expected_samples = int(sample_rate * test_duration)
+    import json
+    import subprocess
+    import sys
 
-    # Generate test audio buffer simulating 1 second recording
-    mock_frames = np.random.randn(expected_samples).astype(np.float32)
+    src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = src_dir + (os.pathsep + existing if existing else "")
 
-    start_time = time.time()
-    result, proc_time = t2.process_audio_stream(mock_frames)
-    elapsed = time.time() - start_time
+    code = (
+        "import sys, json\n"
+        "import numpy as np\n"
+        "import t2\n"
+        "sample_rate = 16000\n"
+        "mock_frames = np.random.randn(int(sample_rate * 1.0)).astype(np.float32)\n"
+        "result, proc_time = t2.process_audio_stream(mock_frames)\n"
+        "print(json.dumps({'proc_time': proc_time, 'result_len': len(result or '')}))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True, env=env, timeout=300,
+    )
+    assert proc.returncode == 0, f"subprocess failed (exit {proc.returncode}): {proc.stderr[-800:]}"
 
-    print(f"\n[Buffer Performance] Processed {len(mock_frames)} audio samples ({test_duration}s) in {proc_time:.4f}s")
+    data = json.loads(proc.stdout.strip().splitlines()[-1])
+    proc_time = data["proc_time"]
+
+    print(f"\n[Buffer Performance] Processed 16000 audio samples (1s) in {proc_time:.4f}s")
     assert proc_time < 5.0, "Buffer processing took too long"

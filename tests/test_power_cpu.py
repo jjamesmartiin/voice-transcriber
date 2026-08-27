@@ -61,6 +61,9 @@ def test_cpu_affinity_and_priority():
     """
     Test CPU core pinning and priority preemption setup.
     """
+    # apply_cpu_affinity_and_priority was removed from src/t2.py; skip gracefully
+    if not hasattr(t2, "apply_cpu_affinity_and_priority"):
+        pytest.skip("t2.apply_cpu_affinity_and_priority no longer exists in production code")
     import os
     # Test setting CPU affinity to dedicated core (e.g. last core)
     t2.apply_cpu_affinity_and_priority(affinity_setting="last_1", high_priority=True)
