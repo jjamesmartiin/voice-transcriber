@@ -84,6 +84,7 @@ class VoiceTranscriberTUI:
         # Backend selection is config-file only (edit config/config.yaml, restart);
         # no runtime model toggle to avoid loading the other ASR backend unexpectedly.
         self.on_toggle_autotype = None
+        self.on_toggle_numbers = None
         self.on_cycle_theme = None
         self.on_reset_terminal = None
         self.on_quit = None
@@ -228,7 +229,7 @@ class VoiceTranscriberTUI:
             else:
                 prompt.append("clipboard ", style="cyan")
             prompt.append("│ ", style="dim white")
-            prompt.append("[Space] Rec  [i] Mic  [m] Mute  [t] Auto-Type  [c] Theme  [q] Quit", style="dim white")
+            prompt.append("[Space] Rec  [i] Mic  [m] Mute  [n] Numbers  [t] Auto-Type  [c] Theme  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
             prompt.append("RECORDING ", style="bold white on red")
@@ -447,6 +448,9 @@ class VoiceTranscriberTUI:
         elif ch.lower() == 't':
             if self.on_toggle_autotype:
                 self.on_toggle_autotype()
+        elif ch.lower() == 'n':
+            if self.on_toggle_numbers:
+                self.on_toggle_numbers()
         elif ch.lower() == 'r':
             if self.on_reset_terminal:
                 self.on_reset_terminal()
