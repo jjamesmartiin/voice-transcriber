@@ -94,3 +94,24 @@ def test_tui_print_transcription():
     tui.print_event("Test Event", "Settings updated cleanly", level="info")
     tui.print_warning("Test Warning", "Microphone level low")
     tui.print_error("Test Error", "Audio stream interrupted")
+
+def test_tui_handle_keypress():
+    tui = VoiceTranscriberTUI()
+    called = []
+    tui.on_change_device = lambda: called.append("mic")
+    tui.on_toggle_mute = lambda: called.append("mute")
+    tui.on_toggle_autotype = lambda: called.append("clipboard")
+    tui.on_cycle_theme = lambda: called.append("theme")
+
+    tui._handle_keypress('M')
+    assert called == ["mic"]
+
+    tui._handle_keypress('m')
+    assert called == ["mic", "mute"]
+
+    tui._handle_keypress('c')
+    assert called == ["mic", "mute", "clipboard"]
+
+    tui._handle_keypress('t')
+    assert called == ["mic", "mute", "clipboard", "theme"]
+

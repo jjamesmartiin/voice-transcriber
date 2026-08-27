@@ -229,7 +229,7 @@ class VoiceTranscriberTUI:
             else:
                 prompt.append("clipboard ", style="cyan")
             prompt.append("│ ", style="dim white")
-            prompt.append("[Space] Rec  [i] Mic  [m] Mute  [n] Numbers  [t] Auto-Type  [c] Theme  [q] Quit", style="dim white")
+            prompt.append("[Space] Rec  [M] Mic  [m] Mute  [n] Numbers  [c] Clipboard  [t] Theme  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
             prompt.append("RECORDING ", style="bold white on red")
@@ -434,20 +434,20 @@ class VoiceTranscriberTUI:
         if ch in [' ', '\r', '\n']:
             if self.on_toggle_record:
                 self.on_toggle_record()
-        elif ch.lower() == 'i':
+        elif ch in ['M', 'i', 'I']:
             if self.on_change_device:
                 self.on_change_device()
-        elif ch.lower() == 'm':
+        elif ch == 'm':
             if self.on_toggle_mute:
                 self.on_toggle_mute()
         elif ch.lower() == 'c':
+            if self.on_toggle_autotype:
+                self.on_toggle_autotype()
+        elif ch.lower() == 't':
             if self.on_cycle_theme:
                 self.on_cycle_theme()
             else:
                 self.cycle_ui_theme()
-        elif ch.lower() == 't':
-            if self.on_toggle_autotype:
-                self.on_toggle_autotype()
         elif ch.lower() == 'n':
             if self.on_toggle_numbers:
                 self.on_toggle_numbers()

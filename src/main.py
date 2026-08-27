@@ -419,7 +419,7 @@ class SimpleVoiceTranscriber:
     def offer_device_change(self):
         """Show non-blocking notice for audio device change/retry"""
         if hasattr(self, 'tui') and self.tui:
-            self.tui.print_warning("No Speech Detected", "No audio detected in recording. Press [i] to change input devices or [Space] to try again.")
+            self.tui.print_warning("No Speech Detected", "No audio detected in recording. Press [M] to change input devices or [Space] to try again.")
             self.tui.update_state("READY")
         else:
             logger.info("Ready for next recording")

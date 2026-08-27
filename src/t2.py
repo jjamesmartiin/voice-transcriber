@@ -988,7 +988,7 @@ def main():
             if ch in [' ', '\r', '\n']:
                 print()
                 record_and_transcribe()
-            elif ch.lower() == 'i':
+            elif ch in ['M', 'i', 'I']:
                 print()
                 select_audio_device()
             elif ch.lower() == 'r':
