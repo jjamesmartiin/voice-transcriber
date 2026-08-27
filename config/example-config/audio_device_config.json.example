@@ -1,0 +1,11 @@
+{
+  "input_device_index": null,
+  "primary_device_name": null,
+  "secondary_device_name": null,
+  "override_mode": "auto",
+  "is_muted": true,
+  "auto_type": false,
+  "sound_theme": "proximity",
+  "model_backend": "cohere",
+  "copy_to_clipboard": true
+}
