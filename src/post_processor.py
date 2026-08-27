@@ -439,6 +439,330 @@ def _preserve_i_casing(char: str, text: str = "", pos: int = 0) -> str:
             return 'I'
     return char.lower()
 
+
+# ---------------------------------------------------------------------------
+# Number words -> digits conversion
+# ---------------------------------------------------------------------------
+# Gated by VT_NUMBER_DIGITS (default "1"; set to "0" to keep number words).
+# Converts spoken numbers into actual digits, e.g.:
+#   "six seven zero six seven zero six nine nine six" -> "7606706996"  (phone/digit string)
+#   "twenty five" -> "25", "one hundred and fifty" -> "150", "two thousand twenty four" -> "2024"
+#   "twenty first" -> "21st", "fifth" -> "5th", "three point one four" -> "3.14"
+#   "fifty percent" -> "50%", "five pm" -> "5 PM", "nineteen eighty five" -> "1985"
+
+_NUMBER_ONES = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+}
+_NUMBER_TENS = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+}
+_NUMBER_SCALES = {
+    "hundred": 100, "thousand": 1000, "million": 1_000_000,
+    "billion": 1_000_000_000, "trillion": 1_000_000_000_000,
+}
+_ORDINAL_TO_CARDINAL = {
+    "first": "one", "second": "two", "third": "three", "fourth": "four",
+    "fifth": "five", "sixth": "six", "seventh": "seven", "eighth": "eight",
+    "ninth": "nine", "tenth": "ten", "eleventh": "eleven", "twelfth": "twelve",
+    "thirteenth": "thirteen", "fourteenth": "fourteen", "fifteenth": "fifteen",
+    "sixteenth": "sixteen", "seventeenth": "seventeen", "eighteenth": "eighteen",
+    "nineteenth": "nineteen", "twentieth": "twenty", "thirtieth": "thirty",
+    "fortieth": "forty", "fiftieth": "fifty", "sixtieth": "sixty",
+    "seventieth": "seventy", "eightieth": "eighty", "ninetieth": "ninety",
+    "hundredth": "hundred", "thousandth": "thousand", "millionth": "million",
+    "billionth": "billion",
+}
+_ORDINAL_VALUE = {k: i for i, k in enumerate(["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth"], start=1)}
+_ORDINAL_VALUE.update({k: v for k, v in [("twentieth", 20), ("thirtieth", 30), ("fortieth", 40), ("fiftieth", 50), ("sixtieth", 60), ("seventieth", 70), ("eightieth", 80), ("ninetieth", 90), ("hundredth", 100), ("thousandth", 1000), ("millionth", 1_000_000), ("billionth", 1_000_000_000)]})
+
+_DIGIT_WORDS = {
+    "zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+}
+_DIGIT_WORD_ALT = "|".join(_DIGIT_WORDS)
+_DIGIT_TOKEN = rf"(?:(?:double|triple)\s+)?(?:\b(?:{_DIGIT_WORD_ALT})\b)"
+# Two or more consecutive digit words: "six seven zero" / "double oh seven" / "one two three"
+_DIGIT_STRING_REGEX = re.compile(rf"\b(?:{_DIGIT_TOKEN})(?:\s+(?:{_DIGIT_TOKEN}))+\b", re.IGNORECASE)
+
+_NUMBER_WORD = (
+    r"(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|"
+    r"forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|"
+    r"trillion|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
+    r"eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|"
+    r"eighteenth|nineteenth|twentieth|thirtieth|fortieth|fiftieth|sixtieth|"
+    r"seventieth|eightieth|ninetieth|hundredth|thousandth|millionth|billionth|"
+    r"point|percent|o'clock|am|pm|a\.m\.|p\.m\.|a\s+m|p\s+m|double|triple)"
+)
+_NUMBER_PHRASE_REGEX = re.compile(
+    r"\b(?:a\s+)?(?:" + _NUMBER_WORD + r")(?:(?:[\s\-]+|\s+and\s+)(?:" + _NUMBER_WORD + r"))*\b",
+    re.IGNORECASE,
+)
+
+# Contexts where a standalone "one" is a pronoun/idiom, not a number
+_ONE_BEFORE_PROTECT = {"the", "this", "that", "no", "any", "each", "every", "first", "last",
+                       "only", "another", "other", "some", "big", "little", "small", "number"}
+_ONE_AFTER_PROTECT = {"of", "thing", "more", "way", "day", "time", "side", "another", "hand",
+                      "eye", "ear", "one"}
+
+
+def _ordinal_suffix(n: int) -> str:
+    if 10 <= n % 100 <= 20:
+        return "th"
+    return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
+def _parse_cardinal(tokens):
+    """Parse a list of cardinal word tokens into an int, or None if invalid.
+    Rejects invalid orderings (e.g. 'nine thirty' is a clock time, not a cardinal)."""
+    if not tokens:
+        return None
+    total = 0
+    current = 0
+    last_was_ones = False
+    for tok in tokens:
+        if tok == "and":
+            last_was_ones = False
+            continue
+        if tok in _NUMBER_ONES:
+            if last_was_ones:
+                return None  # 'one two' style digit string, not a cardinal
+            current += _NUMBER_ONES[tok]
+            last_was_ones = True
+        elif tok in _NUMBER_TENS:
+            if last_was_ones:
+                return None  # 'nine thirty' is not a valid cardinal
+            current += _NUMBER_TENS[tok]
+            last_was_ones = False
+        elif tok in _NUMBER_SCALES:
+            scale = _NUMBER_SCALES[tok]
+            if scale >= 1000:
+                total += (current or 1) * scale
+                current = 0
+            else:
+                current = (current or 1) * scale
+            last_was_ones = False
+        else:
+            return None
+    return total + current
+
+
+def _parse_ordinal(tokens):
+    """
+    Parse an ordinal phrase: 'fifth' -> (5, 'th'); 'twenty first' -> (21, 'st');
+    'one hundred and fifth' -> (105, 'th'). Returns (number, suffix) or None.
+    The tokens before the final ordinal must form a valid tens/scale construction
+    (e.g. 'twenty first', 'one hundred and first') so 'one second' stays as-is.
+    """
+    if not tokens:
+        return None
+    last = tokens[-1].lower()
+    if last not in _ORDINAL_TO_CARDINAL:
+        return None
+    card_tokens = []
+    for i, tok in enumerate(tokens):
+        tl = tok.lower()
+        if i == len(tokens) - 1:
+            card_tokens.append(_ORDINAL_TO_CARDINAL[tl])
+        elif tl == "and":
+            card_tokens.append(tl)
+        elif tl in _NUMBER_TENS or tl in _NUMBER_SCALES:
+            card_tokens.append(tl)
+        elif tl in _NUMBER_ONES and i + 1 < len(tokens) and tokens[i + 1].lower() in _NUMBER_SCALES:
+            # "one" allowed only when building a scale like "one hundred"
+            card_tokens.append(tl)
+        else:
+            return None
+    n = _parse_cardinal(card_tokens)
+    if n is None:
+        return None
+    return n, _ordinal_suffix(_ORDINAL_VALUE[last])
+
+
+def _parse_year(phrase_lower: str):
+    """Recognize common spoken-year patterns, e.g. 'nineteen eighty five' -> 1985."""
+    m = re.match(
+        r"^(nineteen|twenty)\s+(ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+        r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)"
+        r"(?:\s+(one|two|three|four|five|six|seven|eight|nine))?$",
+        phrase_lower,
+    )
+    if m:
+        century = 1900 if m.group(1) == "nineteen" else 2000
+        rest = _NUMBER_TENS.get(m.group(2), 0) or _NUMBER_ONES.get(m.group(2), 0)
+        if m.group(3):
+            rest += _NUMBER_ONES[m.group(3)]
+        return century + rest
+    m2 = re.match(r"^two\s+thousand(?:\s+and)?(?:\s+(.+))?$", phrase_lower)
+    if m2:
+        if not m2.group(1):
+            return 2000
+        n = _parse_cardinal(m2.group(1).split())
+        if n is not None and n < 100:
+            return 2000 + n
+    return None
+
+
+def _expand_digit_string(m):
+    """Convert a matched digit-word string (e.g. 'double oh seven') into digits."""
+    parts = [p for p in re.split(r"[\s\-]+", m.group(0)) if p]
+    out = []
+    i = 0
+    while i < len(parts):
+        p = parts[i].lower()
+        if p in ("double", "triple"):
+            mult = 2 if p == "double" else 3
+            i += 1
+            out.append(_DIGIT_WORDS.get(parts[i].lower(), "") * mult)
+        else:
+            out.append(_DIGIT_WORDS.get(p, ""))
+        i += 1
+    return "".join(out)
+
+
+def _is_pure_digit_string(tokens):
+    """True if every token is a digit word (or 'double X'/'triple X')."""
+    i = 0
+    while i < len(tokens):
+        t = tokens[i].lower()
+        if t in ("double", "triple"):
+            if i + 1 < len(tokens) and tokens[i + 1].lower() in _DIGIT_WORDS:
+                i += 2
+                continue
+            return False
+        if t in _DIGIT_WORDS:
+            i += 1
+            continue
+        return False
+    return True
+
+
+def _parse_clock_time(body):
+    """Parse 'nine thirty' / 'three fifteen' / 'two' as clock time -> '9:30' / '3:15' / '2'."""
+    parts = body.split()
+    if len(parts) == 1:
+        h = _NUMBER_ONES.get(parts[0])
+        if h is not None and 1 <= h <= 12:
+            return str(h)
+    elif len(parts) == 2:
+        h = _NUMBER_ONES.get(parts[0])
+        m1 = _NUMBER_ONES.get(parts[1])  # teens: 10-19
+        m2 = _NUMBER_TENS.get(parts[1])  # tens: 20-59
+        if h is not None and 1 <= h <= 12:
+            if m1 is not None and 10 <= m1 < 20:
+                return f"{h}:{m1}"
+            if m2 is not None and m2 >= 20:
+                return f"{h}:{m2}"
+    elif len(parts) == 3:
+        h = _NUMBER_ONES.get(parts[0])
+        m2 = _NUMBER_TENS.get(parts[1])
+        o = _NUMBER_ONES.get(parts[2])
+        if h is not None and 1 <= h <= 12 and m2 is not None and o is not None:
+            return f"{h}:{m2 + o:02d}"
+    return None
+
+
+def _convert_number_phrase(m):
+    """Try to convert a number-word phrase to digits; return unchanged if unparseable."""
+    phrase = m.group(0).strip()
+    tokens = [t for t in re.split(r"[\s\-]+", phrase) if t]
+    lower_tokens = [t.lower() for t in tokens]
+    joined = " ".join(lower_tokens)
+
+    # Protect ambiguous standalone "one" ("the one", "no one", "one of", "one thing"...)
+    if len(lower_tokens) == 1 and lower_tokens[0] == "one":
+        before = m.string[:m.start()].rstrip().split()[-1].lower() if m.start() > 0 else ""
+        after = m.string[m.end():].lstrip().split()[0].lower() if m.end() < len(m.string) else ""
+        if before in _ONE_BEFORE_PROTECT or after in _ONE_AFTER_PROTECT:
+            return m.group(0)
+        return "1"
+
+    # Digit strings / phone numbers (2+ consecutive digit words): "six seven zero" -> "670"
+    if len(lower_tokens) >= 2 and _is_pure_digit_string(lower_tokens):
+        return _expand_digit_string(m)
+
+    # Percent: "fifty percent" -> "50%"
+    if joined.endswith("percent"):
+        body = joined[: -len("percent")].strip()
+        if body:
+            n = _parse_cardinal(_normalize_a_an(body).split())
+            if n is not None:
+                return f"{n}%"
+
+    # Time: "five pm" / "five p m" / "five p.m." / "five o'clock" -> "5 PM" / "5 o'clock"
+    for marker, repl in (("o'clock", "o'clock"), ("p.m.", "PM"), ("a.m.", "AM"), ("p m", "PM"), ("a m", "AM"), ("pm", "PM"), ("am", "AM")):
+        if joined.endswith(marker):
+            body = joined[: -len(marker)].strip()
+            if body:
+                n = _parse_cardinal(_normalize_a_an(body).split())
+                if n is not None:
+                    return f"{n} {repl}"
+                clock = _parse_clock_time(_normalize_a_an(body))
+                if clock is not None:
+                    return f"{clock} {repl}"
+
+    # Decimal: "three point one four" -> "3.14"
+    if " point " in joined:
+        left, _, right = joined.partition(" point ")
+        n = _parse_cardinal(_normalize_a_an(left).split())
+        if n is not None and right:
+            frac = []
+            ok = True
+            for w in right.split():
+                if w in _DIGIT_WORDS:
+                    frac.append(_DIGIT_WORDS[w])
+                elif w in _NUMBER_TENS or w in _NUMBER_ONES:
+                    frac.append(str(_parse_cardinal([w])))
+                else:
+                    ok = False
+                    break
+            if ok and frac:
+                return f"{n}.{''.join(frac)}"
+
+    # Years
+    y = _parse_year(joined)
+    if y is not None:
+        return str(y)
+
+    # Ordinals
+    ord_ = _parse_ordinal(tokens)
+    if ord_ is not None:
+        n, suffix = ord_
+        return f"{n}{suffix}"
+
+    # Cardinals
+    card_tokens = _normalize_a_an(joined).split()
+    n = _parse_cardinal(card_tokens)
+    if n is not None:
+        return f"{n:,}" if n >= 1000 else str(n)
+
+    return m.group(0)
+
+
+def _normalize_a_an(phrase):
+    """Replace a leading 'a'/'an' before a number word with 'one' (e.g. 'a hundred' -> 'one hundred')."""
+    parts = phrase.split()
+    if parts and parts[0] in ("a", "an") and len(parts) > 1:
+        parts[0] = "one"
+    return " ".join(parts)
+
+
+def convert_number_words_to_digits(text: str) -> str:
+    """Convert spoken number words in text to digits (no-op if VT_NUMBER_DIGITS != '1')."""
+    if os.environ.get("VT_NUMBER_DIGITS", "1") != "1":
+        return text
+    if not text:
+        return ""
+    # General number phrases first (also handles digit strings and decimals);
+    # then a digit-string fallback for any runs the phrase regex missed.
+    converted = _NUMBER_PHRASE_REGEX.sub(_convert_number_phrase, text)
+    converted = _DIGIT_STRING_REGEX.sub(_expand_digit_string, converted)
+    return converted
+
 def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     """
     Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
@@ -513,7 +837,10 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     cleaned = re.sub(r"[,]{2,}", ",", cleaned)
     cleaned = re.sub(r"([.?!,])\s*,\s*", r"\1 ", cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
-    
+
+    # 10b. Convert spoken number words to digits ("twenty five" -> "25", phone digit strings, ...)
+    cleaned = convert_number_words_to_digits(cleaned)
+
     # 11. Normalize standalone I and contractions
     cleaned = re.sub(r"\bi\b", "I", cleaned)
     cleaned = re.sub(r"\bi('[a-z]+)\b", r"I\1", cleaned)

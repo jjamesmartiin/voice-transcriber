@@ -153,5 +153,54 @@ class TestMicroBatchingEngine(unittest.TestCase):
         text = batcher.finish_and_get_text()
         self.assertIsInstance(text, str)
 
+    def test_number_words_to_digits(self):
+        """Test spoken number words convert to actual digits."""
+        from post_processor import convert_number_words_to_digits as conv
+        old_env = os.environ.get("VT_NUMBER_DIGITS")
+        os.environ["VT_NUMBER_DIGITS"] = "1"
+        try:
+            # Phone-number / digit strings (continuous digits)
+            self.assertEqual(conv("Six seven zero six seven zero six nine nine six"), "6706706996")
+            self.assertEqual(conv("seven six oh six seven oh six nine nine six"), "7606706996")
+            self.assertEqual(conv("double oh seven"), "007")
+            self.assertEqual(conv("my number is one two three four five"), "my number is 12345")
+
+            # Cardinals
+            self.assertEqual(conv("twenty five people"), "25 people")
+            self.assertEqual(conv("one hundred and fifty"), "150")
+            self.assertEqual(conv("two thousand twenty four"), "2024")
+            self.assertEqual(conv("a period of five years"), "a period of 5 years")
+
+            # Ordinals
+            self.assertEqual(conv("the fifth item"), "the 5th item")
+            self.assertEqual(conv("twenty first birthday"), "21st birthday")
+            self.assertEqual(conv("one hundred and first"), "101st")
+
+            # Decimals, percent, times, years
+            self.assertEqual(conv("three point one four"), "3.14")
+            self.assertEqual(conv("fifty percent"), "50%")
+            self.assertEqual(conv("five pm"), "5 PM")
+            self.assertEqual(conv("meet at nine thirty am"), "meet at 9:30 AM")
+            self.assertEqual(conv("nineteen eighty five"), "1985")
+            self.assertEqual(conv("twenty twenty four"), "2024")
+
+            # Protections: pronouns/idioms stay as words
+            self.assertEqual(conv("no one is here"), "no one is here")
+            self.assertEqual(conv("the one thing i need"), "the one thing i need")
+            self.assertEqual(conv("wait a second"), "wait a second")
+            self.assertEqual(conv("everyone is welcome"), "everyone is welcome")
+        finally:
+            if old_env is None:
+                os.environ.pop("VT_NUMBER_DIGITS", None)
+            else:
+                os.environ["VT_NUMBER_DIGITS"] = old_env
+
+    def test_number_words_disabled(self):
+        """Test VT_NUMBER_DIGITS=0 disables number conversion."""
+        from post_processor import convert_number_words_to_digits as conv
+        os.environ["VT_NUMBER_DIGITS"] = "0"
+        self.assertEqual(conv("twenty five people"), "twenty five people")
+        os.environ["VT_NUMBER_DIGITS"] = "1"
+
 if __name__ == "__main__":
     unittest.main(argv=['first-arg'], exit=False)
