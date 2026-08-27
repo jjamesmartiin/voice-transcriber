@@ -113,7 +113,6 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_record = self._on_tui_toggle_record
         self.tui.on_change_device = self.change_input_device
         self.tui.on_toggle_mute = self._on_tui_toggle_mute
-        self.tui.on_toggle_backend = self._on_tui_toggle_backend
         self.tui.on_toggle_autotype = self._on_tui_toggle_autotype
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
         self.tui.on_reset_terminal = self._on_tui_reset_terminal
@@ -132,17 +131,6 @@ class SimpleVoiceTranscriber:
         self._sync_tui_state()
         status = "MUTED" if t2.IS_MUTED else "SOUND ENABLED"
         self.tui.print_event("🔊 Sound Toggle", f"Sound effects are now {status}", level="info")
-
-    def _on_tui_toggle_backend(self):
-        import t2
-        new_backend = "whisper" if t2.MODEL_BACKEND == "cohere" else "cohere"
-        t2.MODEL_BACKEND = new_backend
-        from transcribe2 import set_backend
-        set_backend(new_backend)
-        t2.save_audio_config()
-        self._sync_tui_state()
-        self.tui.print_event("⚡ Model Backend", f"Switched model backend to {new_backend.capitalize()}", level="info")
-        t2.preload_model(device=t2.DEVICE)
 
     def _on_tui_toggle_autotype(self):
         import t2
@@ -285,9 +273,11 @@ class SimpleVoiceTranscriber:
         if rec_duration < 0.45 and time_since_last < 15.0 and last_text:
             logger.info("🤖 Quick-Tap SLM On-Demand retro-polish triggered!")
             self.visual_notification.show_processing()
-            from post_processor import process_slm_llm_rewrite
+            from post_processor import process_slm_llm_rewrite, clean_speech_transcription
             t0_slm = time.time()
             polished = process_slm_llm_rewrite(last_text, timeout_sec=3.0).strip()
+            # Final safety pass: strip any punctuation/quote artifacts the SLM may have added
+            polished = clean_speech_transcription(polished, skip_slm=True).strip()
             slm_elapsed = (time.time() - t0_slm) * 1000
             
             if polished and polished != last_text:

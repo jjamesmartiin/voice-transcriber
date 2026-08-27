@@ -81,7 +81,8 @@ class VoiceTranscriberTUI:
         self.on_toggle_record = None
         self.on_change_device = None
         self.on_toggle_mute = None
-        self.on_toggle_backend = None
+        # Backend selection is config-file only (edit config/config.yaml, restart);
+        # no runtime model toggle to avoid loading the other ASR backend unexpectedly.
         self.on_toggle_autotype = None
         self.on_cycle_theme = None
         self.on_reset_terminal = None
@@ -227,7 +228,7 @@ class VoiceTranscriberTUI:
             else:
                 prompt.append("clipboard ", style="cyan")
             prompt.append("│ ", style="dim white")
-            prompt.append("[Space] Rec  [i] Mic  [m] Mute  [b] Model  [t] Auto-Type  [c] Theme  [q] Quit", style="dim white")
+            prompt.append("[Space] Rec  [i] Mic  [m] Mute  [t] Auto-Type  [c] Theme  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
             prompt.append("RECORDING ", style="bold white on red")
@@ -438,9 +439,6 @@ class VoiceTranscriberTUI:
         elif ch.lower() == 'm':
             if self.on_toggle_mute:
                 self.on_toggle_mute()
-        elif ch.lower() == 'b':
-            if self.on_toggle_backend:
-                self.on_toggle_backend()
         elif ch.lower() == 'c':
             if self.on_cycle_theme:
                 self.on_cycle_theme()

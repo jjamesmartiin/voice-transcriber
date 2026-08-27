@@ -428,7 +428,6 @@ def select_audio_device():
     table.add_row("M", "Toggle Sound Effects", "MUTED" if IS_MUTED else "Sound On")
     table.add_row("E", "Select Sound Effect Theme", SOUND_THEME.capitalize() if SOUND_THEME else "Proximity")
     table.add_row("C", "Select UI Color Theme", f"{UI_THEME.upper()}")
-    table.add_row("B", "Switch Model Backend", MODEL_BACKEND.capitalize())
     table.add_row("T", "Toggle Auto-Type Output", "ENABLED" if AUTO_TYPE else "DISABLED (Clipboard Only)")
     table.add_row("R", "Reset Terminal & Audio Bridge", "Ready")
     
@@ -514,17 +513,6 @@ def select_audio_device():
         except:
             pass
             
-        save_audio_config()
-        reset_terminal()
-        return select_audio_device()
-    
-    if choice == 'B':
-        if MODEL_BACKEND == 'whisper':
-            MODEL_BACKEND = 'cohere'
-        else:
-            MODEL_BACKEND = 'whisper'
-        print(f"Model backend set to: {MODEL_BACKEND}")
-        transcribe2.set_backend(MODEL_BACKEND)
         save_audio_config()
         reset_terminal()
         return select_audio_device()

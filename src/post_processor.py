@@ -92,11 +92,28 @@ TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
 MID_SENTENCE_CAP_REGEX = re.compile(r"(?<![.!?\n])\s+([A-Z][a-zA-Z0-9_-]+)")
 
 # Words after which a capitalized word is treated as a proper noun (name, place, day)
-# and exempted from mid-sentence decapitalization, e.g. "Send it to Alice", "on Wednesday",
-# or retraction targets like "... I mean Alice".
+# and exempted from mid-sentence decapitalization, e.g. "Send it to Alice", "on Wednesday".
 PROPER_NOUN_PRECEDERS = {
     "to", "for", "with", "at", "in", "on", "about", "from", "by", "of",
-    "mean", "wait", "rather", "actually", "that", "is", "are", "was", "were",
+}
+
+# Common English function/discourse words that ASR sometimes over-capitalizes mid-sentence
+# (e.g. "to Like quit", "in This section"). These are NEVER treated as proper nouns,
+# even after a preposition. Day/month names are intentionally NOT included so
+# "on Monday" / "in May" keep their capitalization.
+COMMON_MID_SENTENCE_WORDS = {
+    "like", "this", "that", "these", "those", "then", "there", "their", "they",
+    "when", "where", "why", "how", "who", "which", "what", "if", "and", "but",
+    "or", "so", "for", "from", "with", "about", "because", "though", "although",
+    "since", "while", "during", "after", "before", "above", "below", "over",
+    "under", "between", "into", "onto", "upon", "within", "without", "against",
+    "through", "across", "along", "behind", "beyond", "near", "off", "out", "up",
+    "down", "not", "no", "yes", "very", "really", "just", "only", "also", "now",
+    "here", "is", "are", "was", "were", "be", "been", "being", "am", "do", "does",
+    "did", "have", "has", "had", "will", "would", "can", "could", "should",
+    "might", "must", "shall", "want", "need", "let", "make", "get", "take", "go",
+    "come", "see", "know", "think", "say", "tell", "use", "try", "look", "put",
+    "give", "find", "work", "play", "start", "stop", "keep", "help", "check", "fix",
 }
 
 def normalize_mid_sentence_casing(text: str) -> str:
@@ -111,11 +128,12 @@ def normalize_mid_sentence_casing(text: str) -> str:
         word = m.group(1)
         if word in TECHNICAL_ACRONYMS_AND_PROPER_NOUNS or word.isupper() or len(word) == 1:
             return m.group(0)
-        # Preserve proper nouns (names/places/days) that follow a preposition or
-        # verbal-retraction marker (e.g. "to Alice", "on Wednesday", "I mean Alice")
+        # Preserve proper nouns (names/places/days) that follow a preposition
+        # (e.g. "to Alice", "on Wednesday"), unless it is a common English word
+        # that ASR over-capitalized (e.g. "to Like", "on This")
         prefix = text[:m.start()].rstrip()
         prev_word = prefix.split()[-1].rstrip(".,;:!?") if prefix else ""
-        if prev_word.lower() in PROPER_NOUN_PRECEDERS:
+        if prev_word.lower() in PROPER_NOUN_PRECEDERS and word.lower() not in COMMON_MID_SENTENCE_WORDS:
             return m.group(0)
         lowercased = word[0].lower() + word[1:]
         return " " + lowercased
@@ -162,6 +180,43 @@ RETRACTION_REPLACEMENT_PATTERNS = [
     # "X... actually Y" / "X... make that Y" / "X... no wait Y" / "X... I mean Y" / "X... or rather Y"
     re.compile(r"(?:\b(at|in|on|to|for|by|from|with|of|about)\s+)?\b([a-zA-Z0-9$%\.:]+(?:\s+[a-zA-Z0-9$%\.:]+){0,1})\s*[,.]*\s*(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)\s+([a-zA-Z0-9$%\.:]+(?:\s+[a-zA-Z0-9$%\.:]+){0,2})\b", re.IGNORECASE),
 ]
+
+def _sanitize_slm_output(input_text: str, output_text: str) -> str:
+    """
+    Strip spurious quotes, markdown, XML tags, and punctuation artifacts from SLM output.
+    Apostrophes inside words ("it's") are preserved; quote marks are only removed when
+    the input itself contained none (dictation rarely includes literal quotes).
+    """
+    clean_output = output_text.strip()
+    # Extract content inside <cleaned_text> tags if present, or strip any stray XML tags
+    xml_match = re.search(r'<cleaned_text>(.*?)</cleaned_text>', clean_output, re.DOTALL | re.IGNORECASE)
+    if xml_match:
+        clean_output = xml_match.group(1).strip()
+    else:
+        clean_output = re.sub(r'</?[a-zA-Z0-9_-]+>', '', clean_output).strip()
+
+    # Remove enclosing quotes if model wrapped output in quotes
+    if clean_output.startswith('"') and clean_output.endswith('"') and len(clean_output) > 2:
+        clean_output = clean_output[1:-1].strip()
+
+    # Double quotes / curly quotes are never spoken in dictation: remove them when the
+    # input itself had none. Single-quote MARKS at word boundaries (e.g. 'word') are
+    # always removed; apostrophes inside words (contractions like "it's") are preserved
+    # by the word-boundary rules regardless of the input.
+    if '"' not in input_text and '“' not in input_text and '”' not in input_text:
+        clean_output = re.sub(r'["“”]', '', clean_output)
+    clean_output = re.sub(r"(?<!\w)'(?=\w)|(?<=\w)'(?!\w)|(?<=[.,;:!?])'(?=\s|$)", '', clean_output)
+    clean_output = re.sub(r"[‘’]", '', clean_output)
+    # Remove markdown artifacts (code fences, backticks, bold/italic markers)
+    clean_output = re.sub(r'`{1,3}|\*\*|\*|__|#{1,6}\s?', '', clean_output)
+
+    # Normalize spacing after punctuation and stray punctuation sequences
+    clean_output = re.sub(r'([,.!?;:])([a-zA-Z0-9])', r'\1 \2', clean_output)
+    clean_output = re.sub(r'([.!?])\s*[.,;:]+', r'\1', clean_output)
+    clean_output = re.sub(r'\s+([,.;:])', r'\1', clean_output)
+    clean_output = re.sub(r'([,.;:])\s*([,.;:])', r'\1', clean_output)
+    return clean_output.strip()
+
 
 def process_verbal_retractions(text: str) -> str:
     """
@@ -275,12 +330,16 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
             {
                 "role": "system",
                 "content": (
-                    "You are an automated speech dictation text cleaner.\n"
+                    "You are an automated speech dictation text cleaner. "
+                    "The input is raw speech-to-text output. "
                     "STRICT RULES:\n"
-                    "1. Only clean verbal retractions (e.g. 'X... actually Y' -> 'Y') and hesitation fillers (um, uh).\n"
-                    "2. NEVER invent new sentences, topics, or subjects not present in the input text.\n"
-                    "3. NEVER output conversational replies, apologies, or meta-explanations.\n"
-                    "4. Output ONLY the raw cleaned text enclosed inside <cleaned_text> tags."
+                    "1. Only remove verbal retractions (e.g. 'X... actually Y' -> 'Y') and hesitation fillers (um, uh).\n"
+                    "2. Keep every spoken word verbatim; never rephrase, summarize, or add words.\n"
+                    "3. NEVER invent new sentences, topics, or subjects not present in the input text.\n"
+                    "4. NEVER output conversational replies, apologies, or meta-explanations.\n"
+                    "5. NEVER add quotation marks, backticks, markdown, or code formatting of any kind.\n"
+                    "6. NEVER add punctuation that was not spoken (no new question marks, periods, or commas).\n"
+                    "7. Output ONLY the raw cleaned text enclosed inside <cleaned_text> tags, with no other text."
                 )
             },
             {
@@ -301,19 +360,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         )
         with urllib.request.urlopen(req, timeout=timeout_sec) as response:
             res_data = json.loads(response.read().decode('utf-8'))
-            clean_output = res_data['choices'][0]['message']['content'].strip()
-            
-            # Extract content inside <cleaned_text> tags if present, or strip any stray XML tags
-            xml_match = re.search(r'<cleaned_text>(.*?)</cleaned_text>', clean_output, re.DOTALL | re.IGNORECASE)
-            if xml_match:
-                clean_output = xml_match.group(1).strip()
-            else:
-                clean_output = re.sub(r'</?[a-zA-Z0-9_-]+>', '', clean_output).strip()
-            
-            # Remove enclosing quotes if model wrapped output in quotes
-            if clean_output.startswith('"') and clean_output.endswith('"') and len(clean_output) > 2:
-                clean_output = clean_output[1:-1].strip()
-            clean_output = re.sub(r'([,.!?;:])([a-zA-Z0-9])', r'\1 \2', clean_output)
+            clean_output = _sanitize_slm_output(text, res_data['choices'][0]['message']['content'])
             elapsed_ms = (time.time() - t0) * 1000
             
             # Apply guardrail: reject refusal meta-chatter, text explosions, or word-overlap failures
@@ -349,7 +396,7 @@ def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: f
         "messages": [
             {
                 "role": "system",
-                "content": "You are an automated speech dictation stream concater.\nSTRICT OPERATIONAL CONTRACT:\n1. Smoothly join the new incoming audio chunk onto the previous transcript with natural word spacing.\n2. DO NOT delete, summarize, or rephrase valid words from either text.\n3. NEVER output conversational responses or meta-commentary.\n4. Output ONLY the merged transcript."
+                "content": "You are an automated speech dictation stream concater.\nSTRICT OPERATIONAL CONTRACT:\n1. Smoothly join the new incoming audio chunk onto the previous transcript with natural word spacing.\n2. DO NOT delete, summarize, or rephrase valid words from either text.\n3. NEVER output conversational responses or meta-commentary.\n4. NEVER add quotation marks, backticks, markdown, or code formatting of any kind.\n5. NEVER add punctuation that was not spoken.\n6. Output ONLY the merged transcript."
             },
             {
                 "role": "user",
@@ -369,10 +416,7 @@ def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: f
         )
         with urllib.request.urlopen(req, timeout=timeout_sec) as response:
             res_data = json.loads(response.read().decode('utf-8'))
-            merged_output = res_data['choices'][0]['message']['content'].strip()
-            if merged_output.startswith('"') and merged_output.endswith('"') and len(merged_output) > 2:
-                merged_output = merged_output[1:-1].strip()
-            merged_output = re.sub(r'([,.!?;:])([a-zA-Z0-9])', r'\1 \2', merged_output)
+            merged_output = _sanitize_slm_output(f"{prev_text} {new_chunk}", res_data['choices'][0]['message']['content'])
             elapsed_ms = (time.time() - t0) * 1000
             
             if _is_valid_speech_rewrite(f"{prev_text} {new_chunk}", merged_output):
