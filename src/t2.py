@@ -95,6 +95,7 @@ MODEL_BACKEND = os.environ.get("VT_MODEL_BACKEND", "cohere").lower() # 'cohere' 
 COPY_TO_CLIPBOARD = True
 AUTO_TYPE = False
 IS_MUTED = True
+NUMBER_DIGITS = True  # Convert spoken number words to digits ("twenty five" -> 25)
 SOUND_THEME = "proximity"
 UI_THEME = "auto"
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
@@ -241,7 +242,7 @@ import transcribe2
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, SOUND_THEME, UI_THEME, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, NUMBER_DIGITS, SOUND_THEME, UI_THEME, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -266,6 +267,13 @@ def load_audio_config(file_path=None):
             OVERRIDE_MODE = config.get('override_mode', 'auto')
             IS_MUTED = config.get('is_muted', True)
             AUTO_TYPE = config.get('auto_type', False)
+            NUMBER_DIGITS = config.get('number_digits', True)
+
+            env_number_digits = os.environ.get("VT_NUMBER_DIGITS", "").strip().lower()
+            if env_number_digits in ["1", "true", "yes"]:
+                NUMBER_DIGITS = True
+            elif env_number_digits in ["0", "false", "no"]:
+                NUMBER_DIGITS = False
             
             env_muted = os.environ.get("VT_IS_MUTED", "").strip().lower()
             if env_muted in ["1", "true", "yes"]:
@@ -342,6 +350,8 @@ def load_audio_config(file_path=None):
                         print(f"Secondary audio device: {SECONDARY_DEVICE_NAME} (index {sec_idx})")
             else:
                 print("No configured audio devices found. Using system default.")
+        # Keep the post-processor's runtime number-toggle in sync with the loaded config
+        set_number_digits(NUMBER_DIGITS)
     except Exception as e:
         print(f"Could not load audio config: {e}")
 
@@ -382,7 +392,8 @@ def save_audio_config(file_path=None):
             'sound_theme': SOUND_THEME,
             'model_backend': MODEL_BACKEND,
             'copy_to_clipboard': COPY_TO_CLIPBOARD,
-            'ui_theme': UI_THEME
+            'ui_theme': UI_THEME,
+            'number_digits': NUMBER_DIGITS
         })
 
         if CONFIG_FILE.suffix in ['.yaml', '.yml']:
@@ -399,6 +410,18 @@ def save_audio_config(file_path=None):
         print(f"Saved audio device config to {CONFIG_FILE}")
     except Exception as e:
         print(f"Could not save audio config: {e}")
+
+
+def set_number_digits(enabled):
+    """Runtime toggle for number-word -> digit conversion; keeps post-processor in sync."""
+    global NUMBER_DIGITS
+    NUMBER_DIGITS = bool(enabled)
+    try:
+        from post_processor import set_number_digits_enabled
+        set_number_digits_enabled(NUMBER_DIGITS)
+    except Exception:
+        pass
+
 
 def select_audio_device():
     """Interactive audio device selection with Primary/Secondary support & Rich styling"""
@@ -429,6 +452,7 @@ def select_audio_device():
     table.add_row("E", "Select Sound Effect Theme", SOUND_THEME.capitalize() if SOUND_THEME else "Proximity")
     table.add_row("C", "Select UI Color Theme", f"{UI_THEME.upper()}")
     table.add_row("T", "Toggle Auto-Type Output", "ENABLED" if AUTO_TYPE else "DISABLED (Clipboard Only)")
+    table.add_row("N", "Toggle Number Words -> Digits", "DIGITS" if NUMBER_DIGITS else "SPELLED OUT")
     table.add_row("R", "Reset Terminal & Audio Bridge", "Ready")
     
     if not is_wsl:
@@ -520,6 +544,13 @@ def select_audio_device():
     if choice == 'T':
         AUTO_TYPE = not AUTO_TYPE
         print(f"Auto-Type set to: {'Enabled' if AUTO_TYPE else 'Disabled (Clipboard Only)'}")
+        save_audio_config()
+        reset_terminal()
+        return select_audio_device()
+
+    if choice == 'N':
+        set_number_digits(not NUMBER_DIGITS)
+        print(f"Number conversion set to: {'DIGITS' if NUMBER_DIGITS else 'SPELLED OUT'}")
         save_audio_config()
         reset_terminal()
         return select_audio_device()

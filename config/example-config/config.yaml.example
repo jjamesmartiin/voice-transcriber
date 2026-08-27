@@ -52,6 +52,17 @@ copy_to_clipboard: true
 model_backend: "cohere"
 
 # ------------------------------------------------------------------------------
+# Number Words -> Digits Conversion
+# Controls whether spoken number words are transcribed as actual digits
+# ("twenty five" -> 25, "six seven zero..." -> 670...). Toggleable at runtime
+# with the [n] key in the TUI or the 'N' option in the settings menu.
+# Available Options:
+#   - true  : Convert number words to digits (recommended)
+#   - false : Keep number words spelled out
+# Default: true
+number_digits: true
+
+# ------------------------------------------------------------------------------
 # Sound Theme
 # Theme for audio feedback and completion cues.
 # Available Options:

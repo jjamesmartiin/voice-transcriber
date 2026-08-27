@@ -444,6 +444,8 @@ def _preserve_i_casing(char: str, text: str = "", pos: int = 0) -> str:
 # Number words -> digits conversion
 # ---------------------------------------------------------------------------
 # Gated by VT_NUMBER_DIGITS (default "1"; set to "0" to keep number words).
+# Also toggleable at runtime via set_number_digits_enabled() (driven by the
+# t2.NUMBER_DIGITS config setting and the TUI 'n' hotkey).
 # Converts spoken numbers into actual digits, e.g.:
 #   "six seven zero six seven zero six nine nine six" -> "7606706996"  (phone/digit string)
 #   "twenty five" -> "25", "one hundred and fifty" -> "150", "two thousand twenty four" -> "2024"
@@ -752,8 +754,8 @@ def _normalize_a_an(phrase):
 
 
 def convert_number_words_to_digits(text: str) -> str:
-    """Convert spoken number words in text to digits (no-op if VT_NUMBER_DIGITS != '1')."""
-    if os.environ.get("VT_NUMBER_DIGITS", "1") != "1":
+    """Convert spoken number words in text to digits (no-op if disabled via env or runtime toggle)."""
+    if os.environ.get("VT_NUMBER_DIGITS", "1") != "1" or not _number_digits_enabled:
         return text
     if not text:
         return ""
@@ -762,6 +764,15 @@ def convert_number_words_to_digits(text: str) -> str:
     converted = _NUMBER_PHRASE_REGEX.sub(_convert_number_phrase, text)
     converted = _DIGIT_STRING_REGEX.sub(_expand_digit_string, converted)
     return converted
+
+
+_number_digits_enabled = True
+
+
+def set_number_digits_enabled(enabled: bool) -> None:
+    """Runtime toggle for number-word -> digit conversion (used by the 'n' hotkey)."""
+    global _number_digits_enabled
+    _number_digits_enabled = bool(enabled)
 
 def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     """
