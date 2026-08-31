@@ -257,7 +257,11 @@
         in
         {
           default = pkgs.mkShell {
-            buildInputs = [ pythonEnv ] ++ runtimeDeps;
+            buildInputs = [ pythonEnv ] ++ runtimeDeps ++ (with pkgs; [
+              hyperfine
+              flamegraph
+              perf
+            ]);
 
             shellHook = ''
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
