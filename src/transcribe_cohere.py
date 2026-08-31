@@ -12,6 +12,12 @@ import numpy as np
 from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
 from huggingface_hub import login
 
+try:
+    from post_processor import clean_speech_transcription
+except ImportError:
+    def clean_speech_transcription(text, skip_slm=True):
+        return text
+
 MODEL_ID = "CohereLabs/cohere-transcribe-03-2026"
 MODEL_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 
@@ -29,6 +35,30 @@ _os.close(_devnull)
 _model = None
 _processor = None
 _model_lock = threading.Lock()
+_cached_cpu_threads = None
+
+def _configure_torch_runtime(device="cpu"):
+    """Tune PyTorch runtime parameters for optimal CPU/GPU inference latency."""
+    global _cached_cpu_threads
+    if device == "cpu":
+        torch.set_grad_enabled(False)
+        if hasattr(torch, "set_float32_matmul_precision"):
+            try:
+                torch.set_float32_matmul_precision("high")
+            except Exception:
+                pass
+        
+        env_threads = os.environ.get("VT_CPU_THREADS", "").strip()
+        if env_threads.isdigit():
+            target_threads = max(1, min(int(env_threads), os.cpu_count() or 8))
+        else:
+            cpu_cnt = os.cpu_count() or 4
+            target_threads = max(1, min(cpu_cnt, 8))
+            
+        if _cached_cpu_threads != target_threads:
+            if hasattr(torch, "set_num_threads"):
+                torch.set_num_threads(target_threads)
+            _cached_cpu_threads = target_threads
 
 def _token_from_config():
     """Read hf_token from local config.yaml/config.yml (root or config/ dir)."""
@@ -62,7 +92,6 @@ def _token_from_config():
         except Exception:
             continue
     return None
-
 
 def get_token():
     """Resolve Hugging Face token from config.yaml, env var, or huggingface-cli login."""
@@ -102,9 +131,9 @@ def check_auth():
 
     print("\nHugging Face Authentication Info")
     print(f"The model '{MODEL_ID}' is gated and requires access.")
-    print(f"  - Set 'hf_token' in your local config.yaml (gitignored)")
-    print(f"  - Or set the HF_TOKEN environment variable")
-    print(f"  - Or log in via 'huggingface-cli login'")
+    print("  - Set 'hf_token' in your local config.yaml (gitignored)")
+    print("  - Or set the HF_TOKEN environment variable")
+    print("  - Or log in via 'huggingface-cli login'")
     print(f"Access must be granted at: https://huggingface.co/{MODEL_ID}\n")
     return False
 
@@ -118,7 +147,6 @@ def _cpu_supports_bf16():
     except Exception:
         pass
     return False
-
 
 def _resolve_dtype(device):
     """Resolve weight dtype.
@@ -142,8 +170,8 @@ def _resolve_dtype(device):
         return torch.bfloat16
     return torch.float32
 
-
 def _load_model_once(target_id, revision, token, dtype, local_files_only, device):
+    _configure_torch_runtime(device)
     processor = AutoProcessor.from_pretrained(
         target_id,
         revision=revision,
@@ -159,8 +187,13 @@ def _load_model_once(target_id, revision, token, dtype, local_files_only, device
         token=token,
         local_files_only=local_files_only,
     ).to(device)
+    
+    # Put in evaluation mode and disable gradient computation
+    model.eval()
+    for param in model.parameters():
+        param.requires_grad = False
+        
     return model, processor
-
 
 def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
     token = get_token()
@@ -276,9 +309,17 @@ def has_speech_activity(audio_data):
     """Check if audio contains actual speech energy rather than silence / noise floor"""
     if audio_data is None or len(audio_data) == 0:
         return False
-    peak = np.max(np.abs(audio_data))
-    rms = np.sqrt(np.mean(audio_data.astype(np.float32)**2))
-    return peak >= 0.015 or rms >= 0.0035
+    # Short-circuit peak computation first (avoids RMS overhead when speech is evident)
+    peak = float(np.max(np.abs(audio_data)))
+    if peak >= 0.015:
+        return True
+    # If peak is borderline, compute RMS energy
+    if getattr(audio_data, "dtype", None) == np.float32:
+        rms = float(np.sqrt(np.mean(audio_data * audio_data)))
+    else:
+        arr = np.asarray(audio_data, dtype=np.float32)
+        rms = float(np.sqrt(np.mean(arr * arr)))
+    return rms >= 0.0035
 
 def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device="cpu", language="en"):
     # Guard against pure silence / background noise
@@ -290,21 +331,18 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     except Exception as e:
         return f"Error loading model: {e}"
     
+    _configure_torch_runtime(device)
     start_time = time.time()
     
     try:
-        # Set CPU thread count (configurable via VT_CPU_THREADS; default matches prior behavior)
-        if device == "cpu" and hasattr(torch, "set_num_threads"):
-            default_threads = max(1, min(os.cpu_count() or 4, 8))
-            env_threads = os.environ.get("VT_CPU_THREADS", "").strip()
-            if env_threads.isdigit():
-                default_threads = max(1, min(int(env_threads), os.cpu_count() or 8))
-            torch.set_num_threads(default_threads)
-            
         with torch.inference_mode():
             if audio_data is not None:
-                if hasattr(audio_data, "flatten"):
+                if not isinstance(audio_data, np.ndarray):
+                    audio_data = np.asarray(audio_data, dtype=np.float32)
+                elif audio_data.ndim > 1:
                     audio_data = audio_data.flatten()
+                elif audio_data.dtype != np.float32:
+                    audio_data = audio_data.astype(np.float32, copy=False)
                 
                 results = model.transcribe(
                     processor=processor,
@@ -324,7 +362,6 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
             else:
                 transcription = str(results)
             
-            from post_processor import clean_speech_transcription
             transcription = clean_speech_transcription(transcription, skip_slm=True)
             
     except Exception as e:
