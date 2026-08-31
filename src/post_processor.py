@@ -195,7 +195,7 @@ LOWERCASE_AFTER_PERIOD_REGEX = re.compile(
 # Trailing muttered self-corrections (oops, whoops, nevermind) at end of dictation
 # Standalone hesitation filler words (um, uh, er, ah)
 FILLER_WORDS_REGEX = re.compile(
-    r"\b(?:um|uh|er|ah)\b\s*",
+    r"\s*\b(?:um|uh|er|ah)\b\s*",
     re.IGNORECASE
 )
 
@@ -885,7 +885,7 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     # 0. Apply verbal edit self-correction pre-pass & hesitation filler removal
     cleaned = process_verbal_retractions(cleaned)
     if any(k in cleaned_lower for k in _FILLER_KEYWORDS):
-        cleaned = FILLER_WORDS_REGEX.sub("", cleaned)
+        cleaned = FILLER_WORDS_REGEX.sub(" ", cleaned)
 
     # 0b. Recover the "AI" acronym from common ASR mis-hearings ("a eyes" -> "AI")
     if "eyes" in cleaned_lower:

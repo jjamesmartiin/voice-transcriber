@@ -95,6 +95,10 @@ class TestMicroBatchingEngine(unittest.TestCase):
             # Comma spacing normalization (missing space after comma, spaces before comma)
             self.assertEqual(clean_speech_transcription("whatever we're doing for that,we can do for DF"), "whatever we're doing for that, we can do for DF.")
             self.assertEqual(clean_speech_transcription("works for JK though ,so like whatever"), "works for JK though, so like whatever.")
+
+            # Filler word space preservation & double-space cleanup
+            self.assertEqual(clean_speech_transcription("building it right now for myself um and I'll let you know"), "building it right now for myself and I'll let you know.")
+            self.assertEqual(clean_speech_transcription("how it goes.  -- this one"), "how it goes. -- this one.")
         finally:
             if old_env is None:
                 os.environ.pop("VT_ENABLE_SLM", None)
