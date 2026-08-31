@@ -852,7 +852,11 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
     except:
         pass
 
-    return np.concatenate(frames, axis=0) if frames else np.array([])
+    if not frames:
+        return np.array([], dtype=np.float32)
+    if len(frames) == 1:
+        return frames[0]
+    return np.concatenate(frames, axis=0)
 
 
 
@@ -894,24 +898,13 @@ def process_audio_stream(audio_data=None):
     
     transcribe_start_time = time.time()
     
-    # Transcribe directly from numpy array
+    # Transcribe directly from numpy array (zero-copy flattening)
     try:
-        # sounddevice returns data in float32, mono recording should be flattened to 1D
-        if hasattr(audio_data, "flatten"):
-            audio_data = audio_data.flatten()
-            
-        result = transcribe_audio(audio_data=audio_data, sample_rate=ACTUAL_RATE, device=DEVICE)
+        flat_audio = np.asarray(audio_data, dtype=np.float32).ravel()
+        result = transcribe_audio(audio_data=flat_audio, sample_rate=ACTUAL_RATE, device=DEVICE)
     except Exception as e:
         print(f"Processing error: {e}")
         result = ""
-    finally:
-        # Explicitly free audio data memory
-        if audio_data is not None and hasattr(audio_data, 'reshape'):
-            try:
-                audio_data = audio_data.reshape(0)
-            except:
-                pass
-        del audio_data
         
     transcribe_end_time = time.time()
     

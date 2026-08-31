@@ -13,6 +13,9 @@ Fixes common ASR artifacts, disfluencies, and punctuation errors:
 import os
 import re
 import time
+import json
+import urllib.request
+import urllib.error
 
 # Precompiled hallucination patterns
 HALLUCINATION_PATTERNS = [
@@ -62,6 +65,22 @@ STUTTER_DIRECT_REGEX = re.compile(
     r")\s+\1\b",
     re.IGNORECASE
 )
+
+_STUTTER_DIRECT_WORDS = frozenset({
+    "a", "an", "the", "my", "your", "our", "their", "this", "that",
+    "in", "on", "at", "to", "for", "from", "with", "by", "of", "about", "into",
+    "might", "can", "could", "will", "would", "should", "must", "is", "was", "are", "were",
+    "and", "or", "but", "so", "because", "if", "we", "i", "you", "he", "she", "they"
+})
+
+def _has_stutter_direct(text_lower: str) -> bool:
+    prev = ""
+    for w in text_lower.split():
+        w_clean = w.strip(".,!?:;\"'()[]{}")
+        if w_clean and w_clean == prev and w_clean in _STUTTER_DIRECT_WORDS:
+            return True
+        prev = w_clean
+    return False
 
 # Preposition compound stutters (e.g. "into in to" -> "into", "in to into" -> "into", "onto on to" -> "onto")
 PREPOSITION_COMPOUND_STUTTER_REGEX = re.compile(
@@ -121,8 +140,8 @@ def normalize_mid_sentence_casing(text: str) -> str:
     Decapitalizes words appearing mid-sentence without preceding sentence-ending punctuation,
     unless the word is a recognized acronym or proper noun.
     """
-    if not text:
-        return ""
+    if not text or not any(c.isupper() for c in text[1:]):
+        return text
 
     def _replace_mid_sentence_cap(m):
         word = m.group(1)
@@ -132,7 +151,7 @@ def normalize_mid_sentence_casing(text: str) -> str:
         # (e.g. "to Alice", "on Wednesday"), unless it is a common English word
         # that ASR over-capitalized (e.g. "to Like", "on This")
         prefix = text[:m.start()].rstrip()
-        prev_word = prefix.split()[-1].rstrip(".,;:!?") if prefix else ""
+        prev_word = prefix.rsplit(None, 1)[-1].rstrip(".,;:!?") if prefix else ""
         if prev_word.lower() in PROPER_NOUN_PRECEDERS and word.lower() not in COMMON_MID_SENTENCE_WORDS:
             return m.group(0)
         lowercased = word[0].lower() + word[1:]
@@ -178,8 +197,11 @@ RETRACTION_REPLACEMENT_PATTERNS = [
     # "scratch that" / "strike that" / "never mind that" at end of phrase
     re.compile(r"(?:[,.]*\s*)(?:scratch\s+that|strike\s+that|never\s+mind\s+that)[.!?,;:]*\s*$", re.IGNORECASE),
     # "X... actually Y" / "X... make that Y" / "X... no wait Y" / "X... I mean Y" / "X... or rather Y"
-    re.compile(r"(?:\b(at|in|on|to|for|by|from|with|of|about)\s+)?\b([a-zA-Z0-9$%\.:]+(?:\s+[a-zA-Z0-9$%\.:]+){0,1})\s*[,.]*\s*(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)\s+([a-zA-Z0-9$%\.:]+(?:\s+[a-zA-Z0-9$%\.:]+){0,2})\b", re.IGNORECASE),
+    re.compile(r"(?:\b(at|in|on|to|for|by|from|with|of|about)\s+)?\b([a-zA-Z0-9$%.\:]+(?:\s+[a-zA-Z0-9$%.\:]+){0,1})\s*[,.]*\s*(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)\s+([a-zA-Z0-9$%.\:]+(?:\s+[a-zA-Z0-9$%.\:]+){0,2})\b", re.IGNORECASE),
 ]
+
+_RETRACTION_TRIGGER_0 = ("scratch", "strike", "never")
+_RETRACTION_TRIGGER_1 = ("actually", "make that", "no wait", "mean", "rather")
 
 def _sanitize_slm_output(input_text: str, output_text: str) -> str:
     """
@@ -193,7 +215,8 @@ def _sanitize_slm_output(input_text: str, output_text: str) -> str:
     if xml_match:
         clean_output = xml_match.group(1).strip()
     else:
-        clean_output = re.sub(r'</?[a-zA-Z0-9_-]+>', '', clean_output).strip()
+        if '<' in clean_output:
+            clean_output = re.sub(r'</?[a-zA-Z0-9_-]+>', '', clean_output).strip()
 
     # Remove enclosing quotes if model wrapped output in quotes
     if clean_output.startswith('"') and clean_output.endswith('"') and len(clean_output) > 2:
@@ -205,10 +228,13 @@ def _sanitize_slm_output(input_text: str, output_text: str) -> str:
     # by the word-boundary rules regardless of the input.
     if '"' not in input_text and '“' not in input_text and '”' not in input_text:
         clean_output = re.sub(r'["“”]', '', clean_output)
-    clean_output = re.sub(r"(?<!\w)'(?=\w)|(?<=\w)'(?!\w)|(?<=[.,;:!?])'(?=\s|$)", '', clean_output)
-    clean_output = re.sub(r"[‘’]", '', clean_output)
+    if "'" in clean_output:
+        clean_output = re.sub(r"(?<!\w)'(?=\w)|(?<=\w)'(?!\w)|(?<=[.,;:!?])'(?=\s|$)", '', clean_output)
+    if '‘' in clean_output or '’' in clean_output:
+        clean_output = re.sub(r"[‘’]", '', clean_output)
     # Remove markdown artifacts (code fences, backticks, bold/italic markers)
-    clean_output = re.sub(r'`{1,3}|\*\*|\*|__|#{1,6}\s?', '', clean_output)
+    if '`' in clean_output or '*' in clean_output or '_' in clean_output or '#' in clean_output:
+        clean_output = re.sub(r'`{1,3}|\*\*|\*|__|#{1,6}\s?', '', clean_output)
 
     # Normalize spacing after punctuation and stray punctuation sequences
     clean_output = re.sub(r'([,.!?;:])([a-zA-Z0-9])', r'\1 \2', clean_output)
@@ -227,24 +253,28 @@ def process_verbal_retractions(text: str) -> str:
     if not text:
         return ""
         
+    text_lower = text.lower()
+    has_0 = any(kw in text_lower for kw in _RETRACTION_TRIGGER_0)
+    has_1 = any(kw in text_lower for kw in _RETRACTION_TRIGGER_1)
+    if not has_0 and not has_1:
+        return text
+
     cleaned = text
     # 1. Handle "scratch that" tail deletion
-    cleaned = RETRACTION_REPLACEMENT_PATTERNS[0].sub("", cleaned)
+    if has_0:
+        cleaned = RETRACTION_REPLACEMENT_PATTERNS[0].sub("", cleaned)
     
     # 2. Handle verbal replacements ("X... actually Y", "X... I mean Y")
-    def _replace_retraction(m):
-        prep = m.group(1)
-        target = m.group(3)
-        if prep and not re.match(r"^(?:at|in|on|to|for|by|from|with|of|about)\b", target, re.I):
-            return f"{prep} {target}"
-        return target
-        
-    cleaned = RETRACTION_REPLACEMENT_PATTERNS[1].sub(_replace_retraction, cleaned)
+    if has_1:
+        def _replace_retraction(m):
+            prep = m.group(1)
+            target = m.group(3)
+            if prep and not re.match(r"^(?:at|in|on|to|for|by|from|with|of|about)\b", target, re.I):
+                return f"{prep} {target}"
+            return target
+            
+        cleaned = RETRACTION_REPLACEMENT_PATTERNS[1].sub(_replace_retraction, cleaned)
     return cleaned.strip()
-
-import json
-import urllib.request
-import urllib.error
 
 VLLM_API_URL = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/completions")
 
@@ -497,6 +527,14 @@ _NUMBER_PHRASE_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+_ALL_NUMBER_WORDS_SET = frozenset(
+    list(_NUMBER_ONES.keys()) +
+    list(_NUMBER_TENS.keys()) +
+    list(_NUMBER_SCALES.keys()) +
+    list(_ORDINAL_TO_CARDINAL.keys()) +
+    ["oh", "point", "percent", "o'clock", "am", "pm", "double", "triple", "a.m.", "p.m."]
+)
+
 # Contexts where a standalone "one" is a pronoun/idiom, not a number
 _ONE_BEFORE_PROTECT = {"the", "this", "that", "no", "any", "each", "every", "first", "last",
                        "only", "another", "other", "some", "big", "little", "small", "number"}
@@ -522,26 +560,30 @@ def _parse_cardinal(tokens):
         if tok == "and":
             last_was_ones = False
             continue
-        if tok in _NUMBER_ONES:
+        v_one = _NUMBER_ONES.get(tok)
+        if v_one is not None:
             if last_was_ones:
                 return None  # 'one two' style digit string, not a cardinal
-            current += _NUMBER_ONES[tok]
+            current += v_one
             last_was_ones = True
-        elif tok in _NUMBER_TENS:
+            continue
+        v_ten = _NUMBER_TENS.get(tok)
+        if v_ten is not None:
             if last_was_ones:
                 return None  # 'nine thirty' is not a valid cardinal
-            current += _NUMBER_TENS[tok]
+            current += v_ten
             last_was_ones = False
-        elif tok in _NUMBER_SCALES:
-            scale = _NUMBER_SCALES[tok]
-            if scale >= 1000:
-                total += (current or 1) * scale
+            continue
+        v_scale = _NUMBER_SCALES.get(tok)
+        if v_scale is not None:
+            if v_scale >= 1000:
+                total += (current or 1) * v_scale
                 current = 0
             else:
-                current = (current or 1) * scale
+                current = (current or 1) * v_scale
             last_was_ones = False
-        else:
-            return None
+            continue
+        return None
     return total + current
 
 
@@ -555,7 +597,8 @@ def _parse_ordinal(tokens):
     if not tokens:
         return None
     last = tokens[-1].lower()
-    if last not in _ORDINAL_TO_CARDINAL:
+    v_ord = _ORDINAL_VALUE.get(last)
+    if v_ord is None:
         return None
     card_tokens = []
     for i, tok in enumerate(tokens):
@@ -574,24 +617,28 @@ def _parse_ordinal(tokens):
     n = _parse_cardinal(card_tokens)
     if n is None:
         return None
-    return n, _ordinal_suffix(_ORDINAL_VALUE[last])
+    return n, _ordinal_suffix(v_ord)
 
+
+_YEAR_REGEX_1 = re.compile(
+    r"^(nineteen|twenty)\s+(ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+    r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)"
+    r"(?:\s+(one|two|three|four|five|six|seven|eight|nine))?$"
+)
+_YEAR_REGEX_2 = re.compile(r"^two\s+thousand(?:\s+and)?(?:\s+(.+))?$")
 
 def _parse_year(phrase_lower: str):
     """Recognize common spoken-year patterns, e.g. 'nineteen eighty five' -> 1985."""
-    m = re.match(
-        r"^(nineteen|twenty)\s+(ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
-        r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)"
-        r"(?:\s+(one|two|three|four|five|six|seven|eight|nine))?$",
-        phrase_lower,
-    )
+    if not (phrase_lower.startswith("nineteen ") or phrase_lower.startswith("twenty ") or phrase_lower.startswith("two thousand")):
+        return None
+    m = _YEAR_REGEX_1.match(phrase_lower)
     if m:
         century = 1900 if m.group(1) == "nineteen" else 2000
         rest = _NUMBER_TENS.get(m.group(2), 0) or _NUMBER_ONES.get(m.group(2), 0)
         if m.group(3):
             rest += _NUMBER_ONES[m.group(3)]
         return century + rest
-    m2 = re.match(r"^two\s+thousand(?:\s+and)?(?:\s+(.+))?$", phrase_lower)
+    m2 = _YEAR_REGEX_2.match(phrase_lower)
     if m2:
         if not m2.group(1):
             return 2000
@@ -603,7 +650,7 @@ def _parse_year(phrase_lower: str):
 
 def _expand_digit_string(m):
     """Convert a matched digit-word string (e.g. 'double oh seven') into digits."""
-    parts = [p for p in re.split(r"[\s\-]+", m.group(0)) if p]
+    parts = m.group(0).replace("-", " ").split()
     out = []
     i = 0
     while i < len(parts):
@@ -611,7 +658,8 @@ def _expand_digit_string(m):
         if p in ("double", "triple"):
             mult = 2 if p == "double" else 3
             i += 1
-            out.append(_DIGIT_WORDS.get(parts[i].lower(), "") * mult)
+            if i < len(parts):
+                out.append(_DIGIT_WORDS.get(parts[i].lower(), "") * mult)
         else:
             out.append(_DIGIT_WORDS.get(p, ""))
         i += 1
@@ -638,11 +686,12 @@ def _is_pure_digit_string(tokens):
 def _parse_clock_time(body):
     """Parse 'nine thirty' / 'three fifteen' / 'two' as clock time -> '9:30' / '3:15' / '2'."""
     parts = body.split()
-    if len(parts) == 1:
+    lp = len(parts)
+    if lp == 1:
         h = _NUMBER_ONES.get(parts[0])
         if h is not None and 1 <= h <= 12:
             return str(h)
-    elif len(parts) == 2:
+    elif lp == 2:
         h = _NUMBER_ONES.get(parts[0])
         m1 = _NUMBER_ONES.get(parts[1])  # teens: 10-19
         m2 = _NUMBER_TENS.get(parts[1])  # tens: 20-59
@@ -651,7 +700,7 @@ def _parse_clock_time(body):
                 return f"{h}:{m1}"
             if m2 is not None and m2 >= 20:
                 return f"{h}:{m2}"
-    elif len(parts) == 3:
+    elif lp == 3:
         h = _NUMBER_ONES.get(parts[0])
         m2 = _NUMBER_TENS.get(parts[1])
         o = _NUMBER_ONES.get(parts[2])
@@ -660,17 +709,28 @@ def _parse_clock_time(body):
     return None
 
 
+def _normalize_a_an(phrase):
+    """Replace a leading 'a'/'an' before a number word with 'one' (e.g. 'a hundred' -> 'one hundred')."""
+    parts = phrase.split()
+    if parts and parts[0] in ("a", "an") and len(parts) > 1:
+        parts[0] = "one"
+    return " ".join(parts)
+
+
+_TIME_MARKERS = (("o'clock", "o'clock"), ("p.m.", "PM"), ("a.m.", "AM"), ("p m", "PM"), ("a m", "AM"), ("pm", "PM"), ("am", "AM"))
+_TIME_MARKERS_TUPLE = ("o'clock", "p.m.", "a.m.", "p m", "a m", "pm", "am")
+
 def _convert_number_phrase(m):
     """Try to convert a number-word phrase to digits; return unchanged if unparseable."""
     phrase = m.group(0).strip()
-    tokens = [t for t in re.split(r"[\s\-]+", phrase) if t]
+    tokens = phrase.replace("-", " ").split()
     lower_tokens = [t.lower() for t in tokens]
     joined = " ".join(lower_tokens)
 
     # Protect ambiguous standalone "one" ("the one", "no one", "one of", "one thing"...)
     if len(lower_tokens) == 1 and lower_tokens[0] == "one":
-        before = m.string[:m.start()].rstrip().split()[-1].lower() if m.start() > 0 else ""
-        after = m.string[m.end():].lstrip().split()[0].lower() if m.end() < len(m.string) else ""
+        before = m.string[:m.start()].rstrip().rsplit(None, 1)[-1].lower() if m.start() > 0 else ""
+        after = m.string[m.end():].lstrip().split(None, 1)[0].lower() if m.end() < len(m.string) else ""
         if before in _ONE_BEFORE_PROTECT or after in _ONE_AFTER_PROTECT:
             return m.group(0)
         return "1"
@@ -688,16 +748,18 @@ def _convert_number_phrase(m):
                 return f"{n}%"
 
     # Time: "five pm" / "five p m" / "five p.m." / "five o'clock" -> "5 PM" / "5 o'clock"
-    for marker, repl in (("o'clock", "o'clock"), ("p.m.", "PM"), ("a.m.", "AM"), ("p m", "PM"), ("a m", "AM"), ("pm", "PM"), ("am", "AM")):
-        if joined.endswith(marker):
-            body = joined[: -len(marker)].strip()
-            if body:
-                n = _parse_cardinal(_normalize_a_an(body).split())
-                if n is not None:
-                    return f"{n} {repl}"
-                clock = _parse_clock_time(_normalize_a_an(body))
-                if clock is not None:
-                    return f"{clock} {repl}"
+    if joined.endswith(_TIME_MARKERS_TUPLE):
+        for marker, repl in _TIME_MARKERS:
+            if joined.endswith(marker):
+                body = joined[: -len(marker)].strip()
+                if body:
+                    n = _parse_cardinal(_normalize_a_an(body).split())
+                    if n is not None:
+                        return f"{n} {repl}"
+                    clock = _parse_clock_time(_normalize_a_an(body))
+                    if clock is not None:
+                        return f"{clock} {repl}"
+                break
 
     # Decimal: "three point one four" -> "3.14"
     if " point " in joined:
@@ -718,9 +780,10 @@ def _convert_number_phrase(m):
                 return f"{n}.{''.join(frac)}"
 
     # Years
-    y = _parse_year(joined)
-    if y is not None:
-        return str(y)
+    if joined.startswith(("nineteen ", "twenty ", "two thousand")):
+        y = _parse_year(joined)
+        if y is not None:
+            return str(y)
 
     # Ordinals
     ord_ = _parse_ordinal(tokens)
@@ -729,7 +792,11 @@ def _convert_number_phrase(m):
         return f"{n}{suffix}"
 
     # Cardinals
-    card_tokens = _normalize_a_an(joined).split()
+    if lower_tokens[0] in ("a", "an") and len(lower_tokens) > 1:
+        card_tokens = ["one"] + lower_tokens[1:]
+    else:
+        card_tokens = lower_tokens
+
     n = _parse_cardinal(card_tokens)
     if n is not None:
         return f"{n:,}" if n >= 1000 else str(n)
@@ -737,12 +804,16 @@ def _convert_number_phrase(m):
     return m.group(0)
 
 
-def _normalize_a_an(phrase):
-    """Replace a leading 'a'/'an' before a number word with 'one' (e.g. 'a hundred' -> 'one hundred')."""
-    parts = phrase.split()
-    if parts and parts[0] in ("a", "an") and len(parts) > 1:
-        parts[0] = "one"
-    return " ".join(parts)
+def _has_number_words(text_lower: str) -> bool:
+    for word in text_lower.split():
+        w = word.strip(".,!?:;\"'()[]{}")
+        if w in _ALL_NUMBER_WORDS_SET:
+            return True
+        if "-" in w:
+            for part in w.split("-"):
+                if part in _ALL_NUMBER_WORDS_SET:
+                    return True
+    return False
 
 
 def convert_number_words_to_digits(text: str) -> str:
@@ -751,6 +822,9 @@ def convert_number_words_to_digits(text: str) -> str:
         return text
     if not text:
         return ""
+    text_lower = text.lower()
+    if not _has_number_words(text_lower):
+        return text
     # General number phrases first (also handles digit strings and decimals);
     # then a digit-string fallback for any runs the phrase regex missed.
     converted = _NUMBER_PHRASE_REGEX.sub(_convert_number_phrase, text)
@@ -766,6 +840,18 @@ def set_number_digits_enabled(enabled: bool) -> None:
     global _number_digits_enabled
     _number_digits_enabled = bool(enabled)
 
+
+COMMA_DUP_REGEX = re.compile(r"[,]{2,}")
+PUNCT_COMMA_REGEX = re.compile(r"([.?!,])\s*,\s*")
+MULTI_SPACE_REGEX = re.compile(r"\s{2,}")
+STANDALONE_I_REGEX = re.compile(r"\bi\b")
+CONTRACTION_I_REGEX = re.compile(r"\bi('[a-z]+)\b")
+
+_HALLUCINATION_KEYWORDS = ("watching", "subtitles", "subscribe")
+_MUTTERING_KEYWORDS = ("oop", "whoop", "never")
+_FILLER_KEYWORDS = ("um", "uh", "er", "ah")
+
+
 def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     """
     Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
@@ -775,91 +861,114 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
         return ""
         
     cleaned = text
+    cleaned_lower = text.lower()
     
     # 0. Apply verbal edit self-correction pre-pass & hesitation filler removal
     cleaned = process_verbal_retractions(cleaned)
-    cleaned = FILLER_WORDS_REGEX.sub("", cleaned)
+    if any(k in cleaned_lower for k in _FILLER_KEYWORDS):
+        cleaned = FILLER_WORDS_REGEX.sub("", cleaned)
     
     # 0. Apply optional vLLM / SLM rewrite pass (unless bypassed for intermediate streaming micro-chunks)
-    if not skip_slm:
+    if not skip_slm and os.environ.get("VT_ENABLE_SLM", "0") == "1":
         cleaned = process_slm_llm_rewrite(cleaned)
     
     # 1. Hallucination and trailing muttering stripping
-    for pat in HALLUCINATION_PATTERNS:
-        cleaned = pat.sub("", cleaned)
+    cleaned_lower = cleaned.lower()
+    if any(k in cleaned_lower for k in _HALLUCINATION_KEYWORDS):
+        for pat in HALLUCINATION_PATTERNS:
+            cleaned = pat.sub("", cleaned)
         
-    while True:
-        new_cleaned = TRAILING_MUTTERINGS_REGEX.sub(r"\1", cleaned)
-        if new_cleaned == cleaned:
-            break
-        cleaned = new_cleaned
-        
-    cleaned = STANDALONE_MUTTERINGS_REGEX.sub("", cleaned)
-    if STANDALONE_SHORT_HALLUCINATIONS.match(cleaned.strip()):
-        return ""
+    if any(k in cleaned_lower for k in _MUTTERING_KEYWORDS):
+        while True:
+            new_cleaned = TRAILING_MUTTERINGS_REGEX.sub(r"\1", cleaned)
+            if new_cleaned == cleaned:
+                break
+            cleaned = new_cleaned
+        cleaned = STANDALONE_MUTTERINGS_REGEX.sub("", cleaned)
+
+    if len(cleaned) <= 40:
+        stripped_h = cleaned.strip(" .?!").lower()
+        if stripped_h in ("you", "bye", "thank you", "thanks", "subtitles"):
+            return ""
     
     # If the text was reduced to only punctuation / whitespace, return empty
-    if re.match(r"^[.,!?;:\s]*$", cleaned):
+    if not cleaned.strip(".,!?;: \t\n\r"):
         return ""
     
     # 2. Deduplicate repeated words across punctuation (e.g. "about. about" -> "about", "a. a" -> "a")
-    cleaned = STUTTER_PUNCT_REGEX.sub(r"\1", cleaned)
+    if any(p in cleaned for p in ".,?!;:"):
+        cleaned = STUTTER_PUNCT_REGEX.sub(r"\1", cleaned)
     
     # 3. Deduplicate direct filler stutters (e.g. "about about" -> "about", "the the" -> "the")
-    cleaned = STUTTER_DIRECT_REGEX.sub(r"\1", cleaned)
-    cleaned = PREPOSITION_COMPOUND_STUTTER_REGEX.sub(lambda m: "into" if "into" in m.group(0).lower() else "onto", cleaned)
+    if _has_stutter_direct(cleaned_lower):
+        cleaned = STUTTER_DIRECT_REGEX.sub(r"\1", cleaned)
+    if "to" in cleaned_lower and ("into" in cleaned_lower or "onto" in cleaned_lower or "in to" in cleaned_lower or "on to" in cleaned_lower):
+        cleaned = PREPOSITION_COMPOUND_STUTTER_REGEX.sub(lambda m: "into" if "into" in m.group(0).lower() else "onto", cleaned)
     
+    # 4-9. Sentence boundary & clause linking fixes
+    has_period = "." in cleaned
+    has_clause_punct = has_period or "?" in cleaned or "!" in cleaned
+
     # 4. Fix isolated single-word discourse markers (e.g. "So. I am" -> "So, I am", "Yeah. Revert" -> "Yeah, revert")
-    def _fix_discourse(m):
-        prefix = m.group(1)
-        word = m.group(2)
-        next_char = _preserve_i_casing(m.group(3), m.string, m.end())
-        return f"{prefix}{word}, {next_char}"
-    cleaned = DISCOURSE_STARTERS_REGEX.sub(_fix_discourse, cleaned)
+    if has_period:
+        def _fix_discourse(m):
+            prefix = m.group(1)
+            word = m.group(2)
+            next_char = _preserve_i_casing(m.group(3), m.string, m.end())
+            return f"{prefix}{word}, {next_char}"
+        cleaned = DISCOURSE_STARTERS_REGEX.sub(_fix_discourse, cleaned)
     
     # 5. Dangling prepositions & determiners before period (e.g. "put a. period" -> "put a period")
-    def _fix_dangling(m):
-        w1 = m.group(1)
-        next_char = _preserve_i_casing(m.group(2), m.string, m.end())
-        return f"{w1} {next_char}"
-    cleaned = DANGLING_WORDS_REGEX.sub(_fix_dangling, cleaned)
+    if has_clause_punct:
+        def _fix_dangling(m):
+            w1 = m.group(1)
+            next_char = _preserve_i_casing(m.group(2), m.string, m.end())
+            return f"{w1} {next_char}"
+        cleaned = DANGLING_WORDS_REGEX.sub(_fix_dangling, cleaned)
     
-    # 6. Incomplete linking verbs followed by lowercase continuation (e.g. "thing was. something")
-    cleaned = LINKING_VERB_LOWER_REGEX.sub(r"\1 \2", cleaned)
-    
-    # 7. Coordinating conjunctions after period (e.g. "commit. and force push" -> "commit, and force push")
-    cleaned = COORD_CONJUNCTIONS_REGEX.sub(lambda m: f", {m.group(1).lower()}", cleaned)
-    
-    # 8. Subordinating conjunctions after period (e.g. ". because", ". which")
-    cleaned = SUBORD_CONJUNCTIONS_REGEX.sub(lambda m: f" {m.group(1).lower()}", cleaned)
-    
-    # 9. General lowercase continuation after period (e.g. ". something" -> " something")
-    cleaned = LOWERCASE_AFTER_PERIOD_REGEX.sub(r" \1", cleaned)
+    if has_period:
+        # 6. Incomplete linking verbs followed by lowercase continuation (e.g. "thing was. something")
+        cleaned = LINKING_VERB_LOWER_REGEX.sub(r"\1 \2", cleaned)
+        
+        # 7. Coordinating conjunctions after period (e.g. "commit. and force push" -> "commit, and force push")
+        cleaned = COORD_CONJUNCTIONS_REGEX.sub(lambda m: f", {m.group(1).lower()}", cleaned)
+        
+        # 8. Subordinating conjunctions after period (e.g. ". because", ". which")
+        cleaned = SUBORD_CONJUNCTIONS_REGEX.sub(lambda m: f" {m.group(1).lower()}", cleaned)
+        
+        # 9. General lowercase continuation after period (e.g. ". something" -> " something")
+        cleaned = LOWERCASE_AFTER_PERIOD_REGEX.sub(r" \1", cleaned)
     
     # 10. Clean up duplicate punctuation and normalize spacing
-    cleaned = re.sub(r"[,]{2,}", ",", cleaned)
-    cleaned = re.sub(r"([.?!,])\s*,\s*", r"\1 ", cleaned)
-    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    if ",," in cleaned:
+        cleaned = COMMA_DUP_REGEX.sub(",", cleaned)
+    if "," in cleaned:
+        cleaned = PUNCT_COMMA_REGEX.sub(r"\1 ", cleaned)
+    if "  " in cleaned:
+        cleaned = MULTI_SPACE_REGEX.sub(" ", cleaned)
 
     # 10b. Convert spoken number words to digits ("twenty five" -> "25", phone digit strings, ...)
     cleaned = convert_number_words_to_digits(cleaned)
 
     # 11. Normalize standalone I and contractions
-    cleaned = re.sub(r"\bi\b", "I", cleaned)
-    cleaned = re.sub(r"\bi('[a-z]+)\b", r"I\1", cleaned)
+    if "i" in cleaned:
+        cleaned = STANDALONE_I_REGEX.sub("I", cleaned)
+        cleaned = CONTRACTION_I_REGEX.sub(r"I\1", cleaned)
     
     # 12. Normalize mid-sentence random capitalizations
     cleaned = normalize_mid_sentence_casing(cleaned)
     
     # 13. Scrub mid-phrase spurious question marks
-    cleaned = MID_PHRASE_QUESTION_MARK_REGEX.sub(r"\1 \2", cleaned)
+    if "?" in cleaned:
+        cleaned = MID_PHRASE_QUESTION_MARK_REGEX.sub(r"\1 \2", cleaned)
     
     cleaned = cleaned.strip()
-    if re.match(r"^[.,!?;:\s]*$", cleaned):
+    if not cleaned or not cleaned.strip(".,!?;: \t\n\r"):
         return ""
         
     # 14. Ensure complete statement utterances end with terminal punctuation
-    if len(cleaned.split()) >= 3 and not re.search(r"[.!?:]\s*$", cleaned):
-        cleaned += "."
+    if not cleaned.endswith((".", "!", "?", ":")):
+        if len(cleaned.split()) >= 3:
+            cleaned += "."
         
     return cleaned
