@@ -2,13 +2,16 @@
 """
 Autonomous Benchmark Harness for Voice Transcriber.
 Calculates execution latency (ms), real-time factor (RTF), and verifies test suite health.
-Outputs a clean JSON metrics payload to stdout.
+Features a hardware Mutex lock file (/tmp/vt_benchmark.lock) to prevent resource contention
+and collisions when subagents benchmark concurrently.
 """
 
 import os
 import sys
 import time
 import json
+import fcntl
+import argparse
 import numpy as np
 import subprocess
 
@@ -29,6 +32,19 @@ BENCHMARK_TEXT_SAMPLES = [
     "the first second third fourth fifth sixth seventh eighth ninth tenth",
     "wait a second i need one more minute before we start the presentation",
 ]
+
+LOCK_FILE_PATH = "/tmp/vt_benchmark.lock"
+
+class HardwareLock:
+    """Ensures exclusive hardware access during benchmarking across processes/subagents."""
+    def __enter__(self):
+        self.lock_file = open(LOCK_FILE_PATH, "w")
+        fcntl.flock(self.lock_file, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        fcntl.flock(self.lock_file, fcntl.LOCK_UN)
+        self.lock_file.close()
 
 def run_pytest_suite() -> bool:
     """Executes pytest suite to guarantee zero regression on accuracy/correctness."""
@@ -79,33 +95,41 @@ def benchmark_buffer_processing() -> float:
     return round(float(np.median(latencies)), 3)
 
 def main():
-    # 1. Verify correctness
-    tests_passed = run_pytest_suite()
-    if not tests_passed:
-        print(json.dumps({
-            "passed": False,
-            "reason": "Pytest unit tests failed",
-            "latency_ms": 999999.0,
-            "post_processor_ms": 999999.0,
-            "buffer_proc_ms": 999999.0
-        }))
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Voice Transcriber Benchmark Harness")
+    parser.add_argument("--agent-tag", type=str, default="Main-Agent", help="Tag identifying the agent running the test")
+    args = parser.parse_args()
+
+    # Acquire hardware mutex lock to prevent concurrent test collisions
+    with HardwareLock():
+        # 1. Verify correctness
+        tests_passed = run_pytest_suite()
+        if not tests_passed:
+            print(json.dumps({
+                "agent": args.agent_tag,
+                "passed": False,
+                "reason": "Pytest unit tests failed",
+                "latency_ms": 999999.0,
+                "post_processor_ms": 999999.0,
+                "buffer_proc_ms": 999999.0
+            }))
+            sys.exit(1)
+            
+        # 2. Benchmark latency
+        post_proc_ms = benchmark_post_processor()
+        buffer_proc_ms = benchmark_buffer_processing()
         
-    # 2. Benchmark latency
-    post_proc_ms = benchmark_post_processor()
-    buffer_proc_ms = benchmark_buffer_processing()
-    
-    total_latency_ms = post_proc_ms + buffer_proc_ms
-    
-    output = {
-        "passed": True,
-        "latency_ms": round(total_latency_ms, 3),
-        "post_processor_ms": post_proc_ms,
-        "buffer_proc_ms": buffer_proc_ms,
-        "samples_evaluated": len(BENCHMARK_TEXT_SAMPLES)
-    }
-    
-    print(json.dumps(output))
+        total_latency_ms = post_proc_ms + buffer_proc_ms
+        
+        output = {
+            "agent": args.agent_tag,
+            "passed": True,
+            "latency_ms": round(total_latency_ms, 3),
+            "post_processor_ms": post_proc_ms,
+            "buffer_proc_ms": buffer_proc_ms,
+            "samples_evaluated": len(BENCHMARK_TEXT_SAMPLES)
+        }
+        
+        print(json.dumps(output))
 
 if __name__ == "__main__":
     main()
