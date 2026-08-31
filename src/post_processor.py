@@ -99,11 +99,22 @@ MID_PHRASE_QUESTION_MARK_REGEX = re.compile(
     r"\b([a-zA-Z0-9]+)\s*\?\s+([a-z][a-zA-Z0-9_-]*)\b"
 )
 
+# ASR phonetic mis-hearings of the "AI" acronym (e.g. "a eyes" -> "AI").
+# Whisper/Cohere sometimes transcribe spoken "AI" as "a eyes" / "an eyes".
+# Both are ALWAYS ungrammatical English ("a"/"an" can never precede the plural
+# "eyes"), so they're safe to collapse back to the acronym. "an eye" is NOT
+# included (valid English: "an eye for an eye"), nor is "a eye" (many speakers
+# casually say "a eye" meaning "an eye").
+AI_MISHEARINGS_REGEX = re.compile(
+    r"\b(?:a|an)\s+eyes\b",
+    re.IGNORECASE
+)
+
 # Common technical acronyms & proper nouns to preserve casing mid-sentence
 TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
     "I", "vLLM", "NixOS", "PyTorch", "Python", "GitHub", "Git", "WSL", "WSLg",
     "CPU", "GPU", "RAM", "VRAM", "HDMI", "ALSA", "PipeWire", "PortAudio",
-    "REST", "API", "LLM", "SLM", "ASR", "JSON", "YAML", "ONNX", "Cohere",
+    "REST", "API", "LLM", "SLM", "ASR", "JSON", "YAML", "ONNX", "VM", "Cohere",
     "Whisper", "Qwen", "Linux", "Windows", "CUDA", "ID", "UI", "TUI", "CLI",
     "OK", "IP", "URL", "HTTP", "HTTPS", "SSD", "NVMe", "USB", "PCIe", "BIOS"
 }
@@ -146,6 +157,11 @@ def normalize_mid_sentence_casing(text: str) -> str:
     def _replace_mid_sentence_cap(m):
         word = m.group(1)
         if word in TECHNICAL_ACRONYMS_AND_PROPER_NOUNS or word.isupper() or len(word) == 1:
+            return m.group(0)
+        # Preserve plural acronyms mid-sentence ("LLMs", "VMs", "GPUs", "APIs", "SSDs"):
+        # all-caps stem + trailing plural 's'. The base-length guard keeps "Is"/"As"/"Us"
+        # from being exempted (they should still decapitalize to is/as/us).
+        if len(word) > 2 and word.endswith("s") and word[:-1].isupper():
             return m.group(0)
         # Preserve proper nouns (names/places/days) that follow a preposition
         # (e.g. "to Alice", "on Wednesday"), unless it is a common English word
@@ -867,6 +883,10 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     cleaned = process_verbal_retractions(cleaned)
     if any(k in cleaned_lower for k in _FILLER_KEYWORDS):
         cleaned = FILLER_WORDS_REGEX.sub("", cleaned)
+
+    # 0b. Recover the "AI" acronym from common ASR mis-hearings ("a eyes" -> "AI")
+    if "eyes" in cleaned_lower:
+        cleaned = AI_MISHEARINGS_REGEX.sub("AI", cleaned)
     
     # 0. Apply optional vLLM / SLM rewrite pass (unless bypassed for intermediate streaming micro-chunks)
     if not skip_slm and os.environ.get("VT_ENABLE_SLM", "0") == "1":

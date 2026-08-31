@@ -73,6 +73,24 @@ class TestMicroBatchingEngine(unittest.TestCase):
             
             # Discourse markers
             self.assertEqual(clean_speech_transcription("So. I think we should proceed"), "So, I think we should proceed.")
+
+            # Plural acronyms keep their casing mid-sentence ("LLMs", "VMs", "GPUs", ...)
+            self.assertEqual(clean_speech_transcription("We use LLMs every day"), "We use LLMs every day.")
+            self.assertEqual(clean_speech_transcription("We spin up VMs in the cloud"), "We spin up VMs in the cloud.")
+            self.assertEqual(clean_speech_transcription("I have GPUs and SSDs in my rig"), "I have GPUs and SSDs in my rig.")
+            self.assertEqual(clean_speech_transcription("The APIs and CLIs work great"), "The APIs and CLIs work great.")
+
+            # ...while over-capitalized common words still get decapitalized
+            self.assertEqual(clean_speech_transcription("This Is important"), "This is important.")
+            self.assertEqual(clean_speech_transcription("He Asks about it"), "He asks about it.")
+
+            # ASR mis-hearings of the "AI" acronym recover to "AI"
+            self.assertEqual(clean_speech_transcription("Hey, if a shoe company can make a eyes, so can a plane company"), "Hey, if a shoe company can make AI, so can a plane company.")
+            self.assertEqual(clean_speech_transcription("The agent used an eyes model"), "The agent used AI model.")
+            # ...but valid "an eye" / "a eye" / bare "eyes" are untouched
+            self.assertEqual(clean_speech_transcription("He has an eye for design"), "He has an eye for design.")
+            self.assertEqual(clean_speech_transcription("She has a eye for detail"), "She has a eye for detail.")
+            self.assertEqual(clean_speech_transcription("Her eyes are blue"), "Her eyes are blue.")
         finally:
             if old_env is None:
                 os.environ.pop("VT_ENABLE_SLM", None)
