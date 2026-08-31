@@ -257,14 +257,6 @@ VLLM_API_URL = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/comp
 #    - Llama-3.2-1B-Instruct: https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct
 # 3. Manual Download Command:
 #    sudo HF_HOME=/var/lib/vllm/huggingface huggingface-cli download Qwen/Qwen2.5-0.5B-Instruct
-def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
-    """
-    Passes speech transcript through local vLLM / SLM (Qwen2.5-0.5B / Llama-3.2-1B)
-    to perform real-time speech self-correction and grammar polishing.
-    """
-    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "1") != "1":
-        return text
-
 REFUSAL_PHRASES = [
     "i'm sorry", "im sorry", "cannot correct", "can't correct", "as an ai",
     "incomplete sentence", "please provide", "does not contain", "cannot fulfill",
@@ -303,7 +295,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
     Passes speech transcript through local vLLM / SLM (Qwen2.5-0.5B / Llama-3.2-1B)
     to perform real-time speech self-correction and grammar polishing.
     """
-    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "1") != "1":
+    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "0") != "1":
         return text
 
     if timeout_sec is None:
@@ -384,7 +376,7 @@ def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: f
     if not new_chunk:
         return prev_text
         
-    if os.environ.get("VT_ENABLE_SLM", "1") != "1":
+    if os.environ.get("VT_ENABLE_SLM", "0") != "1":
         return f"{prev_text} {new_chunk}".strip()
 
     if timeout_sec is None:

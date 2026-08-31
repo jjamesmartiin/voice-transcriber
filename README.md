@@ -121,11 +121,12 @@ Voice Transcriber features a multi-tiered Wispr Flow post-processing pipeline fo
 
 | Environment Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `VT_ENABLE_SLM` | `1` (or `0` to disable) | Toggles local `vLLM` SLM post-processing pass (`1` = active, `0` = Technique A pre-pass only). |
+| `VT_ENABLE_SLM` | `0` (set `1` to enable) | Toggles local `vLLM` SLM post-processing pass (`1` = active, `0` = Technique A pre-pass only). Battery-friendly default is `0` (no vLLM server required). |
+| `VT_MODEL_DTYPE` | `bf16` on BF16-capable CPUs, else `fp32` | Cohere ASR weight precision (`bf16`, `fp16`, or `fp32`). `bf16` is bit-lossless for the BF16-stored weights while halving RAM. |
 | `VT_SLM_MODEL` | `Qwen/Qwen2.5-0.5B-Instruct` | Local SLM model served on vLLM (`Qwen2.5-0.5B`, `Llama-3.2-1B`, etc.). |
 | `VT_VLLM_URL` | `http://localhost:8000/v1/chat/completions` | Local vLLM OpenAI-compatible REST API endpoint. |
 | `VT_SLM_TIMEOUT` | `1.5` (seconds) | Maximum timeout before gracefully falling back to Technique A ASR text. |
-| `VT_CPU_THREADS` | `min(4, os.cpu_count())` | PyTorch CPU thread cap to prevent CPU spinning. |
+| `VT_CPU_THREADS` | `min(8, os.cpu_count())` | PyTorch CPU thread cap to prevent CPU spinning. Lower values (e.g. `4`) save battery at some latency cost. |
 | `VT_MODE` | `auto` (`auto`, `fixed`, `stop-and-wait`) | Audio micro-batching mode for real-time streaming. |
 
 ---
