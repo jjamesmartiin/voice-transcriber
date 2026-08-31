@@ -56,48 +56,61 @@ def main():
     parser = argparse.ArgumentParser(description="Auto Optimization Loop Controller")
     parser.add_argument("--iterations", type=int, default=20, help="Max optimization iterations")
     parser.add_argument("--agent-tag", type=str, default="Main-Agent", help="Tag identifying this agent worker")
+    parser.add_argument("--pi-model", type=str, help="If set, autonomously invokes the pi CLI with this model (e.g. deepseek/deepseek-v4-flash)")
     parser.add_argument("--dry-run", action="store_true", help="Run benchmark once and exit")
     args = parser.parse_args()
+    
+    # Git workspace safety check
+    branch_res = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True)
+    current_branch = branch_res.stdout.strip()
+    print(f"🛡️  [{args.agent_tag}] Running on Git branch: {current_branch}")
+    if current_branch == "main" and args.pi_model:
+        print("⚠️  WARNING: Running autonomous edits directly on 'main' branch!")
+        print("   For parallel agent swarms, ensure each agent runs in an isolated 'git worktree' or branch.")
 
-    print(f"⚡ [{args.agent-tag}] Establishing initial performance baseline in Nix environment...")
+    print(f"⚡ [{args.agent_tag}] Establishing initial performance baseline in Nix environment...")
     baseline = get_benchmark_result(args.agent_tag)
     
     if not baseline["passed"]:
-        print(f"❌ [{args.agent-tag}] Initial baseline failed test suite! Reason: {baseline.get('reason')}")
+        print(f"❌ [{args.agent_tag}] Initial baseline failed test suite! Reason: {baseline.get('reason')}")
         sys.exit(1)
         
     best_latency = baseline["latency_ms"]
-    print(f"\n✅ [{args.agent-tag}] Initial Baseline Established:")
+    print(f"\n✅ [{args.agent_tag}] Initial Baseline Established:")
     print(f"   Agent ID      : {baseline.get('agent')}")
     print(f"   Total Latency : {best_latency:.3f} ms")
     print(f"   Post Processor: {baseline.get('post_processor_ms'):.3f} ms")
     print(f"   Buffer Proc   : {baseline.get('buffer_proc_ms'):.3f} ms")
 
     if args.dry_run:
-        print(f"\n[{args.agent-tag} Dry Run Complete] Baseline successfully measured.")
+        print(f"\n[{args.agent_tag} Dry Run Complete] Baseline successfully measured.")
         sys.exit(0)
 
     for i in range(1, args.iterations + 1):
-        prompt_optimization_agent(i, best_latency, args.agent_tag)
+        prompt = prompt_optimization_agent(i, best_latency, args.agent_tag)
         
-        input(f"\n[{args.agent-tag}] Press Enter after code change is applied to run benchmark (or Ctrl+C to stop)... ")
+        if args.pi_model:
+            print(f"\n🤖 [{args.agent_tag}] Autonomously executing pi agent ({args.pi_model})...")
+            subprocess.run(["pi", "-p", prompt, "--model", args.pi_model, "--approve"])
+        else:
+            input(f"\n[{args.agent_tag}] Press Enter after code change is applied to run benchmark (or Ctrl+C to stop)... ")
         
-        print(f"\n[{args.agent-tag}] Running verification benchmark in Nix shell (Mutex locked)...")
+        print(f"\n[{args.agent_tag}] Running verification benchmark in Nix shell (Mutex locked)...")
         res = get_benchmark_result(args.agent_tag)
         
         if res["passed"] and res["latency_ms"] < best_latency:
             speedup = best_latency / res["latency_ms"]
             diff_ms = best_latency - res["latency_ms"]
-            print(f"\n🚀 [{args.agent-tag}] WINNING OPTIMIZATION DETECTED!")
+            print(f"\n🚀 [{args.agent_tag}] WINNING OPTIMIZATION DETECTED!")
             print(f"   Speedup : {speedup:.2f}x")
             print(f"   Latency : {best_latency:.3f} ms -> {res['latency_ms']:.3f} ms (saved {diff_ms:.3f} ms)")
             
             best_latency = res["latency_ms"]
-            subprocess.run(["git", "commit", "-am", f"perf({args.agent-tag}): speedup {speedup:.2f}x ({res['latency_ms']:.3f}ms)"])
+            subprocess.run(["git", "commit", "-am", f"perf({args.agent_tag}): speedup {speedup:.2f}x ({res['latency_ms']:.3f}ms)"])
         else:
             reason = "Tests failed" if not res["passed"] else f"Slower or equal latency ({res['latency_ms']:.3f} ms >= {best_latency:.3f} ms)"
-            print(f"\n❌ [{args.agent-tag}] REJECTED CHANGE: {reason}")
-            print(f"   [{args.agent-tag}] Reverting working tree to last clean commit...")
+            print(f"\n❌ [{args.agent_tag}] REJECTED CHANGE: {reason}")
+            print(f"   [{args.agent_tag}] Reverting working tree to last clean commit...")
             subprocess.run(["git", "reset", "--hard", "HEAD"])
 
 if __name__ == "__main__":
