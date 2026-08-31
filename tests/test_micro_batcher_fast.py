@@ -91,6 +91,10 @@ class TestMicroBatchingEngine(unittest.TestCase):
             self.assertEqual(clean_speech_transcription("He has an eye for design"), "He has an eye for design.")
             self.assertEqual(clean_speech_transcription("She has a eye for detail"), "She has a eye for detail.")
             self.assertEqual(clean_speech_transcription("Her eyes are blue"), "Her eyes are blue.")
+
+            # Comma spacing normalization (missing space after comma, spaces before comma)
+            self.assertEqual(clean_speech_transcription("whatever we're doing for that,we can do for DF"), "whatever we're doing for that, we can do for DF.")
+            self.assertEqual(clean_speech_transcription("works for JK though ,so like whatever"), "works for JK though, so like whatever.")
         finally:
             if old_env is None:
                 os.environ.pop("VT_ENABLE_SLM", None)

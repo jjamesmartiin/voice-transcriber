@@ -116,7 +116,8 @@ TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
     "CPU", "GPU", "RAM", "VRAM", "HDMI", "ALSA", "PipeWire", "PortAudio",
     "REST", "API", "LLM", "SLM", "ASR", "JSON", "YAML", "ONNX", "VM", "Cohere",
     "Whisper", "Qwen", "Linux", "Windows", "CUDA", "ID", "UI", "TUI", "CLI",
-    "OK", "IP", "URL", "HTTP", "HTTPS", "SSD", "NVMe", "USB", "PCIe", "BIOS"
+    "OK", "IP", "URL", "HTTP", "HTTPS", "SSD", "NVMe", "USB", "PCIe", "BIOS",
+    "JK", "DF"
 }
 
 MID_SENTENCE_CAP_REGEX = re.compile(r"(?<![.!?\n])\s+([A-Z][a-zA-Z0-9_-]+)")
@@ -859,6 +860,8 @@ def set_number_digits_enabled(enabled: bool) -> None:
 
 COMMA_DUP_REGEX = re.compile(r"[,]{2,}")
 PUNCT_COMMA_REGEX = re.compile(r"([.?!,])\s*,\s*")
+COMMA_NO_SPACE_REGEX = re.compile(r",([a-zA-Z])")
+SPACE_BEFORE_COMMA_REGEX = re.compile(r"\s+,")
 MULTI_SPACE_REGEX = re.compile(r"\s{2,}")
 STANDALONE_I_REGEX = re.compile(r"\bi\b")
 CONTRACTION_I_REGEX = re.compile(r"\bi('[a-z]+)\b")
@@ -964,6 +967,8 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
         cleaned = COMMA_DUP_REGEX.sub(",", cleaned)
     if "," in cleaned:
         cleaned = PUNCT_COMMA_REGEX.sub(r"\1 ", cleaned)
+        cleaned = SPACE_BEFORE_COMMA_REGEX.sub(",", cleaned)
+        cleaned = COMMA_NO_SPACE_REGEX.sub(r", \1", cleaned)
     if "  " in cleaned:
         cleaned = MULTI_SPACE_REGEX.sub(" ", cleaned)
 
