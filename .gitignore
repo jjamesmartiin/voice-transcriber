@@ -10,3 +10,5 @@ result
 /config.yaml
 /config.yml
 /audio_device_config.json
+__pycache__/
+*.pyc
