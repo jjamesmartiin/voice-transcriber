@@ -108,71 +108,125 @@ def check_auth():
     print(f"Access must be granted at: https://huggingface.co/{MODEL_ID}\n")
     return False
 
+def _cpu_supports_bf16():
+    """Detect native CPU bfloat16 support (AVX512-BF16 or AMX-BF16)."""
+    try:
+        with open("/proc/cpuinfo") as f:
+            flags = f.read()
+        if "avx512_bf16" in flags or "amx_bf16" in flags:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _resolve_dtype(device):
+    """Resolve weight dtype.
+
+    CPU defaults to bfloat16 when the hardware supports it: the Cohere weights
+    are stored on disk as BF16, so loading them as BF16 is bit-lossless while
+    halving memory (and memory bandwidth / power). Falls back to float32
+    otherwise. Override with VT_MODEL_DTYPE=fp32|fp16|bf16.
+    """
+    override = os.environ.get("VT_MODEL_DTYPE", "").strip().lower()
+    if override in ("fp32", "float32", "float"):
+        return torch.float32
+    if override in ("fp16", "float16", "half"):
+        return torch.float16
+    if override in ("bf16", "bfloat16"):
+        return torch.bfloat16
+
+    if device == "cuda":
+        return torch.float16
+    if _cpu_supports_bf16():
+        return torch.bfloat16
+    return torch.float32
+
+
+def _load_model_once(target_id, revision, token, dtype, local_files_only, device):
+    processor = AutoProcessor.from_pretrained(
+        target_id,
+        revision=revision,
+        trust_remote_code=True,
+        token=token,
+        local_files_only=local_files_only,
+    )
+    model = AutoModelForSpeechSeq2Seq.from_pretrained(
+        target_id,
+        revision=revision,
+        torch_dtype=dtype,
+        trust_remote_code=True,
+        token=token,
+        local_files_only=local_files_only,
+    ).to(device)
+    return model, processor
+
+
 def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
     token = get_token()
-    dtype = torch.float16 if device == "cuda" else torch.float32
-    
+    dtype = _resolve_dtype(device)
+
     # Search local candidate directories first
     search_dirs = [
         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "cohere"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "cohere"),
         os.path.join(os.getcwd(), "models", "cohere"),
     ]
-    
+
     local_path = None
     for candidate in search_dirs:
         if os.path.exists(candidate) and (os.path.exists(os.path.join(candidate, "model.safetensors")) or os.path.exists(os.path.join(candidate, "pytorch_model.bin"))):
             local_path = candidate
             break
-            
+
     target_id = local_path if local_path else model_id
-    
-    try:
-        print(f"Loading Cohere model from {target_id}...")
-        processor = AutoProcessor.from_pretrained(
-            target_id, 
-            revision=revision if not local_path else None,
-            trust_remote_code=True,
-            token=token,
-            local_files_only=bool(local_path)
-        )
-        
-        model = AutoModelForSpeechSeq2Seq.from_pretrained(
-            target_id,
-            revision=revision if not local_path else None,
-            torch_dtype=dtype,
-            trust_remote_code=True,
-            token=token,
-            local_files_only=bool(local_path)
-        ).to(device)
-        
-        print("Loaded Cohere model successfully.")
-        return model, processor
-    except Exception as e:
-        print(f"Model not in cache or update needed: {e}")
-        print(f"Downloading/Verifying model '{model_id}'...")
-        
-        check_auth()
-        token = get_token()
-        
+
+    # Prefer the resolved dtype; fall back to FP32 on CPU if BF16 load fails
+    # (e.g. an unsupported op in the model code) so the app never breaks.
+    dtypes = [dtype]
+    if device == "cpu" and dtype == torch.bfloat16:
+        dtypes.append(torch.float32)
+
+    last_err = None
+    # Attempt local load first
+    for attempt_dtype in dtypes:
         try:
-            processor = AutoProcessor.from_pretrained(
-                model_id, 
-                revision=revision,
-                trust_remote_code=True,
-                token=token
+            print(f"Loading Cohere model from {target_id} (dtype={attempt_dtype})...")
+            model, processor = _load_model_once(
+                target_id,
+                revision=revision if not local_path else None,
+                token=token,
+                dtype=attempt_dtype,
+                local_files_only=bool(local_path),
+                device=device,
             )
-            
-            model = AutoModelForSpeechSeq2Seq.from_pretrained(
-                model_id,
-                revision=revision,
-                torch_dtype=dtype,
-                trust_remote_code=True,
-                token=token
-            ).to(device)
-            
+            print(f"Loaded Cohere model successfully (dtype={attempt_dtype}).")
             return model, processor
         except Exception as e:
+            last_err = e
+            print(f"Load attempt failed (dtype={attempt_dtype}): {e}")
+
+    # Fall through to download / verify path
+    print(f"Model not in cache or update needed: {last_err}")
+    print(f"Downloading/Verifying model '{model_id}'...")
+
+    check_auth()
+    token = get_token()
+
+    for attempt_dtype in dtypes:
+        try:
+            model, processor = _load_model_once(
+                model_id,
+                revision=revision,
+                token=token,
+                dtype=attempt_dtype,
+                local_files_only=False,
+                device=device,
+            )
+            print(f"Loaded Cohere model successfully (dtype={attempt_dtype}).")
+            return model, processor
+        except Exception as e:
+            last_err = e
             error_str = str(e).lower()
             if "403" in error_str or "access" in error_str or "unauthorized" in error_str or "401" in error_str:
                 print("\nError: Access denied to gated model.")
@@ -180,7 +234,8 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
                 if token:
                     masked = token[:6] + "..." + token[-4:] if len(token) > 10 else "******"
                     print(f"Current token (masked): {masked}")
-            raise e
+                raise e
+    raise last_err
 
 def get_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
     global _model, _processor
@@ -238,9 +293,13 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     start_time = time.time()
     
     try:
-        # Set optimal CPU thread count
+        # Set CPU thread count (configurable via VT_CPU_THREADS; default matches prior behavior)
         if device == "cpu" and hasattr(torch, "set_num_threads"):
-            torch.set_num_threads(max(1, min(os.cpu_count() or 4, 8)))
+            default_threads = max(1, min(os.cpu_count() or 4, 8))
+            env_threads = os.environ.get("VT_CPU_THREADS", "").strip()
+            if env_threads.isdigit():
+                default_threads = max(1, min(int(env_threads), os.cpu_count() or 8))
+            torch.set_num_threads(default_threads)
             
         with torch.inference_mode():
             if audio_data is not None:
