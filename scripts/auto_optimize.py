@@ -51,6 +51,7 @@ def prompt_optimization_agent(iteration: int, current_latency: float, agent_tag=
     print(f"  Target Latency to Beat: {current_latency:.3f} ms")
     print(f"=======================================================")
     print(prompt)
+    return prompt
 
 def main():
     parser = argparse.ArgumentParser(description="Auto Optimization Loop Controller")
