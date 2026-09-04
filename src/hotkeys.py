@@ -25,10 +25,12 @@ class WaylandGlobalHotkeys:
         self.virtual_keyboard = None
         self.key_states = {}
         self.hotkey_active = False
-        
-        # Key codes for our hotkey combination (Alt+Shift)
+        self.latch_release = False
+        self.copy_to_clipboard_mode = False
+
         self.ALT_KEYS = [56, 100]  # KEY_LEFTALT, KEY_RIGHTALT
         self.SHIFT_KEYS = [42, 54]  # KEY_LEFTSHIFT, KEY_RIGHTSHIFT
+        self.SPACE_KEY = [57]       # KEY_SPACE (pressed during Alt+Shift hold = hands-free latch)
         
         # Key codes for config hotkey (Ctrl+Alt+I)
         self.CTRL_KEYS = [29, 97]   # KEY_LEFTCTRL, KEY_RIGHTCTRL
@@ -231,7 +233,6 @@ class WaylandGlobalHotkeys:
         """Check if our hotkey combination (Alt+Shift) is currently pressed"""
         alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
         shift_pressed = any(self.key_states.get(key, False) for key in self.SHIFT_KEYS)
-        
         return alt_pressed and shift_pressed
     
     def is_config_hotkey_pressed(self):
@@ -255,10 +256,7 @@ class WaylandGlobalHotkeys:
 
     def is_hotkey_released(self):
         """Check if hotkey combination is no longer fully pressed"""
-        alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
-        shift_pressed = any(self.key_states.get(key, False) for key in self.SHIFT_KEYS)
-        
-        return not (alt_pressed and shift_pressed)
+        return not self.is_hotkey_pressed()
     
     def handle_key_event(self, event):
         """Handle a key event and check for hotkey activation"""
@@ -279,7 +277,13 @@ class WaylandGlobalHotkeys:
             self.key_states.clear()
             return
 
-        # Check for hotkey activation
+        # Space pressed while the Alt+Shift hotkey is held = "hold the recording":
+        # the next hotkey release won't stop it, so you can let go and keep talking.
+        if key_state == 1 and key_code in self.SPACE_KEY and self.hotkey_active:
+            logger.debug("Space latched - recording will hold after release")
+            self.latch_release = True
+
+        # Check for hotkey activation (push-to-talk: hold Alt+Shift to record)
         if self.is_hotkey_pressed() and not self.hotkey_active:
             logger.debug("Hotkey activated - starting recording")
             self.hotkey_active = True
@@ -287,10 +291,14 @@ class WaylandGlobalHotkeys:
             self.copy_to_clipboard_mode = self.is_ctrl_pressed()
             self.callback_start()
         elif self.hotkey_active and self.is_hotkey_released():
-            logger.debug("⏹️ Hotkey released - stopping recording")
             self.hotkey_active = False
-            # Pass the mode to callback_stop
-            self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
+            if self.latch_release:
+                # Space was pressed during this hold: keep recording hands-free.
+                logger.debug("⏸️ Space-latched release - continuing recording hands-free")
+                self.latch_release = False
+            else:
+                logger.debug("⏹️ Hotkey released - stopping recording")
+                self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
     
     def run(self):
         """Main event loop for monitoring keyboard events"""
@@ -391,6 +399,7 @@ class WSLGlobalHotkeys:
         self.process = None
         self.reader_thread = None
         self.hotkey_active = False
+        self.copy_to_clipboard_mode = False
         self.devices = ["WSL-Windows-Host-Bridge"] # Non-empty so main.py knows hotkeys are active
         self.start()
 
@@ -459,6 +468,10 @@ class WSLGlobalHotkeys:
                 break
 
     def are_modifiers_pressed(self):
+        return self.hotkey_active
+
+    def is_hotkey_pressed(self):
+        """True while the Alt+Shift hotkey session is active (Windows bridge) """
         return self.hotkey_active
 
     def type_text(self, text):

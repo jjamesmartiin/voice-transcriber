@@ -120,6 +120,10 @@ class SimpleVoiceTranscriber:
         self.tui.on_quit = self._on_tui_quit
 
     def _on_tui_toggle_record(self):
+        # While the Alt+Shift hotkey is physically held, Space is the global
+        # "hold the recording" (hands-free latch) signal, not a terminal toggle.
+        if self.hotkey_system and getattr(self.hotkey_system, 'is_hotkey_pressed', None) and self.hotkey_system.is_hotkey_pressed():
+            return
         if self.recording:
             self.stop_recording()
         else:

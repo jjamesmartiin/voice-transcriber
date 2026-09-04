@@ -46,6 +46,7 @@ See [NixOS options](https://search.nixos.org/options?channel=25.11&include_modul
 
 ### Controls
 - **Alt+Shift** (hold) - Start recording, release to transcribe
+- **Space** (tap while holding Alt+Shift) - Hold the recording hands-free: release the keys and keep talking, then press & release Alt+Shift again to transcribe
 - **Ctrl+Alt+I** - Open settings menu
 
 ### Settings Menu

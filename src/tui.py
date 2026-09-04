@@ -256,7 +256,7 @@ class VoiceTranscriberTUI:
 
             prompt.append(f" ({int(self.vu_level*100)}%) ", style="dim cyan")
             prompt.append("│ ", style="dim white")
-            prompt.append("Release Alt+Shift or Press Space to finish", style="dim white")
+            prompt.append("Release Alt+Shift to finish · Space while holding = hands-free", style="dim white")
 
         elif self.state == "PROCESSING":
             prompt.append(f"{spinner} PROCESSING AUDIO [{self.elapsed_time:04.1f}s] ", style="bold yellow")
