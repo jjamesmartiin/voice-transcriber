@@ -926,6 +926,7 @@ def record_and_transcribe():
         # Copy to clipboard with retry mechanism
         max_retries = 3
         copy_success = False
+        
         for attempt in range(max_retries):
             try:
                 pyperclip.copy(transcription)

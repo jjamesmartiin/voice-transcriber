@@ -35,20 +35,25 @@ logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s -
 logger = logging.getLogger(__name__)
 
 def copy_to_clipboard_crossplatform(text):
-    """Copies to clipboard on Linux or Windows (via WSL interop)"""
+    """Copies to clipboard on Linux or Windows (via WSL interop).
+    Note: On Wayland, this may block until a window receives focus."""
     copied = False
+    
     if os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop") or os.environ.get("WSL_DISTRO_NAME"):
         try:
             p = subprocess.Popen(["clip.exe"], stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
             p.communicate(input=text.encode('utf-16le'))
             copied = True
+            return copied
         except Exception:
             pass
+            
     try:
         pyperclip.copy(text)
         copied = True
     except Exception:
         pass
+        
     return copied
 
 class SimpleVoiceTranscriber:
@@ -298,9 +303,20 @@ class SimpleVoiceTranscriber:
                 self.last_transcription = polished
                 self.last_finish_time = time.time()
                 
-                # Copy to clipboard and display notification
-                if copy_to_clipboard_crossplatform(polished):
-                    self.visual_notification.show_completed(sub_text=polished, elapsed_sec=(slm_elapsed / 1000.0))
+                # Hide processing notification immediately before queueing clipboard
+                try:
+                    self.visual_notification.hide_notification()
+                except Exception as e:
+                    pass
+
+                def finalize_slm():
+                    # Blocks if Wayland strict focus is active (e.g. GNOME top bar)
+                    if copy_to_clipboard_crossplatform(polished):
+                        self.visual_notification.show_completed(sub_text=polished, elapsed_sec=(slm_elapsed / 1000.0))
+                
+                # Spawn background thread to queue up clipboard copy and notification
+                threading.Thread(target=finalize_slm, daemon=True).start()
+                
                 return
             else:
                 print(f"⚠️ [vLLM SLM On-Demand Polish] No changes made or guardrail triggered: Clipboard preserved.")
@@ -350,11 +366,6 @@ class SimpleVoiceTranscriber:
                 import t2
                 auto_type_setting = getattr(t2, 'AUTO_TYPE', True)
                 should_type = auto_type_setting and (t2.COPY_TO_CLIPBOARD != self.copy_to_clipboard)
-                if copy_to_clipboard_crossplatform(transcription):
-                    copy_success = True
-                    logger.info(f"Copied to clipboard: {transcription}")
-                else:
-                    logger.error("Failed to copy transcription to clipboard")
 
                 if should_type:
                     try:
@@ -373,28 +384,42 @@ class SimpleVoiceTranscriber:
                     except Exception as e:
                         logger.error(f"Error typing transcription: {e}")
                         logger.warning("Typing failed, but it's available in your clipboard")
-                
-                # Show completion notification with the transcribed text and total post-release latency
+                        
+                # Hide processing notification immediately so it doesn't linger while queued
                 try:
-                    if copy_success:
-                        post_release_latency = time.time() - getattr(self, 'release_time', time.time())
-                        self.visual_notification.show_completed(sub_text=transcription, elapsed_sec=post_release_latency)
-                    else:
-                        logger.error("Transcription not copied to clipboard")
+                    self.visual_notification.hide_notification()
                 except Exception as e:
                     logger.warning(f"Visual notification error: {e}")
-                
-                # Play sound
-                try:
-                    if not t2.IS_MUTED:
-                        if self.hotkey_system and hasattr(self.hotkey_system, 'play_done_sound') and not should_type:
-                            self.hotkey_system.play_done_sound()
-                        else:
-                            sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
-                            subprocess.Popen(['mpg123', '-q', sound_path], 
-                                           stderr=subprocess.DEVNULL)
-                except:
-                    pass
+                    
+                def finalize_transcription():
+                    # This blocking call queues up the copy until GNOME shell releases focus
+                    copy_success = copy_to_clipboard_crossplatform(transcription)
+                    
+                    if copy_success:
+                        logger.info(f"Copied to clipboard: {transcription}")
+                        
+                        # Show completion notification only after clipboard successfully copies
+                        try:
+                            post_release_latency = time.time() - getattr(self, 'release_time', time.time())
+                            self.visual_notification.show_completed(sub_text=transcription, elapsed_sec=post_release_latency)
+                        except Exception as e:
+                            logger.warning(f"Visual notification error: {e}")
+                            
+                        # Play sound only after it has successfully copied and finished queueing
+                        try:
+                            if not getattr(t2, 'IS_MUTED', False):
+                                if self.hotkey_system and hasattr(self.hotkey_system, 'play_done_sound') and not should_type:
+                                    self.hotkey_system.play_done_sound()
+                                else:
+                                    sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
+                                    subprocess.Popen(['mpg123', '-q', sound_path], stderr=subprocess.DEVNULL)
+                        except:
+                            pass
+                    else:
+                        logger.error("Failed to copy transcription to clipboard")
+
+                # Spawn background thread to wait for clipboard access
+                threading.Thread(target=finalize_transcription, daemon=True).start()
                 
             else:
                 # Hide processing notification
