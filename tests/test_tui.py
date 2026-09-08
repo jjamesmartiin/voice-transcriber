@@ -87,9 +87,23 @@ def test_tui_print_transcription():
         elapsed_sec=1.10,
         copy_success=True,
         typed_success=False,
-        device_name="Mock Mic"
+        device_name="Mock Mic",
+        rec_duration=4.20
     )
     assert tui.transcription_count == 2
+
+    # Capture output to ensure rec:, proc:, and ready: are present in top_rule
+    tui.console.record = True
+    tui.print_transcription(
+        text="Testing three timing output.",
+        elapsed_sec=0.45,
+        rec_duration=3.20,
+        proc_time=0.38
+    )
+    output = tui.console.export_text()
+    assert "rec: 3.20s" in output
+    assert "proc: 0.38s" in output
+    assert "ready: 0.45s" in output
 
     tui.print_event("Test Event", "Settings updated cleanly", level="info")
     tui.print_warning("Test Warning", "Microphone level low")

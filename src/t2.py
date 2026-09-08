@@ -352,6 +352,16 @@ def load_audio_config(file_path=None):
                 print("No configured audio devices found. Using system default.")
         # Keep the post-processor's runtime number-toggle in sync with the loaded config
         set_number_digits(NUMBER_DIGITS)
+
+        # Sync custom word/phrase dictionary if configured in config or external file
+        dict_setting = config.get('dictionary')
+        dict_file = config.get('dictionary_file')
+        if dict_file:
+            from post_processor import load_custom_dictionary_from_file
+            load_custom_dictionary_from_file(dict_file)
+        elif dict_setting and isinstance(dict_setting, dict):
+            from post_processor import set_custom_dictionary
+            set_custom_dictionary(dict_setting)
     except Exception as e:
         print(f"Could not load audio config: {e}")
 
@@ -421,6 +431,24 @@ def set_number_digits(enabled):
         set_number_digits_enabled(NUMBER_DIGITS)
     except Exception:
         pass
+
+
+def set_dictionary(mapping):
+    """Set custom word/phrase replacement dictionary at runtime."""
+    try:
+        from post_processor import set_custom_dictionary
+        set_custom_dictionary(mapping)
+    except Exception:
+        pass
+
+
+def get_dictionary():
+    """Get currently active custom word/phrase replacement dictionary."""
+    try:
+        from post_processor import get_custom_dictionary
+        return get_custom_dictionary()
+    except Exception:
+        return {}
 
 
 def select_audio_device():

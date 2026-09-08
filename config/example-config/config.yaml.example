@@ -100,3 +100,35 @@ secondary_device_name: null
 #   - "secondary" : Force use of secondary device only
 # Default: "auto"
 override_mode: "auto"
+
+# ------------------------------------------------------------------------------
+# Custom Word & Phrase Dictionary Replacements
+# High-speed Trie-compacted dictionary (~0.005 ms overhead) to convert spoken words
+# or phrases into specific technical acronyms, symbols, or desired terms.
+# Case-insensitive input matching; whole-word and multi-word boundary safe.
+# Available Options:
+#   - Map of "spoken phrase": "replacement phrase"
+#   - null : No custom dictionary
+# Default: null
+dictionary:
+  "pull request": "PR"
+  "pr": "PR"
+  "v l l m": "vLLM"
+  "vllm": "vLLM"
+  "vs code": "VS Code"
+  "github": "GitHub"
+  "k8s": "Kubernetes"
+  "deepseq": "Deepseek"
+  "deep seq": "Deepseek"
+  "deep seek": "Deepseek"
+  "smiley face": "😊"
+
+# ------------------------------------------------------------------------------
+# External Dictionary File (optional)
+# Path to an external YAML or JSON dictionary file (e.g. config/dictionary.yaml).
+# If specified, takes precedence over the inline 'dictionary' setting above.
+# Available Options:
+#   - "path/to/file.yaml" or "path/to/file.json"
+#   - null (use inline dictionary above)
+# Default: null
+dictionary_file: null

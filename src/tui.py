@@ -278,10 +278,10 @@ class VoiceTranscriberTUI:
 
         return prompt
 
-    def print_transcription(self, text, elapsed_sec=0.0, copy_success=True, typed_success=False, device_name=None):
+    def print_transcription(self, text, elapsed_sec=0.0, copy_success=True, typed_success=False, device_name=None, rec_duration=0.0, proc_time=0.0):
         """
         Print transcription directly into interactive shell scrollback stream:
-        - Top horizontal divider line with prompt tag
+        - Top horizontal divider line with prompt tag, recording duration, processing time, and post-release latency
         - Clean word-wrapped body (NO left/right side borders)
         - Bottom horizontal divider line
         """
@@ -301,9 +301,21 @@ class VoiceTranscriberTUI:
             top_rule.append("─" * 4, style=f"bold {color}")
             top_rule.append(f" ❯ #{count} ", style=f"bold {color}")
             top_rule.append(f" {timestamp} ", style="dim white")
-            top_rule.append(f" ({elapsed_sec:.2f}s) ", style="dim yellow")
-            top_rule.append(f" {status_str} ", style=status_color)
-            right_len = max(0, w - 30 - len(status_str))
+            if rec_duration and rec_duration > 0.0:
+                top_rule.append("│ ", style="dim white")
+                top_rule.append(f"rec: {rec_duration:.2f}s ", style="cyan")
+            if proc_time and proc_time > 0.0:
+                top_rule.append("│ ", style="dim white")
+                top_rule.append(f"proc: {proc_time:.2f}s ", style="yellow")
+                top_rule.append("│ ", style="dim white")
+                top_rule.append(f"ready: {elapsed_sec:.2f}s ", style="bright_cyan")
+            else:
+                top_rule.append("│ ", style="dim white")
+                top_rule.append(f"proc: {elapsed_sec:.2f}s ", style="yellow")
+            top_rule.append("│ ", style="dim white")
+            top_rule.append(f"{status_str} ", style=status_color)
+            rendered_len = len(top_rule.plain)
+            right_len = max(2, w - rendered_len)
             top_rule.append("─" * right_len + "\n", style=f"bold {color}")
             self.console.print(top_rule)
 

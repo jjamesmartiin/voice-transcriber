@@ -284,6 +284,7 @@ class SimpleVoiceTranscriber:
     def process_recording(self):
         """Process the recorded audio frames"""
         rec_duration = time.time() - getattr(self, 'start_time', time.time())
+        audio_rec_duration = max(0.0, getattr(self, 'release_time', time.time()) - getattr(self, 'start_time', time.time()))
         time_since_last = time.time() - getattr(self, 'last_finish_time', 0.0)
         last_text = getattr(self, 'last_transcription', "").strip()
 
@@ -312,7 +313,12 @@ class SimpleVoiceTranscriber:
                 def finalize_slm():
                     # Blocks if Wayland strict focus is active (e.g. GNOME top bar)
                     if copy_to_clipboard_crossplatform(polished):
-                        self.visual_notification.show_completed(sub_text=polished, elapsed_sec=(slm_elapsed / 1000.0))
+                        self.visual_notification.show_completed(
+                            sub_text=polished,
+                            elapsed_sec=(slm_elapsed / 1000.0),
+                            rec_duration=audio_rec_duration,
+                            proc_time=(slm_elapsed / 1000.0)
+                        )
                 
                 # Spawn background thread to queue up clipboard copy and notification
                 threading.Thread(target=finalize_slm, daemon=True).start()
@@ -348,6 +354,7 @@ class SimpleVoiceTranscriber:
             if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
                 self.preload_thread.join()
 
+            t0_proc = time.time()
             # Retrieve text from micro-batcher or fallback (skip_slm=True for instant ASR dictation)
             if hasattr(self, 'micro_batcher') and self.micro_batcher:
                 transcription = self.micro_batcher.finish_and_get_text(skip_slm=True).strip()
@@ -355,6 +362,7 @@ class SimpleVoiceTranscriber:
                 result, transcribe_time = process_audio_stream(self.audio_frames)
                 from post_processor import clean_speech_transcription
                 transcription = clean_speech_transcription(result.strip(), skip_slm=True)
+            proc_time = time.time() - t0_proc
             
             # Explicitly free the audio data memory after processing
             del self.audio_frames
@@ -401,7 +409,12 @@ class SimpleVoiceTranscriber:
                         # Show completion notification only after clipboard successfully copies
                         try:
                             post_release_latency = time.time() - getattr(self, 'release_time', time.time())
-                            self.visual_notification.show_completed(sub_text=transcription, elapsed_sec=post_release_latency)
+                            self.visual_notification.show_completed(
+                                sub_text=transcription,
+                                elapsed_sec=post_release_latency,
+                                rec_duration=audio_rec_duration,
+                                proc_time=proc_time
+                            )
                         except Exception as e:
                             logger.warning(f"Visual notification error: {e}")
                             

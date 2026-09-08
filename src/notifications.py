@@ -142,7 +142,7 @@ class VisualNotification:
         if not self.tui:
             self._show_terminal_notification(f"Loading {text}...")
     
-    def show_completed(self, text="COMPLETED", sub_text=None, elapsed_sec=None):
+    def show_completed(self, text="COMPLETED", sub_text=None, elapsed_sec=None, rec_duration=None, proc_time=None):
         """Show a completion notification."""
         self._cleanup_overlays()
         self._create_overlay("COMPLETED", "#00aaff", persistent=False)
@@ -155,11 +155,13 @@ class VisualNotification:
                 elapsed_sec=elapsed_sec or 0.0,
                 copy_success=True,
                 typed_success=typed,
-                device_name=self.active_device
+                device_name=self.active_device,
+                rec_duration=rec_duration or 0.0,
+                proc_time=proc_time or 0.0
             )
             self.tui.update_state("READY")
         elif not self.tui:
-            self._show_terminal_notification(text, sub_text=sub_text, elapsed_sec=elapsed_sec)
+            self._show_terminal_notification(text, sub_text=sub_text, elapsed_sec=elapsed_sec, rec_duration=rec_duration, proc_time=proc_time)
 
         timer = threading.Timer(2.0, self.hide_notification)
         timer.start()
@@ -321,7 +323,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     
-    def _show_terminal_notification(self, text, sub_text=None, elapsed_sec=None):
+    def _show_terminal_notification(self, text, sub_text=None, elapsed_sec=None, rec_duration=None, proc_time=None):
         """Show a colorful terminal notification."""
         try:
             # Choose colors based on text content
@@ -349,8 +351,15 @@ if __name__ == "__main__":
                 print(f"\n{color_code}{symbol} {text}\033[0m")
                 # Print the full transcription in white, no truncation
                 print(f"{sub_text}")
+                timing_parts = []
+                if rec_duration and rec_duration > 0.0:
+                    timing_parts.append(f"rec: {rec_duration:.2f}s")
+                if proc_time and proc_time > 0.0:
+                    timing_parts.append(f"proc: {proc_time:.2f}s")
                 if elapsed_sec is not None:
-                    print(f"\033[90m⏱️ [Total Post-Release Latency]: {elapsed_sec:.2f}s ({elapsed_sec * 1000:.1f}ms from key release -> clipboard)\033[0m")
+                    timing_parts.append(f"ready: {elapsed_sec:.2f}s" if proc_time else f"proc: {elapsed_sec:.2f}s")
+                if timing_parts:
+                    print(f"\033[90m⏱️ [{' │ '.join(timing_parts)}]\033[0m")
                 print()
             else:
                 # Create minimal notification line for status updates

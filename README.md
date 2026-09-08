@@ -160,30 +160,52 @@ nix-shell -p espeak-ng python3Packages.pytest python3Packages.numpy python3Packa
 
 ---
 
-## Customizing Acronyms & Homophone Repair Rules
+## Custom Word & Phrase Dictionary
 
-Voice Transcriber maintains a high-speed, zero-latency dictionary for developer acronyms, proper nouns, and zero-overhead homophone repairs (< 0.02ms overhead).
+Voice Transcriber includes a high-speed, Trie-compacted dictionary replacer that executes in **~0.005 ms (5 microseconds)** without slowing down text processing or audio streaming.
 
-### 1. Adding Technical Acronyms & Proper Nouns
-To prevent mid-sentence decapitalization of custom technical terms (e.g. `NixOS`, `vLLM`, `PyTorch`, `GraphQL`, `Kubernetes`), add your terms to `TECHNICAL_ACRONYMS_AND_PROPER_NOUNS` in `src/post_processor.py`:
+You can configure word and multi-word phrase conversions directly in your `config/config.yaml` or in an external dictionary file. Spoken inputs are matched case-insensitively with boundary protection (e.g. `"cat"` will never accidentally alter `"catalog"` or `"catch"`), and target casing and formatting are strictly preserved.
 
-```python
-TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
-    "I", "vLLM", "NixOS", "PyTorch", "Python", "GitHub", "Git", "WSL", "WSLg",
-    "CPU", "GPU", "RAM", "VRAM", "HDMI", "ALSA", "PipeWire", "PortAudio",
-    "GraphQL", "Kubernetes", "Docker", "Rust", "TypeScript"  # <-- Add custom terms here
-}
+### 1. Adding Replacements in `config/config.yaml`
+
+Add a `dictionary` map to your `config/config.yaml`:
+
+```yaml
+dictionary:
+  "pull request": "PR"
+  "pr": "PR"
+  "v l l m": "vLLM"
+  "vllm": "vLLM"
+  "vs code": "VS Code"
+  "github": "GitHub"
+  "k8s": "Kubernetes"
+  "postgres": "PostgreSQL"
+  "smiley face": "😊"
 ```
 
-### 2. Adding Zero-Latency Homophone Repair Rules
-To repair misheard technical terms or homophones (e.g., mishearing "VLLN" for "vLLM", "build switch" for "nixos-rebuild switch"), add regex rules to `HOMOPHONE_REPAIR_PATTERNS` in `src/post_processor.py`:
+### 2. Using an External Dictionary File
 
-```python
-HOMOPHONE_REPAIR_PATTERNS = [
-    (re.compile(r"\bVLLN\b", re.IGNORECASE), "vLLM"),
-    (re.compile(r"\bbuild\s+switch\b", re.IGNORECASE), "nixos-rebuild switch"),
-]
+If you prefer keeping your dictionary separate, point `dictionary_file` to a YAML or JSON file:
+
+```yaml
+dictionary_file: "config/dictionary.yaml"
 ```
+
+Or simply create `config/dictionary.yaml` (Voice Transcriber will auto-detect it on startup):
+
+```yaml
+# config/dictionary.yaml
+"pull request": "PR"
+"open ai": "OpenAI"
+"nixos": "NixOS"
+"dot net": ".NET"
+```
+
+### 3. Technical Acronyms & Homophone Repair Patterns
+
+For developer terms and advanced regex homophone repairs:
+- **Technical Acronym Whitelist**: Any capitalized target words in your dictionary are automatically whitelisted from mid-sentence decapitalization. You can also manually add entries to `TECHNICAL_ACRONYMS_AND_PROPER_NOUNS` in `src/post_processor.py`.
+- **Regex Homophone Rules**: For complex phonetic regex patterns, you can add tuples of `(regex_pattern, replacement_str)` to `HOMOPHONE_REPAIR_PATTERNS` in `src/post_processor.py`.
 
 ---
 

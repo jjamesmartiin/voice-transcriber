@@ -92,6 +92,11 @@ class TestMicroBatchingEngine(unittest.TestCase):
             self.assertEqual(clean_speech_transcription("She has a eye for detail"), "She has a eye for detail.")
             self.assertEqual(clean_speech_transcription("Her eyes are blue"), "Her eyes are blue.")
 
+            # ASR mis-hearings of "addressing" ("t needs a. dressing." -> "needs addressing.")
+            self.assertEqual(clean_speech_transcription("t needs a. dressing."), "needs addressing.")
+            self.assertEqual(clean_speech_transcription("this issue needs a dressing"), "this issue needs addressing.")
+            self.assertEqual(clean_speech_transcription("I like salad with a dressing"), "I like salad with a dressing.")
+
             # Comma spacing normalization (missing space after comma, spaces before comma)
             self.assertEqual(clean_speech_transcription("whatever we're doing for that,we can do for DF"), "whatever we're doing for that, we can do for DF.")
             self.assertEqual(clean_speech_transcription("works for JK though ,so like whatever"), "works for JK though, so like whatever.")

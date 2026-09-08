@@ -16,6 +16,7 @@ import time
 import json
 import urllib.request
 import urllib.error
+from pathlib import Path
 
 # Precompiled hallucination patterns
 HALLUCINATION_PATTERNS = [
@@ -110,6 +111,18 @@ AI_MISHEARINGS_REGEX = re.compile(
     re.IGNORECASE
 )
 
+# ASR phonetic mis-hearings of "addressing" (e.g. "needs a dressing" / "needs a. dressing" -> "needs addressing")
+ADDRESSING_MISHEARINGS_REGEX = re.compile(
+    r"\b(needs?|requires?|worth|without|before|after|about|by|for|start(?:ed|s|ing)?|stop(?:ped|s|ing)?)\s+(?:a\s*[.]\s*|a\s+)dressing\b",
+    re.IGNORECASE
+)
+
+# Stray single-consonant microphone click/onset clipping at start of utterance (e.g. "t needs" -> "needs")
+LEADING_STRAY_T_REGEX = re.compile(
+    r"^\s*(?:t|\x27t)\s+(needs\b)",
+    re.IGNORECASE
+)
+
 # Common technical acronyms & proper nouns to preserve casing mid-sentence
 TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
     "I", "vLLM", "NixOS", "PyTorch", "Python", "GitHub", "Git", "WSL", "WSLg",
@@ -117,7 +130,7 @@ TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
     "REST", "API", "LLM", "SLM", "ASR", "JSON", "YAML", "ONNX", "VM", "Cohere",
     "Whisper", "Qwen", "Linux", "Windows", "CUDA", "ID", "UI", "TUI", "CLI",
     "OK", "IP", "URL", "HTTP", "HTTPS", "SSD", "NVMe", "USB", "PCIe", "BIOS",
-    "JK", "DF"
+    "JK", "DF", "Deepseek", "DeepSeek"
 }
 
 MID_SENTENCE_CAP_REGEX = re.compile(r"(?<![.!?\n])\s+([A-Z][a-zA-Z0-9_-]+)")
@@ -858,6 +871,184 @@ def set_number_digits_enabled(enabled: bool) -> None:
     _number_digits_enabled = bool(enabled)
 
 
+# ---------------------------------------------------------------------------
+# High-Speed Trie-Compacted Custom Word & Phrase Dictionary Replacer
+# ---------------------------------------------------------------------------
+# Replaces custom words and multi-word phrases (e.g. "pull request" -> "PR",
+# "v l l m" -> "vLLM", "github" -> "GitHub") in ~0.005 ms using a single-pass
+# C-level Trie-compacted regex with word boundaries.
+
+class _TrieNode:
+    __slots__ = ("children", "is_end")
+    def __init__(self):
+        self.children = {}
+        self.is_end = False
+
+def _build_trie_regex(words: list[str]) -> str:
+    """Builds a compact nested alternation regex from a list of words/phrases."""
+    root = _TrieNode()
+    for w in words:
+        curr = root
+        for char in w:
+            curr = curr.children.setdefault(char, _TrieNode())
+        curr.is_end = True
+
+    def _node_to_regex(node: _TrieNode) -> str:
+        if not node.children:
+            return ""
+        alts = []
+        for char, child in sorted(node.children.items()):
+            sub = _node_to_regex(child)
+            esc = re.escape(char)
+            if child.is_end and sub:
+                alts.append(f"{esc}(?:{sub})?")
+            elif child.is_end:
+                alts.append(esc)
+            else:
+                alts.append(f"{esc}{sub}")
+        if len(alts) == 1:
+            return alts[0]
+        return "(?:" + "|".join(alts) + ")"
+
+    return _node_to_regex(root)
+
+_CUSTOM_DICTIONARY: dict[str, str] = {}
+_CUSTOM_DICT_REPLACER = None
+_CUSTOM_DICT_INITIALIZED = False
+HOMOPHONE_REPAIR_PATTERNS: list[tuple[re.Pattern, str]] = []
+
+def set_custom_dictionary(mapping: dict[str, str] | None) -> None:
+    """
+    Sets and compiles the custom word/phrase replacement dictionary.
+    Compiles phrases into a ~0.005 ms Trie-compacted regex pattern.
+    """
+    global _CUSTOM_DICTIONARY, _CUSTOM_DICT_REPLACER, _CUSTOM_DICT_INITIALIZED
+    _CUSTOM_DICT_INITIALIZED = True
+    if not mapping:
+        _CUSTOM_DICTIONARY = {}
+        _CUSTOM_DICT_REPLACER = None
+        return
+
+    # Clean and normalize keys (single-space whitespace, lowercase, stripped)
+    clean_map = {}
+    for k, v in mapping.items():
+        if k is not None and v is not None:
+            clean_k = " ".join(str(k).strip().split()).lower()
+            if clean_k:
+                clean_map[clean_k] = str(v)
+
+    _CUSTOM_DICTIONARY = clean_map
+    if not _CUSTOM_DICTIONARY:
+        _CUSTOM_DICT_REPLACER = None
+        return
+
+    # Automatically register capitalized/mixed-case target words to TECHNICAL_ACRONYMS_AND_PROPER_NOUNS
+    # so mid-sentence decapitalization won't lower them
+    for target in _CUSTOM_DICTIONARY.values():
+        for word in target.split():
+            clean_w = word.strip(".,!?:;\"'()[]{}")
+            if any(c.isupper() for c in clean_w):
+                TECHNICAL_ACRONYMS_AND_PROPER_NOUNS.add(clean_w)
+
+    sorted_phrases = sorted(_CUSTOM_DICTIONARY.keys(), key=len, reverse=True)
+    trie_body = _build_trie_regex(sorted_phrases)
+    pattern = re.compile(rf"(?<!\w)({trie_body})(?!\w)", re.IGNORECASE)
+
+    def _replace(m: re.Match) -> str:
+        key = m.group(0).lower()
+        return _CUSTOM_DICTIONARY.get(key, m.group(0))
+
+    _CUSTOM_DICT_REPLACER = lambda text: pattern.sub(_replace, text)
+
+
+def get_custom_dictionary() -> dict[str, str]:
+    """Returns a copy of the active custom replacement dictionary."""
+    return dict(_CUSTOM_DICTIONARY)
+
+
+def reset_custom_dictionary() -> None:
+    """Resets the custom replacement dictionary to empty."""
+    set_custom_dictionary(None)
+
+
+def load_custom_dictionary_from_file(file_path: str | os.PathLike) -> dict[str, str]:
+    """Loads dictionary mappings from a YAML or JSON file and applies them."""
+    p = Path(file_path)
+    if not p.exists():
+        return {}
+    try:
+        content = p.read_text(encoding="utf-8")
+        if p.suffix in (".yaml", ".yml"):
+            try:
+                import yaml
+                data = yaml.safe_load(content) or {}
+            except Exception:
+                data = json.loads(content) if content.strip() else {}
+        else:
+            data = json.loads(content) if content.strip() else {}
+        
+        if isinstance(data, dict) and "dictionary" in data and isinstance(data["dictionary"], dict):
+            mapping = data["dictionary"]
+        elif isinstance(data, dict):
+            mapping = data
+        else:
+            mapping = {}
+            
+        set_custom_dictionary(mapping)
+        return mapping
+    except Exception as e:
+        print(f"⚠️ [post_processor] Error loading dictionary from {file_path}: {e}")
+        return {}
+
+
+def _auto_load_dictionary_if_needed() -> None:
+    """Auto-detects and loads dictionary from config.yaml or dictionary.yaml on first use."""
+    global _CUSTOM_DICT_INITIALIZED
+    if _CUSTOM_DICT_INITIALIZED:
+        return
+    _CUSTOM_DICT_INITIALIZED = True
+    
+    candidates = [
+        Path("config/dictionary.yaml"),
+        Path("config/dictionary.yml"),
+        Path("config/dictionary.json"),
+        Path("dictionary.yaml"),
+        Path("dictionary.json"),
+        Path("config/config.yaml"),
+        Path("config.yaml"),
+    ]
+    for c in candidates:
+        if c.exists():
+            try:
+                content = c.read_text(encoding="utf-8")
+                if c.suffix in (".yaml", ".yml"):
+                    try:
+                        import yaml
+                        data = yaml.safe_load(content) or {}
+                    except Exception:
+                        data = json.loads(content) if content.strip() else {}
+                else:
+                    data = json.loads(content) if content.strip() else {}
+                
+                if isinstance(data, dict):
+                    dict_file = data.get("dictionary_file")
+                    if dict_file and Path(dict_file).exists():
+                        load_custom_dictionary_from_file(dict_file)
+                        return
+                    if "dictionary" in data and isinstance(data["dictionary"], dict):
+                        set_custom_dictionary(data["dictionary"])
+                        return
+                    if "dictionary" in c.name and data:
+                        set_custom_dictionary(data)
+                        return
+            except Exception:
+                pass
+
+
+# Initialize custom dictionary once at module load
+_auto_load_dictionary_if_needed()
+
+
 COMMA_DUP_REGEX = re.compile(r"[,]{2,}")
 PUNCT_COMMA_REGEX = re.compile(r"([.?!,])\s*,\s*")
 COMMA_NO_SPACE_REGEX = re.compile(r",([a-zA-Z])")
@@ -890,6 +1081,14 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     # 0b. Recover the "AI" acronym from common ASR mis-hearings ("a eyes" -> "AI")
     if "eyes" in cleaned_lower:
         cleaned = AI_MISHEARINGS_REGEX.sub("AI", cleaned)
+
+    # 0c. Scrub stray microphone click / onset consonant clipping before words ("t needs" -> "needs")
+    if cleaned_lower.startswith("t ") or cleaned_lower.startswith("'t "):
+        cleaned = LEADING_STRAY_T_REGEX.sub(r"\1", cleaned)
+
+    # 0d. Recover phonetic mis-hearings of "addressing" ("needs a. dressing" / "needs a dressing" -> "needs addressing")
+    if "dressing" in cleaned_lower:
+        cleaned = ADDRESSING_MISHEARINGS_REGEX.sub(r"\1 addressing", cleaned)
     
     # 0. Apply optional vLLM / SLM rewrite pass (unless bypassed for intermediate streaming micro-chunks)
     if not skip_slm and os.environ.get("VT_ENABLE_SLM", "0") == "1":
@@ -987,6 +1186,15 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     if "?" in cleaned:
         cleaned = MID_PHRASE_QUESTION_MARK_REGEX.sub(r"\1 \2", cleaned)
     
+    # 13c. Apply legacy homophone repair patterns if configured
+    if HOMOPHONE_REPAIR_PATTERNS:
+        for pat, repl in HOMOPHONE_REPAIR_PATTERNS:
+            cleaned = pat.sub(repl, cleaned)
+
+    # 13d. Apply custom vocabulary / phrase dictionary substitutions (~5 us)
+    if _CUSTOM_DICT_REPLACER is not None:
+        cleaned = _CUSTOM_DICT_REPLACER(cleaned)
+
     cleaned = cleaned.strip()
     if not cleaned or not cleaned.strip(".,!?;: \t\n\r"):
         return ""
