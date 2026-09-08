@@ -67,7 +67,10 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
     if audio_pcm is None or len(audio_pcm) == 0:
         return audio_pcm
         
-    flat = np.asarray(audio_pcm, dtype=np.float32).ravel()
+    if isinstance(audio_pcm, np.ndarray) and audio_pcm.dtype == np.float32 and audio_pcm.ndim == 1:
+        flat = audio_pcm
+    else:
+        flat = np.asarray(audio_pcm, dtype=np.float32).ravel()
     n = len(flat)
     frame_size = int(frame_len_ms * sample_rate / 1000)
     if frame_size <= 0 or n < frame_size:
@@ -88,22 +91,32 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
     frames_2d = flat[n - slice_len : n].reshape(num_frames, frame_size)
     
     # 1. RMS Energy calculation (mean of squares using vector SIMD)
-    mean_sq = np.sum(frames_2d * frames_2d, axis=1) / frame_size
+    mean_sq = np.einsum('ij,ij->i', frames_2d, frames_2d) / frame_size
     
-    # 2. Peak calculation
+    # 2. Peak calculation (fast per-frame max/min)
     peak = np.maximum(np.max(frames_2d, axis=1), -np.min(frames_2d, axis=1))
     
-    # 3. Zero-Crossing Rate (ZCR) for quiet unvoiced consonants
-    signs = np.signbit(frames_2d)
-    crossings = signs[:, 1:] ^ signs[:, :-1]
-    zcr = np.mean(crossings, axis=1)
+    # Fast path: detect frames with definite speech energy (high RMS or peak)
+    high_energy = (mean_sq >= silence_thresh_sq) | (peak >= peak_thresh)
+    high_indices = np.nonzero(high_energy)[0]
+    last_frame_j = high_indices[-1] if len(high_indices) > 0 else -1
     
-    # Match high energy speech OR peak OR quiet unvoiced trailing consonants with ZCR turbulence
-    speech_mask = (mean_sq >= silence_thresh_sq) | (peak >= peak_thresh) | ((mean_sq >= decayed_thresh_sq) & (zcr >= 0.15))
-    
-    speech_indices = np.nonzero(speech_mask)[0]
-    if len(speech_indices) > 0:
-        last_frame_j = speech_indices[-1]
+    # Check trailing candidate frames after last_frame_j for quiet unvoiced consonants via ZCR
+    if last_frame_j < num_frames - 1:
+        start_idx = last_frame_j + 1
+        cand_mask = (~high_energy[start_idx:]) & (mean_sq[start_idx:] >= decayed_thresh_sq)
+        cand_indices = np.nonzero(cand_mask)[0]
+        if len(cand_indices) > 0:
+            for rel_idx in reversed(cand_indices):
+                j = start_idx + rel_idx
+                f = frames_2d[j]
+                signs = np.signbit(f)
+                zcr = np.mean(signs[1:] ^ signs[:-1])
+                if zcr >= 0.15:
+                    last_frame_j = j
+                    break
+
+    if last_frame_j >= 0:
         i = n - (num_frames - last_frame_j) * frame_size
         last_speech_idx = min(n, i + frame_size + cushion_size)
         if last_speech_idx < n:
@@ -136,6 +149,7 @@ class StreamingMicroBatcher:
         self.audio_buffer = []
         self.total_samples = 0
         self.silence_samples = 0
+        self.next_chunk_idx = 0
         
         self.chunk_queue = queue.Queue()
         self.results_lock = threading.Lock()
@@ -151,6 +165,7 @@ class StreamingMicroBatcher:
         self.accumulated_text = ''
         self.silence_samples = 0
         self.transcribed_chunks = []
+        self.next_chunk_idx = 0
         self.running = True
         
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
@@ -161,7 +176,7 @@ class StreamingMicroBatcher:
             chunk_data = None
             try:
                 try:
-                    chunk_data = self.chunk_queue.get(timeout=0.05)
+                    chunk_data = self.chunk_queue.get(timeout=0.2)
                 except queue.Empty:
                     continue
                     
@@ -171,19 +186,28 @@ class StreamingMicroBatcher:
                 chunk_index, audio_chunk = chunk_data
                 
                 # Check energy gate: is this chunk purely silence/background noise?
-                flat = np.asarray(audio_chunk, dtype=np.float32).ravel()
+                if isinstance(audio_chunk, np.ndarray) and audio_chunk.dtype == np.float32 and audio_chunk.ndim == 1:
+                    flat = audio_chunk
+                else:
+                    flat = np.asarray(audio_chunk, dtype=np.float32).ravel()
                 n = len(flat)
                 if n == 0:
                     text = ''
                 else:
+                    # Fast speech energy detection: check peak first
                     peak = max(float(np.max(flat)), -float(np.min(flat)))
-                    mean_sq = float(np.dot(flat, flat)) / n
-                    if peak < 0.015 and mean_sq < (0.0035 * 0.0035):
-                        text = ''
-                    else:
-                        # Transcribe chunk with speech signal
+                    if peak >= 0.015:
+                        # Definite speech energy: transcribe chunk directly
                         text = transcribe2.transcribe_audio(audio_data=flat, sample_rate=self.sample_rate)
                         text = clean_hallucinations(text.strip() if text else '', skip_slm=True)
+                    else:
+                        # Low peak: check RMS energy to confirm silence
+                        mean_sq = float(np.dot(flat, flat)) / n
+                        if mean_sq < (0.0035 * 0.0035):
+                            text = ''
+                        else:
+                            text = transcribe2.transcribe_audio(audio_data=flat, sample_rate=self.sample_rate)
+                            text = clean_hallucinations(text.strip() if text else '', skip_slm=True)
                 
                 with self.results_lock:
                     self.transcribed_chunks.append((chunk_index, text))
@@ -198,10 +222,13 @@ class StreamingMicroBatcher:
 
     def feed_audio(self, pcm_chunk):
         """Feed a live incoming block of PCM audio (float32, 16kHz)"""
-        if not self.running or pcm_chunk is None or len(pcm_chunk) == 0:
+        if not self.running or pcm_chunk is None:
             return
             
-        flat = np.asarray(pcm_chunk, dtype=np.float32).ravel()
+        if isinstance(pcm_chunk, np.ndarray) and pcm_chunk.dtype == np.float32 and pcm_chunk.ndim == 1:
+            flat = pcm_chunk
+        else:
+            flat = np.asarray(pcm_chunk, dtype=np.float32).ravel()
         n_samples = len(flat)
         if n_samples == 0:
             return
@@ -213,7 +240,7 @@ class StreamingMicroBatcher:
         sum_sq = float(np.dot(flat, flat))
         mean_sq = sum_sq / n_samples
         
-        if hasattr(self, 'tui') and self.tui:
+        if self.tui:
             rms = np.sqrt(mean_sq)
             self.tui.update_vu_level(float(rms))
             
@@ -239,7 +266,8 @@ class StreamingMicroBatcher:
         if is_tail:
             full_chunk = trim_trailing_silence(full_chunk, sample_rate=self.sample_rate)
             
-        chunk_idx = len(self.transcribed_chunks) + self.chunk_queue.qsize()
+        chunk_idx = self.next_chunk_idx
+        self.next_chunk_idx += 1
         self.chunk_queue.put((chunk_idx, full_chunk))
         
         if keep_overlap and len(full_chunk) > self.overlap_len:

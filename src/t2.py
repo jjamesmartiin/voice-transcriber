@@ -778,7 +778,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                                 frame_flat = frame.flatten().astype(np.float32)
                                 frame_processed = scipy.signal.resample_poly(frame_flat, 16000, rate).astype(np.float32)
                             else:
-                                frame_processed = frame
+                                frame_processed = frame.ravel() if frame.ndim > 1 else frame
 
                             frames.append(frame_processed)
                             if stream_callback:
@@ -794,7 +794,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                                 frame_flat = frame.flatten().astype(np.float32)
                                 frame_processed = scipy.signal.resample_poly(frame_flat, 16000, rate).astype(np.float32)
                             else:
-                                frame_processed = frame
+                                frame_processed = frame.ravel() if frame.ndim > 1 else frame
 
                             frames.append(frame_processed)
                             if stream_callback:
@@ -883,8 +883,10 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
     if not frames:
         return np.array([], dtype=np.float32)
     if len(frames) == 1:
-        return frames[0]
-    return np.concatenate(frames, axis=0)
+        f0 = frames[0]
+        return f0.ravel() if f0.ndim > 1 else f0
+    concatenated = np.concatenate(frames, axis=0)
+    return concatenated.ravel() if concatenated.ndim > 1 else concatenated
 
 
 
@@ -893,7 +895,8 @@ def countdown_timer():
     for i in range(RECORD_SECONDS, 0, -1):
         if stop_recording.is_set(): break
         print(f'Recording: {i}s... (press space to stop)', end='\r')
-        time.sleep(1)
+        if stop_recording.wait(timeout=1.0):
+            break
 
 def check_for_stop_key():
     """Check for space key"""
@@ -903,12 +906,12 @@ def check_for_stop_key():
         old_settings = termios.tcgetattr(sys.stdin)
         tty.setcbreak(sys.stdin.fileno())
         while not stop_recording.is_set():
-            if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
+            rlist, _, _ = select.select([sys.stdin], [], [], 0.05)
+            if rlist:
                 c = sys.stdin.read(1)
                 if c == ' ':
                     stop_recording.set()
                     break
-            time.sleep(0.1)
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
     except:
         pass
@@ -923,12 +926,15 @@ def process_audio_stream(audio_data=None):
         return "", 0
 
     get_model(device=DEVICE)
-    
+
     transcribe_start_time = time.time()
     
     # Transcribe directly from numpy array (zero-copy flattening)
     try:
-        flat_audio = np.asarray(audio_data, dtype=np.float32).ravel()
+        if isinstance(audio_data, np.ndarray) and audio_data.dtype == np.float32 and audio_data.ndim == 1:
+            flat_audio = audio_data
+        else:
+            flat_audio = np.asarray(audio_data, dtype=np.float32).ravel()
         result = transcribe_audio(audio_data=flat_audio, sample_rate=ACTUAL_RATE, device=DEVICE)
     except Exception as e:
         print(f"Processing error: {e}")

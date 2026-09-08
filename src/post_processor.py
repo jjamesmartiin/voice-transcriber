@@ -74,14 +74,22 @@ _STUTTER_DIRECT_WORDS = frozenset({
     "and", "or", "but", "so", "because", "if", "we", "i", "you", "he", "she", "they"
 })
 
-def _has_stutter_direct(text_lower: str) -> bool:
+def _check_stutters(text_lower: str) -> tuple[bool, bool]:
+    has_punct_cand = False
+    has_direct = False
     prev = ""
     for w in text_lower.split():
         w_clean = w.strip(".,!?:;\"'()[]{}")
-        if w_clean and w_clean == prev and w_clean in _STUTTER_DIRECT_WORDS:
-            return True
+        if w_clean and w_clean == prev:
+            has_punct_cand = True
+            if w_clean in _STUTTER_DIRECT_WORDS:
+                has_direct = True
         prev = w_clean
-    return False
+    return has_punct_cand, has_direct
+
+def _has_stutter_direct(text_lower: str) -> bool:
+    _, has_direct = _check_stutters(text_lower)
+    return has_direct
 
 # Preposition compound stutters (e.g. "into in to" -> "into", "in to into" -> "into", "onto on to" -> "onto")
 PREPOSITION_COMPOUND_STUTTER_REGEX = re.compile(
@@ -134,6 +142,8 @@ TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
 }
 
 MID_SENTENCE_CAP_REGEX = re.compile(r"(?<![.!?\n])\s+([A-Z][a-zA-Z0-9_-]+)")
+_UPPERCASE_CHAR_REGEX = re.compile(r"[A-Z]")
+MID_SENTENCE_BOUNDARY_REGEX = re.compile(r"[.?!]\s+[a-zA-Z]")
 
 # Words after which a capitalized word is treated as a proper noun (name, place, day)
 # and exempted from mid-sentence decapitalization, e.g. "Send it to Alice", "on Wednesday".
@@ -165,7 +175,7 @@ def normalize_mid_sentence_casing(text: str) -> str:
     Decapitalizes words appearing mid-sentence without preceding sentence-ending punctuation,
     unless the word is a recognized acronym or proper noun.
     """
-    if not text or not any(c.isupper() for c in text[1:]):
+    if not text or not _UPPERCASE_CHAR_REGEX.search(text, 1):
         return text
 
     def _replace_mid_sentence_cap(m):
@@ -180,8 +190,15 @@ def normalize_mid_sentence_casing(text: str) -> str:
         # Preserve proper nouns (names/places/days) that follow a preposition
         # (e.g. "to Alice", "on Wednesday"), unless it is a common English word
         # that ASR over-capitalized (e.g. "to Like", "on This")
-        prefix = text[:m.start()].rstrip()
-        prev_word = prefix.rsplit(None, 1)[-1].rstrip(".,;:!?") if prefix else ""
+        start_idx = m.start()
+        idx = start_idx - 1
+        while idx >= 0 and text[idx] in " \t\r\n":
+            idx -= 1
+        end_prev = idx + 1
+        while idx >= 0 and text[idx] not in " \t\r\n":
+            idx -= 1
+        start_prev = idx + 1
+        prev_word = text[start_prev:end_prev].rstrip(".,;:!?") if end_prev > start_prev else ""
         if prev_word.lower() in PROPER_NOUN_PRECEDERS and word.lower() not in COMMON_MID_SENTENCE_WORDS:
             return m.group(0)
         lowercased = word[0].lower() + word[1:]
@@ -274,7 +291,7 @@ def _sanitize_slm_output(input_text: str, output_text: str) -> str:
     return clean_output.strip()
 
 
-def process_verbal_retractions(text: str) -> str:
+def process_verbal_retractions(text: str, text_lower: str | None = None) -> str:
     """
     Applies zero-latency verbal self-correction parsing:
     Replaces retracted phrases ('5 PM... actually 6 PM' -> '6 PM')
@@ -283,19 +300,20 @@ def process_verbal_retractions(text: str) -> str:
     if not text:
         return ""
         
-    text_lower = text.lower()
-    has_0 = any(kw in text_lower for kw in _RETRACTION_TRIGGER_0)
-    has_1 = any(kw in text_lower for kw in _RETRACTION_TRIGGER_1)
+    if text_lower is None:
+        text_lower = text.lower()
+    has_0 = ("scratch" in text_lower or "strike" in text_lower or "never" in text_lower)
+    has_1 = ("actually" in text_lower or "mean" in text_lower or "rather" in text_lower or "make that" in text_lower or "no wait" in text_lower)
     if not has_0 and not has_1:
         return text
 
     cleaned = text
     # 1. Handle "scratch that" tail deletion
-    if has_0:
+    if has_0 and RETRACTION_REPLACEMENT_PATTERNS[0].search(cleaned):
         cleaned = RETRACTION_REPLACEMENT_PATTERNS[0].sub("", cleaned)
     
     # 2. Handle verbal replacements ("X... actually Y", "X... I mean Y")
-    if has_1:
+    if has_1 and RETRACTION_REPLACEMENT_PATTERNS[1].search(cleaned):
         def _replace_retraction(m):
             prep = m.group(1)
             target = m.group(3)
@@ -542,16 +560,51 @@ _DIGIT_TOKEN = rf"(?:(?:double|triple)\s+)?(?:\b(?:{_DIGIT_WORD_ALT})\b)"
 # Two or more consecutive digit words: "six seven zero" / "double oh seven" / "one two three"
 _DIGIT_STRING_REGEX = re.compile(rf"\b(?:{_DIGIT_TOKEN})(?:\s+(?:{_DIGIT_TOKEN}))+\b", re.IGNORECASE)
 
-_NUMBER_WORD = (
-    r"(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
-    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|"
-    r"forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|"
-    r"trillion|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
-    r"eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|"
-    r"eighteenth|nineteenth|twentieth|thirtieth|fortieth|fiftieth|sixtieth|"
-    r"seventieth|eightieth|ninetieth|hundredth|thousandth|millionth|billionth|"
-    r"point|percent|o'clock|am|pm|a\.m\.|p\.m\.|a\s+m|p\s+m|double|triple)"
-)
+class _TrieNode:
+    __slots__ = ("children", "is_end")
+    def __init__(self):
+        self.children = {}
+        self.is_end = False
+
+def _build_trie_regex(words: list[str]) -> str:
+    """Builds a compact nested alternation regex from a list of words/phrases."""
+    root = _TrieNode()
+    for w in words:
+        curr = root
+        for char in w:
+            curr = curr.children.setdefault(char, _TrieNode())
+        curr.is_end = True
+
+    def _node_to_regex(node: _TrieNode) -> str:
+        if not node.children:
+            return ""
+        alts = []
+        for char, child in sorted(node.children.items()):
+            sub = _node_to_regex(child)
+            esc = re.escape(char)
+            if child.is_end and sub:
+                alts.append(f"{esc}(?:{sub})?")
+            elif child.is_end:
+                alts.append(esc)
+            else:
+                alts.append(f"{esc}{sub}")
+        if len(alts) == 1:
+            return alts[0]
+        return "(?:" + "|".join(alts) + ")"
+
+    return _node_to_regex(root)
+
+_NUMBER_WORD_LIST = [
+    "zero", "oh", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+    "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
+    "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion",
+    "trillion", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+    "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth",
+    "eighteenth", "nineteen", "twentieth", "thirtieth", "fortieth", "fiftieth", "sixtieth",
+    "seventieth", "eightieth", "ninetieth", "hundredth", "thousandth", "millionth", "billionth",
+    "point", "percent", "o'clock", "am", "pm", "a.m.", "p.m.", "a m", "p m", "double", "triple"
+]
+_NUMBER_WORD = _build_trie_regex(sorted(_NUMBER_WORD_LIST, key=len, reverse=True))
 _NUMBER_PHRASE_REGEX = re.compile(
     r"\b(?:a\s+)?(?:" + _NUMBER_WORD + r")(?:(?:[\s\-]+|\s+and\s+)(?:" + _NUMBER_WORD + r"))*\b",
     re.IGNORECASE,
@@ -846,19 +899,19 @@ def _has_number_words(text_lower: str) -> bool:
     return False
 
 
-def convert_number_words_to_digits(text: str) -> str:
+def convert_number_words_to_digits(text: str, text_lower: str | None = None) -> str:
     """Convert spoken number words in text to digits (no-op if disabled via env or runtime toggle)."""
     if os.environ.get("VT_NUMBER_DIGITS", "1") != "1" or not _number_digits_enabled:
         return text
     if not text:
         return ""
-    text_lower = text.lower()
+    if text_lower is None:
+        text_lower = text.lower()
     if not _has_number_words(text_lower):
         return text
-    # General number phrases first (also handles digit strings and decimals);
-    # then a digit-string fallback for any runs the phrase regex missed.
     converted = _NUMBER_PHRASE_REGEX.sub(_convert_number_phrase, text)
-    converted = _DIGIT_STRING_REGEX.sub(_expand_digit_string, converted)
+    if _DIGIT_STRING_REGEX.search(converted):
+        converted = _DIGIT_STRING_REGEX.sub(_expand_digit_string, converted)
     return converted
 
 
@@ -878,39 +931,7 @@ def set_number_digits_enabled(enabled: bool) -> None:
 # "v l l m" -> "vLLM", "github" -> "GitHub") in ~0.005 ms using a single-pass
 # C-level Trie-compacted regex with word boundaries.
 
-class _TrieNode:
-    __slots__ = ("children", "is_end")
-    def __init__(self):
-        self.children = {}
-        self.is_end = False
 
-def _build_trie_regex(words: list[str]) -> str:
-    """Builds a compact nested alternation regex from a list of words/phrases."""
-    root = _TrieNode()
-    for w in words:
-        curr = root
-        for char in w:
-            curr = curr.children.setdefault(char, _TrieNode())
-        curr.is_end = True
-
-    def _node_to_regex(node: _TrieNode) -> str:
-        if not node.children:
-            return ""
-        alts = []
-        for char, child in sorted(node.children.items()):
-            sub = _node_to_regex(child)
-            esc = re.escape(char)
-            if child.is_end and sub:
-                alts.append(f"{esc}(?:{sub})?")
-            elif child.is_end:
-                alts.append(esc)
-            else:
-                alts.append(f"{esc}{sub}")
-        if len(alts) == 1:
-            return alts[0]
-        return "(?:" + "|".join(alts) + ")"
-
-    return _node_to_regex(root)
 
 _CUSTOM_DICTIONARY: dict[str, str] = {}
 _CUSTOM_DICT_REPLACER = None
@@ -1074,39 +1095,52 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     cleaned_lower = text.lower()
     
     # 0. Apply verbal edit self-correction pre-pass & hesitation filler removal
-    cleaned = process_verbal_retractions(cleaned)
-    if any(k in cleaned_lower for k in _FILLER_KEYWORDS):
-        cleaned = FILLER_WORDS_REGEX.sub(" ", cleaned)
+    new_cleaned = process_verbal_retractions(cleaned, cleaned_lower)
+    if new_cleaned is not cleaned:
+        cleaned = new_cleaned
+        cleaned_lower = cleaned.lower()
+        
+    if ("um" in cleaned_lower or "uh" in cleaned_lower or "ah" in cleaned_lower or
+        " er" in cleaned_lower or "er " in cleaned_lower or cleaned_lower.startswith("er") or cleaned_lower.endswith("er")):
+        if FILLER_WORDS_REGEX.search(cleaned):
+            cleaned = FILLER_WORDS_REGEX.sub(" ", cleaned)
+            cleaned_lower = cleaned.lower()
 
     # 0b. Recover the "AI" acronym from common ASR mis-hearings ("a eyes" -> "AI")
     if "eyes" in cleaned_lower:
         cleaned = AI_MISHEARINGS_REGEX.sub("AI", cleaned)
+        cleaned_lower = cleaned.lower()
 
     # 0c. Scrub stray microphone click / onset consonant clipping before words ("t needs" -> "needs")
     if cleaned_lower.startswith("t ") or cleaned_lower.startswith("'t "):
         cleaned = LEADING_STRAY_T_REGEX.sub(r"\1", cleaned)
+        cleaned_lower = cleaned.lower()
 
     # 0d. Recover phonetic mis-hearings of "addressing" ("needs a. dressing" / "needs a dressing" -> "needs addressing")
     if "dressing" in cleaned_lower:
         cleaned = ADDRESSING_MISHEARINGS_REGEX.sub(r"\1 addressing", cleaned)
+        cleaned_lower = cleaned.lower()
     
     # 0. Apply optional vLLM / SLM rewrite pass (unless bypassed for intermediate streaming micro-chunks)
     if not skip_slm and os.environ.get("VT_ENABLE_SLM", "0") == "1":
         cleaned = process_slm_llm_rewrite(cleaned)
+        cleaned_lower = cleaned.lower()
     
     # 1. Hallucination and trailing muttering stripping
-    cleaned_lower = cleaned.lower()
-    if any(k in cleaned_lower for k in _HALLUCINATION_KEYWORDS):
+    if ("watching" in cleaned_lower or "subtitles" in cleaned_lower or "subscribe" in cleaned_lower):
         for pat in HALLUCINATION_PATTERNS:
             cleaned = pat.sub("", cleaned)
+        cleaned_lower = cleaned.lower()
         
-    if any(k in cleaned_lower for k in _MUTTERING_KEYWORDS):
-        while True:
-            new_cleaned = TRAILING_MUTTERINGS_REGEX.sub(r"\1", cleaned)
-            if new_cleaned == cleaned:
-                break
-            cleaned = new_cleaned
-        cleaned = STANDALONE_MUTTERINGS_REGEX.sub("", cleaned)
+    if ("oop" in cleaned_lower or "whoop" in cleaned_lower or "never" in cleaned_lower):
+        if cleaned_lower.rstrip(" .?!,;:").endswith(("oops", "whoops", "oopsy", "whoopsy", "oop", "opps", "nevermind", "never mind")):
+            while True:
+                new_cleaned = TRAILING_MUTTERINGS_REGEX.sub(r"\1", cleaned)
+                if new_cleaned == cleaned:
+                    break
+                cleaned = new_cleaned
+            cleaned = STANDALONE_MUTTERINGS_REGEX.sub("", cleaned)
+            cleaned_lower = cleaned.lower()
 
     if len(cleaned) <= 40:
         stripped_h = cleaned.strip(" .?!").lower()
@@ -1117,67 +1151,75 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     if not cleaned.strip(".,!?;: \t\n\r"):
         return ""
     
-    # 2. Deduplicate repeated words across punctuation (e.g. "about. about" -> "about", "a. a" -> "a")
-    if any(p in cleaned for p in ".,?!;:"):
+    # 2 & 3. Deduplicate repeated words across punctuation & direct filler stutters
+    has_punct_cand, has_direct = _check_stutters(cleaned_lower)
+    if has_punct_cand and any(p in cleaned for p in ".,?!;:"):
         cleaned = STUTTER_PUNCT_REGEX.sub(r"\1", cleaned)
-    
-    # 3. Deduplicate direct filler stutters (e.g. "about about" -> "about", "the the" -> "the")
-    if _has_stutter_direct(cleaned_lower):
+    if has_direct:
         cleaned = STUTTER_DIRECT_REGEX.sub(r"\1", cleaned)
     if "to" in cleaned_lower and ("into" in cleaned_lower or "onto" in cleaned_lower or "in to" in cleaned_lower or "on to" in cleaned_lower):
         cleaned = PREPOSITION_COMPOUND_STUTTER_REGEX.sub(lambda m: "into" if "into" in m.group(0).lower() else "onto", cleaned)
     
     # 4-9. Sentence boundary & clause linking fixes
-    has_period = "." in cleaned
-    has_clause_punct = has_period or "?" in cleaned or "!" in cleaned
+    if MID_SENTENCE_BOUNDARY_REGEX.search(cleaned):
+        has_period = "." in cleaned
 
-    # 4. Fix isolated single-word discourse markers (e.g. "So. I am" -> "So, I am", "Yeah. Revert" -> "Yeah, revert")
-    if has_period:
-        def _fix_discourse(m):
-            prefix = m.group(1)
-            word = m.group(2)
-            next_char = _preserve_i_casing(m.group(3), m.string, m.end())
-            return f"{prefix}{word}, {next_char}"
-        cleaned = DISCOURSE_STARTERS_REGEX.sub(_fix_discourse, cleaned)
-    
-    # 5. Dangling prepositions & determiners before period (e.g. "put a. period" -> "put a period")
-    if has_clause_punct:
-        def _fix_dangling(m):
-            w1 = m.group(1)
-            next_char = _preserve_i_casing(m.group(2), m.string, m.end())
-            return f"{w1} {next_char}"
-        cleaned = DANGLING_WORDS_REGEX.sub(_fix_dangling, cleaned)
-    
-    if has_period:
-        # 6. Incomplete linking verbs followed by lowercase continuation (e.g. "thing was. something")
-        cleaned = LINKING_VERB_LOWER_REGEX.sub(r"\1 \2", cleaned)
+        # 4. Fix isolated single-word discourse markers (e.g. "So. I am" -> "So, I am", "Yeah. Revert" -> "Yeah, revert")
+        if has_period and DISCOURSE_STARTERS_REGEX.search(cleaned):
+            def _fix_discourse(m):
+                prefix = m.group(1)
+                word = m.group(2)
+                next_char = _preserve_i_casing(m.group(3), m.string, m.end())
+                return f"{prefix}{word}, {next_char}"
+            cleaned = DISCOURSE_STARTERS_REGEX.sub(_fix_discourse, cleaned)
         
-        # 7. Coordinating conjunctions after period (e.g. "commit. and force push" -> "commit, and force push")
-        cleaned = COORD_CONJUNCTIONS_REGEX.sub(lambda m: f", {m.group(1).lower()}", cleaned)
+        # 5. Dangling prepositions & determiners before period (e.g. "put a. period" -> "put a period")
+        if DANGLING_WORDS_REGEX.search(cleaned):
+            def _fix_dangling(m):
+                w1 = m.group(1)
+                next_char = _preserve_i_casing(m.group(2), m.string, m.end())
+                return f"{w1} {next_char}"
+            cleaned = DANGLING_WORDS_REGEX.sub(_fix_dangling, cleaned)
         
-        # 8. Subordinating conjunctions after period (e.g. ". because", ". which")
-        cleaned = SUBORD_CONJUNCTIONS_REGEX.sub(lambda m: f" {m.group(1).lower()}", cleaned)
-        
-        # 9. General lowercase continuation after period (e.g. ". something" -> " something")
-        cleaned = LOWERCASE_AFTER_PERIOD_REGEX.sub(r" \1", cleaned)
+        if has_period:
+            # 6. Incomplete linking verbs followed by lowercase continuation (e.g. "thing was. something")
+            if LINKING_VERB_LOWER_REGEX.search(cleaned):
+                cleaned = LINKING_VERB_LOWER_REGEX.sub(r"\1 \2", cleaned)
+            
+            # 7. Coordinating conjunctions after period (e.g. "commit. and force push" -> "commit, and force push")
+            if ("and" in cleaned_lower or "or" in cleaned_lower or "but" in cleaned_lower or
+                "so" in cleaned_lower or "yet" in cleaned_lower or "nor" in cleaned_lower):
+                cleaned = COORD_CONJUNCTIONS_REGEX.sub(lambda m: f", {m.group(1).lower()}", cleaned)
+            
+            # 8. Subordinating conjunctions after period (e.g. ". because", ". which")
+            if ("because" in cleaned_lower or "which" in cleaned_lower or "that" in cleaned_lower or
+                "though" in cleaned_lower or "although" in cleaned_lower):
+                cleaned = SUBORD_CONJUNCTIONS_REGEX.sub(lambda m: f" {m.group(1).lower()}", cleaned)
+            
+            # 9. General lowercase continuation after period (e.g. ". something" -> " something")
+            if LOWERCASE_AFTER_PERIOD_REGEX.search(cleaned):
+                cleaned = LOWERCASE_AFTER_PERIOD_REGEX.sub(r" \1", cleaned)
     
     # 10. Clean up duplicate punctuation and normalize spacing
     if ",," in cleaned:
         cleaned = COMMA_DUP_REGEX.sub(",", cleaned)
     if "," in cleaned:
         cleaned = PUNCT_COMMA_REGEX.sub(r"\1 ", cleaned)
-        cleaned = SPACE_BEFORE_COMMA_REGEX.sub(",", cleaned)
+        if " ," in cleaned:
+            cleaned = SPACE_BEFORE_COMMA_REGEX.sub(",", cleaned)
         cleaned = COMMA_NO_SPACE_REGEX.sub(r", \1", cleaned)
     if "  " in cleaned:
         cleaned = MULTI_SPACE_REGEX.sub(" ", cleaned)
 
     # 10b. Convert spoken number words to digits ("twenty five" -> "25", phone digit strings, ...)
-    cleaned = convert_number_words_to_digits(cleaned)
+    cleaned = convert_number_words_to_digits(cleaned, cleaned_lower)
 
     # 11. Normalize standalone I and contractions
     if "i" in cleaned:
-        cleaned = STANDALONE_I_REGEX.sub("I", cleaned)
-        cleaned = CONTRACTION_I_REGEX.sub(r"I\1", cleaned)
+        if " i " in cleaned or cleaned.startswith("i ") or cleaned.endswith(" i") or STANDALONE_I_REGEX.search(cleaned):
+            cleaned = STANDALONE_I_REGEX.sub("I", cleaned)
+        if "i'" in cleaned:
+            cleaned = CONTRACTION_I_REGEX.sub(r"I\1", cleaned)
     
     # 12. Normalize mid-sentence random capitalizations
     cleaned = normalize_mid_sentence_casing(cleaned)
@@ -1201,7 +1243,7 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
         
     # 14. Ensure complete statement utterances end with terminal punctuation
     if not cleaned.endswith((".", "!", "?", ":")):
-        if len(cleaned.split()) >= 3:
+        if len(cleaned.split(None, 3)) >= 3:
             cleaned += "."
         
     return cleaned

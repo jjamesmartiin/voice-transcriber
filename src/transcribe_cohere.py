@@ -36,12 +36,20 @@ _model = None
 _processor = None
 _model_lock = threading.Lock()
 _cached_cpu_threads = None
+_interop_configured = False
 
 def _configure_torch_runtime(device="cpu"):
-    """Tune PyTorch runtime parameters for optimal CPU/GPU inference latency."""
-    global _cached_cpu_threads
+    """Tune PyTorch runtime parameters for optimal CPU/GPU inference latency and power efficiency."""
+    global _cached_cpu_threads, _interop_configured
     if device == "cpu":
         torch.set_grad_enabled(False)
+        if not _interop_configured:
+            try:
+                torch.set_num_interop_threads(1)
+            except RuntimeError:
+                pass
+            _interop_configured = True
+            
         if hasattr(torch, "set_float32_matmul_precision"):
             try:
                 torch.set_float32_matmul_precision("high")
@@ -170,6 +178,63 @@ def _resolve_dtype(device):
         return torch.bfloat16
     return torch.float32
 
+
+def _optimize_cohere_runtime(model, processor):
+    """Optimize model and processor with prompt caching and tokenizer result memoization."""
+    # 1. Prompt string formatting cache
+    if hasattr(model, "build_prompt"):
+        orig_build_prompt = model.build_prompt
+        prompt_cache = {}
+        def cached_build_prompt(language: str, punctuation: bool = True) -> str:
+            key = (language, punctuation)
+            if key not in prompt_cache:
+                prompt_cache[key] = orig_build_prompt(language, punctuation)
+            return prompt_cache[key]
+        model.build_prompt = cached_build_prompt
+
+    # 2. Tokenizer output memoization for repetitive prompts
+    if hasattr(processor, "tokenizer") and hasattr(processor, "__call__"):
+        token_cache = {}
+        orig_processor_call = processor.__call__
+        
+        def cached_processor_call(audio=None, text=None, sampling_rate=None, return_tensors=None, **kwargs):
+            if audio is None:
+                raise ValueError("audio is required for CohereAsrProcessor.")
+            result = processor.feature_extractor(audio, sampling_rate=sampling_rate, return_tensors=return_tensors)
+            if text is not None:
+                add_special_tokens = kwargs.get("add_special_tokens", False)
+                cache_key = None
+                if isinstance(text, str):
+                    cache_key = (text, return_tensors, add_special_tokens)
+                elif isinstance(text, (list, tuple)) and all(isinstance(t, str) for t in text):
+                    cache_key = (tuple(text), return_tensors, add_special_tokens)
+                
+                if cache_key is not None and cache_key in token_cache:
+                    cached = token_cache[cache_key]
+                    result["input_ids"] = cached["input_ids"].clone()
+                    if "attention_mask" in cached and cached["attention_mask"] is not None:
+                        result["attention_mask"] = cached["attention_mask"].clone()
+                else:
+                    kwargs_copy = dict(kwargs)
+                    add_spec = kwargs_copy.pop("add_special_tokens", False)
+                    text_inputs = processor.tokenizer(
+                        text,
+                        return_tensors=return_tensors,
+                        add_special_tokens=add_spec,
+                        **kwargs_copy,
+                    )
+                    result["input_ids"] = text_inputs["input_ids"]
+                    if "attention_mask" in text_inputs:
+                        result["attention_mask"] = text_inputs["attention_mask"]
+                    if cache_key is not None:
+                        token_cache[cache_key] = {
+                            "input_ids": text_inputs["input_ids"].clone(),
+                            "attention_mask": text_inputs["attention_mask"].clone() if "attention_mask" in text_inputs else None,
+                        }
+            return result
+        processor.__call__ = cached_processor_call
+    return model, processor
+
 def _load_model_once(target_id, revision, token, dtype, local_files_only, device):
     _configure_torch_runtime(device)
     processor = AutoProcessor.from_pretrained(
@@ -193,6 +258,7 @@ def _load_model_once(target_id, revision, token, dtype, local_files_only, device
     for param in model.parameters():
         param.requires_grad = False
         
+    model, processor = _optimize_cohere_runtime(model, processor)
     return model, processor
 
 def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
@@ -290,12 +356,13 @@ def preload_model(device="cpu"):
             print("Warming up model...")
             warmup_audio = np.zeros(int(16000 * 0.1), dtype=np.float32)
             
-            model.transcribe(
-                processor=processor,
-                audio_arrays=[warmup_audio],
-                sample_rates=[16000],
-                language="en"
-            )
+            with torch.inference_mode():
+                model.transcribe(
+                    processor=processor,
+                    audio_arrays=[warmup_audio],
+                    sample_rates=[16000],
+                    language="en"
+                )
             print("Warmup complete! Ready for instant transcription.")
         except Exception as e:
             print(f"Preload/Warmup error: {e}")
@@ -307,18 +374,26 @@ def preload_model(device="cpu"):
 
 def has_speech_activity(audio_data):
     """Check if audio contains actual speech energy rather than silence / noise floor"""
-    if audio_data is None or len(audio_data) == 0:
+    if audio_data is None:
         return False
-    # Short-circuit peak computation first (avoids RMS overhead when speech is evident)
-    peak = float(np.max(np.abs(audio_data)))
-    if peak >= 0.015:
-        return True
-    # If peak is borderline, compute RMS energy
-    if getattr(audio_data, "dtype", None) == np.float32:
-        rms = float(np.sqrt(np.mean(audio_data * audio_data)))
+    if isinstance(audio_data, np.ndarray):
+        arr = audio_data
     else:
         arr = np.asarray(audio_data, dtype=np.float32)
-        rms = float(np.sqrt(np.mean(arr * arr)))
+    if arr.size == 0:
+        return False
+    # Short-circuit peak computation first using max and min to avoid allocating an intermediate array
+    max_val = float(np.max(arr))
+    min_val = float(np.min(arr))
+    peak = max(abs(max_val), abs(min_val))
+    if peak >= 0.015:
+        return True
+    # If peak is borderline, compute RMS energy via zero-allocation SIMD dot product
+    if arr.dtype != np.float32:
+        arr = arr.astype(np.float32, copy=False)
+    if arr.ndim > 1:
+        arr = arr.ravel()
+    rms = float(np.sqrt(np.dot(arr, arr) / len(arr)))
     return rms >= 0.0035
 
 def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device="cpu", language="en"):
@@ -339,10 +414,11 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
             if audio_data is not None:
                 if not isinstance(audio_data, np.ndarray):
                     audio_data = np.asarray(audio_data, dtype=np.float32)
-                elif audio_data.ndim > 1:
-                    audio_data = audio_data.flatten()
-                elif audio_data.dtype != np.float32:
-                    audio_data = audio_data.astype(np.float32, copy=False)
+                else:
+                    if audio_data.dtype != np.float32:
+                        audio_data = audio_data.astype(np.float32, copy=False)
+                    if audio_data.ndim > 1:
+                        audio_data = audio_data.ravel()
                 
                 results = model.transcribe(
                     processor=processor,

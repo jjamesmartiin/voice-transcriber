@@ -19,6 +19,28 @@ warnings.filterwarnings("ignore", message="Init provider bridge failed")
 _model = None
 _model_lock = threading.Lock()
 
+def has_speech_activity(audio_data):
+    """Check if audio contains actual speech energy rather than silence / noise floor"""
+    if audio_data is None:
+        return False
+    if isinstance(audio_data, np.ndarray):
+        arr = audio_data
+    else:
+        arr = np.asarray(audio_data, dtype=np.float32)
+    if arr.size == 0:
+        return False
+    max_val = float(np.max(arr))
+    min_val = float(np.min(arr))
+    peak = max(abs(max_val), abs(min_val))
+    if peak >= 0.015:
+        return True
+    if arr.dtype != np.float32:
+        arr = arr.astype(np.float32, copy=False)
+    if arr.ndim > 1:
+        arr = arr.ravel()
+    rms = float(np.sqrt(np.dot(arr, arr) / len(arr)))
+    return rms >= 0.0035
+
 def load_model(model_name=MODEL, device="cpu", compute_type=None):
     """Load model with optimized parameters for the current device"""
     # Automatically select the best compute type for the device
@@ -75,7 +97,21 @@ def load_model(model_name=MODEL, device="cpu", compute_type=None):
         model_source = model_name
         download_kwargs = {"download_root": cache_dir}
         
-    model = WhisperModel(model_source, device=device, compute_type=compute_type, **download_kwargs)
+    # Prevent CPU core saturation/thrashing: optimal thread count for CTranslate2
+    env_threads = os.environ.get("VT_CPU_THREADS", "").strip()
+    if env_threads.isdigit():
+        cpu_threads = max(1, min(int(env_threads), os.cpu_count() or 4))
+    else:
+        cpu_threads = max(1, min(os.cpu_count() or 4, 4))
+        
+    model = WhisperModel(
+        model_source,
+        device=device,
+        compute_type=compute_type,
+        cpu_threads=cpu_threads,
+        num_workers=1,
+        **download_kwargs
+    )
     
     # Use batched inference pipeline for performance
     batched_model = BatchedInferencePipeline(model=model)
@@ -110,6 +146,9 @@ def preload_model(device="cpu"):
 
 def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device="cpu", language="en"):
     """Transcribe audio with performance optimizations"""
+    if audio_data is not None and not has_speech_activity(audio_data):
+        return ""
+
     # Use the singleton model instead of loading it each time
     model = get_model(device=device)
     
@@ -118,8 +157,13 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     
     # Prepare input
     if audio_data is not None:
-        if hasattr(audio_data, "flatten"):
-            audio_data = audio_data.flatten()
+        if not isinstance(audio_data, np.ndarray):
+            audio_data = np.asarray(audio_data, dtype=np.float32)
+        else:
+            if audio_data.dtype != np.float32:
+                audio_data = audio_data.astype(np.float32, copy=False)
+            if audio_data.ndim > 1:
+                audio_data = audio_data.ravel()
         
         # Resample to 16kHz if necessary (Whisper expects 16kHz)
         if sample_rate != 16000:
