@@ -50,7 +50,7 @@ def detect_system_theme_color():
 
 
 class VoiceTranscriberTUI:
-    def __init__(self, app_version="1.0.0", ui_theme="auto"):
+    def __init__(self, app_version="1.0.1", ui_theme="auto"):
         self.app_version = app_version
         self.console = Console()
         self.lock = threading.Lock()
