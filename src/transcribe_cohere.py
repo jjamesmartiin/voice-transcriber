@@ -277,8 +277,9 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "cohere"),
         os.path.join(os.getcwd(), "models", "cohere"),
     ]
-    # Per-user writable install dir used by the GitHub-release auto-installer
-    # (also the only writable candidate when installed from the read-only Nix store).
+    # Install target of the GitHub-release auto-installer: <repo>/models/cohere
+    # when running from a git checkout, else the per-user dir (read-only Nix
+    # store / AppImage installs).
     if cohere_models_dir is not None:
         search_dirs.insert(0, cohere_models_dir())
 

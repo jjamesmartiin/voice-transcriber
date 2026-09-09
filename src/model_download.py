@@ -5,16 +5,24 @@ CohereLabs/cohere-transcribe-03-2026 is Apache-2.0 licensed, so the weights are
 mirrored as split-xz GitHub Release assets (see scripts/prepare_model_release.py).
 When the app needs the Cohere backend and no local copy exists, this module
 downloads the parts, verifies their SHA-256, decompresses/concatenates them, and
-extracts them into a writable per-user directory (~/.local/share/vt/models/cohere)
-so the backend can load fully offline afterwards (local_files_only=True).
+installs them so the backend can load fully offline afterwards
+(local_files_only=True).
+
+Install location (see cohere_models_dir): when the app runs from a git
+checkout of this repository, the weights unpack into <repo>/models/cohere so it
+is obvious they belong to / came from this project; read-only installs (Nix
+store, AppImage) fall back to ~/.local/share/vt/models/cohere. A SOURCE.json
+provenance file is written next to the weights recording the origin repo,
+release tag, sha256, license, and install date.
 
 Pure stdlib: urllib for download, lzma for decompression, tarfile for extract.
 
 Env knobs:
-  VT_AUTO_DOWNLOAD_MODEL   "0"/"false" disables automatic download
-  VT_MODEL_RELEASE_BASE    base URL of the release assets (default: GitHub
-                           "latest" release of jjamesmartiin/voice-transcriber)
-  XDG_DATA_HOME            (standard) relocates the install target for testing
+  VT_MODEL_DIR            explicit model install directory (overrides both)
+  VT_AUTO_DOWNLOAD_MODEL  "0"/"false" disables automatic download
+  VT_MODEL_RELEASE_BASE   base URL of the release assets (default: GitHub
+                          "latest" release of jjamesmartiin/voice-transcriber)
+  XDG_DATA_HOME           (standard) relocates the per-user fallback for testing
 """
 import hashlib
 import lzma
@@ -73,9 +81,74 @@ def get_data_dir():
     return d
 
 
+def find_repo_root():
+    """Return the voice-transcriber checkout root when running from one.
+
+    Walks up from this file looking for the repository marker (`.git`). When the
+    app runs from the Nix store, an AppImage, or a pip-style install there is no
+    marker, so this returns None and the installer falls back to the per-user
+    data dir (those install locations are read-only).
+    """
+    d = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(8):
+        if os.path.isdir(os.path.join(d, ".git")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    return None
+
+
 def cohere_models_dir():
-    """Writable install target shared by the app's local-model search path."""
+    """Preferred writable install target for the Cohere model.
+
+    Order: $VT_MODEL_DIR override -> <repo checkout>/models/cohere (so the
+    weights live visibly inside the project it came from) -> per-user data dir
+    (~/.local/share/vt/models/cohere) for read-only installs (Nix/AppImage).
+    """
+    override = os.environ.get("VT_MODEL_DIR", "").strip()
+    if override:
+        return os.path.abspath(override)
+    root = find_repo_root()
+    if root:
+        repo_dir = os.path.join(root, "models", "cohere")
+        # writable now? (no side effects: don't create anything on lookup)
+        if os.path.isdir(repo_dir):
+            if os.access(repo_dir, os.W_OK):
+                return repo_dir
+        elif os.access(root, os.W_OK):
+            return repo_dir
     return os.path.join(get_data_dir(), "models", "cohere")
+
+
+def _write_provenance(dest, base_url, resolved_url=None):
+    """Write SOURCE.json next to the weights so their origin is unambiguous."""
+    import datetime as _dt
+    release_tag = None
+    if resolved_url:
+        m = re.search(r"/releases/download/([^/]+)/", resolved_url)
+        if m:
+            release_tag = m.group(1)
+    info = {
+        "model": REPO_ID,
+        "revision": REVISION,
+        "model_safetensors_sha256": SAFETENSORS_SHA256,
+        "download_url_base": base_url,
+        "release_tag": release_tag,
+        "license": "Apache-2.0 (see LICENSE and NOTICE in this directory)",
+        "installed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        "note": "Weights mirrored from the " + REPO_ID + " HF snapshot via the "
+                "voice-transcriber GitHub release, so the app runs without a "
+                "Hugging Face account.",
+    }
+    try:
+        with open(os.path.join(dest, "SOURCE.json"), "w") as f:
+            import json as _json
+            _json.dump(info, f, indent=2)
+            f.write("\n")
+    except Exception as e:
+        print(f"(could not write SOURCE.json provenance: {e})")
 
 
 def _release_base():
@@ -134,27 +207,41 @@ def _sha256_file(path, chunk=1 << 20):
 
 
 def _fetch_part_manifest(base_url, prefix):
-    """Download the SHA256SUMS file; return {filename: sha256} for *.partN.xz."""
+    """Download the SHA256SUMS file.
+
+    Returns (manifest, resolved_url) where manifest is {filename: sha256} for
+    *.partN.xz entries and resolved_url is the final URL after redirects (used
+    to record the concrete release tag in SOURCE.json).
+    """
     sums_url = f"{base_url}/{prefix}.SHA256SUMS"
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sha256")
-    tmp.close()
-    try:
-        _http_get(sums_url, tmp.name, f"manifest ({prefix}.SHA256SUMS)")
-        manifest = {}
-        with open(tmp.name) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    digest, name = line.split(None, 1)
-                except ValueError:
-                    continue
-                if re.fullmatch(rf"{re.escape(prefix)}\.part\d+\.xz", name):
-                    manifest[name] = digest
-        return manifest
-    finally:
-        os.unlink(tmp.name)
+    data = None
+    resolved_url = None
+    last_err = None
+    for attempt in range(1, 4):
+        try:
+            req = urllib.request.Request(sums_url, headers={"User-Agent": "vt-model-installer/1.0"})
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                resolved_url = resp.geturl()
+                data = resp.read()
+            break
+        except (urllib.error.URLError, OSError, socket.timeout) as e:
+            last_err = e
+            print(f"Manifest attempt {attempt}/3 for {sums_url} failed: {e}", flush=True)
+            time.sleep(2 * attempt)
+    if data is None:
+        raise RuntimeError(f"Failed to download {sums_url}: {last_err}")
+    manifest = {}
+    for line in data.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            digest, name = line.split(None, 1)
+        except ValueError:
+            continue
+        if re.fullmatch(rf"{re.escape(prefix)}\.part\d+\.xz", name):
+            manifest[name] = digest
+    return manifest, resolved_url
 
 
 def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
@@ -180,7 +267,7 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
           f"Downloading Cohere model parts from {base_url} (Apache-2.0 release asset)...")
 
     try:
-        manifest = _fetch_part_manifest(base_url, prefix)
+        manifest, resolved_url = _fetch_part_manifest(base_url, prefix)
     except Exception as e:
         print(f"Could not fetch model manifest ({e}). Falling back to Hugging Face "
               f"(requires token/access).")
@@ -227,7 +314,9 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
         if os.path.isdir(dest):
             shutil.rmtree(dest)
         shutil.move(staging, dest)
-        print(f"Model installed at {dest}. Loading fully offline from now on.")
+        _write_provenance(dest, base_url, resolved_url)
+        print(f"Model installed at {dest}. Loading fully offline from now on.\n"
+              f"Origin recorded in {os.path.join(dest, 'SOURCE.json')}.")
         return dest
     except Exception as e:
         print(f"Model auto-download failed: {e}", flush=True)

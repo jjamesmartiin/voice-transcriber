@@ -103,7 +103,7 @@ cp config/example-config/config.yaml.example config/config.yaml
 # then set: hf_token: "hf_..."
 ```
 
-Fallbacks if `hf_token` is unset: the `HF_TOKEN` environment variable, then `huggingface-cli login` credentials. No token is needed once the model is cached locally under `~/.local/share/vt/models/cohere` (or `models/cohere`).
+Fallbacks if `hf_token` is unset: the `HF_TOKEN` environment variable, then `huggingface-cli login` credentials. No token is needed once the model is cached locally — under the repo's own `models/cohere` when running from a git checkout, or under `~/.local/share/vt/models/cohere` for read-only Nix/AppImage installs.
 
 ---
 
@@ -219,10 +219,18 @@ When the Cohere backend starts and finds no local copy, the app automatically:
 
 1. downloads the release assets (`cohere-transcribe-<revision>.part1.xz` / `.part2.xz`, ~1.46 GB each),
 2. verifies each part's SHA-256 against the published `SHA256SUMS`,
-3. decompresses, concatenates, and extracts them into `~/.local/share/vt/models/cohere` (also the writable location when the app runs from the read-only Nix store), then
-4. loads fully offline (`local_files_only=True`) on every launch afterwards.
+3. decompresses, concatenates, and extracts them into the project's own **`models/cohere`** directory when you're running from a git checkout (so it's obvious the weights belong to this repo), or into `~/.local/share/vt/models/cohere` when running from a read-only install (Nix store / AppImage), then
+4. writes a **`SOURCE.json`** provenance file next to the weights recording where they came from: origin repo, exact GitHub release tag, revision, `model.safetensors` SHA-256, license, and install date,
+5. loads fully offline (`local_files_only=True`) on every launch afterwards.
 
 ```bash
+# Inspect where a model came from (printed at install, and always on disk):
+cat models/cohere/SOURCE.json          # git checkout install
+cat ~/.local/share/vt/models/cohere/SOURCE.json   # Nix/AppImage install
+
+# Explicit install location (overrides repo-first and the user dir):
+export VT_MODEL_DIR=/path/to/models/cohere
+
 # Opt out of automatic downloads (you supply the model yourself):
 export VT_AUTO_DOWNLOAD_MODEL=0
 
