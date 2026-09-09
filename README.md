@@ -234,23 +234,22 @@ Needs ~2.9 GB to download and ~4.1 GB free disk to unpack (the bf16 weights). If
 
 ### Making a release
 
-Push a `v*` tag and the [`.github/workflows/release.yml`](.github/workflows/release.yml) workflow attaches everything automatically:
+No secrets or tokens are involved — the model weights are mirrored by the maintainer, never fetched in CI.
 
-- **model-assets** job: fetches the pinned gated snapshot from Hugging Face (needs the `HF_TOKEN` repository secret, once per release), runs `scripts/prepare_model_release.py`, and uploads the two `.xz` parts + `SHA256SUMS`.
-- **portable-bundle** job: builds a single self-contained Linux **AppImage** (`vt-x86_64-linux.AppImage`) via `nix bundle`, so non-Nix users can run the app without installing Nix.
-
-```bash
-git tag v1.1.0 && git push origin v1.1.0
-```
-
-To prepare the model assets locally instead (e.g. attach manually):
+1. Push a `v*` tag. The [`.github/workflows/release.yml`](.github/workflows/release.yml) workflow builds and attaches a single self-contained Linux **AppImage** (`vt-x86_64-linux.AppImage`) via `nix bundle`, so non-Nix users can run the app without installing Nix:
 
 ```bash
-python3 scripts/prepare_model_release.py --out dist/model
-gh release create v1.1.0 dist/model/*   # uploads parts + SHA256SUMS
+git tag v1.0.2 && git push origin v1.0.2
 ```
 
-The assets round-trip is verified at build time (parts decompress → concatenate → `model.safetensors` hashes identically to the source).
+2. Attach the mirrored model assets to the same release (built once from the HF cache on the maintainer machine, round-trip verified):
+
+```bash
+python3 scripts/prepare_model_release.py --out dist/model   # if not already built
+gh release upload v1.0.2 dist/model/*                        # parts + SHA256SUMS
+```
+
+…or drag `dist/model/*` into the release page on github.com.
 
 ### License & attribution for the mirrored weights
 
