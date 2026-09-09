@@ -15,6 +15,12 @@ from huggingface_hub import login
 MODEL_ID = "CohereLabs/cohere-transcribe-03-2026"
 MODEL_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 
+try:
+    from model_download import cohere_models_dir, ensure_local_cohere
+except Exception:
+    cohere_models_dir = None
+    ensure_local_cohere = None
+
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*Init provider bridge failed.*")
 
@@ -95,7 +101,12 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
     dtype = torch.float16 if device == "cuda" else torch.float32
     
     # Search local candidate directories first
-    search_dirs = [
+    search_dirs = []
+    if cohere_models_dir is not None:
+        # install target of the GitHub-release auto-installer (repo checkout
+        # models/cohere, else per-user dir for read-only installs)
+        search_dirs.append(cohere_models_dir())
+    search_dirs += [
         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "cohere"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "cohere"),
         os.path.join(os.getcwd(), "models", "cohere"),
@@ -107,6 +118,14 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
             local_path = candidate
             break
             
+    # No local copy yet: try the mirrored Apache-2.0 GitHub-release asset first,
+    # so users never need a Hugging Face account. Falls back to HF below.
+    if local_path is None and ensure_local_cohere is not None:
+        print("No local Cohere model found. Checking GitHub release assets...")
+        installed = ensure_local_cohere()
+        if installed:
+            local_path = installed
+
     target_id = local_path if local_path else model_id
     
     try:
