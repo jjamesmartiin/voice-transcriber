@@ -14,6 +14,11 @@ from huggingface_hub import login
 MODEL_ID = "CohereLabs/cohere-transcribe-03-2026"
 MODEL_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 
+try:
+    from model_download import ensure_local_cohere
+except Exception:
+    ensure_local_cohere = None
+
 def get_bundled_model_dir():
     """Get the model directory - bundled in EXE or use default cache"""
     # First check if models were extracted next to EXE
@@ -208,26 +213,37 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
     extract_bundled_models()
     bundled_dir = get_bundled_model_dir()
     cache_dir = bundled_dir if bundled_dir else os.path.expanduser("~/.cache/huggingface/hub")
+
+    # GitHub-release auto-install (no Hugging Face) — used only when no offline
+    # bundle is present. Installs flat files into models/cohere (repo checkout)
+    # or the per-user data dir, recording provenance in SOURCE.json.
+    release_dir = None
+    if not bundled_dir and ensure_local_cohere is not None:
+        release_dir = ensure_local_cohere()
+    if release_dir:
+        target_id, load_rev, offline, load_cache = release_dir, None, True, None
+    else:
+        target_id, load_rev, offline, load_cache = model_id, revision, bundled_dir is not None, cache_dir
     
     try:
-        print(f"Loading model from cache...")
+        print(f"Loading Cohere model from {target_id}...")
         processor = AutoProcessor.from_pretrained(
-            model_id, 
-            revision=revision,
+            target_id,
+            revision=load_rev,
             trust_remote_code=True,
             token=token,
-            local_files_only=bundled_dir is not None,
-            cache_dir=cache_dir
+            local_files_only=offline,
+            cache_dir=load_cache,
         )
         
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
-            model_id,
-            revision=revision,
+            target_id,
+            revision=load_rev,
             torch_dtype=dtype,
             trust_remote_code=True,
             token=token,
-            local_files_only=bundled_dir is not None,
-            cache_dir=cache_dir
+            local_files_only=offline,
+            cache_dir=load_cache,
         ).to(device)
         
         print("Loaded from local cache.")
