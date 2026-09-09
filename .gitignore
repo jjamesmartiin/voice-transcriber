@@ -5,6 +5,12 @@ env/
 venv/
 result
 
+# Local model copies & release artifacts.
+# Model weights are normally installed per-user (~/.local/share/vt/models/cohere)
+# or shipped as GitHub Release assets, NOT committed to this repo.
+/models/
+/dist/
+
 # Root-level local config overrides (ignored so local edits aren't committed)
 /config.json
 /config.yaml

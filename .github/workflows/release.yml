@@ -1,0 +1,102 @@
+name: release
+
+# Builds and attaches everything needed for a no-Hugging-Face install:
+#   1. model-assets   — Cohere weights, Apache-2.0, packed as split-xz parts
+#                       (the app downloads these on first run, verifies SHA-256,
+#                       unpacks to ~/.local/share/vt/models/cohere, then loads
+#                       fully offline). Requires the HF_TOKEN secret to fetch the
+#                       gated snapshot once; the published assets then serve
+#                       everyone without a HF account.
+#   2. portable-bundle — self-contained Linux AppImage of the app (Nix bundle),
+#                        so non-Nix users can run it without installing Nix.
+#
+# Trigger: push a tag like v1.1.0  (or run manually with an existing tag).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach assets to (e.g. v1.1.0)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  model-assets:
+    name: Package Cohere model assets
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xz
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xz-utils
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download gated model snapshot from Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pip install -q "huggingface_hub>=0.24"
+          python3 - <<'PY'
+          import os
+          from huggingface_hub import hf_hub_download
+          REV = "499888924f5f1313b48ab0686c8f3a94178a4709"
+          FILES = [
+              "config.json", "generation_config.json", "model.safetensors",
+              "modeling_cohere_asr.py", "configuration_cohere_asr.py",
+              "processing_cohere_asr.py", "tokenization_cohere_asr.py",
+              "processor_config.json", "preprocessor_config.json",
+              "tokenizer_config.json", "tokenizer.json", "tokenizer.model",
+              "special_tokens_map.json",
+          ]
+          os.makedirs("model_src", exist_ok=True)
+          for f in FILES:
+              hf_hub_download("CohereLabs/cohere-transcribe-03-2026", f,
+                              revision=REV, local_dir="model_src",
+                              local_dir_use_symlinks=False)
+          print("downloaded", len(FILES), "files")
+          PY
+
+      - name: Package (tar -> split -> xz -> verify -> SHA256SUMS)
+        run: |
+          python3 scripts/prepare_model_release.py \
+            --model-dir model_src \
+            --out model_assets
+
+      - name: Upload model assets to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: model_assets/*
+          fail_on_unmatched_files: true
+
+  portable-bundle:
+    name: Build portable Linux AppImage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Build and bundle the app into a single AppImage
+        run: |
+          nix bundle --bundler github:ralismark/nix-appimage \
+            --extra-experimental-features "nix-command flakes" \
+            ".#default"
+          ls -lh *.AppImage
+
+      - name: Upload AppImage to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: ./*.AppImage
+          fail_on_unmatched_files: true

@@ -100,6 +100,10 @@
               EOF
               chmod +x $out/bin/vt
             '';
+
+            meta = {
+              mainProgram = "vt";  # used by `nix bundle` for the AppImage release
+            };
           };
         });
 

@@ -18,6 +18,12 @@ except ImportError:
     def clean_speech_transcription(text, skip_slm=True):
         return text
 
+try:
+    from model_download import cohere_models_dir, ensure_local_cohere
+except Exception:
+    cohere_models_dir = None
+    ensure_local_cohere = None
+
 MODEL_ID = "CohereLabs/cohere-transcribe-03-2026"
 MODEL_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 
@@ -271,12 +277,24 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "cohere"),
         os.path.join(os.getcwd(), "models", "cohere"),
     ]
+    # Per-user writable install dir used by the GitHub-release auto-installer
+    # (also the only writable candidate when installed from the read-only Nix store).
+    if cohere_models_dir is not None:
+        search_dirs.insert(0, cohere_models_dir())
 
     local_path = None
     for candidate in search_dirs:
         if os.path.exists(candidate) and (os.path.exists(os.path.join(candidate, "model.safetensors")) or os.path.exists(os.path.join(candidate, "pytorch_model.bin"))):
             local_path = candidate
             break
+
+    # No local copy yet: try the mirrored Apache-2.0 GitHub-release asset first,
+    # so users never need a Hugging Face account. Falls back to HF below.
+    if local_path is None and ensure_local_cohere is not None:
+        print("No local Cohere model found. Checking GitHub release assets...")
+        installed = ensure_local_cohere()
+        if installed:
+            local_path = installed
 
     target_id = local_path if local_path else model_id
 

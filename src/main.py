@@ -80,6 +80,14 @@ class SimpleVoiceTranscriber:
         from t2 import MODEL_BACKEND
         self.tui.update_state("PROCESSING", f"Loading {MODEL_BACKEND.capitalize()} model weights...")
         self.preload_thread = preload_model(device=DEVICE)
+
+        # Non-blocking model-load tracking: the app must stay fully responsive
+        # even when loading the model stalls (e.g. slow/flaky connection to
+        # huggingface.co). Recording may start immediately; transcription waits
+        # in the background for the load to finish (or fail).
+        self._model_ready_event = threading.Event()
+        self.model_load_error = None
+        self._load_started_at = time.time()
         
         # Proactively check microphone health on startup
         is_healthy, mic_issues = t2.check_microphone_health()
@@ -97,7 +105,20 @@ class SimpleVoiceTranscriber:
         
         # Initialize global hotkey system
         self.init_hotkeys()
-        
+
+        # Surface first-run model-download progress (GitHub release assets) in the TUI.
+        try:
+            import model_download
+            model_download.set_status_handler(self._on_model_download_status)
+        except Exception:
+            pass
+
+        # Watch the background model load without ever blocking: the watcher sets
+        # _model_ready_event and flips the TUI to READY once loading finishes (or
+        # fails). Started at construction so every entry point (interactive app,
+        # tests) shares the same non-blocking behavior.
+        self._start_model_load_watcher()
+
     def _sync_tui_state(self):
         """Sync t2 configuration state with TUI badges and visual notification"""
         import t2
@@ -133,6 +154,88 @@ class SimpleVoiceTranscriber:
             self.stop_recording()
         else:
             self.start_recording()
+
+    def _preload_threads(self):
+        """Return every model-preload thread that must finish before transcribing."""
+        import t2 as _t2mod
+        threads = []
+        if getattr(self, 'preload_thread', None) is not None:
+            threads.append(self.preload_thread)
+        active = getattr(_t2mod, 'active_preload_thread', None)
+        if active is not None and active not in threads:
+            threads.append(active)
+        return threads
+
+    def _start_model_load_watcher(self):
+        """Spawn a daemon watcher that updates the UI once the model finishes loading."""
+        threading.Thread(target=self._watch_model_load, daemon=True).start()
+
+    def _on_model_download_status(self, stage, pct, text):
+        """Show first-run model-download progress in the TUI prompt line.
+
+        Never clobbers the state of an in-progress recording/processing.
+        """
+        if self.recording:
+            return
+        process = getattr(self, 'process_thread', None)
+        if process is not None and process.is_alive():
+            return
+        try:
+            self.tui.update_state("PROCESSING", text)
+        except Exception:
+            pass
+
+    def _watch_model_load(self):
+        """Wait for the background model preload to finish, then update the UI.
+
+        Runs on its own daemon thread so the main/hotkey loops never block on a
+        slow or failed model load (e.g. a stalled connection to huggingface.co).
+        """
+        try:
+            for t in self._preload_threads():
+                if t is not None:
+                    t.join()
+        except Exception as e:
+            logger.debug(f"Model-load watcher error: {e}")
+
+        # Only a load that actually produced a model counts as success.
+        try:
+            import transcribe2
+            backend_mod = transcribe2.get_backend()  # already imported by the preload
+            loaded = getattr(backend_mod, '_model', None) is not None
+        except Exception:
+            loaded = False
+        if not loaded:
+            self.model_load_error = (
+                "model weights failed to load (check your connection to "
+                "huggingface.co, then restart the app to retry)"
+            )
+        self._model_ready_event.set()
+
+        # Don't clobber the UI state of an in-progress recording/processing; the
+        # recording path will surface the outcome (success or error) on its own.
+        busy = bool(getattr(self, 'recording', False)) or (
+            getattr(self, 'process_thread', None) is not None and self.process_thread.is_alive()
+        )
+        if busy:
+            logger.info("Model finished loading while a recording was active.")
+            return
+        try:
+            self.visual_notification.hide_notification()  # also flips TUI state to READY
+        except Exception:
+            pass
+        try:
+            import t2 as _t2mod
+            elapsed = time.time() - getattr(self, '_load_started_at', time.time())
+            if self.model_load_error:
+                self.tui.update_state("READY", "Model load failed")
+                self.tui.print_error("Model Load Failed", self.model_load_error)
+            else:
+                self.tui.update_state("READY")
+                self.tui.print_event("✅ Model Ready",
+                    f"{str(getattr(_t2mod, 'MODEL_BACKEND', 'model')).capitalize()} model loaded in {elapsed:.1f}s — ready to transcribe.")
+        except Exception as e:
+            logger.debug(f"Model-load watcher UI update error: {e}")
 
     def _on_tui_toggle_mute(self):
         import t2
@@ -212,19 +315,15 @@ class SimpleVoiceTranscriber:
         if self.recording:
             return
             
-        # Wait for model to load if still loading
-        # Check both the instance's initial thread and t2's global active thread (for backend switches)
-        import t2
-        current_thread = getattr(t2, 'active_preload_thread', None)
-        
-        if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
-            logger.info("⏳ Waiting for transcription model to finish loading...")
-            self.preload_thread.join()
-        
-        if current_thread and current_thread.is_alive():
-            logger.info("⏳ Waiting for new transcription model to finish loading...")
-            current_thread.join()
-        
+        # NEVER block on the model here: audio capture is independent of the ASR
+        # weights. If the model is still loading (slow first load, flaky network),
+        # recording starts right away and transcription waits for the load in a
+        # background thread (_watch_model_load flips the UI to READY when done).
+        # This keeps the hotkeys and TUI fully responsive during the load.
+        if not self._model_ready_event.is_set():
+            self.tui.print_event("⏳ Model Loading",
+                "Model is still loading — recording now; it will transcribe automatically once the model is ready.")
+
         self.recording = True
         self.start_time = time.time()
         stop_recording.clear()
@@ -346,13 +445,19 @@ class SimpleVoiceTranscriber:
         self.visual_notification.show_processing()
         
         try:
-            import t2
-            current_thread = getattr(t2, 'active_preload_thread', None)
-            if current_thread and current_thread.is_alive():
-                logger.info("⏳ Still waiting for transcription model...")
-                current_thread.join()
-            if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
-                self.preload_thread.join()
+            # Wait for the model on this background thread ONLY — never on the UI
+            # or hotkey threads. If the load ultimately fails, report it clearly
+            # and bail out instead of pasting a load-error string to the clipboard.
+            if not self._model_ready_event.is_set():
+                logger.info("⏳ Audio captured; waiting for the model to finish loading...")
+                self._model_ready_event.wait()
+                if self.model_load_error:
+                    logger.error(f"Model load failed: {self.model_load_error}")
+                    try:
+                        self.visual_notification.show_error(f"Model load failed: {self.model_load_error}")
+                    except Exception:
+                        pass
+                    return
 
             t0_proc = time.time()
             # Retrieve text from micro-batcher or fallback (skip_slm=True for instant ASR dictation)
@@ -502,12 +607,10 @@ class SimpleVoiceTranscriber:
         if hasattr(self, 'tui') and self.tui:
             self.tui.start()
 
-        # Wait for model to load BEFORE starting the loop
-        if hasattr(self, 'preload_thread') and self.preload_thread.is_alive():
-            self.visual_notification.show_processing("Loading model")
-            self.preload_thread.join()
-            self.visual_notification.hide_notification()
-
+        # Enter the hotkey loop IMMEDIATELY, without waiting for the model (the
+        # model-load watcher was already started in __init__). A slow or stalled
+        # load must never freeze the app; recordings made meanwhile wait for the
+        # model in background threads.
         self.running = True
 
         try:

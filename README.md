@@ -103,7 +103,7 @@ cp config/example-config/config.yaml.example config/config.yaml
 # then set: hf_token: "hf_..."
 ```
 
-Fallbacks if `hf_token` is unset: the `HF_TOKEN` environment variable, then `huggingface-cli login` credentials. No token is needed once the model is cached locally under `models/cohere`.
+Fallbacks if `hf_token` is unset: the `HF_TOKEN` environment variable, then `huggingface-cli login` credentials. No token is needed once the model is cached locally under `~/.local/share/vt/models/cohere` (or `models/cohere`).
 
 ---
 
@@ -208,6 +208,53 @@ For developer terms and advanced regex homophone repairs:
 - **Regex Homophone Rules**: For complex phonetic regex patterns, you can add tuples of `(regex_pattern, replacement_str)` to `HOMOPHONE_REPAIR_PATTERNS` in `src/post_processor.py`.
 
 ---
+
+## Distribution & Releases (no Hugging Face required)
+
+The Cohere model (`CohereLabs/cohere-transcribe-03-2026`) is **Apache-2.0 licensed**, which permits redistribution with attribution. GitHub Releases therefore ship the weights as mirrored, compressed assets — end users never need a Hugging Face account or token.
+
+### First run: automatic model install
+
+When the Cohere backend starts and finds no local copy, the app automatically:
+
+1. downloads the release assets (`cohere-transcribe-<revision>.part1.xz` / `.part2.xz`, ~1.46 GB each),
+2. verifies each part's SHA-256 against the published `SHA256SUMS`,
+3. decompresses, concatenates, and extracts them into `~/.local/share/vt/models/cohere` (also the writable location when the app runs from the read-only Nix store), then
+4. loads fully offline (`local_files_only=True`) on every launch afterwards.
+
+```bash
+# Opt out of automatic downloads (you supply the model yourself):
+export VT_AUTO_DOWNLOAD_MODEL=0
+
+# Point at a different asset mirror (self-hosted, fork, ...):
+export VT_MODEL_RELEASE_BASE=https://github.com/<you>/voice-transcriber/releases/latest/download
+```
+
+Needs ~2.9 GB to download and ~4.1 GB free disk to unpack (the bf16 weights). If no release assets are reachable, the app falls back to the classic Hugging Face download path.
+
+### Making a release
+
+Push a `v*` tag and the [`.github/workflows/release.yml`](.github/workflows/release.yml) workflow attaches everything automatically:
+
+- **model-assets** job: fetches the pinned gated snapshot from Hugging Face (needs the `HF_TOKEN` repository secret, once per release), runs `scripts/prepare_model_release.py`, and uploads the two `.xz` parts + `SHA256SUMS`.
+- **portable-bundle** job: builds a single self-contained Linux **AppImage** (`vt-x86_64-linux.AppImage`) via `nix bundle`, so non-Nix users can run the app without installing Nix.
+
+```bash
+git tag v1.1.0 && git push origin v1.1.0
+```
+
+To prepare the model assets locally instead (e.g. attach manually):
+
+```bash
+python3 scripts/prepare_model_release.py --out dist/model
+gh release create v1.1.0 dist/model/*   # uploads parts + SHA256SUMS
+```
+
+The assets round-trip is verified at build time (parts decompress → concatenate → `model.safetensors` hashes identically to the source).
+
+### License & attribution for the mirrored weights
+
+Redistribution of the Cohere weights is permitted under the Apache License 2.0; the packaged model includes `LICENSE` (Apache-2.0 text) and `NOTICE` (attribution) files inside the model directory. See [`config/licenses/Cohere-Apache-2.0.txt`](config/licenses/Cohere-Apache-2.0.txt).
 
 ## License
 See [LICENSE](LICENSE) for details.
