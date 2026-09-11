@@ -6,19 +6,23 @@ A robust, modular voice transcription tool with global hotkeys for Linux (Waylan
 
 ## Quick Start
 
-### Windows
-- **Native Windows**: See the [main-windows](https://github.com/jjamesmartiin/voice-transcriber/tree/main-windows) branch.
-- **Windows via NixOS WSL**: See the [`main-wsl`](https://github.com/jjamesmartiin/voice-transcriber/tree/main-wsl) branch.
-  - Global push-to-talk (`Alt+Shift`) with automatic host clipboard paste.
-  - Streaming VAD speech chunking for low-latency transcription.
-  - Energy gating and silence trimming to prevent background hallucinations.
-  - Audio cue feedback configurable in `run.sh` or settings.
-
-```bash
-# To run on Windows via WSL:
-git checkout main-wsl
-./run.sh
+### Windows (Native)
+Run directly on Windows without WSL:
+- See [**`README_WINDOWS.md`**](README_WINDOWS.md) for full native setup.
+```powershell
+# In PowerShell:
+pip install -r requirements.txt
+.\run.ps1
 ```
+
+### Windows (via NixOS WSL)
+Run the Linux backend inside WSL with transparent Windows host hotkeys and clipboard integration:
+- See [**`README_WSL.md`**](README_WSL.md) for full WSL guide.
+```powershell
+# From Windows PowerShell:
+.\run_wsl.ps1
+```
+*(Or inside WSL: `./run.sh`)*
 
 ---
 
@@ -27,10 +31,10 @@ git checkout main-wsl
 # Add user to input group for global hotkeys
 sudo usermod -a -G input $USER
 # Log out and back in, then run:
-nix run github:jjamesmartiin/voice-transcriber
+nix run .
 
-# Or run as root (not recommended)
-sudo nix run github:jjamesmartiin/voice-transcriber
+# Or run with Python:
+python src/main.py
 ```
 
 #### NixOS Example

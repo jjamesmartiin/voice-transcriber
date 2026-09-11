@@ -6,19 +6,15 @@ Enhanced with Wayland-compatible global hotkeys using evdev+uinput
 import numpy as np
 import logging
 import threading
-import subprocess
 import time
 import os
 import sys
-import pyperclip
-import atexit
 
 # Ensure local source directory is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import core modules
-from notifications import VisualNotification
-from hotkeys import create_global_hotkeys
+import hal
 from tui import VoiceTranscriberTUI
 
 # Import transcription functionality
@@ -34,27 +30,25 @@ from t2 import (
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def copy_to_clipboard_crossplatform(text):
-    """Copies to clipboard on Linux or Windows (via WSL interop).
-    Note: On Wayland, this may block until a window receives focus."""
-    copied = False
-    
-    if os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop") or os.environ.get("WSL_DISTRO_NAME"):
-        try:
-            p = subprocess.Popen(["clip.exe"], stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            p.communicate(input=text.encode('utf-16le'))
-            copied = True
-            return copied
-        except Exception:
-            pass
-            
+def copy_to_clipboard_crossplatform(text, sink=None):
+    """Copy text to the platform clipboard via the HAL.
+
+    Falls back to ``pyperclip`` if the platform sink is unavailable. Note: on
+    Wayland, ``wl-copy`` may block until a window receives focus.
+    """
     try:
+        if (sink or hal.get_clipboard_sink()).copy_text(text):
+            return True
+    except Exception as e:
+        logger.debug(f"HAL clipboard copy failed, falling back to pyperclip: {e}")
+
+    try:
+        import pyperclip
+
         pyperclip.copy(text)
-        copied = True
+        return True
     except Exception:
-        pass
-        
-    return copied
+        return False
 
 class SimpleVoiceTranscriber:
     def __init__(self):
@@ -70,6 +64,11 @@ class SimpleVoiceTranscriber:
         # Initialize Rich TUI
         self.tui = VoiceTranscriberTUI()
         self._wire_tui_callbacks()
+
+        # Detect the host platform once and select HAL backends from it.
+        self.platform = hal.detect_platform()
+        self.clipboard_sink = hal.get_clipboard_sink(self.platform)
+        self.audio_cues = hal.get_audio_cue_player(self.platform)
         
         # Load saved audio device configuration FIRST before starting TUI live display
         load_audio_config()
@@ -95,8 +94,10 @@ class SimpleVoiceTranscriber:
             warn_msg = "⚠️ HARDWARE MICROPHONE NOT DETECTED BY WSL!\n" + "\n".join([f" • {issue}" for issue in mic_issues])
             self.tui.print_warning("MICROPHONE HARDWARE WARNING", warn_msg)
         
-        # Initialize visual notification
-        self.visual_notification = VisualNotification(app_name="Voice Transcriber", tui=self.tui)
+        # Initialize visual notification (platform-appropriate backend)
+        self.visual_notification = hal.get_visual_notification(
+            app_name="Voice Transcriber", tui=self.tui
+        )
         self.visual_notification.set_active_device(get_active_device_name())
         
         # State tracking for SLM On-Demand Quick-Tap retro-polishing
@@ -288,19 +289,27 @@ class SimpleVoiceTranscriber:
             self.hotkey_system.cleanup()
         
     def init_hotkeys(self):
-        """Initialize the global hotkey system"""
+        """Initialize the global hotkey system via the HAL."""
         try:
-            self.hotkey_system = create_global_hotkeys(
+            self.hotkey_system = hal.create_hotkey_manager(
+                platform=self.platform,
                 callback_start=self.start_recording,
                 callback_stop=self.stop_recording,
-                callback_config=self.change_input_device
+                callback_config=self.change_input_device,
             )
             
             if self.hotkey_system.devices:
                 logger.debug("Global hotkey system initialized")
                 import t2
-                if hasattr(self.hotkey_system, 'set_sound_theme') and hasattr(t2, 'SOUND_THEME'):
-                    self.hotkey_system.set_sound_theme(t2.SOUND_THEME)
+                theme = getattr(t2, 'SOUND_THEME', None)
+                if theme:
+                    if hasattr(self.hotkey_system, 'set_sound_theme'):
+                        self.hotkey_system.set_sound_theme(theme)
+                    if hasattr(self.audio_cues, 'set_sound_theme'):
+                        self.audio_cues.set_sound_theme(theme)
+                # WSL forwards earcons through the same bridge process.
+                if hasattr(self.audio_cues, 'set_bridge'):
+                    self.audio_cues.set_bridge(self.hotkey_system)
                 return True
             else:
                 logger.error("Failed to initialize global hotkey system")
@@ -342,15 +351,11 @@ class SimpleVoiceTranscriber:
         # Update notification
         self.visual_notification.show_recording()
         
-        # Play sound (Windows bridge plays native chime directly on Windows host)
+        # Play the platform start earcon (WSL forwards to the Windows host).
         try:
             if not t2.IS_MUTED:
-                from hotkeys import is_running_in_wsl
-                if not is_running_in_wsl():
-                    sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/start.mp3')
-                    subprocess.Popen(['mpg123', '-q', sound_path], 
-                                   stderr=subprocess.DEVNULL)
-        except:
+                self.audio_cues.play_cue("start")
+        except Exception:
             pass
 
     def stop_recording(self, copy_to_clipboard=False):
@@ -411,7 +416,7 @@ class SimpleVoiceTranscriber:
 
                 def finalize_slm():
                     # Blocks if Wayland strict focus is active (e.g. GNOME top bar)
-                    if copy_to_clipboard_crossplatform(polished):
+                    if copy_to_clipboard_crossplatform(polished, self.clipboard_sink):
                         self.visual_notification.show_completed(
                             sub_text=polished,
                             elapsed_sec=(slm_elapsed / 1000.0),
@@ -506,7 +511,7 @@ class SimpleVoiceTranscriber:
                     
                 def finalize_transcription():
                     # This blocking call queues up the copy until GNOME shell releases focus
-                    copy_success = copy_to_clipboard_crossplatform(transcription)
+                    copy_success = copy_to_clipboard_crossplatform(transcription, self.clipboard_sink)
                     
                     if copy_success:
                         logger.info(f"Copied to clipboard: {transcription}")
@@ -523,15 +528,11 @@ class SimpleVoiceTranscriber:
                         except Exception as e:
                             logger.warning(f"Visual notification error: {e}")
                             
-                        # Play sound only after it has successfully copied and finished queueing
+                        # Play the platform completion earcon.
                         try:
                             if not getattr(t2, 'IS_MUTED', False):
-                                if self.hotkey_system and hasattr(self.hotkey_system, 'play_done_sound') and not should_type:
-                                    self.hotkey_system.play_done_sound()
-                                else:
-                                    sound_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds/pop.mp3')
-                                    subprocess.Popen(['mpg123', '-q', sound_path], stderr=subprocess.DEVNULL)
-                        except:
+                                self.audio_cues.play_cue("complete")
+                        except Exception:
                             pass
                     else:
                         logger.error("Failed to copy transcription to clipboard")

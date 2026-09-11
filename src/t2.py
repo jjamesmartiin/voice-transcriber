@@ -944,6 +944,24 @@ def process_audio_stream(audio_data=None):
     
     return result, transcribe_end_time - transcribe_start_time
 
+def copy_text_to_clipboard(text):
+    """Copy ``text`` using the platform HAL, with a pyperclip fallback."""
+    try:
+        import hal
+
+        if hal.get_clipboard_sink().copy_text(text):
+            return True
+    except Exception:
+        pass
+    try:
+        import pyperclip
+
+        pyperclip.copy(text)
+        return True
+    except Exception:
+        return False
+
+
 def record_and_transcribe():
     """Record audio and transcribe it"""
     process_start_time = time.time()
@@ -963,10 +981,11 @@ def record_and_transcribe():
         
         for attempt in range(max_retries):
             try:
-                pyperclip.copy(transcription)
-                copy_success = True
-                print("Transcription copied to clipboard")
-                break
+                if copy_text_to_clipboard(transcription):
+                    copy_success = True
+                    print("Transcription copied to clipboard")
+                    break
+                raise RuntimeError("clipboard backend returned failure")
             except Exception as e:
                 if attempt < max_retries - 1:
                     print(f"Clipboard copy failed (attempt {attempt+1}), retrying...")
