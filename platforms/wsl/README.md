@@ -48,14 +48,12 @@ If the Windows Virtual Machine Platform feature is not yet active:
    ```
    *(If prompted, reboot your PC to finalize Windows hypervisor features).*
 
-### Step 2: Register NixOS-WSL
-The NixOS-WSL image (`nixos.wsl`) is stored at `C:\Users\jjame\WSL\nixos.wsl`.
-
+### Step 2: Register NixOS-WSL (If not already installed)
 To register NixOS in WSL2:
 ```powershell
-wsl --install --from-file C:\Users\jjame\WSL\nixos.wsl
+# From the repository root:
+powershell -ExecutionPolicy Bypass -File platforms\wsl\setup_wsl.ps1
 ```
-*(Or run `.\setup_wsl.ps1` to perform the complete setup automatically).*
 
 ---
 
@@ -69,7 +67,7 @@ WSL2 includes **WSLg**, which runs a built-in PulseAudio audio server connected 
    /mnt/wslg/runtime-dir/pulse/native
    ```
 2. Setting `PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native` redirects all Linux audio recording (`sounddevice`, `PortAudio`, `parec`, `arecord`) to your Windows default recording device.
-3. In this `wsl` branch, [`src/t2.py`](file:///C:/Users/jjame/gitprojects/vt2/src/t2.py) and [`src/check_devices.py`](file:///C:/Users/jjame/gitprojects/vt2/src/check_devices.py) automatically detect the WSLg socket and set `PULSE_SERVER` automatically!
+3. The Hardware/OS Abstraction Layer (HAL) automatically detects the WSLg socket and sets `PULSE_SERVER` accordingly.
 
 ### Windows Microphone Permissions Checklist:
 Ensure Windows privacy settings allow WSL to access your microphone:
@@ -79,22 +77,24 @@ Ensure Windows privacy settings allow WSL to access your microphone:
 
 ---
 
-## 3. Running the App (100% Inside NixOS WSL)
+## 3. Running the App
 
-**Zero setup needed on Windows!** You do NOT need Python or any packages installed on Windows. Everything runs inside NixOS WSL.
+### Option A: Launch from Windows (Recommended)
+From Windows PowerShell in the repository root:
+```powershell
+powershell -ExecutionPolicy Bypass -File platforms\wsl\run_wsl.ps1
+```
 
-### Start the Voice Transcriber
+### Option B: Launch from inside WSL
 Inside your NixOS WSL terminal:
 ```bash
-cd /mnt/c/Users/jjame/gitprojects/voice-transcriber
-./run.sh
-# or: nix run .
+nix run .
 ```
 
 > **How it works:**
 > 1. Nix provides Faster-Whisper, PyTorch, PortAudio, and all Python dependencies in an isolated sandbox.
 > 2. The app detects WSL and automatically connects to your Windows microphone via WSLg PulseAudio (`RDPSource`).
-> 3. It automatically connects a lightweight background bridge to Windows so you can press and hold **`Alt+Shift`** anywhere in Windows (Chrome, VS Code, Discord, etc.) to speak!
+> 3. It automatically connects a lightweight background bridge to Windows so you can press and hold **`Alt+Shift`** anywhere in Windows (Chrome, VS Code, Discord, etc.) to speak.
 > 4. When you release **`Alt+Shift`**, it transcribes in **~230ms** and pastes the text directly at your cursor in Windows.
 
 ---

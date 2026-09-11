@@ -7,29 +7,27 @@ Run Voice Transcriber natively on Windows with global hotkeys, Windows audio cue
 ## Quick Start
 
 ### 1. Prerequisites
-- Python 3.10+ installed on Windows (with "Add Python to PATH" checked during install).
+- Python 3.10+ installed on Windows (with "Add Python to PATH" enabled).
 - PowerShell 5.1+ or PowerShell 7+.
 
 ### 2. Setup Virtual Environment
-In PowerShell:
+In PowerShell from the repository root:
 ```powershell
-# Clone or navigate to the repo
-cd voice-transcriber
-
 # Create and activate virtual environment
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
-# Install dependencies
-pip install -r requirements.txt
+# Install Windows dependencies
+pip install -r platforms\windows\requirements.txt
 ```
 
 ### 3. Launch the Application
 ```powershell
-# Using the automated Windows launcher:
-.\run.ps1
+# Using the Windows launcher:
+.\platforms\windows\run.ps1
 
 # Or run directly with Python:
+$env:PYTHONPATH = "src"
 python src\main.py
 ```
 

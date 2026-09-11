@@ -3,8 +3,16 @@
 
 $ErrorActionPreference = "Stop"
 
-$ProjectRoot = $PSScriptRoot
-if (-not $ProjectRoot) { $ProjectRoot = Get-Location }
+$ScriptDir = $PSScriptRoot
+if (-not $ScriptDir) { $ScriptDir = Get-Location }
+
+if (Test-Path (Join-Path $ScriptDir "..\..\src")) {
+    $ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+} elseif (Test-Path (Join-Path $ScriptDir "src")) {
+    $ProjectRoot = (Resolve-Path $ScriptDir).Path
+} else {
+    $ProjectRoot = (Get-Location).Path
+}
 
 function Write-Step { param([string]$m) Write-Host "`n[WSL] $m" -ForegroundColor Cyan }
 function Write-Success { param([string]$m) Write-Host "[OK] $m" -ForegroundColor Green }

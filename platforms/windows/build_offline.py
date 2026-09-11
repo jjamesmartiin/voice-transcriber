@@ -46,7 +46,8 @@ def copy_with_progress(src, dst, desc="Copying"):
         progress_copy()
 
 # Configuration
-PROJECT_ROOT = Path(__file__).parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent if (SCRIPT_DIR.parent.parent / "src").exists() else SCRIPT_DIR
 SRC_DIR = PROJECT_ROOT / "src"
 BUILD_DIR = PROJECT_ROOT / "build"
 DIST_DIR = PROJECT_ROOT / "dist"
