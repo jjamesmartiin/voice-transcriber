@@ -6,6 +6,7 @@
   "is_muted": true,
   "auto_type": false,
   "sound_theme": "proximity",
+  "keep_bluetooth_handsfree": true,
   "model_backend": "cohere",
   "copy_to_clipboard": true
 }

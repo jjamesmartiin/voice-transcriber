@@ -63,6 +63,18 @@ model_backend: "cohere"
 number_digits: true
 
 # ------------------------------------------------------------------------------
+# Keep Bluetooth Hands-Free / Prevent Headphone Switching
+# Prevents PipeWire / WirePlumber from automatically switching Bluetooth headsets
+# between Headphone (A2DP) and Hands-Free (HFP/HSP) profiles when recording starts/stops.
+# When enabled (true), keeping your headset on the Hands-Free option prevents background
+# media/videos from pausing every time you record dictation.
+# Available Options:
+#   - true  : Keep Bluetooth in hands-free mode (prevents media pause on record end)
+#   - false : Allow auto-switching back to headphone profile
+# Default: true
+keep_bluetooth_handsfree: true
+
+# ------------------------------------------------------------------------------
 # Sound Theme
 # Theme for audio feedback and completion cues.
 # Available Options:

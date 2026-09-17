@@ -98,6 +98,7 @@ Supported options include:
 - `auto_type`: `true` (direct keystroke injection) or `false` (clipboard only).
 - `copy_to_clipboard`: `true` or `false`.
 - `number_digits`: `true` (convert spoken numbers to digits) or `false`.
+- `keep_bluetooth_handsfree`: `true` (keeps Bluetooth devices in hands-free mode to prevent media/videos from pausing when recording ends) or `false`.
 - `formatting_level`: `raw`, `standard`, `semi-formal`, or `formal`.
 - `dictionary`: Key-value map of custom phrase replacements.
 

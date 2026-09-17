@@ -24,7 +24,8 @@ def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
         "model_backend": "cohere",
         "is_muted": True,
         "auto_type": False,
-        "ui_theme": "auto"
+        "ui_theme": "auto",
+        "keep_bluetooth_handsfree": True,
     }
     
     import yaml
@@ -39,11 +40,13 @@ def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
     assert t2.IS_MUTED is True
     assert t2.AUTO_TYPE is False
     assert t2.MODEL_BACKEND == "cohere"
+    assert t2.KEEP_BLUETOOTH_HANDSFREE is True
 
     # Modify settings
     t2.IS_MUTED = False
     t2.AUTO_TYPE = True
     t2.MODEL_BACKEND = "whisper"
+    t2.KEEP_BLUETOOTH_HANDSFREE = False
 
     # Save config
     t2.save_audio_config()
@@ -55,6 +58,7 @@ def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
     assert saved_content["is_muted"] is False
     assert saved_content["auto_type"] is True
     assert saved_content["model_backend"] == "whisper"
+    assert saved_content["keep_bluetooth_handsfree"] is False
 
 
 def test_save_audio_config_json_format(tmp_path, monkeypatch):
@@ -66,12 +70,72 @@ def test_save_audio_config_json_format(tmp_path, monkeypatch):
     t2.load_audio_config()
     t2.IS_MUTED = False
     t2.AUTO_TYPE = True
+    t2.KEEP_BLUETOOTH_HANDSFREE = True
     t2.save_audio_config()
 
     saved_data = json.loads(json_config.read_text())
     assert saved_data["custom_setting"] == 42
     assert saved_data["is_muted"] is False
     assert saved_data["auto_type"] is True
+    assert saved_data["keep_bluetooth_handsfree"] is True
+
+
+def test_keep_bluetooth_handsfree_env_override(tmp_path, monkeypatch):
+    yaml_config = tmp_path / "config.yaml"
+    import yaml
+    yaml_config.write_text(yaml.dump({"keep_bluetooth_handsfree": True}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: yaml_config)
+
+    monkeypatch.setenv("VT_KEEP_BLUETOOTH_HANDSFREE", "0")
+    t2.load_audio_config()
+    assert t2.KEEP_BLUETOOTH_HANDSFREE is False
+
+    monkeypatch.setenv("VT_KEEP_BLUETOOTH_HANDSFREE", "1")
+    t2.load_audio_config()
+    assert t2.KEEP_BLUETOOTH_HANDSFREE is True
+
+
+def test_set_default_input_device_preserves_output_device(monkeypatch):
+    import sounddevice as sd
+    # Record starting output device
+    initial_dev = sd.default.device
+    out_dev = initial_dev[1] if isinstance(initial_dev, (list, tuple)) and len(initial_dev) > 1 else None
+
+    # Set input device to index 3
+    t2.set_default_input_device(3)
+    curr = sd.default.device
+    assert curr[0] == 3
+    if out_dev is not None:
+        assert curr[1] == out_dev
+
+    # Reset input device to None
+    t2.set_default_input_device(None)
+    curr_reset = sd.default.device
+    if out_dev is not None:
+        assert curr_reset[1] == out_dev
+
+
+def test_wireplumber_helpers(monkeypatch):
+    import subprocess
+    calls = []
+
+    def mock_run(cmd, *args, **kwargs):
+        calls.append(cmd)
+        class MockResult:
+            returncode = 0
+            stdout = "Value: false\n"
+        return MockResult()
+
+    monkeypatch.setattr(subprocess, 'run', mock_run)
+    monkeypatch.setattr('shutil.which', lambda tool: '/usr/bin/' + tool)
+
+    # Test query
+    val = t2.get_wireplumber_bt_autoswitch()
+    assert val is False
+
+    # Test setting policy (keep handsfree disables autoswitch)
+    t2.apply_bluetooth_handsfree_policy(True)
+    assert any("bluetooth.autoswitch-to-headset-profile" in c and "false" in c for c in calls)
 
 
 def test_tui_status_bar_matches_settings():

@@ -96,6 +96,7 @@ COPY_TO_CLIPBOARD = True
 AUTO_TYPE = False
 IS_MUTED = True
 NUMBER_DIGITS = True  # Convert spoken number words to digits ("twenty five" -> 25)
+KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
 UI_THEME = "auto"
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
@@ -119,6 +120,64 @@ def get_config_file():
     return GLOBAL_CONFIG_FILE
 
 CONFIG_FILE = get_config_file()
+
+
+def set_default_input_device(index):
+    """Set sounddevice default input device while strictly preserving the default output device."""
+    try:
+        current = sd.default.device
+        out_dev = current[1] if isinstance(current, (list, tuple)) and len(current) > 1 else None
+        sd.default.device = (index, out_dev)
+    except Exception:
+        try:
+            sd.default.device = (index, None)
+        except Exception:
+            pass
+
+
+def get_wireplumber_bt_autoswitch():
+    """Check if WirePlumber autoswitch to headset profile is enabled."""
+    import shutil
+    import subprocess
+    if not shutil.which('wpctl'):
+        return None
+    try:
+        res = subprocess.run(['wpctl', 'settings', 'bluetooth.autoswitch-to-headset-profile'],
+                             capture_output=True, text=True, timeout=2)
+        if 'Value: true' in res.stdout:
+            return True
+        elif 'Value: false' in res.stdout:
+            return False
+    except Exception:
+        pass
+    return None
+
+
+def set_wireplumber_bt_autoswitch(enable_autoswitch: bool):
+    """Enable or disable WirePlumber autoswitch to headset profile."""
+    import shutil
+    import subprocess
+    if not shutil.which('wpctl'):
+        return False
+    val_str = 'true' if enable_autoswitch else 'false'
+    try:
+        res = subprocess.run(['wpctl', 'settings', '-s', 'bluetooth.autoswitch-to-headset-profile', val_str],
+                             capture_output=True, text=True, timeout=2)
+        if res.returncode == 0:
+            return True
+        res = subprocess.run(['wpctl', 'settings', 'bluetooth.autoswitch-to-headset-profile', val_str],
+                             capture_output=True, text=True, timeout=2)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def apply_bluetooth_handsfree_policy(keep_handsfree: bool = True):
+    """Apply the policy to keep Bluetooth devices in hands-free mode (prevents media pause on record end)."""
+    if keep_handsfree:
+        set_wireplumber_bt_autoswitch(False)
+    else:
+        set_wireplumber_bt_autoswitch(True)
 
 
 def find_device_index(name):
@@ -242,7 +301,7 @@ import transcribe2
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, NUMBER_DIGITS, SOUND_THEME, UI_THEME, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, NUMBER_DIGITS, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -268,6 +327,7 @@ def load_audio_config(file_path=None):
             IS_MUTED = config.get('is_muted', True)
             AUTO_TYPE = config.get('auto_type', False)
             NUMBER_DIGITS = config.get('number_digits', True)
+            KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
 
             env_number_digits = os.environ.get("VT_NUMBER_DIGITS", "").strip().lower()
             if env_number_digits in ["1", "true", "yes"]:
@@ -275,6 +335,12 @@ def load_audio_config(file_path=None):
             elif env_number_digits in ["0", "false", "no"]:
                 NUMBER_DIGITS = False
             
+            env_bt_handsfree = os.environ.get("VT_KEEP_BLUETOOTH_HANDSFREE", "").strip().lower()
+            if env_bt_handsfree in ["1", "true", "yes"]:
+                KEEP_BLUETOOTH_HANDSFREE = True
+            elif env_bt_handsfree in ["0", "false", "no"]:
+                KEEP_BLUETOOTH_HANDSFREE = False
+
             env_muted = os.environ.get("VT_IS_MUTED", "").strip().lower()
             if env_muted in ["1", "true", "yes"]:
                 IS_MUTED = True
@@ -342,7 +408,7 @@ def load_audio_config(file_path=None):
                                 INPUT_DEVICE_INDEX = None
             
             if INPUT_DEVICE_INDEX is not None:
-                sd.default.device = INPUT_DEVICE_INDEX
+                set_default_input_device(INPUT_DEVICE_INDEX)
                 # Print secondary device info
                 if SECONDARY_DEVICE_NAME:
                     sec_idx = find_device_index(SECONDARY_DEVICE_NAME)
@@ -350,6 +416,10 @@ def load_audio_config(file_path=None):
                         print(f"Secondary audio device: {SECONDARY_DEVICE_NAME} (index {sec_idx})")
             else:
                 print("No configured audio devices found. Using system default.")
+        
+        # Apply Bluetooth hands-free policy on Linux / PipeWire
+        apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
+
         # Keep the post-processor's runtime number-toggle in sync with the loaded config
         set_number_digits(NUMBER_DIGITS)
 
@@ -403,7 +473,8 @@ def save_audio_config(file_path=None):
             'model_backend': MODEL_BACKEND,
             'copy_to_clipboard': COPY_TO_CLIPBOARD,
             'ui_theme': UI_THEME,
-            'number_digits': NUMBER_DIGITS
+            'number_digits': NUMBER_DIGITS,
+            'keep_bluetooth_handsfree': KEEP_BLUETOOTH_HANDSFREE
         })
 
         if CONFIG_FILE.suffix in ['.yaml', '.yml']:
@@ -481,6 +552,8 @@ def select_audio_device():
     table.add_row("C", "Select UI Color Theme", f"{UI_THEME.upper()}")
     table.add_row("T", "Toggle Auto-Type Output", "ENABLED" if AUTO_TYPE else "DISABLED (Clipboard Only)")
     table.add_row("N", "Toggle Number Words -> Digits", "DIGITS" if NUMBER_DIGITS else "SPELLED OUT")
+    bt_status = "LOCKED (No Media Pause)" if KEEP_BLUETOOTH_HANDSFREE else "AUTOSWITCH"
+    table.add_row("B", "Keep Bluetooth Hands-Free", bt_status)
     table.add_row("R", "Reset Terminal & Audio Bridge", "Ready")
     
     if not is_wsl:
@@ -569,6 +642,14 @@ def select_audio_device():
         reset_terminal()
         return select_audio_device()
     
+    if choice.upper() == 'B':
+        KEEP_BLUETOOTH_HANDSFREE = not KEEP_BLUETOOTH_HANDSFREE
+        apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
+        print(f"Keep Bluetooth Hands-Free set to: {'ENABLED (No Media Pause)' if KEEP_BLUETOOTH_HANDSFREE else 'DISABLED (Auto-switch enabled)'}")
+        save_audio_config()
+        reset_terminal()
+        return select_audio_device()
+    
     if choice == 'T':
         AUTO_TYPE = not AUTO_TYPE
         print(f"Auto-Type set to: {'Enabled' if AUTO_TYPE else 'Disabled (Clipboard Only)'}")
@@ -602,7 +683,7 @@ def select_audio_device():
                 idx = find_device_index(PRIMARY_DEVICE_NAME)
                 if idx is not None:
                     INPUT_DEVICE_INDEX = idx
-                    sd.default.device = INPUT_DEVICE_INDEX
+                    set_default_input_device(INPUT_DEVICE_INDEX)
                     print(f"Set to Primary Device: {PRIMARY_DEVICE_NAME}")
                 else:
                     print(f"Primary device not found: {PRIMARY_DEVICE_NAME}")
@@ -616,7 +697,7 @@ def select_audio_device():
                 idx = find_device_index(SECONDARY_DEVICE_NAME)
                 if idx is not None:
                     INPUT_DEVICE_INDEX = idx
-                    sd.default.device = INPUT_DEVICE_INDEX
+                    set_default_input_device(INPUT_DEVICE_INDEX)
                     print(f"Set to Secondary Device: {SECONDARY_DEVICE_NAME}")
                 else:
                     print(f"Secondary device not found: {SECONDARY_DEVICE_NAME}")
@@ -687,7 +768,7 @@ def select_audio_device():
             if is_primary:
                 PRIMARY_DEVICE_NAME = selected_name
                 INPUT_DEVICE_INDEX = selected_idx
-                sd.default.device = INPUT_DEVICE_INDEX
+                set_default_input_device(INPUT_DEVICE_INDEX)
             else:
                 SECONDARY_DEVICE_NAME = selected_name
             
@@ -713,7 +794,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
     if is_wsl:
         # In WSL, we always rely on the single default ALSA-Pulse audio bridge
         INPUT_DEVICE_INDEX = None
-        sd.default.device = None
+        set_default_input_device(None)
     else:
         # Manual Override Logic for Native Windows/Linux
         if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
@@ -722,7 +803,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                 if INPUT_DEVICE_INDEX != primary_idx:
                     print(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME}")
                     INPUT_DEVICE_INDEX = primary_idx
-                    sd.default.device = INPUT_DEVICE_INDEX
+                    set_default_input_device(INPUT_DEVICE_INDEX)
             else:
                 print(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
         elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
@@ -731,7 +812,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                 if INPUT_DEVICE_INDEX != secondary_idx:
                     print(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME}")
                     INPUT_DEVICE_INDEX = secondary_idx
-                    sd.default.device = INPUT_DEVICE_INDEX
+                    set_default_input_device(INPUT_DEVICE_INDEX)
             else:
                 print(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
         elif PRIMARY_DEVICE_NAME:
@@ -741,14 +822,14 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                 if INPUT_DEVICE_INDEX != primary_idx:
                     print(f"Switching to primary device: {PRIMARY_DEVICE_NAME}")
                     INPUT_DEVICE_INDEX = primary_idx
-                    sd.default.device = INPUT_DEVICE_INDEX
+                    set_default_input_device(INPUT_DEVICE_INDEX)
             elif SECONDARY_DEVICE_NAME:
                 # If primary is gone, ensure we at least use the secondary if it's available
                 secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
                 if secondary_idx is not None and INPUT_DEVICE_INDEX != secondary_idx:
                     print(f"Using secondary device: {SECONDARY_DEVICE_NAME}")
                     INPUT_DEVICE_INDEX = secondary_idx
-                    sd.default.device = INPUT_DEVICE_INDEX
+                    set_default_input_device(INPUT_DEVICE_INDEX)
 
     q = queue.Queue()
 
@@ -864,7 +945,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
             if frames is not None:
                 # Update current device if fallback succeeded
                 INPUT_DEVICE_INDEX = fallback_idx
-                sd.default.device = INPUT_DEVICE_INDEX
+                set_default_input_device(INPUT_DEVICE_INDEX)
                 print("Fallback successful!")
         else:
             print("No valid secondary device found or secondary device is the same as failed device.")
