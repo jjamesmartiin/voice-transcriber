@@ -1,0 +1,3 @@
+# Audio + generated data are never committed. Keep this file itself.
+*
+!.gitignore

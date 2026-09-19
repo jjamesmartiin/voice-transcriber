@@ -99,11 +99,50 @@ NUMBER_DIGITS = True  # Convert spoken number words to digits ("twenty five" -> 
 KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
 UI_THEME = "auto"
+PUNCTUATION_MODE = "full"
+PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "lowercase_no_punctuation"]
+WAIT_FOR_MODEL_ON_STARTUP = True
+ENABLE_SLM = True
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 
+def _dump_toml(d: dict) -> str:
+    """Minimal dependency-free serializer for app config to TOML."""
+    import json
+    lines = []
+    tables = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            tables[k] = v
+        elif isinstance(v, bool):
+            lines.append(f"{k} = {'true' if v else 'false'}")
+        elif isinstance(v, (int, float)):
+            lines.append(f"{k} = {v}")
+        elif v is None:
+            pass
+        elif isinstance(v, str):
+            escaped = v.replace('\\', '\\\\').replace('"', '\\"')
+            lines.append(f'{k} = "{escaped}"')
+        elif isinstance(v, (list, tuple)):
+            lines.append(f"{k} = {json.dumps(list(v))}")
+    for tk, tv in tables.items():
+        lines.append(f"\n[{tk}]")
+        for k, v in tv.items():
+            if isinstance(v, bool):
+                lines.append(f"{k} = {'true' if v else 'false'}")
+            elif isinstance(v, (int, float)):
+                lines.append(f"{k} = {v}")
+            elif isinstance(v, str):
+                escaped = v.replace('\\', '\\\\').replace('"', '\\"')
+                lines.append(f'{k} = "{escaped}"')
+            elif isinstance(v, (list, tuple)):
+                lines.append(f"{k} = {json.dumps(list(v))}")
+    return "\n".join(lines) + "\n"
+
 def get_config_file():
-    """Find local project config.yaml/config.yml/config.json (in root or config/ dir), fallback to global data dir"""
+    """Find local project config.yaml/config.yml/config.json/config.toml (in root or config/ dir), fallback to global data dir"""
     candidates = [
+        Path('config.toml'),
+        Path('config/config.toml'),
         Path('config.yaml'),
         Path('config.yml'),
         Path('config/config.yaml'),
@@ -301,7 +340,7 @@ import transcribe2
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, NUMBER_DIGITS, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, NUMBER_DIGITS, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -312,7 +351,13 @@ def load_audio_config(file_path=None):
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
                 content = f.read()
-            if CONFIG_FILE.suffix in ['.yaml', '.yml']:
+            if CONFIG_FILE.suffix == '.toml':
+                try:
+                    import tomllib
+                    config = tomllib.loads(content)
+                except Exception:
+                    config = {}
+            elif CONFIG_FILE.suffix in ['.yaml', '.yml']:
                 try:
                     import yaml
                     config = yaml.safe_load(content) or {}
@@ -328,6 +373,34 @@ def load_audio_config(file_path=None):
             AUTO_TYPE = config.get('auto_type', False)
             NUMBER_DIGITS = config.get('number_digits', True)
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
+
+            raw_punct = config.get('punctuation_mode') or config.get('formatting_level') or 'full'
+            if raw_punct in ('semi-formal', 'semi_formal'):
+                PUNCTUATION_MODE = 'no_terminal_period'
+            else:
+                PUNCTUATION_MODE = str(raw_punct).strip().lower()
+
+            env_punct = os.environ.get("VT_PUNCTUATION_MODE", "").strip().lower()
+            if env_punct:
+                if env_punct in ('semi-formal', 'semi_formal'):
+                    PUNCTUATION_MODE = 'no_terminal_period'
+                else:
+                    PUNCTUATION_MODE = env_punct
+
+            WAIT_FOR_MODEL_ON_STARTUP = config.get('wait_for_model_on_startup', True)
+            env_wait = os.environ.get("VT_WAIT_FOR_MODEL_ON_STARTUP", "").strip().lower()
+            if env_wait in ["1", "true", "yes"]:
+                WAIT_FOR_MODEL_ON_STARTUP = True
+            elif env_wait in ["0", "false", "no"]:
+                WAIT_FOR_MODEL_ON_STARTUP = False
+
+            ENABLE_SLM = config.get('enable_slm', True)
+            env_slm = os.environ.get("VT_ENABLE_SLM", "").strip().lower()
+            if env_slm in ["1", "true", "yes"]:
+                ENABLE_SLM = True
+            elif env_slm in ["0", "false", "no"]:
+                ENABLE_SLM = False
+            os.environ["VT_ENABLE_SLM"] = "1" if ENABLE_SLM else "0"
 
             env_number_digits = os.environ.get("VT_NUMBER_DIGITS", "").strip().lower()
             if env_number_digits in ["1", "true", "yes"]:
@@ -423,6 +496,9 @@ def load_audio_config(file_path=None):
         # Keep the post-processor's runtime number-toggle in sync with the loaded config
         set_number_digits(NUMBER_DIGITS)
 
+        # Keep post-processor punctuation mode in sync
+        set_punctuation_mode(PUNCTUATION_MODE)
+
         # Sync custom word/phrase dictionary if configured in config or external file
         dict_setting = config.get('dictionary')
         dict_file = config.get('dictionary_file')
@@ -448,7 +524,13 @@ def save_audio_config(file_path=None):
             try:
                 with open(CONFIG_FILE, 'r') as f:
                     content = f.read()
-                if CONFIG_FILE.suffix in ['.yaml', '.yml']:
+                if CONFIG_FILE.suffix == '.toml':
+                    try:
+                        import tomllib
+                        existing_config = tomllib.loads(content)
+                    except Exception:
+                        existing_config = {}
+                elif CONFIG_FILE.suffix in ['.yaml', '.yml']:
                     try:
                         import yaml
                         existing_config = yaml.safe_load(content) or {}
@@ -474,10 +556,14 @@ def save_audio_config(file_path=None):
             'copy_to_clipboard': COPY_TO_CLIPBOARD,
             'ui_theme': UI_THEME,
             'number_digits': NUMBER_DIGITS,
-            'keep_bluetooth_handsfree': KEEP_BLUETOOTH_HANDSFREE
+            'keep_bluetooth_handsfree': KEEP_BLUETOOTH_HANDSFREE,
+            'punctuation_mode': PUNCTUATION_MODE,
+            'enable_slm': ENABLE_SLM,
         })
 
-        if CONFIG_FILE.suffix in ['.yaml', '.yml']:
+        if CONFIG_FILE.suffix == '.toml':
+            out_content = _dump_toml(existing_config)
+        elif CONFIG_FILE.suffix in ['.yaml', '.yml']:
             try:
                 import yaml
                 out_content = yaml.dump(existing_config, default_flow_style=False, sort_keys=False)
@@ -491,6 +577,29 @@ def save_audio_config(file_path=None):
         print(f"Saved audio device config to {CONFIG_FILE}")
     except Exception as e:
         print(f"Could not save audio config: {e}")
+
+
+def set_punctuation_mode(mode: str) -> None:
+    """Runtime setter for punctuation formatting mode; keeps post-processor in sync."""
+    global PUNCTUATION_MODE
+    clean = str(mode).strip().lower()
+    if clean in ("semi-formal", "semi_formal"):
+        clean = "no_terminal_period"
+    PUNCTUATION_MODE = clean
+    try:
+        from post_processor import set_punctuation_mode as post_set_punct
+        post_set_punct(PUNCTUATION_MODE)
+    except Exception:
+        pass
+
+
+def cycle_punctuation_mode() -> str:
+    """Cycle through the 4 punctuation modes and save."""
+    global PUNCTUATION_MODE
+    idx = PUNCTUATION_MODES.index(PUNCTUATION_MODE) if PUNCTUATION_MODE in PUNCTUATION_MODES else 0
+    next_mode = PUNCTUATION_MODES[(idx + 1) % len(PUNCTUATION_MODES)]
+    set_punctuation_mode(next_mode)
+    return next_mode
 
 
 def set_number_digits(enabled):
@@ -524,7 +633,7 @@ def get_dictionary():
 
 def select_audio_device():
     """Interactive audio device selection with Primary/Secondary support & Rich styling"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE, UI_THEME
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE, UI_THEME, NUMBER_DIGITS, KEEP_BLUETOOTH_HANDSFREE
     
     # Always reset terminal before interaction to fix terminal state
     reset_terminal() 
@@ -568,7 +677,7 @@ def select_audio_device():
 
     panel = Panel(table, title="⚙️  Voice Transcriber Settings", border_style="bright_cyan", padding=(0, 1))
     console.print(panel)
-    console.print("[dim white]Press choice key: [/dim white]", end="", flush=True)
+    console.print("[dim white]Press choice key: [/dim white]", end="")
     
     choice = getch()
     print() # Newline after getch

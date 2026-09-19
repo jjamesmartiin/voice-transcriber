@@ -1,0 +1,99 @@
+# Voice Transcriber — Custom Word & Technical Phrase Dictionary
+# Automatically compiled into a ~0.005 ms high-speed Trie regex in post_processor.py.
+# Matches case-insensitively and replaces with exact target casing/formatting.
+
+dictionary:
+  # AI / Models
+  deepseq: Deepseek
+  deep seq: Deepseek
+  deep seek: Deepseek
+
+  # Nix / NixOS
+  nixos: NixOS
+  nix os: NixOS
+  nixos rebuild: nixos-rebuild
+  nixos-rebuild: nixos-rebuild
+  nix os rebuild: nixos-rebuild
+  configuration dot nix: configuration.nix
+  configuration.nix: configuration.nix
+  flake dot nix: flake.nix
+  flake.nix: flake.nix
+
+  # Linux & System Administration
+  system ctl: systemctl
+  systemctl: systemctl
+  journal ctl: journalctl
+  journalctl: journalctl
+  systemd: systemd
+
+  # DevOps, Cloud & CI/CD
+  c pipeline: CI pipeline
+  ci pipeline: CI pipeline
+  gitlab: GitLab
+  git lab: GitLab
+  kubernetes: Kubernetes
+  k8s: Kubernetes
+  docker: Docker
+  ansible: Ansible
+  terraform: Terraform
+
+  # Databases & Mail & Infrastructure
+  mysql: MySQL
+  my sql: MySQL
+  postgresql: PostgreSQL
+  postgres: Postgres
+  veeam: Veeam
+  redis: Redis
+  postfix: Postfix
+  dovecot: Dovecot
+  dovecott: Dovecot
+  spam assassin: SpamAssassin
+  spamassassin: SpamAssassin
+
+  # Hardware, Electronics & Embedded
+  altium: Altium
+  pcb: PCB
+  plc: PLC
+  uart: UART
+  you art: UART
+  spi: SPI
+  i2c: I2C
+  i two c: I2C
+  i squared c: I2C
+  gpio: GPIO
+  g p i o: GPIO
+  modbus: Modbus
+  pololu: Pololu
+  stack up: stackup
+
+  # Networking & Protocols
+  vlan: VLAN
+  ldap: LDAP
+  dhcp: DHCP
+  dns: DNS
+  vpn: VPN
+  tls: TLS
+  ssh: SSH
+  s s h: SSH
+  https: HTTPS
+  imap: IMAP
+  tcp: TCP
+
+  # System Architecture & Code Conventions
+  wsl: WSL
+  x86 64: x86_64
+  x 86 64: x86_64
+  x86_64: x86_64
+  hexadecimal deadbef: "0xDEADBEEF"
+  hexadecimal deadbeef: "0xDEADBEEF"
+  deadbeef: "0xDEADBEEF"
+  0x dead beef: "0xDEADBEEF"
+  0xdeadbeef: "0xDEADBEEF"
+  3735928559: "0xDEADBEEF"
+  carrier code: carrierCode
+  carriercode: carrierCode
+  exit hook: exitHook
+  exithook: exitHook
+  server setup: server_setup
+  work notes: work_notes
+  merge requests: merge_requests

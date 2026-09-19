@@ -52,6 +52,32 @@ copy_to_clipboard: true
 model_backend: "cohere"
 
 # ------------------------------------------------------------------------------
+# Punctuation & Formatting Mode
+# Controls formatting, capitalization, and punctuation styles for output.
+# Available Options:
+#   - "full"                     : Standard full capitalization and terminal punctuation (periods, questions, commas)
+#   - "no_terminal_period"       : Full capitalization and internal punctuation, but omits the trailing period at the end
+#   - "no_punctuation"           : Strips all punctuation marks, preserving capitalization
+#   - "lowercase_no_punctuation" : Strips all punctuation and lowercases all words
+# (Legacy alias: "semi-formal" -> "no_terminal_period")
+# Default: "full"
+punctuation_mode: "full"
+
+# ------------------------------------------------------------------------------
+# Small Language Model (SLM) Grammar & Polishing Pass (Optional)
+# Enables an on-demand CPU Small Language Model pass (e.g. Qwen2.5-0.5B / SmolLM2-360M)
+# to fix spelling and context grammar mistakes.
+# Default: true
+enable_slm: true
+
+# ------------------------------------------------------------------------------
+# Wait for Model Warmup on Startup
+# Ensures the model is 100% loaded and warmed up BEFORE activating hotkeys, so the
+# user's very first dictation keypress is instantaneous without any cold-start delay.
+# Default: true
+wait_for_model_on_startup: true
+
+# ------------------------------------------------------------------------------
 # Number Words -> Digits Conversion
 # Controls whether spoken number words are transcribed as actual digits
 # ("twenty five" -> 25, "six seven zero..." -> 670...). Toggleable at runtime

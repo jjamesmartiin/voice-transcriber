@@ -1,0 +1,64 @@
+# ==============================================================================
+# Voice Transcriber Configuration Example (TOML Format)
+# ==============================================================================
+# Copy this file to 'config.toml' (in root directory or config/ directory) to override defaults.
+# Format: TOML
+
+# Speech recognition engine: "cohere" or "whisper"
+model_backend = "cohere"
+
+# Controls whether audio cue sounds play on transcription complete
+is_muted = true
+
+# Controls whether transcription text is automatically typed into active window
+auto_type = false
+
+# Automatically copy transcribed text to clipboard
+copy_to_clipboard = true
+
+# Punctuation & Formatting Mode
+# Options:
+#   - "full"                     : Standard full capitalization and terminal punctuation (periods, questions, commas)
+#   - "no_terminal_period"       : Full capitalization and internal punctuation, but omits the trailing period at the end
+#   - "no_punctuation"           : Strips all punctuation marks, preserving capitalization
+#   - "lowercase_no_punctuation" : Strips all punctuation and lowercases all words
+punctuation_mode = "full"
+
+# Convert spoken number words to digits ("twenty five" -> 25)
+number_digits = true
+
+# Enable optional Small Language Model (SLM) grammar polish pass (default true for testing)
+enable_slm = true
+
+# Ensure model is 100% loaded and warmed up before activating hotkeys
+wait_for_model_on_startup = true
+
+# Keep Bluetooth headsets on Hands-Free profile to prevent media pausing on record stop
+keep_bluetooth_handsfree = true
+
+# Sound cue theme: "proximity", "pop", "chime", or "silent"
+sound_theme = "proximity"
+
+# Device selection: primary/secondary device names (null/omitted for default)
+override_mode = "auto"
+# primary_device_name = "USB Audio"
+# secondary_device_name = "Built-in Microphone"
+
+# Custom Word & Technical Phrase Dictionary (case-insensitive Trie replacement)
+[dictionary]
+deepseq = "Deepseek"
+"deep seq" = "Deepseek"
+"deep seek" = "Deepseek"
+nixos = "NixOS"
+"nixos rebuild" = "nixos-rebuild"
+"flake dot nix" = "flake.nix"
+"configuration dot nix" = "configuration.nix"
+systemctl = "systemctl"
+journalctl = "journalctl"
+kubernetes = "Kubernetes"
+k8s = "Kubernetes"
+gitlab = "GitLab"
+"pull request" = "PR"
+pr = "PR"
+wsl = "WSL"
+"x86 64" = "x86_64"

@@ -64,6 +64,11 @@ class TestMicroBatchingEngine(unittest.TestCase):
             # Repeated stutters
             self.assertEqual(clean_speech_transcription("about. about this project"), "about this project.")
             self.assertEqual(clean_speech_transcription("the the repository"), "the repository")
+
+            # Intentional repetitions & numbers are preserved
+            self.assertEqual(clean_speech_transcription("really, really good"), "really, really good.")
+            self.assertEqual(clean_speech_transcription("no, no, no"), "no, no, no.")
+            self.assertEqual(clean_speech_transcription("two, two, three"), "2, 2, 3.")
             
             # Subordinating conjunctions after period
             self.assertEqual(clean_speech_transcription("specifically. because we might need"), "specifically because we might need.")
@@ -232,6 +237,52 @@ class TestMicroBatchingEngine(unittest.TestCase):
         os.environ["VT_NUMBER_DIGITS"] = "0"
         self.assertEqual(conv("twenty five people"), "twenty five people")
         os.environ["VT_NUMBER_DIGITS"] = "1"
+
+    def test_deduplicate_text_overlap_cases(self):
+        """Test intelligent text overlap deduplication across chunk boundaries."""
+        from micro_batcher import deduplicate_text_overlap
+
+        # 1. Spoken repetitions across silence (has_speech_overlap=False) are preserved
+        self.assertEqual(
+            deduplicate_text_overlap("I counted two", "two three", has_speech_overlap=False),
+            "I counted two two three"
+        )
+        self.assertEqual(
+            deduplicate_text_overlap("Enter code two", "two three", has_speech_overlap=False),
+            "Enter code two two three"
+        )
+
+        # 2. Acoustic multi-word overlap (has_speech_overlap=True) is collapsed
+        self.assertEqual(
+            deduplicate_text_overlap("speech recognition have evolved", "have evolved significantly over", has_speech_overlap=True),
+            "speech recognition have evolved significantly over"
+        )
+
+        # 3. Single-word overlap of common function word is collapsed
+        self.assertEqual(
+            deduplicate_text_overlap("went to the", "the store today", has_speech_overlap=True),
+            "went to the store today"
+        )
+
+        # 4. Single-word repetition of protected numbers is preserved even with overlap flag
+        self.assertEqual(
+            deduplicate_text_overlap("counted two", "two three", has_speech_overlap=True),
+            "counted two two three"
+        )
+
+        # 5. Boundary stem truncations are healed
+        self.assertEqual(
+            deduplicate_text_overlap("both been hospitable", "Hospitably received", has_speech_overlap=True),
+            "both been Hospitably received"
+        )
+        self.assertEqual(
+            deduplicate_text_overlap("in the gate", "the gateway machine", has_speech_overlap=True),
+            "in the gateway machine"
+        )
+        self.assertEqual(
+            deduplicate_text_overlap("encoders with autoregressive", "progressive transformer", has_speech_overlap=True),
+            "encoders with autoregressive transformer"
+        )
 
 if __name__ == "__main__":
     unittest.main(argv=['first-arg'], exit=False)

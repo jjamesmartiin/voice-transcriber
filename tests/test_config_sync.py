@@ -164,3 +164,59 @@ def test_tui_status_bar_matches_settings():
     assert "model: whisper" in rendered_plain
     assert "sound: on" in rendered_plain
     assert "auto-type" in rendered_plain
+
+
+def test_toml_config_support(tmp_path, monkeypatch):
+    import tomllib
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text("""
+model_backend = "cohere"
+is_muted = true
+auto_type = false
+punctuation_mode = "no_terminal_period"
+number_digits = true
+
+[dictionary]
+deepseq = "Deepseek"
+""")
+    monkeypatch.setattr(t2, 'get_config_file', lambda: toml_file)
+
+    t2.load_audio_config()
+    assert t2.MODEL_BACKEND == "cohere"
+    assert t2.PUNCTUATION_MODE == "no_terminal_period"
+    assert t2.NUMBER_DIGITS is True
+
+    # Test cycling punctuation mode
+    new_mode = t2.cycle_punctuation_mode()
+    assert new_mode == "no_punctuation"
+    assert t2.PUNCTUATION_MODE == "no_punctuation"
+
+    # Save to TOML
+    t2.save_audio_config()
+
+    # Re-read and check round-trip
+    saved = tomllib.loads(toml_file.read_text())
+    assert saved["punctuation_mode"] == "no_punctuation"
+    assert saved["model_backend"] == "cohere"
+    assert saved["dictionary"]["deepseq"] == "Deepseek"
+
+
+def test_punctuation_modes_in_post_processor():
+    from post_processor import clean_speech_transcription, set_punctuation_mode
+
+    sample = "Hello world, this is Voice Transcriber."
+    
+    # 1. Full mode
+    set_punctuation_mode("full")
+    assert clean_speech_transcription(sample, punctuation_mode="full") == "Hello world, this is voice transcriber."
+
+    # 2. No terminal period (semi-formal)
+    assert clean_speech_transcription(sample, punctuation_mode="no_terminal_period") == "Hello world, this is voice transcriber"
+    assert clean_speech_transcription(sample, punctuation_mode="semi-formal") == "Hello world, this is voice transcriber"
+
+    # 3. No punctuation
+    assert clean_speech_transcription(sample, punctuation_mode="no_punctuation") == "Hello world this is voice transcriber"
+
+    # 4. Lowercase no punctuation
+    assert clean_speech_transcription(sample, punctuation_mode="lowercase_no_punctuation") == "hello world this is voice transcriber"
+

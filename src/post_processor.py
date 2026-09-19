@@ -24,11 +24,12 @@ HALLUCINATION_PATTERNS = [
     re.compile(r"\bthank\s+you\s+for\s+watching[.!?,]*\b", re.IGNORECASE),
     re.compile(r"\bsubtitles\s+by\s+.*$", re.IGNORECASE),
     re.compile(r"\bplease\s+subscribe[.!?,]*\b", re.IGNORECASE),
+    re.compile(r"={2,}[^=\n]+={2,}[.?!]*", re.IGNORECASE),
 ]
 
 # Standalone single-word noise hallucinations on short audio clips
 STANDALONE_SHORT_HALLUCINATIONS = re.compile(
-    r"^\s*(you|bye|thank\s+you|thanks|subtitles)\s*[.?!]*$", re.IGNORECASE
+    r"^\s*(you|bye|thank\s+you|thanks|subtitles|shh+|ptl)\s*[.?!]*$", re.IGNORECASE
 )
 
 # Words that can never grammatically end an English sentence / clause
@@ -40,7 +41,7 @@ DANGLING_WORDS_REGEX = re.compile(
     r"very|too|quite|really|such|more|less|most|least|"
     r"two|three|four|five|several|multiple|few|many|some|another|each|every|"
     r"different|similar|same|other|next|previous|main|"
-    r"is|are|was|were|be|been|being|have|has|had|can|could|would|should|might|must"
+    r"is|are|was|were|be|been|being|have|has|had|can|could|would|should|shall|will|might|must"
     r")\s*[.?!]\s+([a-zA-Z])",
     re.IGNORECASE
 )
@@ -51,9 +52,11 @@ DISCOURSE_STARTERS_REGEX = re.compile(
     re.IGNORECASE
 )
 
-# Repeated words across punctuation (e.g. "about. about", "might. Might", "a. a")
+# Repeated words across period/dash (e.g. "about. about", "might. Might", "a. a")
+# Note: we do NOT collapse words across commas (e.g. "two, two", "no, no", "really, really")
+# because those are natural spoken repetitions or number enumerations.
 STUTTER_PUNCT_REGEX = re.compile(
-    r"\b([a-zA-Z]+)\s*[.,?!;:]+\s+(?i:\1)\b"
+    r"\b([a-zA-Z]+)\s*[.-]+\s+(?i:\1)\b"
 )
 
 # High-confidence repeated words without punctuation (e.g. "the the", "a a", "in in", "about about", "might might")
@@ -74,6 +77,20 @@ _STUTTER_DIRECT_WORDS = frozenset({
     "and", "or", "but", "so", "because", "if", "we", "i", "you", "he", "she", "they"
 })
 
+STUTTER_PROTECTED_WORDS = frozenset({
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+    "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+    "hundred", "thousand", "million", "billion",
+    "no", "yes", "really", "very", "bye", "hear", "now", "never", "again", "too", "so", "oh"
+})
+
+def _collapse_stutter_punct(m: re.Match) -> str:
+    w = m.group(1)
+    if w.lower() in STUTTER_PROTECTED_WORDS:
+        return m.group(0)
+    return w
+
 def _check_stutters(text_lower: str) -> tuple[bool, bool]:
     has_punct_cand = False
     has_direct = False
@@ -81,7 +98,8 @@ def _check_stutters(text_lower: str) -> tuple[bool, bool]:
     for w in text_lower.split():
         w_clean = w.strip(".,!?:;\"'()[]{}")
         if w_clean and w_clean == prev:
-            has_punct_cand = True
+            if w_clean not in STUTTER_PROTECTED_WORDS:
+                has_punct_cand = True
             if w_clean in _STUTTER_DIRECT_WORDS:
                 has_direct = True
         prev = w_clean
@@ -107,6 +125,24 @@ COORD_CONJUNCTIONS_REGEX = re.compile(
 MID_PHRASE_QUESTION_MARK_REGEX = re.compile(
     r"\b([a-zA-Z0-9]+)\s*\?\s+([a-z][a-zA-Z0-9_-]*)\b"
 )
+
+# Spoken Unix paths and CIDR subnets (e.g. "slash etc slash nixos" -> "/etc/nixos", "slash 24" -> "/24")
+SPOKEN_SUBNET_REGEX = re.compile(r'\s+slash\s+(\d{1,2})\b', re.IGNORECASE)
+SPOKEN_PATH_REGEX = re.compile(r'\b(?:slash\s+[a-zA-Z0-9_.-]+\s*){2,}', re.IGNORECASE)
+
+def _path_repl(m: re.Match) -> str:
+    raw = m.group(0)
+    parts = re.split(r'\s*slash\s*', raw.strip(), flags=re.IGNORECASE)
+    cleaned_parts = [p.strip() for p in parts if p.strip()]
+    return "/" + "/".join(cleaned_parts)
+
+def clean_spoken_paths(text: str) -> str:
+    """Converts spoken Unix paths and subnets (e.g. 'slash etc slash nixos' -> '/etc/nixos', 'slash 24' -> '/24')."""
+    if not text or "slash" not in text.lower():
+        return text
+    text = SPOKEN_SUBNET_REGEX.sub(r'/\1', text)
+    text = SPOKEN_PATH_REGEX.sub(_path_repl, text)
+    return text
 
 # ASR phonetic mis-hearings of the "AI" acronym (e.g. "a eyes" -> "AI").
 # Whisper/Cohere sometimes transcribe spoken "AI" as "a eyes" / "an eyes".
@@ -368,12 +404,20 @@ def _is_valid_speech_rewrite(original: str, candidate: str) -> bool:
         return False
     return True
 
+_SLM_LAST_OFFLINE_CHECK = 0.0
+_SLM_OFFLINE_COOLDOWN = 5.0
+
 def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
     """
     Passes speech transcript through local vLLM / SLM (Qwen2.5-0.5B / Llama-3.2-1B)
     to perform real-time speech self-correction and grammar polishing.
     """
-    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "0") != "1":
+    global _SLM_LAST_OFFLINE_CHECK
+    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "1") != "1":
+        return text
+
+    # If the SLM endpoint was recently unreachable, back off to avoid connection latency
+    if time.time() - _SLM_LAST_OFFLINE_CHECK < _SLM_OFFLINE_COOLDOWN:
         return text
 
     if timeout_sec is None:
@@ -440,6 +484,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
             else:
                 print(f"⚠️ [vLLM SLM Pass] Guardrail triggered (word-overlap or refusal failure): Bypassed -> Using ASR text")
     except Exception as e:
+        _SLM_LAST_OFFLINE_CHECK = time.time()
         print(f"⚠️ [vLLM SLM Pass] Offline/Bypassed ({e}): Using ASR text")
         
     return text
@@ -454,7 +499,7 @@ def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: f
     if not new_chunk:
         return prev_text
         
-    if os.environ.get("VT_ENABLE_SLM", "0") != "1":
+    if os.environ.get("VT_ENABLE_SLM", "1") != "1":
         return f"{prev_text} {new_chunk}".strip()
 
     if timeout_sec is None:
@@ -925,6 +970,59 @@ def set_number_digits_enabled(enabled: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Punctuation & Formatting Modes
+# ---------------------------------------------------------------------------
+# 1. "full": standard casing & terminal punctuation (default)
+# 2. "no_terminal_period" (semi-formal): internal punctuation kept, no trailing period
+# 3. "no_punctuation": all punctuation stripped, casing preserved
+# 4. "lowercase_no_punctuation": all punctuation stripped and lowercased
+_PUNCTUATION_MODE = "full"
+
+
+def set_punctuation_mode(mode: str) -> None:
+    """Set global punctuation mode."""
+    global _PUNCTUATION_MODE
+    if mode:
+        _PUNCTUATION_MODE = str(mode).strip().lower()
+
+
+def get_punctuation_mode() -> str:
+    """Get global punctuation mode."""
+    return _PUNCTUATION_MODE
+
+
+def apply_punctuation_mode(text: str, mode: str | None = None) -> str:
+    """Format transcribed text according to the selected punctuation mode.
+
+    Modes:
+      - full (default): standard capitalization and terminal/internal punctuation.
+      - no_terminal_period (semi-formal): retains internal punctuation and capitalization,
+        but omits trailing periods at the end of the text.
+      - no_punctuation: removes all punctuation marks, preserving casing.
+      - lowercase_no_punctuation: removes all punctuation and lowercases all words.
+    """
+    if not text:
+        return text
+    mode_str = (mode or _PUNCTUATION_MODE or "full").strip().lower().replace("-", "_")
+
+    if mode_str in ("no_terminal_period", "semi_formal", "no_period", "no_ending_period"):
+        trimmed = text.rstrip()
+        if trimmed.endswith("."):
+            return trimmed.rstrip(". ")
+        return trimmed
+
+    elif mode_str in ("no_punctuation", "none", "no_punct"):
+        t = re.sub(r"[^\w\s-]", "", text)
+        return " ".join(t.split())
+
+    elif mode_str in ("lowercase_no_punctuation", "raw", "lowercase", "lower", "lowercase_no_punct"):
+        t = re.sub(r"[^\w\s-]", "", text.lower())
+        return " ".join(t.split())
+
+    return text
+
+
+# ---------------------------------------------------------------------------
 # High-Speed Trie-Compacted Custom Word & Phrase Dictionary Replacer
 # ---------------------------------------------------------------------------
 # Replaces custom words and multi-word phrases (e.g. "pull request" -> "PR",
@@ -1029,6 +1127,7 @@ def _auto_load_dictionary_if_needed() -> None:
         return
     _CUSTOM_DICT_INITIALIZED = True
     
+    repo_root = Path(__file__).resolve().parent.parent
     candidates = [
         Path("config/dictionary.yaml"),
         Path("config/dictionary.yml"),
@@ -1037,6 +1136,10 @@ def _auto_load_dictionary_if_needed() -> None:
         Path("dictionary.json"),
         Path("config/config.yaml"),
         Path("config.yaml"),
+        repo_root / "config/dictionary.yaml",
+        repo_root / "config/dictionary.yml",
+        repo_root / "config/dictionary.json",
+        repo_root / "config/config.yaml",
     ]
     for c in candidates:
         if c.exists():
@@ -1083,7 +1186,12 @@ _MUTTERING_KEYWORDS = ("oop", "whoop", "never")
 _FILLER_KEYWORDS = ("um", "uh", "er", "ah")
 
 
-def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
+def clean_speech_transcription(
+    text: str,
+    skip_slm: bool = False,
+    punctuation_mode: str | None = None,
+    is_intermediate: bool = False
+) -> str:
     """
     Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
     repeated stutters, verbal self-corrections, and trailing hallucinations.
@@ -1122,12 +1230,12 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
         cleaned_lower = cleaned.lower()
     
     # 0. Apply optional vLLM / SLM rewrite pass (unless bypassed for intermediate streaming micro-chunks)
-    if not skip_slm and os.environ.get("VT_ENABLE_SLM", "0") == "1":
+    if not skip_slm and os.environ.get("VT_ENABLE_SLM", "1") == "1":
         cleaned = process_slm_llm_rewrite(cleaned)
         cleaned_lower = cleaned.lower()
     
     # 1. Hallucination and trailing muttering stripping
-    if ("watching" in cleaned_lower or "subtitles" in cleaned_lower or "subscribe" in cleaned_lower):
+    if ("watching" in cleaned_lower or "subtitles" in cleaned_lower or "subscribe" in cleaned_lower or "==" in cleaned_lower):
         for pat in HALLUCINATION_PATTERNS:
             cleaned = pat.sub("", cleaned)
         cleaned_lower = cleaned.lower()
@@ -1144,7 +1252,7 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
 
     if len(cleaned) <= 40:
         stripped_h = cleaned.strip(" .?!").lower()
-        if stripped_h in ("you", "bye", "thank you", "thanks", "subtitles"):
+        if stripped_h in ("you", "bye", "thank you", "thanks", "subtitles", "shh", "shhh", "ptl"):
             return ""
     
     # If the text was reduced to only punctuation / whitespace, return empty
@@ -1153,8 +1261,8 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     
     # 2 & 3. Deduplicate repeated words across punctuation & direct filler stutters
     has_punct_cand, has_direct = _check_stutters(cleaned_lower)
-    if has_punct_cand and any(p in cleaned for p in ".,?!;:"):
-        cleaned = STUTTER_PUNCT_REGEX.sub(r"\1", cleaned)
+    if has_punct_cand and any(p in cleaned for p in ".-"):
+        cleaned = STUTTER_PUNCT_REGEX.sub(_collapse_stutter_punct, cleaned)
     if has_direct:
         cleaned = STUTTER_DIRECT_REGEX.sub(r"\1", cleaned)
     if "to" in cleaned_lower and ("into" in cleaned_lower or "onto" in cleaned_lower or "in to" in cleaned_lower or "on to" in cleaned_lower):
@@ -1237,13 +1345,22 @@ def clean_speech_transcription(text: str, skip_slm: bool = False) -> str:
     if _CUSTOM_DICT_REPLACER is not None:
         cleaned = _CUSTOM_DICT_REPLACER(cleaned)
 
+    # 13e. Clean spoken Unix file paths and subnet notation
+    if "slash" in cleaned_lower:
+        cleaned = clean_spoken_paths(cleaned)
+
     cleaned = cleaned.strip()
     if not cleaned or not cleaned.strip(".,!?;: \t\n\r"):
         return ""
         
     # 14. Ensure complete statement utterances end with terminal punctuation
-    if not cleaned.endswith((".", "!", "?", ":")):
-        if len(cleaned.split(None, 3)) >= 3:
-            cleaned += "."
+    if not is_intermediate:
+        if not cleaned.endswith((".", "!", "?", ":")):
+            if len(cleaned.split(None, 3)) >= 3:
+                cleaned += "."
+
+    # 15. Apply punctuation mode formatting (if not intermediate chunk)
+    if not is_intermediate:
+        cleaned = apply_punctuation_mode(cleaned, mode=punctuation_mode)
         
     return cleaned

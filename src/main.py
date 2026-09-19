@@ -30,6 +30,27 @@ from t2 import (
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
+def create_tui():
+    """Pick a TUI frontend.
+
+    Prefer the ratatui (Rust) frontend when the binary is available, otherwise
+    fall back to the built-in Rich TUI. Force Rich with ``VT_TUI=rich``.
+    """
+    prefer = os.environ.get("VT_TUI", "").strip().lower()
+    if prefer != "rich":
+        binary = os.environ.get("VT_TUI_BIN", "")
+        try:
+            from tui_ratatui import RatatuiTui, tui_available
+            if tui_available(binary):
+                logger.info("Using ratatui frontend: %s", binary)
+                return RatatuiTui(binary)
+            logger.info("ratatui frontend unavailable (VT_TUI_BIN=%r)", binary)
+        except Exception as e:
+            logger.warning("ratatui frontend unavailable, using Rich TUI: %s", e)
+    from tui import VoiceTranscriberTUI
+    return VoiceTranscriberTUI()
+
 def copy_to_clipboard_crossplatform(text, sink=None):
     """Copy text to the platform clipboard via the HAL.
 
@@ -61,8 +82,8 @@ class SimpleVoiceTranscriber:
         self.copy_to_clipboard = False
         self.start_time = 0
         
-        # Initialize Rich TUI
-        self.tui = VoiceTranscriberTUI()
+        # Initialize the TUI frontend (ratatui if available, else Rich).
+        self.tui = create_tui()
         self._wire_tui_callbacks()
 
         # Detect the host platform once and select HAL backends from it.
@@ -73,7 +94,7 @@ class SimpleVoiceTranscriber:
         # Load saved audio device configuration FIRST before starting TUI live display
         load_audio_config()
         self._sync_tui_state()
-        self.tui.start()
+        self._safe_tui_start()
         
         # Preload model in background with live loading spinner animation
         from t2 import MODEL_BACKEND
@@ -104,9 +125,6 @@ class SimpleVoiceTranscriber:
         self.last_transcription = ""
         self.last_finish_time = 0.0
         
-        # Initialize global hotkey system
-        self.init_hotkeys()
-
         # Surface first-run model-download progress (GitHub release assets) in the TUI.
         try:
             import model_download
@@ -120,6 +138,32 @@ class SimpleVoiceTranscriber:
         # tests) shares the same non-blocking behavior.
         self._start_model_load_watcher()
 
+        # If configured to wait on startup (default True), ensure the model is
+        # 100% loaded and warmed up BEFORE initializing hotkeys so the user's very
+        # first keypress transcribes instantly without waiting.
+        if getattr(t2, 'WAIT_FOR_MODEL_ON_STARTUP', True):
+            if self.preload_thread and self.preload_thread.is_alive():
+                self.preload_thread.join(timeout=20.0)
+
+        # Initialize global hotkey system after model is ready
+        self.init_hotkeys()
+
+    def _safe_tui_start(self):
+        """Start the selected TUI; if the ratatui frontend fails, fall back to Rich."""
+        try:
+            self.tui.start()
+        except Exception as e:
+            logger.warning("ratatui frontend failed to start (%s); using Rich TUI", e)
+            try:
+                self.tui.stop()
+            except Exception:
+                pass
+            from tui import VoiceTranscriberTUI
+            self.tui = VoiceTranscriberTUI()
+            self._wire_tui_callbacks()
+            self._sync_tui_state()
+            self.tui.start()
+
     def _sync_tui_state(self):
         """Sync t2 configuration state with TUI badges and visual notification"""
         import t2
@@ -130,7 +174,8 @@ class SimpleVoiceTranscriber:
             muted=t2.IS_MUTED,
             auto_type=t2.AUTO_TYPE,
             sound_theme=t2.SOUND_THEME,
-            ui_theme=getattr(t2, 'UI_THEME', 'auto')
+            ui_theme=getattr(t2, 'UI_THEME', 'auto'),
+            punctuation_mode=getattr(t2, 'PUNCTUATION_MODE', 'full')
         )
         if hasattr(self, 'visual_notification') and self.visual_notification:
             self.visual_notification.set_active_device(get_active_device_name(include_model=False))
@@ -142,6 +187,7 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_mute = self._on_tui_toggle_mute
         self.tui.on_toggle_autotype = self._on_tui_toggle_autotype
         self.tui.on_toggle_numbers = self._on_tui_toggle_numbers
+        self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
         self.tui.on_reset_terminal = self._on_tui_reset_terminal
         self.tui.on_quit = self._on_tui_quit
@@ -262,6 +308,20 @@ class SimpleVoiceTranscriber:
         status = "DIGITS" if t2.NUMBER_DIGITS else "SPELLED OUT"
         self.tui.print_event("🔢 Number Conversion", f"Numbers are now transcribed as {status}", level="info")
 
+    def _on_tui_cycle_punctuation_mode(self):
+        import t2
+        new_mode = t2.cycle_punctuation_mode()
+        t2.save_audio_config()
+        self._sync_tui_state()
+        labels = {
+            "full": "Full Punctuation",
+            "no_terminal_period": "No Trailing Period (Semi-Formal)",
+            "no_punctuation": "No Punctuation",
+            "lowercase_no_punctuation": "Lowercase Without Punctuation"
+        }
+        disp = labels.get(new_mode, new_mode)
+        self.tui.print_event("📝 Formatting Mode", f"Punctuation mode set to {disp}", level="info")
+
     def _on_tui_cycle_theme(self):
         import t2
         new_theme = self.tui.cycle_ui_theme()
@@ -277,7 +337,9 @@ class SimpleVoiceTranscriber:
 
     def _on_tui_quit(self):
         self.cleanup()
-        sys.exit(0)
+        # The quit command arrives on the TUI reader thread; sys.exit() there
+        # would only end that thread, so terminate the whole process.
+        os._exit(0)
 
     def cleanup(self):
         """Clean up all resources."""
@@ -392,8 +454,10 @@ class SimpleVoiceTranscriber:
         time_since_last = time.time() - getattr(self, 'last_finish_time', 0.0)
         last_text = getattr(self, 'last_transcription', "").strip()
 
-        # Check for Quick-Tap SLM On-Demand retro-polish trigger (15.0s buffer window)
-        if rec_duration < 0.45 and time_since_last < 15.0 and last_text:
+        # Check for Quick-Tap SLM On-Demand retro-polish trigger (only if SLM is enabled and audio is empty tap)
+        import t2
+        slm_enabled = getattr(t2, 'ENABLE_SLM', True) and os.environ.get("VT_ENABLE_SLM", "1") != "0"
+        if slm_enabled and rec_duration < 0.35 and time_since_last < 15.0 and last_text and (self.audio_frames is None or len(self.audio_frames) == 0):
             logger.info("🤖 Quick-Tap SLM On-Demand retro-polish triggered!")
             self.visual_notification.show_processing()
             from post_processor import process_slm_llm_rewrite, clean_speech_transcription
@@ -590,6 +654,15 @@ class SimpleVoiceTranscriber:
         except Exception as e:
             if hasattr(self, 'tui') and self.tui:
                 self.tui.print_error("Audio Configuration Error", str(e))
+            _dbg_path = os.environ.get("VT_TUI_DEBUG")
+            if _dbg_path:
+                try:
+                    import traceback
+                    with open(_dbg_path, "a", encoding="utf-8") as _f:
+                        _f.write("change_input_device error: " + repr(e) + "\n")
+                        _f.write(traceback.format_exc())
+                except OSError:
+                    pass
             reset_terminal()
             
         self._sync_tui_state()
