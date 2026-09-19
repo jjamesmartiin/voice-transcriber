@@ -170,3 +170,14 @@ def test_dictionary_execution_latency():
     avg_ms = total_ms / iterations
 
     assert avg_ms < 0.10, f"Post-processor latency exceeded threshold: {avg_ms:.4f} ms"
+
+
+def test_shipped_dictionary_maps_github_variants():
+    """Regression: the shipped dictionary had GitLab but not GitHub, so dictated
+    "git hub"/"get hub" fell through un-repaired."""
+    repo_root = Path(__file__).resolve().parent.parent
+    mapping = post_processor.load_custom_dictionary_from_file(repo_root / "config" / "dictionary.yaml")
+    assert mapping.get("github") == "GitHub"
+    for variant in ("git hub", "git-hub", "get hub"):
+        assert mapping.get(variant) == "GitHub", f"missing dictionary variant {variant!r}"
+    assert "GitHub" in post_processor.clean_speech_transcription("push it to git hub", skip_slm=True)

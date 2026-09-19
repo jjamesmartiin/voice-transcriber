@@ -31,6 +31,10 @@ dictionary:
   ci pipeline: CI pipeline
   gitlab: GitLab
   git lab: GitLab
+  github: GitHub
+  git hub: GitHub
+  git-hub: GitHub
+  get hub: GitHub
   kubernetes: Kubernetes
   k8s: Kubernetes
   docker: Docker
