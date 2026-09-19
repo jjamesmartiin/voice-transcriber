@@ -152,7 +152,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
             
-    def set_config_state(self, backend=None, muted=None, auto_type=None, sound_theme=None, ui_theme=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, sound_theme=None, ui_theme=None, punctuation_mode=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -164,6 +164,8 @@ class VoiceTranscriberTUI:
                 self.sound_theme = sound_theme
             if ui_theme is not None:
                 self.ui_theme = ui_theme
+            if punctuation_mode is not None:
+                self.punctuation_mode = punctuation_mode
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 

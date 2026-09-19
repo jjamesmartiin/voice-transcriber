@@ -1,0 +1,17 @@
+[package]
+name = "vt-tui"
+version = "0.1.0"
+edition = "2021"
+description = "Ratatui frontend for Voice Transcriber"
+publish = false
+
+[[bin]]
+name = "vt-tui"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = { version = "0.29", features = ["unstable"] }
+crossterm = "0.28"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

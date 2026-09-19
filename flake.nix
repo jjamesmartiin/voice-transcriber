@@ -80,8 +80,21 @@
             datasets
             psutil
           ]);
+
+          # ratatui frontend (Rust), built from the tui-rs/ crate.
+          vt-tui = pkgs.rustPlatform.buildRustPackage {
+            pname = "vt-tui";
+            version = "0.1.0";
+            src = pkgs.lib.cleanSourceWith {
+              src = ./tui-rs;
+              filter = p: t: baseNameOf p != "target";
+            };
+            cargoLock.lockFile = ./tui-rs/Cargo.lock;
+          };
         in
         {
+          inherit vt-tui;
+
           default = pkgs.stdenv.mkDerivation {
             pname = "vt";
             version = "1.0.3";
@@ -96,6 +109,11 @@
               #!${pkgs.bash}/bin/bash
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:\$PATH"
               export PYTHONPATH="$out/share/vt:\$PYTHONPATH"
+              # ratatui frontend built by this flake. Override for local dev with
+              # VT_TUI_BIN=/path/to/vt-tui, or force the Rich UI with VT_TUI=rich.
+              if [ -z "\$VT_TUI_BIN" ]; then
+                export VT_TUI_BIN="${vt-tui}/bin/vt-tui"
+              fi
               exec ${pythonEnv}/bin/python $out/share/vt/main.py "\$@"
               EOF
               chmod +x $out/bin/vt

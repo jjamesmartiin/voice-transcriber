@@ -24,6 +24,19 @@ Choose your platform guide for installation and setup:
 
 ---
 
+## Terminal UI
+
+The default frontend is a [ratatui](https://ratatui.rs) (Rust) TUI, launched
+automatically by the Python engine over a local socket — see
+[`tui-rs/README.md`](tui-rs/README.md). `nix run` builds it via the flake; no
+separate build step is needed.
+
+Set `VT_TUI=rich` to force the original Rich frontend, or `VT_TUI_BIN=/path` to
+point at a specific `vt-tui` binary (e.g. a local `cargo` build during frontend
+development). If no binary is found, the app falls back to Rich automatically.
+
+---
+
 ## Architecture
 
 Voice Transcriber unifies all supported platforms over a single shared core engine using a Hardware/OS Abstraction Layer (HAL):
