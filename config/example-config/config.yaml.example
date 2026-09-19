@@ -155,6 +155,7 @@ dictionary:
   "vllm": "vLLM"
   "vs code": "VS Code"
   "github": "GitHub"
+  "gitea": "Gitea"
   "k8s": "Kubernetes"
   "deepseq": "Deepseek"
   "deep seq": "Deepseek"

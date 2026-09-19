@@ -181,3 +181,17 @@ def test_shipped_dictionary_maps_github_variants():
     for variant in ("git hub", "git-hub", "get hub"):
         assert mapping.get(variant) == "GitHub", f"missing dictionary variant {variant!r}"
     assert "GitHub" in post_processor.clean_speech_transcription("push it to git hub", skip_slm=True)
+
+
+def test_gitea_variants_are_safe_and_get_tea_is_untouched():
+    """Only unambiguous variants may map to Gitea. 'get tea' is ordinary English
+    (a drink) and must survive untouched — a context-free dictionary cannot
+    disambiguate it, so it must not have an entry."""
+    repo_root = Path(__file__).resolve().parent.parent
+    mapping = post_processor.load_custom_dictionary_from_file(repo_root / "config" / "dictionary.yaml")
+    for variant in ("gitea", "git ea", "git tea"):
+        assert mapping.get(variant) == "Gitea", f"missing dictionary variant {variant!r}"
+
+    drink = post_processor.clean_speech_transcription("let's get tea", skip_slm=True)
+    assert "gitea" not in drink.lower()
+    assert "get tea" in drink.lower()
