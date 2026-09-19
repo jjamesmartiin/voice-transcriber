@@ -284,5 +284,58 @@ class TestMicroBatchingEngine(unittest.TestCase):
             "encoders with autoregressive transformer"
         )
 
+class TestTailAndOverlapDispatch(unittest.TestCase):
+    """Dispatch-level behaviour of the streaming chunker (no model, no worker thread)."""
+
+    SR = 16000
+
+    def _make_batcher(self):
+        # Construct without start(): no worker thread is created, so nothing is
+        # transcribed and the test stays fast.
+        return StreamingMicroBatcher(sample_rate=self.SR, tui=None)
+
+    def _speech(self, seconds, amp=0.05):
+        t = np.linspace(0, seconds, int(self.SR * seconds), endpoint=False)
+        return (amp * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+
+    def _quiet(self, seconds):
+        return np.full(int(self.SR * seconds), 0.0005, dtype=np.float32)
+
+    def test_short_tail_is_dropped_to_suppress_trailing_hallucinations(self):
+        # Deliberate: sub-utterance tails are mic-release residue that ASR
+        # hallucinates words on. Verified on the 154-clip eval (see eval/HANDOFF.md).
+        b = self._make_batcher()
+        b.audio_buffer = [self._speech(0.4)]
+        b.total_samples = len(b.audio_buffer[0])
+        b.next_chunk_idx = 1  # a chunk was already dispatched
+        b._dispatch_current_chunk(keep_overlap=False, is_tail=True)
+        self.assertTrue(b.chunk_queue.empty(), "sub-utterance tail must be dropped")
+
+    def test_short_silent_tail_is_dropped(self):
+        b = self._make_batcher()
+        b.audio_buffer = [self._quiet(0.4)]
+        b.total_samples = len(b.audio_buffer[0])
+        b.next_chunk_idx = 1
+        b._dispatch_current_chunk(keep_overlap=False, is_tail=True)
+        self.assertTrue(b.chunk_queue.empty(), "silent mic-release tail must be dropped")
+
+    def test_speech_overlap_is_flagged_for_dedup(self):
+        b = self._make_batcher()
+        b.audio_buffer = [self._speech(1.0)]
+        b.total_samples = len(b.audio_buffer[0])
+        b._dispatch_current_chunk(keep_overlap=True, overlap_len=int(0.2 * self.SR))
+        _, _, is_tail, _is_forced, has_overlap = b.chunk_queue.get_nowait()
+        self.assertFalse(is_tail)
+        self.assertTrue(has_overlap, "overlap containing speech must be de-duplicated")
+
+    def test_silence_overlap_is_not_flagged(self):
+        b = self._make_batcher()
+        b.audio_buffer = [self._quiet(1.0)]
+        b.total_samples = len(b.audio_buffer[0])
+        b._dispatch_current_chunk(keep_overlap=True, overlap_len=int(0.2 * self.SR))
+        _, _, _is_tail, _is_forced, has_overlap = b.chunk_queue.get_nowait()
+        self.assertFalse(has_overlap, "silence-only overlap must preserve spoken repetitions")
+
+
 if __name__ == "__main__":
     unittest.main(argv=['first-arg'], exit=False)

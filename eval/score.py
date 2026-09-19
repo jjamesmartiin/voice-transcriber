@@ -265,7 +265,7 @@ def main():
     eprint("Voice Transcriber accuracy evaluation")
     eprint("=" * 72)
     eprint(f"clips        : {len(entries)} ({', '.join(f'{k}={v}' for k, v in sorted(counts.items()))})")
-    eprint(f"backend      : cohere  (VT_INT8_DYNAMIC={os.environ.get('VT_INT8_DYNAMIC', '1')})")
+    eprint(f"backend      : cohere  (VT_INT8_DYNAMIC={os.environ.get('VT_INT8_DYNAMIC', '0')})")
     eprint(f"number_digits: {bool(num_digits)} (config value: {cfg.get('number_digits', False)})")
     eprint(f"feed block   : {args.blocks_ms} ms")
 
@@ -391,7 +391,7 @@ def main():
             "meta": {
                 "n_clips": len(results),
                 "slices": dict(counts),
-                "int8_dynamic": os.environ.get("VT_INT8_DYNAMIC", "1"),
+                "int8_dynamic": os.environ.get("VT_INT8_DYNAMIC", "0"),
                 "number_digits": bool(num_digits),
                 "norm_numbers": args.norm_numbers,
                 "blocks_ms": args.blocks_ms,

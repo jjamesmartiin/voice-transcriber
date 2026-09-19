@@ -67,8 +67,8 @@ punctuation_mode: "full"
 # Small Language Model (SLM) Grammar & Polishing Pass (Optional)
 # Enables an on-demand CPU Small Language Model pass (e.g. Qwen2.5-0.5B / SmolLM2-360M)
 # to fix spelling and context grammar mistakes.
-# Default: true
-enable_slm: true
+# Default: false (opt-in; requires a local vLLM/OpenAI-compatible endpoint)
+enable_slm: false
 
 # ------------------------------------------------------------------------------
 # Wait for Model Warmup on Startup

@@ -27,8 +27,9 @@ punctuation_mode = "full"
 # Convert spoken number words to digits ("twenty five" -> 25)
 number_digits = true
 
-# Enable optional Small Language Model (SLM) grammar polish pass (default true for testing)
-enable_slm = true
+# Enable optional Small Language Model (SLM) grammar polish pass
+# (default false; opt-in and requires a local vLLM endpoint)
+enable_slm = false
 
 # Ensure model is 100% loaded and warmed up before activating hotkeys
 wait_for_model_on_startup = true

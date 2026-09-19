@@ -144,6 +144,11 @@ class SimpleVoiceTranscriber:
         if getattr(t2, 'WAIT_FOR_MODEL_ON_STARTUP', True):
             if self.preload_thread and self.preload_thread.is_alive():
                 self.preload_thread.join(timeout=20.0)
+                if self.preload_thread.is_alive():
+                    logger.warning(
+                        "Model still loading after 20s; registering hotkeys anyway "
+                        "(the first dictation will wait for the model)."
+                    )
 
         # Initialize global hotkey system after model is ready
         self.init_hotkeys()
@@ -339,6 +344,11 @@ class SimpleVoiceTranscriber:
         self.cleanup()
         # The quit command arrives on the TUI reader thread; sys.exit() there
         # would only end that thread, so terminate the whole process.
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
         os._exit(0)
 
     def cleanup(self):
@@ -456,7 +466,7 @@ class SimpleVoiceTranscriber:
 
         # Check for Quick-Tap SLM On-Demand retro-polish trigger (only if SLM is enabled and audio is empty tap)
         import t2
-        slm_enabled = getattr(t2, 'ENABLE_SLM', True) and os.environ.get("VT_ENABLE_SLM", "1") != "0"
+        slm_enabled = bool(getattr(t2, 'ENABLE_SLM', False)) and os.environ.get("VT_ENABLE_SLM", "0") == "1"
         if slm_enabled and rec_duration < 0.35 and time_since_last < 15.0 and last_text and (self.audio_frames is None or len(self.audio_frames) == 0):
             logger.info("🤖 Quick-Tap SLM On-Demand retro-polish triggered!")
             self.visual_notification.show_processing()

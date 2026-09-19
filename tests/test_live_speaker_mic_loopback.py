@@ -32,6 +32,63 @@ import t2
 
 from difflib import SequenceMatcher
 
+
+def list_audio_devices():
+    """Print every input/output device with its index."""
+    print("Available audio devices:")
+    for i, d in enumerate(sd.query_devices()):
+        print(f"  [{i:2d}] in={d['max_input_channels']:3d} out={d['max_output_channels']:3d}  {d['name']}")
+
+
+def resolve_device(spec, kind):
+    """Resolve a device spec (None/'default' | index | name substring) to an index.
+
+    ``kind`` is 'input' or 'output'; the device must have channels for it.
+    Returns None to mean "use the system default".
+    """
+    if spec is None or str(spec).strip() == "":
+        return None
+    s = str(spec).strip()
+    if s.lower() in ("default", "none"):
+        return None
+    if s.isdigit():
+        idx = int(s)
+        d = sd.query_devices(idx)
+        channels = d['max_input_channels'] if kind == 'input' else d['max_output_channels']
+        if channels <= 0:
+            raise SystemExit(f"Device [{idx}] '{d['name']}' has no {kind} channels")
+        return idx
+    matches = []
+    for i, d in enumerate(sd.query_devices()):
+        channels = d['max_input_channels'] if kind == 'input' else d['max_output_channels']
+        if channels > 0 and s.lower() in d['name'].lower():
+            matches.append(i)
+    if not matches:
+        raise SystemExit(f"No {kind} device matching {s!r}; use --list to see devices")
+    return matches[0]
+
+
+def device_rate(device):
+    """Native sample rate for a device, or None for the system default.
+
+    Hardware (ALSA hw:X) devices only accept their native rate, so playback
+    must be resampled to it; the pipewire/default devices accept 16 kHz.
+    """
+    if device is None:
+        return None
+    try:
+        return int(sd.query_devices(device)['default_samplerate'])
+    except Exception:
+        return None
+
+
+def resample_to(data, src_rate, dst_rate):
+    """Resample a float32 mono buffer with a polyphase filter."""
+    if not dst_rate or dst_rate == src_rate:
+        return data
+    import scipy.signal
+    return scipy.signal.resample_poly(data, dst_rate, src_rate).astype(np.float32)
+
 def _words_match_fuzzy(w1, w2, threshold=0.80):
     if w1 == w2:
         return True
@@ -72,7 +129,7 @@ def score_transcription(expected, actual):
         return match_ratio, "FAIL"
 
 
-def run_single_test(sample_id, transcriber):
+def run_single_test(sample_id, transcriber, out_device=None, in_device=None):
     test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_transcribe")
     audio_path = os.path.join(test_dir, f"{sample_id}.mp3")
     md_path = os.path.join(test_dir, f"{sample_id}.md")
@@ -93,10 +150,20 @@ def run_single_test(sample_id, transcriber):
     print(f"EXPECTED: \"{expected_text}\"")
     print("-" * 80)
 
+    # Pin the microphone for this run so the app's stream does not fall back to
+    # the session default (which may be a headset, not the room mic).
+    t2.INPUT_DEVICE_INDEX = in_device
+    t2.PRIMARY_DEVICE_NAME = None
+    t2.SECONDARY_DEVICE_NAME = None
+    t2.OVERRIDE_MODE = 'auto'
+
     transcriber.start_recording()
     time.sleep(0.05)  # Fast pre-playback start
-    
-    sd.play(data, sr)
+
+    # Play the reference clip out the chosen speaker, independent of the default
+    # output device. Hardware devices need their native rate.
+    out_rate = device_rate(out_device) or sr
+    sd.play(resample_to(data, sr, out_rate), out_rate, device=out_device)
     sd.wait()
     time.sleep(0.35)  # Post-playback room acoustic propagation cushion
 
@@ -123,16 +190,32 @@ def run_single_test(sample_id, transcriber):
 
 
 def main():
-    sample_arg = sys.argv[1] if len(sys.argv) > 1 else "long_30s"
-    
+    import argparse
+    parser = argparse.ArgumentParser(description="Live speaker-to-mic acoustic loopback suite.")
+    parser.add_argument("sample", nargs="?", default="long_30s",
+                        help="sample id or 'all' (default: long_30s)")
+    parser.add_argument("--out", dest="out",
+                        default=os.environ.get("VT_LOOPBACK_OUT") or os.environ.get("VT_LOOPBACK_OUTPUT"),
+                        help="speaker/output device: index or name substring (default: system default)")
+    parser.add_argument("--in", dest="inp",
+                        default=os.environ.get("VT_LOOPBACK_IN") or os.environ.get("VT_LOOPBACK_INPUT"),
+                        help="microphone/input device: index or name substring (default: system default)")
+    parser.add_argument("--list", action="store_true", help="list audio devices and exit")
+    args = parser.parse_args()
+
+    if args.list:
+        list_audio_devices()
+        return
+
+    sample_arg = args.sample
+    out_device = resolve_device(args.out, 'output')
+    in_device = resolve_device(args.inp, 'input')
+
     print("\n" + "=" * 80)
     print("🎙️  LIVE SPEAKER-TO-MIC ACOUSTIC LOOPBACK SUITE")
     print("=" * 80)
-
-    # Force system default audio input device for clean loopback
-    t2.INPUT_DEVICE_INDEX = None
-    t2.PRIMARY_DEVICE_NAME = None
-    t2.SECONDARY_DEVICE_NAME = None
+    print(f"output device: {out_device if out_device is not None else 'system default'}")
+    print(f"input device : {in_device if in_device is not None else 'system default'}")
 
     # Pre-initialize single transcriber instance
     transcriber = SimpleVoiceTranscriber()
@@ -144,7 +227,7 @@ def main():
 
     results = []
     for sid in samples_to_run:
-        res = run_single_test(sid, transcriber)
+        res = run_single_test(sid, transcriber, out_device=out_device, in_device=in_device)
         if res:
             results.append(res)
 

@@ -201,6 +201,61 @@ deepseq = "Deepseek"
     assert saved["dictionary"]["deepseq"] == "Deepseek"
 
 
+def test_toml_dump_quotes_spaced_keys_and_roundtrips():
+    """Regression: dictionary keys with spaces must be quoted, or the file is invalid TOML."""
+    import tomllib
+
+    cfg = {
+        "model_backend": "cohere",
+        "empty_value": None,
+        "ratio": 0.5,
+        "dictionary": {"deep seq": "Deepseek", "nixos": "NixOS", "x86 64": "x86_64"},
+        "nested": {"a b": {"c d": "e"}},
+    }
+    dumped = t2._dump_toml(cfg)
+    parsed = tomllib.loads(dumped)  # must not raise
+    assert parsed["dictionary"] == cfg["dictionary"]
+    assert parsed["nested"] == cfg["nested"]
+    assert parsed["ratio"] == 0.5
+    assert "empty_value" not in parsed
+
+
+def test_toml_roundtrip_with_spaced_dictionary_key(tmp_path, monkeypatch):
+    """Saving a config whose dictionary has spaced keys must stay loadable."""
+    import tomllib
+
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text(
+        'model_backend = "cohere"\n'
+        'number_digits = false\n'
+        'punctuation_mode = "full"\n'
+        '\n'
+        '[dictionary]\n'
+        '"deep seq" = "Deepseek"\n'
+        '"x86 64" = "x86_64"\n'
+    )
+    monkeypatch.setattr(t2, 'get_config_file', lambda: toml_file)
+    t2.load_audio_config()
+    t2.save_audio_config()  # previously produced invalid TOML
+
+    parsed = tomllib.loads(toml_file.read_text())
+    assert parsed["dictionary"]["deep seq"] == "Deepseek"
+    assert parsed["dictionary"]["x86 64"] == "x86_64"
+    assert parsed["punctuation_mode"] == "full"
+
+
+def test_malformed_toml_is_not_silently_wiped(tmp_path, monkeypatch):
+    """A bad TOML file must be left intact (and warned about), not reset to defaults."""
+    toml_file = tmp_path / "config.toml"
+    bad = 'model_backend = "cohere"\nthis is not toml =\n'
+    toml_file.write_text(bad)
+    monkeypatch.setattr(t2, 'get_config_file', lambda: toml_file)
+
+    t2.load_audio_config()  # must not raise
+
+    assert toml_file.read_text() == bad  # untouched
+
+
 def test_punctuation_modes_in_post_processor():
     from post_processor import clean_speech_transcription, set_punctuation_mode
 

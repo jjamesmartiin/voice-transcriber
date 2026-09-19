@@ -290,8 +290,9 @@ def _maybe_quantize_dynamic(model, device):
     Measured ~22% faster median single-inference latency on CPU vs the bf16
     baseline (interleaved A/B, n>=10), with ~10-13% more from also converting
     the 1x1 conformer convs to quantizable Linears.  Normalized exact-match
-    transcriptions are preserved on every test clip.  Enabled by default on
-    CPU; disable with VT_INT8_DYNAMIC=0.  Any failure falls back to the
+    transcriptions are preserved on every test clip.  Disabled by default on
+    CPU (it adds ~11 s one-time model-load time and is accuracy-neutral);
+    enable with VT_INT8_DYNAMIC=1.  Any failure falls back to the
     original (un-quantized) model so the app never breaks.
     """
     if device != "cpu":

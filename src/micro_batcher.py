@@ -16,7 +16,11 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import transcribe2
 
-from post_processor import clean_speech_transcription, process_slm_llm_stream_concat, STUTTER_PROTECTED_WORDS
+from post_processor import clean_speech_transcription, STUTTER_PROTECTED_WORDS
+
+# Peak amplitude above which a block counts as definite speech (matches the live
+# VAD / worker energy gate).
+SPEECH_PEAK_THRESH = 0.015
 
 def clean_hallucinations(text, skip_slm=False, is_intermediate=False):
     return clean_speech_transcription(text, skip_slm=skip_slm, is_intermediate=is_intermediate)
@@ -277,7 +281,7 @@ class StreamingMicroBatcher:
                     is_inter = not is_tail
                     # Fast speech energy detection: check peak first
                     peak = max(float(np.max(flat)), -float(np.min(flat)))
-                    if peak >= 0.015:
+                    if peak >= SPEECH_PEAK_THRESH:
                         # Definite speech energy: transcribe chunk directly
                         text = transcribe2.transcribe_audio(audio_data=flat, sample_rate=self.sample_rate)
                         text = clean_hallucinations(text.strip() if text else '', skip_slm=True, is_intermediate=is_inter)
@@ -360,6 +364,11 @@ class StreamingMicroBatcher:
             # silence trimming is sub-utterance length (< 0.55s), it is trailing room breath
             # / mic-release residue. Skip dispatching to prevent trailing phantom hallucinations.
             if self.next_chunk_idx > 0 and len(full_chunk) < int(0.55 * self.sample_rate):
+                # Sub-utterance tail after a real chunk: this is mic-release residue
+                # and the ASR reliably hallucinates a word on it (measured on the
+                # 154-clip eval: "...assign" -> "...assign sign", "encoders." ->
+                # "encoders. Peace"). Drop it. Keeping it cost exact-match and
+                # accented WER, so this is deliberate, not an oversight.
                 self.audio_buffer = []
                 self.total_samples = 0
                 return
@@ -394,12 +403,14 @@ class StreamingMicroBatcher:
             overlap_data = full_chunk[-eff_overlap:].copy()
             self.audio_buffer = [overlap_data]
             self.total_samples = len(overlap_data)
-            self._last_overlap_samples = len(overlap_data)
-            has_speech_overlap = (overlap_len is None)
+            # Measure, don't assume: the overlap needs de-duplicating only if it
+            # actually contains speech. A silence-only overlap (the energy-valley
+            # cut) must set this False so genuine spoken repetitions survive.
+            overlap_peak = float(np.max(np.abs(overlap_data))) if len(overlap_data) else 0.0
+            has_speech_overlap = overlap_peak >= SPEECH_PEAK_THRESH
         else:
             self.audio_buffer = []
             self.total_samples = 0
-            self._last_overlap_samples = 0
             has_speech_overlap = False
             
         self.chunk_queue.put((chunk_idx, full_chunk, False, False, has_speech_overlap))

@@ -31,6 +31,7 @@ import warnings
 from transcribe2 import transcribe_audio, get_model
 import transcribe2
 import json
+import re
 import tempfile
 import contextlib
 from pathlib import Path
@@ -102,41 +103,96 @@ UI_THEME = "auto"
 PUNCTUATION_MODE = "full"
 PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "lowercase_no_punctuation"]
 WAIT_FOR_MODEL_ON_STARTUP = True
-ENABLE_SLM = True
+ENABLE_SLM = False
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 
+_TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _toml_string(value: str) -> str:
+    """Serialize a Python string as a TOML basic string (always quoted)."""
+    out = ['"']
+    for ch in value:
+        if ch == '\\':
+            out.append('\\\\')
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == '\n':
+            out.append('\\n')
+        elif ch == '\r':
+            out.append('\\r')
+        elif ch == '\t':
+            out.append('\\t')
+        elif ch == '\b':
+            out.append('\\b')
+        elif ch == '\f':
+            out.append('\\f')
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append('\\u%04X' % ord(ch))
+        else:
+            out.append(ch)
+    out.append('"')
+    return "".join(out)
+
+
+def _toml_key(key) -> str:
+    """Serialize a key: bare when TOML allows it, quoted otherwise (e.g. 'deep seq')."""
+    text = str(key)
+    if text and _TOML_BARE_KEY_RE.match(text):
+        return text
+    return _toml_string(text)
+
+
+def _toml_value(value):
+    """Serialize a scalar/list value; returns None for values TOML cannot express."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        import math
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return repr(value)
+    if isinstance(value, str):
+        return _toml_string(value)
+    if isinstance(value, (list, tuple)):
+        parts = [_toml_value(v) for v in value]
+        if any(p is None for p in parts):
+            return None
+        return "[" + ", ".join(parts) + "]"
+    return None
+
+
 def _dump_toml(d: dict) -> str:
-    """Minimal dependency-free serializer for app config to TOML."""
-    import json
+    """Dependency-free serializer for the app config to TOML.
+
+    Handles the shape we actually write: a flat table of scalars/lists plus
+    nested tables (notably ``[dictionary]``, whose keys may contain spaces and
+    therefore must be quoted). Values TOML cannot express (None, NaN, inf,
+    unsupported types) are skipped rather than emitting invalid syntax.
+    """
     lines = []
-    tables = {}
-    for k, v in d.items():
-        if isinstance(v, dict):
-            tables[k] = v
-        elif isinstance(v, bool):
-            lines.append(f"{k} = {'true' if v else 'false'}")
-        elif isinstance(v, (int, float)):
-            lines.append(f"{k} = {v}")
-        elif v is None:
-            pass
-        elif isinstance(v, str):
-            escaped = v.replace('\\', '\\\\').replace('"', '\\"')
-            lines.append(f'{k} = "{escaped}"')
-        elif isinstance(v, (list, tuple)):
-            lines.append(f"{k} = {json.dumps(list(v))}")
-    for tk, tv in tables.items():
-        lines.append(f"\n[{tk}]")
-        for k, v in tv.items():
-            if isinstance(v, bool):
-                lines.append(f"{k} = {'true' if v else 'false'}")
-            elif isinstance(v, (int, float)):
-                lines.append(f"{k} = {v}")
-            elif isinstance(v, str):
-                escaped = v.replace('\\', '\\\\').replace('"', '\\"')
-                lines.append(f'{k} = "{escaped}"')
-            elif isinstance(v, (list, tuple)):
-                lines.append(f"{k} = {json.dumps(list(v))}")
-    return "\n".join(lines) + "\n"
+
+    def emit(table: dict, prefix: str) -> None:
+        subtables = []
+        for key, value in table.items():
+            if isinstance(value, dict):
+                subtables.append((key, value))
+                continue
+            literal = _toml_value(value)
+            if literal is None:
+                continue
+            lines.append(f"{_toml_key(key)} = {literal}")
+        for key, value in subtables:
+            name = f"{prefix}.{_toml_key(key)}" if prefix else _toml_key(key)
+            if lines:
+                lines.append("")
+            lines.append(f"[{name}]")
+            emit(value, name)
+
+    emit(d, "")
+    return "\n".join(lines) + "\n" if lines else ""
 
 def get_config_file():
     """Find local project config.yaml/config.yml/config.json/config.toml (in root or config/ dir), fallback to global data dir"""
@@ -355,7 +411,8 @@ def load_audio_config(file_path=None):
                 try:
                     import tomllib
                     config = tomllib.loads(content)
-                except Exception:
+                except Exception as e:
+                    print(f"⚠️  Could not parse {CONFIG_FILE} as TOML ({e}); using defaults (file left untouched).")
                     config = {}
             elif CONFIG_FILE.suffix in ['.yaml', '.yml']:
                 try:
@@ -394,7 +451,7 @@ def load_audio_config(file_path=None):
             elif env_wait in ["0", "false", "no"]:
                 WAIT_FOR_MODEL_ON_STARTUP = False
 
-            ENABLE_SLM = config.get('enable_slm', True)
+            ENABLE_SLM = config.get('enable_slm', False)
             env_slm = os.environ.get("VT_ENABLE_SLM", "").strip().lower()
             if env_slm in ["1", "true", "yes"]:
                 ENABLE_SLM = True
@@ -559,6 +616,7 @@ def save_audio_config(file_path=None):
             'keep_bluetooth_handsfree': KEEP_BLUETOOTH_HANDSFREE,
             'punctuation_mode': PUNCTUATION_MODE,
             'enable_slm': ENABLE_SLM,
+            'wait_for_model_on_startup': WAIT_FOR_MODEL_ON_STARTUP,
         })
 
         if CONFIG_FILE.suffix == '.toml':

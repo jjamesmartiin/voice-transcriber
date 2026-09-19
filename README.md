@@ -112,7 +112,8 @@ Supported options include:
 - `copy_to_clipboard`: `true` or `false`.
 - `number_digits`: `true` (convert spoken numbers to digits) or `false`.
 - `keep_bluetooth_handsfree`: `true` (keeps Bluetooth devices in hands-free mode to prevent media/videos from pausing when recording ends) or `false`.
-- `formatting_level`: `raw`, `standard`, `semi-formal`, or `formal`.
+- `punctuation_mode`: `full`, `no_terminal_period`, `no_punctuation`, or `lowercase_no_punctuation` (legacy alias `semi-formal` → `no_terminal_period`).
+- `enable_slm`: `true` to enable the optional local vLLM grammar-polish pass (default `false`).
 - `dictionary`: Key-value map of custom phrase replacements.
 
 ### Hugging Face Access Token

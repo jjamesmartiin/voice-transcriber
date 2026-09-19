@@ -1,0 +1,35 @@
+name: ci
+
+# Runs the hardware-independent unit tests on every push / PR.
+#
+# The acoustic end-to-end and live speaker->microphone suites need real audio
+# devices and a loaded model, so they are deliberately NOT run here: run them
+# locally with
+#   python tests/test_live_speaker_mic_loopback.py all
+#   PYTHONPATH=src python eval/score.py
+# See eval/README.md and plan.md (Phase 4).
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  unit-tests:
+    name: Unit tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Run hardware-independent unit tests
+        run: |
+          nix develop --command python -m pytest \
+            tests/test_dictionary.py \
+            tests/test_post_processor.py \
+            tests/test_config_sync.py \
+            tests/test_micro_batcher_fast.py \
+            tests/test_tui.py \
+            -q

@@ -23,9 +23,9 @@ PYTHONPATH=$PWD/src "$PY" <script>
 
 | file | state | notes |
 |---|---|---|
-| `src/transcribe_cohere.py` | **int8 dynamic quantization ON by default** (`VT_INT8_DYNAMIC=0` disables) + a 1×1-conv→Linear patch; CPU threads `min(cpu,4)` | Measured ~20% faster, accuracy ±0.1pp (neutral). Load time +~11s one-time. |
+| `src/transcribe_cohere.py` | int8 dynamic quantization **available but OFF by default** (`VT_INT8_DYNAMIC=1` enables) + a 1×1-conv→Linear patch; CPU threads `min(cpu,8)` | Measured ~20% faster, accuracy ±0.1pp (neutral). Load time +~11s one-time, so it stays opt-in. |
 | `src/micro_batcher.py` | `min_chunk_sec=4.5` (the 2.0 change was **reverted**) + an overlap fix on silence cuts | Overlap fix is accuracy-neutral; see §4. |
-| `src/post_processor.py` | `_collapse_partial_word_restarts` heuristic + `shall|will` in `DANGLING_WORDS_REGEX` | **Measured no-op** on the eval set (bit-identical WER). The heuristic can wrongly collapse `"progressive. regressive"` — consider removing it. |
+| `src/post_processor.py` | `shall|will` added to `DANGLING_WORDS_REGEX` | Accuracy-neutral on the eval set. |
 | `tests/test_transcribe/short_word.md`, `short_phrase.md` | **corrected fixtures** | They were mislabeled; see `tests/test_transcribe/PROVENANCE.md`. Don't revert. |
 | `eval/` | **untracked** eval set + scorer | The main tool. |
 
@@ -93,7 +93,7 @@ Full decomposition (all on the 154-clip set, `--no-int8` unless noted):
 **Speed (do not trade accuracy blindly):**
 - **ONNX Runtime / OpenVINO** instead of eager PyTorch — untried, commonly 2–4× on CPU transformers. Biggest remaining CPU lever.
 - GPU (5–10×) if target machines have one.
-- int8 (in tree, ~20%) and threads `min(cpu,4)` (validated by interleaved A/B).
+- int8 (opt-in, ~20%) and threads `min(cpu,8)`.
 - Chunk size: smaller chunks reduce latency but **cost accuracy** (measured). Latency vs accuracy is a real tradeoff here.
 
 **Do NOT**: rewrite in Rust for latency — post-release latency is ~100% ASR inference (Python overhead ~1 ms, measured).

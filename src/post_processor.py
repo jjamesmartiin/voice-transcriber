@@ -126,20 +126,46 @@ MID_PHRASE_QUESTION_MARK_REGEX = re.compile(
     r"\b([a-zA-Z0-9]+)\s*\?\s+([a-z][a-zA-Z0-9_-]*)\b"
 )
 
-# Spoken Unix paths and CIDR subnets (e.g. "slash etc slash nixos" -> "/etc/nixos", "slash 24" -> "/24")
-SPOKEN_SUBNET_REGEX = re.compile(r'\s+slash\s+(\d{1,2})\b', re.IGNORECASE)
-SPOKEN_PATH_REGEX = re.compile(r'\b(?:slash\s+[a-zA-Z0-9_.-]+\s*){2,}', re.IGNORECASE)
+# Spoken Unix paths, IP addresses and CIDR subnets.
+#   "slash etc slash nixos"                 -> "/etc/nixos"
+#   "10 dot 0 dot 0 dot 0 slash 24"          -> "10.0.0.0/24"
+# NOTE: the path pattern must NOT consume trailing whitespace, otherwise the
+# next word is glued on ("... slash nixos now" -> "/etc/nixosnow").
+SPOKEN_PATH_REGEX = re.compile(
+    r'\b(?:slash\s+[a-zA-Z0-9_.-]+)(?:\s+slash\s+[a-zA-Z0-9_.-]+)+',
+    re.IGNORECASE,
+)
+SPOKEN_IP_REGEX = re.compile(
+    r'\b(\d{1,3}(?:\s+dot\s+\d{1,3})+)(?:\s+slash\s+(\d{1,2}))?\b',
+    re.IGNORECASE,
+)
+# Bare CIDR suffix already attached to a digit ("10.0.0.0 slash 24").
+SPOKEN_SUBNET_REGEX = re.compile(r'(?<=\d)\s+slash\s+(\d{1,2})\b', re.IGNORECASE)
+
 
 def _path_repl(m: re.Match) -> str:
-    raw = m.group(0)
-    parts = re.split(r'\s*slash\s*', raw.strip(), flags=re.IGNORECASE)
-    cleaned_parts = [p.strip() for p in parts if p.strip()]
-    return "/" + "/".join(cleaned_parts)
+    segments = re.findall(r'slash\s+([a-zA-Z0-9_.-]+)', m.group(0), flags=re.IGNORECASE)
+    # Path segments are case-sensitive and dictated lowercase; the dictionary has
+    # already run, so undo any proper-noun capitalisation it applied ("NixOS" ->
+    # "/etc/nixos"). Put a mixed-case path in the dictionary if you need it.
+    return "/" + "/".join(s.lower() for s in segments)
+
+
+def _ip_repl(m: re.Match) -> str:
+    ip = re.sub(r'\s+dot\s+', '.', m.group(1), flags=re.IGNORECASE)
+    if m.group(2):
+        return f"{ip}/{m.group(2)}"
+    return ip
+
 
 def clean_spoken_paths(text: str) -> str:
-    """Converts spoken Unix paths and subnets (e.g. 'slash etc slash nixos' -> '/etc/nixos', 'slash 24' -> '/24')."""
-    if not text or "slash" not in text.lower():
+    """Converts spoken Unix paths, IP addresses and CIDR subnets to symbols."""
+    if not text:
         return text
+    low = text.lower()
+    if "slash" not in low and " dot " not in low:
+        return text
+    text = SPOKEN_IP_REGEX.sub(_ip_repl, text)
     text = SPOKEN_SUBNET_REGEX.sub(r'/\1', text)
     text = SPOKEN_PATH_REGEX.sub(_path_repl, text)
     return text
@@ -405,19 +431,31 @@ def _is_valid_speech_rewrite(original: str, candidate: str) -> bool:
     return True
 
 _SLM_LAST_OFFLINE_CHECK = 0.0
-_SLM_OFFLINE_COOLDOWN = 5.0
+_SLM_BASE_COOLDOWN = 5.0
+_SLM_MAX_COOLDOWN = 120.0
+_SLM_OFFLINE_STREAK = 0
+
+
+def _slm_cooldown_remaining() -> float:
+    """Seconds still to wait before retrying a recently-unreachable SLM endpoint."""
+    if _SLM_OFFLINE_STREAK <= 0:
+        return 0.0
+    cooldown = min(_SLM_MAX_COOLDOWN, _SLM_BASE_COOLDOWN * (2 ** min(_SLM_OFFLINE_STREAK - 1, 5)))
+    return max(0.0, cooldown - (time.time() - _SLM_LAST_OFFLINE_CHECK))
+
 
 def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
     """
     Passes speech transcript through local vLLM / SLM (Qwen2.5-0.5B / Llama-3.2-1B)
     to perform real-time speech self-correction and grammar polishing.
     """
-    global _SLM_LAST_OFFLINE_CHECK
-    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "1") != "1":
+    global _SLM_LAST_OFFLINE_CHECK, _SLM_OFFLINE_STREAK
+    if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "0") != "1":
         return text
 
-    # If the SLM endpoint was recently unreachable, back off to avoid connection latency
-    if time.time() - _SLM_LAST_OFFLINE_CHECK < _SLM_OFFLINE_COOLDOWN:
+    # Exponential back-off once the endpoint is known to be unreachable, so a
+    # machine with no local vLLM never pays a per-utterance connect timeout.
+    if _slm_cooldown_remaining() > 0:
         return text
 
     if timeout_sec is None:
@@ -474,6 +512,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         )
         with urllib.request.urlopen(req, timeout=timeout_sec) as response:
             res_data = json.loads(response.read().decode('utf-8'))
+            _SLM_OFFLINE_STREAK = 0
             clean_output = _sanitize_slm_output(text, res_data['choices'][0]['message']['content'])
             elapsed_ms = (time.time() - t0) * 1000
             
@@ -485,6 +524,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
                 print(f"⚠️ [vLLM SLM Pass] Guardrail triggered (word-overlap or refusal failure): Bypassed -> Using ASR text")
     except Exception as e:
         _SLM_LAST_OFFLINE_CHECK = time.time()
+        _SLM_OFFLINE_STREAK += 1
         print(f"⚠️ [vLLM SLM Pass] Offline/Bypassed ({e}): Using ASR text")
         
     return text
@@ -499,7 +539,7 @@ def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: f
     if not new_chunk:
         return prev_text
         
-    if os.environ.get("VT_ENABLE_SLM", "1") != "1":
+    if os.environ.get("VT_ENABLE_SLM", "0") != "1":
         return f"{prev_text} {new_chunk}".strip()
 
     if timeout_sec is None:
@@ -991,6 +1031,28 @@ def get_punctuation_mode() -> str:
     return _PUNCTUATION_MODE
 
 
+def _strip_punctuation(text: str) -> str:
+    """Remove punctuation while preserving intra-token separators.
+
+    Decimals (``3.14``), IPs (``192.168.1.10``), paths (``/etc/nixos``) and
+    contractions (``don't``) keep their separators; everything else is dropped.
+    """
+    def _keep_or_drop(m: re.Match) -> str:
+        ch = m.group(0)
+        if ch == "-":
+            return ch
+        start, end = m.start(), m.end()
+        before = text[start - 1] if start > 0 else ""
+        after = text[end] if end < len(text) else ""
+        if before.isalnum() and after.isalnum():
+            return ch
+        if ch in "/." and not before.isalnum() and after.isalnum():
+            return ch
+        return ""
+
+    return " ".join(re.sub(r"[^\w\s-]", _keep_or_drop, text).split())
+
+
 def apply_punctuation_mode(text: str, mode: str | None = None) -> str:
     """Format transcribed text according to the selected punctuation mode.
 
@@ -998,8 +1060,9 @@ def apply_punctuation_mode(text: str, mode: str | None = None) -> str:
       - full (default): standard capitalization and terminal/internal punctuation.
       - no_terminal_period (semi-formal): retains internal punctuation and capitalization,
         but omits trailing periods at the end of the text.
-      - no_punctuation: removes all punctuation marks, preserving casing.
-      - lowercase_no_punctuation: removes all punctuation and lowercases all words.
+      - no_punctuation: removes punctuation marks, preserving casing and intra-token
+        separators (decimals, IPs, paths, contractions).
+      - lowercase_no_punctuation: as above, and lowercased.
     """
     if not text:
         return text
@@ -1012,12 +1075,10 @@ def apply_punctuation_mode(text: str, mode: str | None = None) -> str:
         return trimmed
 
     elif mode_str in ("no_punctuation", "none", "no_punct"):
-        t = re.sub(r"[^\w\s-]", "", text)
-        return " ".join(t.split())
+        return _strip_punctuation(text)
 
-    elif mode_str in ("lowercase_no_punctuation", "raw", "lowercase", "lower", "lowercase_no_punct"):
-        t = re.sub(r"[^\w\s-]", "", text.lower())
-        return " ".join(t.split())
+    elif mode_str in ("lowercase_no_punctuation", "lowercase_no_punct"):
+        return _strip_punctuation(text.lower())
 
     return text
 
@@ -1230,7 +1291,7 @@ def clean_speech_transcription(
         cleaned_lower = cleaned.lower()
     
     # 0. Apply optional vLLM / SLM rewrite pass (unless bypassed for intermediate streaming micro-chunks)
-    if not skip_slm and os.environ.get("VT_ENABLE_SLM", "1") == "1":
+    if not skip_slm and os.environ.get("VT_ENABLE_SLM", "0") == "1":
         cleaned = process_slm_llm_rewrite(cleaned)
         cleaned_lower = cleaned.lower()
     
