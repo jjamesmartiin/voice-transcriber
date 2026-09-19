@@ -42,9 +42,7 @@ def run_micro_batching_tests():
     print("🚀 MICRO-BATCHING ACCURACY & LATENCY BENCHMARK SUITE")
     print("=" * 95)
     
-    os.environ["VT_MODEL_BACKEND"] = "cohere"
     transcribe2._backend = None
-    transcribe2._current_backend_name = "cohere"
     
     # Pre-warm backend
     print("Warming up Cohere model...")

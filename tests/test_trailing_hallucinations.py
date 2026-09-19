@@ -26,9 +26,7 @@ def run_tests():
     print("🧪 RUNNING TARGETED TRAILING HALLUCINATION & RETENTION TESTS")
     print("=" * 80)
     
-    os.environ["VT_MODEL_BACKEND"] = "cohere"
     transcribe2._backend = None
-    transcribe2._current_backend_name = "cohere"
     
     test_dir = Path(__file__).resolve().parent / "test_transcribe"
     

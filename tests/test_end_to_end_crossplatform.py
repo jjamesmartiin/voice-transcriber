@@ -572,7 +572,7 @@ def warm_asr():
     """Load + warm the ASR backend once so latency measurements are meaningful."""
     import transcribe2
 
-    backend = os.environ.get("VT_MODEL_BACKEND", "cohere").lower()
+    backend = "cohere"
     transcribe2.set_backend(backend)
     warm_audio = load_test_audio("short_word")
     probe = transcribe2.transcribe_audio(audio_data=warm_audio)

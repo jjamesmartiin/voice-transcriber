@@ -36,9 +36,7 @@ def run_benchmark():
     print("🚀 DUAL-PATH BENCHMARK MATRIX: STOP-&-WAIT vs FIXED MICRO-BATCH vs DYNAMIC HYBRID (AUTO)")
     print("=" * 105)
     
-    os.environ["VT_MODEL_BACKEND"] = "cohere"
     transcribe2._backend = None
-    transcribe2._current_backend_name = "cohere"
     
     # Warmup
     print("Pre-loading Cohere model...")

@@ -47,7 +47,7 @@ Voice Transcriber Architecture
 │                      Core Engine (src/)                     │
 │                                                             │
 │  - Audio Pipeline & Streaming VAD (t2.py, micro_batcher.py) │
-│  - ASR Engines (Cohere Transcribe, Faster-Whisper)          │
+│  - ASR Engine (Cohere Transcribe)                           │
 │  - Wispr Flow Post-Processor (post_processor.py)            │
 │    * Trie-compacted dictionary replacer                     │
 │    * Filler-word and stutter removal                        │
@@ -106,7 +106,6 @@ cp config/example-config/config.yaml.example config/config.yaml
 ```
 
 Supported options include:
-- `model_backend`: `cohere` or `whisper`.
 - `is_muted`: `true` or `false`.
 - `auto_type`: `true` (direct keystroke injection) or `false` (clipboard only).
 - `copy_to_clipboard`: `true` or `false`.

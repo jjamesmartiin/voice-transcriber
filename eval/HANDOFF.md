@@ -87,7 +87,7 @@ Full decomposition (all on the 154-clip set, `--no-int8` unless noted):
 **Accuracy (priority):**
 - Fix §5 artifacts, then re-baseline — likely large apparent gains with zero code change.
 - **Vocabulary-aware correction**: `post_processor.set_custom_dictionary` / `load_custom_dictionary_from_file` already exist. Seeding with the user's real jargon (NixOS, nixos-rebuild, systemctl, journalctl, GitLab, merge request, Kubernetes, Ansible, Terraform, SpamAssassin, Postfix, Dovecot, Altium, PCB, PLC, Pololu, UART, SPI, I2C, carrierCode, exitHook, …) is deterministic and cannot hallucinate. **Most promising technical-accuracy lever.**
-- Compare the `whisper` backend (`VT_MODEL_BACKEND=whisper`) on the same set.
+- ~~Compare the `whisper` backend on the same set.~~ **Done and rejected**: faster-whisper base.en / small.en scored WER 9.38% / 8.75% (vs Cohere 2.79%) and were slower (748s vs ~340s for 154 clips), so the whisper backend and the `model_backend` option were removed.
 - Larger/stronger model, or fine-tuning/adaptation.
 
 **Speed (do not trade accuracy blindly):**

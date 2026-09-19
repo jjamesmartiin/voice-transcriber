@@ -83,8 +83,8 @@ def cleanup_after_tests():
     """Unload ML models and collect garbage at session teardown."""
     yield
     try:
-        import transcribe_whisper
-        transcribe_whisper.unload_model()
+        import transcribe2
+        transcribe2.unload_model()
     except Exception:
         pass
     import gc

@@ -26,8 +26,8 @@ def test_tui_state_updates():
     tui.set_active_device("Test Mic")
     assert tui.active_device == "Test Mic"
 
-    tui.set_config_state(backend="whisper", muted=False, auto_type=True, sound_theme="proximity", ui_theme="cyan")
-    assert tui.model_backend == "whisper"
+    tui.set_config_state(backend="cohere", muted=False, auto_type=True, sound_theme="proximity", ui_theme="cyan")
+    assert tui.model_backend == "cohere"
     assert tui.is_muted is False
     assert tui.auto_type is True
     assert tui.ui_theme == "cyan"

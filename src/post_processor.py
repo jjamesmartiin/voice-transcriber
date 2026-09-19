@@ -171,7 +171,7 @@ def clean_spoken_paths(text: str) -> str:
     return text
 
 # ASR phonetic mis-hearings of the "AI" acronym (e.g. "a eyes" -> "AI").
-# Whisper/Cohere sometimes transcribe spoken "AI" as "a eyes" / "an eyes".
+# ASR models sometimes transcribe spoken "AI" as "a eyes" / "an eyes".
 # Both are ALWAYS ungrammatical English ("a"/"an" can never precede the plural
 # "eyes"), so they're safe to collapse back to the acronym. "an eye" is NOT
 # included (valid English: "an eye for an eye"), nor is "a eye" (many speakers

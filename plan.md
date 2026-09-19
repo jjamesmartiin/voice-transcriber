@@ -28,7 +28,7 @@ flowchart TD
     A["1. Simulated Hotkey Trigger\n(Alt+Shift Push-to-Talk or Space-Held Latch)"] --> B["2. Audio Stream Ingestion\n(16kHz Real-Time PCM Stream)"]
     B --> C["3. VAD Speech Chunking & Dynamic Energy Decay"]
     C --> D["4. Hotkey Release & Audio Cue Earcon"]
-    D --> E["5. ASR Inference Engine\n(Cohere or Whisper Backend)"]
+    D --> E["5. ASR Inference Engine\n(Cohere Backend)"]
     E --> F["6. Post-Processor Engine\n(Trie Dictionary, Disfluencies, Numbers, Formatting)"]
     F --> G["7. Target Output Sink\n(Clipboard / Typing Injection)"]
     G --> H{"8. SLA Gate Evaluation\nLatency <= 1.0s, Accuracy >= 80%, Hallucinations = 0"}
@@ -111,7 +111,6 @@ src/
 ├── micro_batcher.py            # Micro-batching & VAD chunking (from main)
 ├── post_processor.py           # Unified disfluency, Trie dictionary & formatting (from main)
 ├── transcribe_cohere.py        # Cohere backend
-├── transcribe_whisper.py       # Whisper backend
 ├── tui.py                      # Rich TUI dashboard (gracefully degrades on raw terminals)
 │
 ├── platform/                   # Hardware/OS Abstraction Layer (HAL)

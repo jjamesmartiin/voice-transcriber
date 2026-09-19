@@ -92,7 +92,7 @@ SECONDARY_DEVICE_NAME = None
 LAST_USED_DEVICE_NAME = "Unknown"
 ACTUAL_RATE = RATE
 OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
-MODEL_BACKEND = os.environ.get("VT_MODEL_BACKEND", "cohere").lower() # 'cohere' or 'whisper'
+MODEL_BACKEND = "cohere"  # Cohere Transcribe is the only ASR backend
 COPY_TO_CLIPBOARD = True
 AUTO_TYPE = False
 IS_MUTED = True
@@ -488,15 +488,10 @@ def load_audio_config(file_path=None):
             if SOUND_THEME.lower() in ["silent", "muted", "none"]:
                 IS_MUTED = True
 
-            env_backend = os.environ.get("VT_MODEL_BACKEND", "").lower()
-            MODEL_BACKEND = env_backend or config.get('model_backend', 'cohere')
             COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
             
             env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
             UI_THEME = env_theme or config.get('ui_theme', 'auto')
-            
-            # Update backend in transcribe2
-            transcribe2.set_backend(MODEL_BACKEND)
             
             # If we have an override, try that first
             if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
@@ -609,7 +604,6 @@ def save_audio_config(file_path=None):
             'is_muted': IS_MUTED,
             'auto_type': AUTO_TYPE,
             'sound_theme': SOUND_THEME,
-            'model_backend': MODEL_BACKEND,
             'copy_to_clipboard': COPY_TO_CLIPBOARD,
             'ui_theme': UI_THEME,
             'number_digits': NUMBER_DIGITS,

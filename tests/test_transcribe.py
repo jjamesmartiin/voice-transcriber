@@ -3,9 +3,8 @@
 Test transcription accuracy against expected results.
 Run: python tests/test_transcribe.py
 
-Each ASR backend (Whisper / Cohere) runs in a SEPARATE subprocess because
-loading faster-whisper (CTranslate2) and torch (Cohere) in the same process
-triggers a hardware floating-point exception (SIGFPE) on some CPUs.
+The ASR backend (Cohere) runs in a subprocess so the torch runtime is isolated
+from the test process.
 """
 import os
 import sys
@@ -22,7 +21,6 @@ import numpy as np
 import soundfile as sf
 
 BACKENDS = [
-    ("Whisper", "whisper"),
     ("Cohere", "cohere"),
 ]
 
@@ -77,9 +75,7 @@ def _run_backend(backend_id, backend_name):
     import time
     import transcribe2
 
-    os.environ["VT_MODEL_BACKEND"] = backend_id
     transcribe2._backend = None
-    transcribe2._current_backend_name = backend_id
 
     # Gated Cohere model requires an HF token to download; skip cleanly if unavailable
     if backend_id == "cohere":

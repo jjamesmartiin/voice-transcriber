@@ -43,15 +43,6 @@ auto_type: false
 copy_to_clipboard: true
 
 # ------------------------------------------------------------------------------
-# Model Backend ASR Engine
-# Specifies the speech recognition engine to load for audio transcription.
-# Available Options:
-#   - "cohere"  : Cohere Transcribe2 / Cohere ASR backend
-#   - "whisper" : Faster-Whisper / OpenAI Whisper backend
-# Default: "cohere"
-model_backend: "cohere"
-
-# ------------------------------------------------------------------------------
 # Punctuation & Formatting Mode
 # Controls formatting, capitalization, and punctuation styles for output.
 # Available Options:

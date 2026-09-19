@@ -19,9 +19,6 @@
           # Custom python with package overrides
           python = pkgs.python3.override {
             self = python;
-            packageOverrides = pyfinal: pyprev: {
-              faster-whisper = pyfinal.callPackage ./src/faster-whisper { };
-            };
           };
 
           # Runtime dependencies
@@ -69,7 +66,6 @@
             evdev
             pynput
             python-uinput
-            faster-whisper
             torch
             transformers
             huggingface-hub
@@ -130,9 +126,6 @@
           # Reusing definitions (simplification for brevity, though ideally shared)
           python = pkgs.python3.override {
             self = python;
-            packageOverrides = pyfinal: pyprev: {
-              faster-whisper = pyfinal.callPackage ./src/faster-whisper { };
-            };
           };
           
           pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
@@ -147,7 +140,6 @@
             evdev
             pynput
             python-uinput
-            faster-whisper
             torch
             transformers
             huggingface-hub
@@ -218,9 +210,6 @@
         let
           python = pkgs.python3.override {
             self = python;
-            packageOverrides = pyfinal: pyprev: {
-              faster-whisper = pyfinal.callPackage ./src/faster-whisper { };
-            };
           };
 
           runtimeDeps = with pkgs; [
@@ -263,7 +252,6 @@
             evdev
             pynput
             python-uinput
-            faster-whisper
             torch
             transformers
             huggingface-hub

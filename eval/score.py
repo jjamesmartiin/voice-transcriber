@@ -42,8 +42,6 @@ import re
 import sys
 import time
 
-os.environ.setdefault("VT_MODEL_BACKEND", "cohere")
-
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIR = os.path.join(REPO_ROOT, "src")
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -391,6 +389,7 @@ def main():
             "meta": {
                 "n_clips": len(results),
                 "slices": dict(counts),
+                "backend": "cohere",
                 "int8_dynamic": os.environ.get("VT_INT8_DYNAMIC", "0"),
                 "number_digits": bool(num_digits),
                 "norm_numbers": args.norm_numbers,

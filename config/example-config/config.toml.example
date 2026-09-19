@@ -4,9 +4,6 @@
 # Copy this file to 'config.toml' (in root directory or config/ directory) to override defaults.
 # Format: TOML
 
-# Speech recognition engine: "cohere" or "whisper"
-model_backend = "cohere"
-
 # Controls whether audio cue sounds play on transcription complete
 is_muted = true
 

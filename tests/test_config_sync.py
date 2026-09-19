@@ -45,7 +45,6 @@ def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
     # Modify settings
     t2.IS_MUTED = False
     t2.AUTO_TYPE = True
-    t2.MODEL_BACKEND = "whisper"
     t2.KEEP_BLUETOOTH_HANDSFREE = False
 
     # Save config
@@ -57,7 +56,7 @@ def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
     assert saved_content["ui_theme"] == "auto"  # extra key preserved unchanged
     assert saved_content["is_muted"] is False
     assert saved_content["auto_type"] is True
-    assert saved_content["model_backend"] == "whisper"
+    assert saved_content["model_backend"] == "cohere"  # preserved extra key (option removed)
     assert saved_content["keep_bluetooth_handsfree"] is False
 
 
@@ -145,14 +144,14 @@ def test_tui_status_bar_matches_settings():
     tui = VoiceTranscriberTUI()
     tui.set_active_device("Microphone USB")
     tui.set_config_state(
-        backend="whisper",
+        backend="cohere",
         muted=False,
         auto_type=True,
         sound_theme="proximity",
         ui_theme="magenta"
     )
 
-    assert tui.model_backend == "whisper"
+    assert tui.model_backend == "cohere"
     assert tui.is_muted is False
     assert tui.auto_type is True
     assert tui.ui_theme == "magenta"
@@ -161,7 +160,7 @@ def test_tui_status_bar_matches_settings():
     rendered_plain = rendered.plain
 
     assert "mic: Microphone USB" in rendered_plain
-    assert "model: whisper" in rendered_plain
+    assert "model: cohere" in rendered_plain
     assert "sound: on" in rendered_plain
     assert "auto-type" in rendered_plain
 

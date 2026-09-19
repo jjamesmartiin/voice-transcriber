@@ -31,10 +31,9 @@ graph TD
     end
 
     subgraph Dual-Path ASR Subsystem
-        SilenceTrimmer -->|Normalized Audio| ASRBackend{"Model Backend Manager (transcribe2.py)"}
+        SilenceTrimmer -->|Normalized Audio| ASRBackend{"ASR Engine (transcribe2.py)"}
         ASRBackend -->|Primary| Cohere["Cohere Transcribe2 (03-2026)"]
-        ASRBackend -->|Fallback| Whisper["Faster-Whisper (CTranslate2)"]
-        Cohere & Whisper -->|Raw Transcript| ChunkQueue["Background Transcribed Chunks"]
+        Cohere -->|Raw Transcript| ChunkQueue["Background Transcribed Chunks"]
     end
 
     subgraph Wispr Flow Post-Processing Subsystem
@@ -126,7 +125,7 @@ flowchart TD
 | **Hotkey System** | [`src/hotkeys.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/hotkeys.py) | Monitored via Linux `evdev` raw kernel events (`/dev/input/event*`). Filters virtual `uinput` self-loops to prevent infinite key-trigger loops. Tracks `Alt`, `Shift`, `Ctrl` modifier states. |
 | **Audio Hardware** | [`src/t2.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/t2.py) | Configures PortAudio / sounddevice streams at 16kHz 16-bit PCM. Manages primary and secondary audio device failover (`override_mode`). Loads `config.yaml`. |
 | **Streaming Micro-Batcher** | [`src/micro_batcher.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/micro_batcher.py) | Slices audio streams into micro-batches based on speech energy gating (`peak >= 0.015`, `rms >= 0.0035`). Trims trailing silence (`trim_trailing_silence`). Performs N-gram overlap deduplication (`deduplicate_text_overlap`). |
-| **ASR Engine** | [`src/transcribe2.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/transcribe2.py) | Manages model backends (`Cohere Transcribe2` default or `Faster-Whisper`). Uses HuggingFace local snapshot resolution for sub-1.5s cold starts. |
+| **ASR Engine** | [`src/transcribe2.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/transcribe2.py) | Runs the Cohere Transcribe2 model. Uses HuggingFace local snapshot resolution for sub-1.5s cold starts. |
 | **Wispr Flow Post-Processor** | [`src/post_processor.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/post_processor.py) | Multi-stage text cleanup pipeline: verbal retraction parsing, stutter removal, dangling clause linking, mid-sentence casing normalization, acronym preservation (`TECHNICAL_ACRONYMS_AND_PROPER_NOUNS`), and optional `vLLM` SLM polish. |
 | **Notifications & UI** | [`src/notifications.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/notifications.py) | Floating Tkinter status pill overlay displaying real-time pipeline state (`RECORDING`, `PROCESSING`, `COMPLETED`) and total post-release latency timers. |
 
@@ -166,5 +165,5 @@ $$\text{Lowercased}(w_i) \iff \Big( \text{is\_upper\_start}(w_i) \land w_{i-1} \
 2. Subdirectory Config    : ./config/config.yaml
 3. Local Alternative      : ./config.yml or ./config.json
 4. User Home Fallback     : ~/.local/share/vt/audio_device_config.json
-5. Hardcoded Defaults     : is_muted=True, auto_type=False, model_backend="cohere"
+5. Hardcoded Defaults     : is_muted=True, auto_type=False
 ```

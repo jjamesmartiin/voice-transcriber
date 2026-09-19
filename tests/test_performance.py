@@ -3,7 +3,6 @@ import time
 import pytest
 import numpy as np
 import transcribe2
-import transcribe_whisper
 import t2
 
 def compute_wer(reference: str, hypothesis: str) -> float:
@@ -43,7 +42,7 @@ def test_transcribe_known_text_validation(sample_audio_file):
     audio_path, expected_text, sample_rate, duration = sample_audio_file
 
     # Perform transcription on sample audio file
-    transcribed_text = transcribe_whisper.transcribe_audio(audio_path=audio_path, language="en")
+    transcribed_text = transcribe2.transcribe_audio(audio_path=audio_path, language="en")
     print(f"\n[Validation] Expected Text   : '{expected_text}'")
     print(f"[Validation] Transcribed Text: '{transcribed_text}'")
 
@@ -65,7 +64,7 @@ def test_transcription_performance_time(sample_audio_file):
     audio_path, expected_text, sample_rate, duration = sample_audio_file
 
     start_time = time.time()
-    result = transcribe_whisper.transcribe_audio(audio_path=audio_path, language="en")
+    result = transcribe2.transcribe_audio(audio_path=audio_path, language="en")
     transcribe_time = time.time() - start_time
 
     rtf = transcribe_time / max(duration, 0.1)
@@ -81,8 +80,7 @@ def test_recording_time_and_buffer_performance():
     """
     Test audio recording duration and buffer sizing accuracy.
     Verifies that audio frames accumulated match requested sample rate and time duration.
-    Runs in a subprocess: cohere (torch) cannot run in the same process that imported
-    faster-whisper (CTranslate2) due to an FPU-state conflict on some CPUs.
+    Runs in a subprocess to keep the torch runtime isolated from the test process.
     """
     import json
     import subprocess
