@@ -15,6 +15,7 @@ public class WinInterop {
     [DllImport("user32.dll")]
     public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
+    public const int VK_MBUTTON = 0x04;
     public const int VK_SHIFT = 0x10;
     public const int VK_CONTROL = 0x11;
     public const int VK_MENU = 0x12; // ALT key
@@ -83,10 +84,19 @@ public class WinInterop {
         try { if (donePlayer != null) donePlayer.Play(); } catch { }
     }
 
+    public static bool MiddleClickEnabled = true;
+    public static void SetMiddleClickEnabled(bool enabled) {
+        MiddleClickEnabled = enabled;
+    }
+
     public static bool IsAltShiftPressed() {
         bool alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
         bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
         return alt && shift;
+    }
+
+    public static bool IsMButtonPressed() {
+        return (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
     }
 
     public static bool IsCtrlAltIPressed() {
@@ -119,6 +129,8 @@ public class WinInterop {
                             PlayDoneSound();
                         } else if (line != null && line.StartsWith("SET_SOUND:")) {
                             SetSoundTheme(line.Substring(10));
+                        } else if (line != null && line.StartsWith("SET_MCLICK:")) {
+                            SetMiddleClickEnabled(line.Substring(11).Trim() == "1");
                         } else if (line == null) {
                             System.Threading.Thread.Sleep(50);
                         }
@@ -144,10 +156,26 @@ Add-Type -TypeDefinition $csharpCode -ReferencedAssemblies "System.Windows.Forms
 
 $wasHotkeyDown = $false
 $wasConfigDown = $false
+$mButtonDownTime = [DateTime]::MinValue
+$mButtonActive = $false
 
 while ($true) {
-    # Check Alt+Shift (Record Trigger)
-    $isHotkeyDown = [WinInterop]::IsAltShiftPressed()
+    # Check Middle Mouse button (Hold >= 250ms Trigger)
+    $isMButtonDown = if ([WinInterop]::MiddleClickEnabled) { [WinInterop]::IsMButtonPressed() } else { $false }
+    if ($isMButtonDown) {
+        if ($mButtonDownTime -eq [DateTime]::MinValue) {
+            $mButtonDownTime = [DateTime]::UtcNow
+        } elseif (-not $mButtonActive -and (([DateTime]::UtcNow - $mButtonDownTime).TotalMilliseconds -ge 250)) {
+            $mButtonActive = $true
+        }
+    } else {
+        $mButtonDownTime = [DateTime]::MinValue
+        $mButtonActive = $false
+    }
+
+    # Check Alt+Shift or Middle Click Hold (Record Trigger)
+    $isAltShiftDown = [WinInterop]::IsAltShiftPressed()
+    $isHotkeyDown = $isAltShiftDown -or $mButtonActive
     if ($isHotkeyDown -and -not $wasHotkeyDown) {
         $wasHotkeyDown = $true
         [WinInterop]::PlayStartSound()

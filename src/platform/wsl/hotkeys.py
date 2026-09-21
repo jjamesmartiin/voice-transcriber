@@ -149,6 +149,11 @@ class WSLHotkeyManager(BaseHotkeyManager):
         """Set the sound theme dynamically on the Windows host."""
         return self._send(f"SET_SOUND:{theme}\n")
 
+    def set_middle_click_enabled(self, enabled: bool):
+        """Toggle middle click push-to-talk mode on the Windows host."""
+        self.middle_click_enabled = bool(enabled)
+        return self._send(f"SET_MCLICK:{1 if enabled else 0}\n")
+
     def run(self):
         try:
             while self.running:

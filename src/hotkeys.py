@@ -43,6 +43,16 @@ def set_global_sound_theme(theme):
             logger.debug(f"set_global_sound_theme failed: {e}")
 
 
+def set_global_middle_click_enabled(enabled: bool):
+    """Propagate middle click push-to-talk toggle to the active hotkey manager."""
+    global _current_hotkey_instance
+    if _current_hotkey_instance and hasattr(_current_hotkey_instance, "set_middle_click_enabled"):
+        try:
+            _current_hotkey_instance.set_middle_click_enabled(enabled)
+        except Exception as e:
+            logger.debug(f"set_global_middle_click_enabled failed: {e}")
+
+
 def create_global_hotkeys(callback_start, callback_stop, callback_config=None):
     """Create the platform-appropriate global hotkey manager via the HAL.
 
@@ -76,6 +86,7 @@ __all__ = [
     "create_global_hotkeys",
     "is_running_in_wsl",
     "set_global_sound_theme",
+    "set_global_middle_click_enabled",
     "WaylandGlobalHotkeys",
     "WSLGlobalHotkeys",
     "WindowsGlobalHotkeys",

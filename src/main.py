@@ -192,6 +192,7 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_mute = self._on_tui_toggle_mute
         self.tui.on_toggle_autotype = self._on_tui_toggle_autotype
         self.tui.on_toggle_numbers = self._on_tui_toggle_numbers
+        self.tui.on_toggle_middle_click = self._on_tui_toggle_middle_click
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
         self.tui.on_reset_terminal = self._on_tui_reset_terminal
@@ -313,6 +314,16 @@ class SimpleVoiceTranscriber:
         status = "DIGITS" if t2.NUMBER_DIGITS else "SPELLED OUT"
         self.tui.print_event("🔢 Number Conversion", f"Numbers are now transcribed as {status}", level="info")
 
+    def _on_tui_toggle_middle_click(self):
+        import t2
+        t2.set_middle_click_enabled(not t2.MIDDLE_CLICK_ENABLED)
+        t2.save_audio_config()
+        if self.hotkey_system and hasattr(self.hotkey_system, "set_middle_click_enabled"):
+            self.hotkey_system.set_middle_click_enabled(t2.MIDDLE_CLICK_ENABLED)
+        self._sync_tui_state()
+        status = "ENABLED" if t2.MIDDLE_CLICK_ENABLED else "DISABLED"
+        self.tui.print_event("🖱️ Mouse Hotkey", f"Middle click hold mode is now {status}", level="info")
+
     def _on_tui_cycle_punctuation_mode(self):
         import t2
         new_mode = t2.cycle_punctuation_mode()
@@ -379,6 +390,8 @@ class SimpleVoiceTranscriber:
                         self.hotkey_system.set_sound_theme(theme)
                     if hasattr(self.audio_cues, 'set_sound_theme'):
                         self.audio_cues.set_sound_theme(theme)
+                if hasattr(self.hotkey_system, 'set_middle_click_enabled'):
+                    self.hotkey_system.set_middle_click_enabled(getattr(t2, 'MIDDLE_CLICK_ENABLED', True))
                 # WSL forwards earcons through the same bridge process.
                 if hasattr(self.audio_cues, 'set_bridge'):
                     self.audio_cues.set_bridge(self.hotkey_system)
@@ -440,11 +453,14 @@ class SimpleVoiceTranscriber:
         self.copy_to_clipboard = copy_to_clipboard
         stop_recording.set()
         
-        if self.record_thread:
-            self.record_thread.join()
-            
-        # Start processing in a separate thread
-        self.process_thread = threading.Thread(target=self.process_recording)
+        # Start processing in a separate thread, joining the recording thread
+        # there so the hotkey monitoring loop is never blocked.
+        def _process_worker():
+            if self.record_thread:
+                self.record_thread.join()
+            self.process_recording()
+
+        self.process_thread = threading.Thread(target=_process_worker)
         self.process_thread.daemon = True
         self.process_thread.start()
 

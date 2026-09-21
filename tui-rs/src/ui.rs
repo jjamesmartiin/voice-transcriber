@@ -102,7 +102,7 @@ pub fn status_line_for(app: &App, state: &RunState, sub_state: &str) -> Line<'st
             }
             spans.push(Span::styled("│ ", dim()));
             spans.push(Span::styled(
-                "[Space] Rec  [M] Mic  [m] Mute  [n] Numbers  [c] Clipboard  [t] Theme  [q] Quit",
+                "[Space] Rec  [M] Mic  [m] Mute  [n] Numbers  [o] Mouse  [c] Clipboard  [t] Theme  [q] Quit",
                 dim(),
             ));
         }
@@ -129,7 +129,7 @@ pub fn status_line_for(app: &App, state: &RunState, sub_state: &str) -> Line<'st
             ));
             spans.push(Span::styled("│ ", dim()));
             spans.push(Span::styled(
-                "Release Alt+Shift to finish · Space while holding = hands-free",
+                "Release Alt+Shift or Middle Click to finish · Space while holding = hands-free",
                 dim(),
             ));
         }

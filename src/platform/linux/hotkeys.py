@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import glob
 import logging
+import os
 import select
+import socket
+import threading
 import time
 
 from ..base import BaseHotkeyManager
@@ -29,6 +32,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         self.devices = []
         self.virtual_keyboard = None
         self.key_states = {}
+        self.device_key_states = {}
         self.evdev = None
         self.uinput = None
 
@@ -41,6 +45,13 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         self.CTRL_KEYS = [29, 97]  # KEY_LEFTCTRL, KEY_RIGHTCTRL
         self.KEY_I = [23]  # KEY_I
 
+        # Middle mouse button code (BTN_MIDDLE = 274) and hold delay (quarter second)
+        self.MIDDLE_MOUSE_KEYS = [274]
+        self.MIDDLE_CLICK_HOLD_DELAY = 0.25
+        self._middle_click_timer = None
+        self.middle_click_active = False
+        self._lock = threading.Lock()
+
         self.init_devices()
 
     def init_devices(self):
@@ -51,6 +62,8 @@ class LinuxHotkeyManager(BaseHotkeyManager):
 
             self.evdev = evdev
             self.uinput = uinput
+            if hasattr(evdev.ecodes, "BTN_MIDDLE"):
+                self.MIDDLE_MOUSE_KEYS = [evdev.ecodes.BTN_MIDDLE]
         except ImportError as e:
             logger.error(f"Missing dependencies: {e}")
             logger.error("Install with: pip install evdev python-uinput")
@@ -208,8 +221,43 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         except Exception:
             return False
 
+    def _is_mouse_device(self, device):
+        """Check if a device looks like a mouse or pointer with middle click."""
+        try:
+            name = getattr(device, "name", "").lower()
+            # Keyboards, remap daemons, and virtual bridges must NEVER be grabbed as mice
+            if any(k in name for k in ("kanata", "kmonad", "keyboard", "kbd")):
+                return False
+
+            caps = device.capabilities()
+            if self.evdev.ecodes.EV_KEY not in caps:
+                return False
+
+            key_caps = caps[self.evdev.ecodes.EV_KEY]
+
+            # If device has standard typing keys (e.g. KEY_A = 30), it is a keyboard
+            if getattr(self.evdev.ecodes, "KEY_A", 30) in key_caps:
+                return False
+
+            # If it qualifies as a keyboard, it is not a mouse
+            if self._is_keyboard_device(device):
+                return False
+
+            return any(key in key_caps for key in self.MIDDLE_MOUSE_KEYS)
+        except Exception:
+            return False
+
+    def _is_monitored_device(self, device):
+        """Check if a device should be monitored (keyboard or mouse)."""
+        name = getattr(device, "name", "")
+        if name == "python-uinput" or name.startswith("vt-"):
+            return False
+        if not self.middle_click_enabled:
+            return self._is_keyboard_device(device)
+        return self._is_keyboard_device(device) or self._is_mouse_device(device)
+
     def scan_for_devices(self):
-        """Scan for new keyboard devices."""
+        """Scan for new keyboard and mouse devices."""
         try:
             evdev = self.evdev
 
@@ -229,7 +277,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                     continue
                 try:
                     device = evdev.InputDevice(path)
-                    if self._is_keyboard_device(device):
+                    if self._is_monitored_device(device):
                         new_devices.append(device)
                 except (PermissionError, OSError):
                     continue
@@ -244,35 +292,122 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             return False
 
     # -- hotkey state queries ---------------------------------------------
-    def is_hotkey_pressed(self):
+    def is_key_pressed(self, keys):
+        """Check if any of the given keys are pressed on any device."""
+        for dev_states in self.device_key_states.values():
+            if any(dev_states.get(k, False) for k in keys):
+                return True
+        return any(self.key_states.get(k, False) for k in keys)
+
+    def is_alt_shift_pressed(self):
         """Check if the hotkey combination (Alt+Shift) is currently pressed."""
-        alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
-        shift_pressed = any(self.key_states.get(key, False) for key in self.SHIFT_KEYS)
+        alt_pressed = self.is_key_pressed(self.ALT_KEYS)
+        shift_pressed = self.is_key_pressed(self.SHIFT_KEYS)
         return alt_pressed and shift_pressed
+
+    def is_middle_click_pressed(self):
+        """Check if the middle mouse button is currently pressed."""
+        if not self.middle_click_enabled:
+            return False
+        return self.is_key_pressed(self.MIDDLE_MOUSE_KEYS)
+
+    def is_hotkey_pressed(self):
+        """Check if any push-to-talk trigger is currently pressed."""
+        return self.is_alt_shift_pressed() or (self.middle_click_active and self.is_middle_click_pressed())
 
     def is_config_hotkey_pressed(self):
         """Check if the config hotkey (Ctrl+Alt+I) is currently pressed."""
-        alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
-        ctrl_pressed = any(self.key_states.get(key, False) for key in self.CTRL_KEYS)
-        i_pressed = any(self.key_states.get(key, False) for key in self.KEY_I)
+        alt_pressed = self.is_key_pressed(self.ALT_KEYS)
+        ctrl_pressed = self.is_key_pressed(self.CTRL_KEYS)
+        i_pressed = self.is_key_pressed(self.KEY_I)
         return alt_pressed and ctrl_pressed and i_pressed
 
     def is_ctrl_pressed(self):
         """Check if Ctrl is currently pressed."""
-        return any(self.key_states.get(key, False) for key in self.CTRL_KEYS)
+        return self.is_key_pressed(self.CTRL_KEYS)
 
     def are_modifiers_pressed(self):
-        """Check if any modifier keys (Alt, Shift, Ctrl) are still pressed."""
-        alt_pressed = any(self.key_states.get(key, False) for key in self.ALT_KEYS)
-        shift_pressed = any(self.key_states.get(key, False) for key in self.SHIFT_KEYS)
-        ctrl_pressed = any(self.key_states.get(key, False) for key in self.CTRL_KEYS)
-        return alt_pressed or shift_pressed or ctrl_pressed
+        """Check if any modifier keys (Alt, Shift, Ctrl) or middle click are still pressed."""
+        alt_pressed = self.is_key_pressed(self.ALT_KEYS)
+        shift_pressed = self.is_key_pressed(self.SHIFT_KEYS)
+        ctrl_pressed = self.is_key_pressed(self.CTRL_KEYS)
+        middle_pressed = self.is_middle_click_pressed()
+        return alt_pressed or shift_pressed or ctrl_pressed or middle_pressed
 
     def is_hotkey_released(self):
         """Check if the hotkey combination is no longer fully pressed."""
         return not self.is_hotkey_pressed()
 
-    def handle_key_event(self, event):
+    def set_middle_click_enabled(self, enabled: bool):
+        """Toggle middle click push-to-talk mode."""
+        with self._lock:
+            self.middle_click_enabled = bool(enabled)
+            if not self.middle_click_enabled:
+                if self._middle_click_timer:
+                    self._middle_click_timer.cancel()
+                    self._middle_click_timer = None
+                if self.middle_click_active:
+                    self.middle_click_active = False
+                    if not self.is_alt_shift_pressed():
+                        self.hotkey_active = False
+                        if self.callback_stop:
+                            self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
+
+    def _on_middle_click_hold_timeout(self):
+        """Called when middle click has been held for >= 0.25s."""
+        with self._lock:
+            if self._middle_click_timer is None:
+                return
+            if self.is_middle_click_pressed() and not self.hotkey_active:
+                logger.debug("Middle click held >= 0.25s - starting recording")
+                self.hotkey_active = True
+                self.middle_click_active = True
+                self.copy_to_clipboard_mode = self.is_ctrl_pressed()
+                if self.callback_start:
+                    self.callback_start()
+
+    def _handle_middle_mouse_event(self, event):
+        """Handle middle mouse button event for push-to-talk."""
+        if not self.middle_click_enabled:
+            return
+
+        key_code = event.code
+        key_state = event.value  # 1 = press, 0 = release
+
+        with self._lock:
+            if key_state in [0, 1]:
+                self.key_states[key_code] = (key_state == 1)
+
+            if key_state == 1:
+                if not self.hotkey_active:
+                    if self._middle_click_timer:
+                        self._middle_click_timer.cancel()
+                    self._middle_click_timer = threading.Timer(
+                        self.MIDDLE_CLICK_HOLD_DELAY,
+                        self._on_middle_click_hold_timeout,
+                    )
+                    self._middle_click_timer.daemon = True
+                    self._middle_click_timer.start()
+
+            elif key_state == 0:
+                if self._middle_click_timer:
+                    self._middle_click_timer.cancel()
+                    self._middle_click_timer = None
+
+                if self.middle_click_active:
+                    # Held >= 0.25s: was push-to-talk.
+                    self.middle_click_active = False
+                    if not self.is_alt_shift_pressed():
+                        self.hotkey_active = False
+                        if self.latch_release:
+                            logger.debug("⏸️ Space-latched release - continuing recording hands-free")
+                            self.latch_release = False
+                        else:
+                            logger.debug("⏹️ Middle click released - stopping recording")
+                            if self.callback_stop:
+                                self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
+
+    def handle_key_event(self, event, forwarder=None, fd=None):
         """Handle a key event and check for hotkey activation."""
         if event.type != self.evdev.ecodes.EV_KEY:
             return
@@ -280,35 +415,48 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         key_code = event.code
         key_state = event.value  # 1 = press, 0 = release, 2 = repeat
 
-        if key_state in [0, 1]:
-            self.key_states[key_code] = (key_state == 1)
-
-        # Config hotkey (Ctrl + Alt + I)
-        if key_state == 1 and self.is_config_hotkey_pressed() and self.callback_config:
-            logger.debug("⚙️ Config hotkey activated")
-            self.callback_config()
-            self.key_states.clear()
+        # Delegate middle mouse button events to _handle_middle_mouse_event
+        if key_code in self.MIDDLE_MOUSE_KEYS:
+            self._handle_middle_mouse_event(event)
             return
 
-        # Space pressed while the hotkey is held = hold the recording hands-free.
-        if key_state == 1 and key_code in self.SPACE_KEY and self.hotkey_active:
-            logger.debug("Space latched - recording will hold after release")
-            self.latch_release = True
+        with self._lock:
+            if key_state in [0, 1]:
+                if fd is not None:
+                    if fd not in self.device_key_states:
+                        self.device_key_states[fd] = {}
+                    self.device_key_states[fd][key_code] = (key_state == 1)
+                self.key_states[key_code] = (key_state == 1)
 
-        # Push-to-talk: hold Alt+Shift to record.
-        if self.is_hotkey_pressed() and not self.hotkey_active:
-            logger.debug("Hotkey activated - starting recording")
-            self.hotkey_active = True
-            self.copy_to_clipboard_mode = self.is_ctrl_pressed()
-            self.callback_start()
-        elif self.hotkey_active and self.is_hotkey_released():
-            self.hotkey_active = False
-            if self.latch_release:
-                logger.debug("⏸️ Space-latched release - continuing recording hands-free")
-                self.latch_release = False
-            else:
-                logger.debug("⏹️ Hotkey released - stopping recording")
-                self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
+            # Config hotkey (Ctrl + Alt + I)
+            if key_state == 1 and self.is_config_hotkey_pressed() and self.callback_config:
+                logger.debug("⚙️ Config hotkey activated")
+                self.callback_config()
+                self.key_states.clear()
+                self.device_key_states.clear()
+                return
+
+            # Space pressed while the hotkey is held = hold the recording hands-free.
+            if key_state == 1 and key_code in self.SPACE_KEY and self.hotkey_active:
+                logger.debug("Space latched - recording will hold after release")
+                self.latch_release = True
+
+            # Push-to-talk: hold Alt+Shift to record.
+            if self.is_alt_shift_pressed() and not self.hotkey_active:
+                logger.debug("Hotkey activated - starting recording")
+                self.hotkey_active = True
+                self.copy_to_clipboard_mode = self.is_ctrl_pressed()
+                if self.callback_start:
+                    self.callback_start()
+            elif self.hotkey_active and not self.middle_click_active and not self.is_alt_shift_pressed():
+                self.hotkey_active = False
+                if self.latch_release:
+                    logger.debug("⏸️ Space-latched release - continuing recording hands-free")
+                    self.latch_release = False
+                else:
+                    logger.debug("⏹️ Hotkey released - stopping recording")
+                    if self.callback_stop:
+                        self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
 
     def run(self):
         """Main event loop for monitoring keyboard events."""
@@ -343,10 +491,13 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                 r, w, x = select.select(devices_map, [], [], 1.0)
 
                 for fd in r:
-                    device = devices_map[fd]
+                    device = devices_map.get(fd)
+                    if device is None:
+                        continue
                     try:
                         for event in device.read():
-                            self.handle_key_event(event)
+                            if event.type == self.evdev.ecodes.EV_KEY:
+                                self.handle_key_event(event, fd=device.fd)
                     except OSError as e:
                         is_disconnect = (e.errno == 19) or ("No such device" in str(e))
 
@@ -354,6 +505,8 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                             logger.warning(f"Device disconnected: {device.name}")
                         else:
                             logger.warning(f"Device {device.path} error: {e}")
+
+                        self.device_key_states.pop(device.fd, None)
 
                         if device in self.devices:
                             self.devices.remove(device)
@@ -364,6 +517,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
 
                         if not self.devices:
                             self.key_states.clear()
+                            self.device_key_states.clear()
                         continue
 
             except Exception as e:
@@ -375,6 +529,16 @@ class LinuxHotkeyManager(BaseHotkeyManager):
     def stop(self):
         """Stop the hotkey monitoring."""
         self.running = False
+        with self._lock:
+            if self._middle_click_timer:
+                try:
+                    self._middle_click_timer.cancel()
+                except Exception:
+                    pass
+                self._middle_click_timer = None
+            self.middle_click_active = False
+            self.hotkey_active = False
+
         for device in self.devices:
             try:
                 device.close()
@@ -382,6 +546,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                 pass
         self.devices = []
         self.key_states.clear()
+        self.device_key_states.clear()
         if self.virtual_keyboard:
             try:
                 self.virtual_keyboard.destroy()

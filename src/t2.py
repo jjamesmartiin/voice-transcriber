@@ -97,6 +97,7 @@ COPY_TO_CLIPBOARD = True
 AUTO_TYPE = False
 IS_MUTED = True
 NUMBER_DIGITS = True  # Convert spoken number words to digits ("twenty five" -> 25)
+MIDDLE_CLICK_ENABLED = True  # Push-to-talk by holding middle mouse button (>= 0.25s)
 KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
 UI_THEME = "auto"
@@ -396,7 +397,7 @@ import transcribe2
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, NUMBER_DIGITS, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -429,6 +430,7 @@ def load_audio_config(file_path=None):
             IS_MUTED = config.get('is_muted', True)
             AUTO_TYPE = config.get('auto_type', False)
             NUMBER_DIGITS = config.get('number_digits', True)
+            MIDDLE_CLICK_ENABLED = config.get('middle_click_enabled', True)
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
 
             raw_punct = config.get('punctuation_mode') or config.get('formatting_level') or 'full'
@@ -464,6 +466,12 @@ def load_audio_config(file_path=None):
                 NUMBER_DIGITS = True
             elif env_number_digits in ["0", "false", "no"]:
                 NUMBER_DIGITS = False
+
+            env_middle_click = os.environ.get("VT_MIDDLE_CLICK_ENABLED", "").strip().lower()
+            if env_middle_click in ["1", "true", "yes"]:
+                MIDDLE_CLICK_ENABLED = True
+            elif env_middle_click in ["0", "false", "no"]:
+                MIDDLE_CLICK_ENABLED = False
             
             env_bt_handsfree = os.environ.get("VT_KEEP_BLUETOOTH_HANDSFREE", "").strip().lower()
             if env_bt_handsfree in ["1", "true", "yes"]:
@@ -607,6 +615,7 @@ def save_audio_config(file_path=None):
             'copy_to_clipboard': COPY_TO_CLIPBOARD,
             'ui_theme': UI_THEME,
             'number_digits': NUMBER_DIGITS,
+            'middle_click_enabled': MIDDLE_CLICK_ENABLED,
             'keep_bluetooth_handsfree': KEEP_BLUETOOTH_HANDSFREE,
             'punctuation_mode': PUNCTUATION_MODE,
             'enable_slm': ENABLE_SLM,
@@ -665,6 +674,17 @@ def set_number_digits(enabled):
         pass
 
 
+def set_middle_click_enabled(enabled):
+    """Runtime toggle for middle click hold push-to-talk mode."""
+    global MIDDLE_CLICK_ENABLED
+    MIDDLE_CLICK_ENABLED = bool(enabled)
+    try:
+        import hotkeys
+        hotkeys.set_global_middle_click_enabled(MIDDLE_CLICK_ENABLED)
+    except Exception:
+        pass
+
+
 def set_dictionary(mapping):
     """Set custom word/phrase replacement dictionary at runtime."""
     try:
@@ -685,7 +705,7 @@ def get_dictionary():
 
 def select_audio_device():
     """Interactive audio device selection with Primary/Secondary support & Rich styling"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE, UI_THEME, NUMBER_DIGITS, KEEP_BLUETOOTH_HANDSFREE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE, UI_THEME, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE
     
     # Always reset terminal before interaction to fix terminal state
     reset_terminal() 
@@ -713,6 +733,7 @@ def select_audio_device():
     table.add_row("C", "Select UI Color Theme", f"{UI_THEME.upper()}")
     table.add_row("T", "Toggle Auto-Type Output", "ENABLED" if AUTO_TYPE else "DISABLED (Clipboard Only)")
     table.add_row("N", "Toggle Number Words -> Digits", "DIGITS" if NUMBER_DIGITS else "SPELLED OUT")
+    table.add_row("O", "Toggle Middle Click Push-to-Talk", "ENABLED" if MIDDLE_CLICK_ENABLED else "DISABLED")
     bt_status = "LOCKED (No Media Pause)" if KEEP_BLUETOOTH_HANDSFREE else "AUTOSWITCH"
     table.add_row("B", "Keep Bluetooth Hands-Free", bt_status)
     table.add_row("R", "Reset Terminal & Audio Bridge", "Ready")
@@ -821,6 +842,13 @@ def select_audio_device():
     if choice == 'N':
         set_number_digits(not NUMBER_DIGITS)
         print(f"Number conversion set to: {'DIGITS' if NUMBER_DIGITS else 'SPELLED OUT'}")
+        save_audio_config()
+        reset_terminal()
+        return select_audio_device()
+
+    if choice.upper() == 'O':
+        set_middle_click_enabled(not MIDDLE_CLICK_ENABLED)
+        print(f"Middle click hold mode set to: {'ENABLED' if MIDDLE_CLICK_ENABLED else 'DISABLED'}")
         save_audio_config()
         reset_terminal()
         return select_audio_device()

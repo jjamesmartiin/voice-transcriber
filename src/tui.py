@@ -85,6 +85,7 @@ class VoiceTranscriberTUI:
         # no runtime model toggle to avoid loading the other ASR backend unexpectedly.
         self.on_toggle_autotype = None
         self.on_toggle_numbers = None
+        self.on_toggle_middle_click = None
         self.on_cycle_theme = None
         self.on_reset_terminal = None
         self.on_quit = None
@@ -231,7 +232,7 @@ class VoiceTranscriberTUI:
             else:
                 prompt.append("clipboard ", style="cyan")
             prompt.append("│ ", style="dim white")
-            prompt.append("[Space] Rec  [M] Mic  [m] Mute  [n] Numbers  [c] Clipboard  [t] Theme  [q] Quit", style="dim white")
+            prompt.append("[Space] Rec  [M] Mic  [m] Mute  [n] Numbers  [o] Mouse  [c] Clipboard  [t] Theme  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
             prompt.append("RECORDING ", style="bold white on red")
@@ -258,7 +259,7 @@ class VoiceTranscriberTUI:
 
             prompt.append(f" ({int(self.vu_level*100)}%) ", style="dim cyan")
             prompt.append("│ ", style="dim white")
-            prompt.append("Release Alt+Shift to finish · Space while holding = hands-free", style="dim white")
+            prompt.append("Release Alt+Shift or Middle Click to finish · Space while holding = hands-free", style="dim white")
 
         elif self.state == "PROCESSING":
             prompt.append(f"{spinner} PROCESSING AUDIO [{self.elapsed_time:04.1f}s] ", style="bold yellow")
@@ -465,6 +466,9 @@ class VoiceTranscriberTUI:
         elif ch.lower() == 'n':
             if self.on_toggle_numbers:
                 self.on_toggle_numbers()
+        elif ch.lower() == 'o':
+            if self.on_toggle_middle_click:
+                self.on_toggle_middle_click()
         elif ch.lower() == 'r':
             if self.on_reset_terminal:
                 self.on_reset_terminal()

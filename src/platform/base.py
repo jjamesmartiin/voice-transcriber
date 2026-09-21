@@ -74,6 +74,7 @@ class BaseHotkeyManager:
         self.hotkey_active = False
         self.latch_release = False
         self.copy_to_clipboard_mode = False
+        self.middle_click_enabled = True
 
         # Non-empty when the backend successfully initialised; ``main.py`` uses
         # this to decide whether global hotkeys are available.
@@ -112,3 +113,7 @@ class BaseHotkeyManager:
     def set_sound_theme(self, theme: str) -> bool:
         """Propagate a sound theme to the backend (WSL bridge). Optional."""
         return False
+
+    def set_middle_click_enabled(self, enabled: bool) -> None:
+        """Toggle middle click push-to-talk mode."""
+        self.middle_click_enabled = bool(enabled)

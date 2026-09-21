@@ -82,6 +82,7 @@ class RatatuiTui:
         self.on_toggle_mute = None
         self.on_toggle_autotype = None
         self.on_toggle_numbers = None
+        self.on_toggle_middle_click = None
         self.on_cycle_theme = None
         self.on_reset_terminal = None
         self.on_quit = None
@@ -235,6 +236,8 @@ class RatatuiTui:
             self.on_toggle_autotype()
         elif cmd == "toggle_numbers" and self.on_toggle_numbers:
             self.on_toggle_numbers()
+        elif cmd == "toggle_middle_click" and self.on_toggle_middle_click:
+            self.on_toggle_middle_click()
         elif cmd == "cycle_theme" and self.on_cycle_theme:
             self.on_cycle_theme()
         elif cmd == "cycle_punctuation" and getattr(self, "on_cycle_punctuation", None):

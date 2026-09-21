@@ -333,6 +333,9 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                                 Intent::ToggleMute => ipc::send_cmd(&writer, "toggle_mute"),
                                 Intent::ToggleAutoType => ipc::send_cmd(&writer, "toggle_autotype"),
                                 Intent::ToggleNumbers => ipc::send_cmd(&writer, "toggle_numbers"),
+                                Intent::ToggleMiddleClick => {
+                                    ipc::send_cmd(&writer, "toggle_middle_click")
+                                }
                                 Intent::CycleTheme => ipc::send_cmd(&writer, "cycle_theme"),
                                 Intent::ResetTerminal => ipc::send_cmd(&writer, "reset_terminal"),
                             }
@@ -433,6 +436,7 @@ fn run_local(demo_enabled: bool, theme: Theme) -> io::Result<()> {
                             Intent::ToggleMute => app.is_muted = !app.is_muted,
                             Intent::ToggleAutoType => app.auto_type = !app.auto_type,
                             Intent::ToggleNumbers => {}
+                            Intent::ToggleMiddleClick => {}
                             Intent::CycleTheme => {
                                 app.cycle_theme();
                             }
@@ -505,6 +509,7 @@ enum Intent {
     ToggleMute,
     ToggleAutoType,
     ToggleNumbers,
+    ToggleMiddleClick,
     CycleTheme,
     ResetTerminal,
     Quit,
@@ -520,6 +525,7 @@ fn key_intent(key: KeyEvent) -> Option<Intent> {
         KeyCode::Char('m') => Some(Intent::ToggleMute),
         KeyCode::Char('c') => Some(Intent::ToggleAutoType),
         KeyCode::Char('n') => Some(Intent::ToggleNumbers),
+        KeyCode::Char('o') | KeyCode::Char('O') => Some(Intent::ToggleMiddleClick),
         KeyCode::Char('t') => Some(Intent::CycleTheme),
         KeyCode::Char('r') => Some(Intent::ResetTerminal),
         KeyCode::Char('M') | KeyCode::Char('i') | KeyCode::Char('I') => Some(Intent::ChangeDevice),
@@ -553,6 +559,7 @@ fn print_help() {
          \x20   m                 Toggle sound effects\n\
          \x20   c                 Toggle auto-type vs clipboard\n\
          \x20   n                 Toggle number-to-digits\n\
+         \x20   o                 Toggle middle click push-to-talk\n\
          \x20   t                 Cycle UI theme\n\
          \x20   r                 Reset terminal & clipboard bridge\n\
          \x20   q, Esc, Ctrl+C    Quit"
