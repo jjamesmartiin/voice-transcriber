@@ -157,6 +157,7 @@ pub struct App {
     pub model_backend: String,
     pub is_muted: bool,
     pub auto_type: bool,
+    pub output_mode: String,
     #[allow(dead_code)]
     pub sound_theme: String,
     pub ui_theme: Theme,
@@ -181,6 +182,7 @@ impl App {
             model_backend: "cohere".to_string(),
             is_muted: true,
             auto_type: false,
+            output_mode: "clipboard".to_string(),
             sound_theme: "proximity".to_string(),
             ui_theme,
             should_quit: false,
@@ -275,6 +277,7 @@ impl App {
         backend: Option<String>,
         muted: Option<bool>,
         auto_type: Option<bool>,
+        output_mode: Option<String>,
         sound_theme: Option<String>,
         ui_theme: Option<String>,
     ) {
@@ -290,8 +293,12 @@ impl App {
         if let Some(m) = muted {
             self.is_muted = m;
         }
-        if let Some(a) = auto_type {
+        if let Some(mode) = output_mode {
+            self.output_mode = mode;
+            self.auto_type = self.output_mode == "type" || self.output_mode == "type_fast";
+        } else if let Some(a) = auto_type {
             self.auto_type = a;
+            self.output_mode = if a { "type".to_string() } else { "clipboard".to_string() };
         }
         if let Some(s) = sound_theme {
             self.sound_theme = s;

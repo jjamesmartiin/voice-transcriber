@@ -51,6 +51,8 @@ pub enum Wire {
         #[serde(default)]
         auto_type: Option<bool>,
         #[serde(default)]
+        output_mode: Option<String>,
+        #[serde(default)]
         sound_theme: Option<String>,
         #[serde(default)]
         ui_theme: Option<String>,

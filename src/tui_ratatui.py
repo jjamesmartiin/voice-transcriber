@@ -71,6 +71,7 @@ class RatatuiTui:
         self.model_backend = "cohere"
         self.is_muted = True
         self.auto_type = False
+        self.output_mode = "clipboard"
         self.sound_theme = "proximity"
         self.ui_theme = os.environ.get("VT_UI_THEME", "auto") or "auto"
         self.transcription_count = 0
@@ -81,6 +82,7 @@ class RatatuiTui:
         self.on_change_device = None
         self.on_toggle_mute = None
         self.on_toggle_autotype = None
+        self.on_cycle_output_mode = None
         self.on_toggle_numbers = None
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
@@ -232,8 +234,11 @@ class RatatuiTui:
             self.on_change_device()
         elif cmd == "toggle_mute" and self.on_toggle_mute:
             self.on_toggle_mute()
-        elif cmd == "toggle_autotype" and self.on_toggle_autotype:
-            self.on_toggle_autotype()
+        elif cmd in ("toggle_autotype", "cycle_output_mode"):
+            if getattr(self, "on_cycle_output_mode", None):
+                self.on_cycle_output_mode()
+            elif self.on_toggle_autotype:
+                self.on_toggle_autotype()
         elif cmd == "toggle_numbers" and self.on_toggle_numbers:
             self.on_toggle_numbers()
         elif cmd == "toggle_middle_click" and self.on_toggle_middle_click:
@@ -275,7 +280,7 @@ class RatatuiTui:
         self.secondary_device = device_name
         self._send({"t": "cfg", "secondary": device_name})
 
-    def set_config_state(self, backend=None, muted=None, auto_type=None,
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None,
                          sound_theme=None, ui_theme=None, punctuation_mode=None):
         msg = {"t": "cfg"}
         if backend is not None:
@@ -284,9 +289,15 @@ class RatatuiTui:
         if muted is not None:
             self.is_muted = muted
             msg["muted"] = bool(muted)
-        if auto_type is not None:
+        if output_mode is not None:
+            self.output_mode = output_mode
+            msg["output_mode"] = str(output_mode)
+            self.auto_type = (output_mode in ("type", "type_fast"))
+            msg["auto_type"] = bool(self.auto_type)
+        elif auto_type is not None:
             self.auto_type = auto_type
             msg["auto_type"] = bool(auto_type)
+            msg["output_mode"] = "type" if auto_type else "clipboard"
         if sound_theme is not None:
             self.sound_theme = sound_theme
             msg["sound_theme"] = sound_theme

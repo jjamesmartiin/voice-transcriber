@@ -137,9 +137,14 @@ class WSLHotkeyManager(BaseHotkeyManager):
                 logger.warning(f"Failed to send {command!r} via WSL bridge: {e}")
         return False
 
-    def type_text(self, text):
+    def type_text(self, text, fast: bool = False):
         """Trigger auto-paste into the active Windows window."""
         return self._send("PASTE\n")
+
+    def paste_text(self, terminal: bool = False) -> bool:
+        """Trigger auto-paste (Ctrl+V or Ctrl+Shift+V) into the active Windows window."""
+        cmd = "PASTE_TERMINAL\n" if terminal else "PASTE\n"
+        return self._send(cmd)
 
     def play_done_sound(self):
         """Trigger the Windows notification sound via the bridge."""

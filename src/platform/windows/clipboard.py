@@ -35,11 +35,13 @@ class WindowsClipboardSink(BaseClipboardSink):
             logger.error(f"Windows clipboard copy failed: {e}")
             return False
 
-    def type_text(self, text: str) -> bool:
+    def type_text(self, text: str, fast: bool = False) -> bool:
         try:
             import ctypes
+            import time
 
             user32 = ctypes.windll.user32
+            delay = 0.001 if fast else 0.01
             for char in text:
                 scan = user32.VkKeyScanW(ord(char))
                 if scan == -1:
@@ -52,6 +54,7 @@ class WindowsClipboardSink(BaseClipboardSink):
                 user32.keybd_event(vk, 0, _KEYEVENTF_KEYUP, 0)
                 if shift_needed:
                     user32.keybd_event(_SHIFT_VK, 0, _KEYEVENTF_KEYUP, 0)
+                time.sleep(delay)
             return True
         except Exception as e:
             logger.error(f"Windows keybd_event typing failed: {e}")

@@ -19,7 +19,7 @@ class BaseClipboardSink:
         """Copy ``text`` to the system clipboard. Return ``True`` on success."""
         raise NotImplementedError
 
-    def type_text(self, text: str) -> bool:
+    def type_text(self, text: str, fast: bool = False) -> bool:
         """Inject ``text`` as synthetic keystrokes into the active window.
 
         The default implementation degrades to the clipboard so callers always
@@ -102,8 +102,12 @@ class BaseHotkeyManager:
         return self.hotkey_active
 
     # Output helpers -------------------------------------------------------
-    def type_text(self, text: str) -> bool:
+    def type_text(self, text: str, fast: bool = False) -> bool:
         """Inject ``text`` into the active window. Optional backend feature."""
+        return False
+
+    def paste_text(self, terminal: bool = False) -> bool:
+        """Emit a synthetic paste keystroke (Ctrl+V or Ctrl+Shift+V). Optional backend feature."""
         return False
 
     def play_done_sound(self) -> bool:

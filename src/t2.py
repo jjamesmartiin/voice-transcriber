@@ -95,6 +95,8 @@ OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
 MODEL_BACKEND = "cohere"  # Cohere Transcribe is the only ASR backend
 COPY_TO_CLIPBOARD = True
 AUTO_TYPE = False
+OUTPUT_MODES = ["clipboard", "type", "type_fast"]
+OUTPUT_MODE = "clipboard"
 IS_MUTED = True
 NUMBER_DIGITS = True  # Convert spoken number words to digits ("twenty five" -> 25)
 MIDDLE_CLICK_ENABLED = True  # Push-to-talk by holding middle mouse button (>= 0.25s)
@@ -397,7 +399,7 @@ import transcribe2
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -428,7 +430,17 @@ def load_audio_config(file_path=None):
             SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
             OVERRIDE_MODE = config.get('override_mode', 'auto')
             IS_MUTED = config.get('is_muted', True)
-            AUTO_TYPE = config.get('auto_type', False)
+            raw_out_mode = config.get('output_mode')
+            if raw_out_mode in OUTPUT_MODES:
+                OUTPUT_MODE = raw_out_mode
+            elif raw_out_mode in ("paste", "paste_terminal"):
+                OUTPUT_MODE = "type_fast"
+            elif config.get('auto_type', False):
+                OUTPUT_MODE = "type"
+            else:
+                OUTPUT_MODE = "clipboard"
+            AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
+            COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
             NUMBER_DIGITS = config.get('number_digits', True)
             MIDDLE_CLICK_ENABLED = config.get('middle_click_enabled', True)
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
@@ -487,9 +499,18 @@ def load_audio_config(file_path=None):
             
             env_auto_type = os.environ.get("VT_AUTO_TYPE", "").strip().lower()
             if env_auto_type in ["1", "true", "yes"]:
-                AUTO_TYPE = True
-            elif env_auto_type in ["0", "false", "no"]:
-                AUTO_TYPE = False
+                OUTPUT_MODE = "type"
+            elif env_auto_type in ["0", "false", "no"] and OUTPUT_MODE in ("type", "type_fast"):
+                OUTPUT_MODE = "clipboard"
+
+            env_out_mode = os.environ.get("VT_OUTPUT_MODE", "").strip().lower()
+            if env_out_mode in OUTPUT_MODES:
+                OUTPUT_MODE = env_out_mode
+            elif env_out_mode in ("paste", "paste_terminal"):
+                OUTPUT_MODE = "type_fast"
+
+            AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
+            COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
 
             env_sound = os.environ.get("VT_SOUND_THEME", "").strip()
             SOUND_THEME = env_sound or config.get('sound_theme', 'proximity')
@@ -573,7 +594,7 @@ def load_audio_config(file_path=None):
 
 def save_audio_config(file_path=None):
     """Save audio device configuration to local file preserving existing keys and format"""
-    global CONFIG_FILE
+    global CONFIG_FILE, AUTO_TYPE, OUTPUT_MODE, COPY_TO_CLIPBOARD
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     elif CONFIG_FILE is None:
@@ -604,12 +625,21 @@ def save_audio_config(file_path=None):
         if not isinstance(existing_config, dict):
             existing_config = {}
 
+        # Keep AUTO_TYPE and OUTPUT_MODE in sync if updated directly
+        if AUTO_TYPE and OUTPUT_MODE == "clipboard":
+            OUTPUT_MODE = "type"
+        elif not AUTO_TYPE and OUTPUT_MODE in ("type", "type_fast"):
+            OUTPUT_MODE = "clipboard"
+        AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
+        COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
+
         existing_config.update({
             'input_device_index': INPUT_DEVICE_INDEX,
             'primary_device_name': PRIMARY_DEVICE_NAME,
             'secondary_device_name': SECONDARY_DEVICE_NAME,
             'override_mode': OVERRIDE_MODE,
             'is_muted': IS_MUTED,
+            'output_mode': OUTPUT_MODE,
             'auto_type': AUTO_TYPE,
             'sound_theme': SOUND_THEME,
             'copy_to_clipboard': COPY_TO_CLIPBOARD,
@@ -638,6 +668,39 @@ def save_audio_config(file_path=None):
         print(f"Saved audio device config to {CONFIG_FILE}")
     except Exception as e:
         print(f"Could not save audio config: {e}")
+
+
+def cycle_output_mode() -> str:
+    """Cycle output mode: clipboard -> type -> type_fast."""
+    global OUTPUT_MODE, AUTO_TYPE, COPY_TO_CLIPBOARD
+    idx = (OUTPUT_MODES.index(OUTPUT_MODE) + 1) % len(OUTPUT_MODES)
+    OUTPUT_MODE = OUTPUT_MODES[idx]
+    AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
+    COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
+    if AUTO_TYPE:
+        set_punctuation_mode("full")
+    return OUTPUT_MODE
+
+
+def set_output_mode(mode: str) -> str:
+    """Set output mode: clipboard, type, or type_fast."""
+    global OUTPUT_MODE, AUTO_TYPE, COPY_TO_CLIPBOARD
+    clean = str(mode).strip().lower()
+    if clean in OUTPUT_MODES:
+        OUTPUT_MODE = clean
+        AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
+        COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
+    elif clean in ("paste", "paste_terminal"):
+        OUTPUT_MODE = "type_fast"
+        AUTO_TYPE = True
+        COPY_TO_CLIPBOARD = False
+    if AUTO_TYPE:
+        set_punctuation_mode("full")
+    return OUTPUT_MODE
+
+
+def get_output_mode() -> str:
+    return OUTPUT_MODE
 
 
 def set_punctuation_mode(mode: str) -> None:
@@ -731,7 +794,12 @@ def select_audio_device():
     table.add_row("M", "Toggle Sound Effects", "MUTED" if IS_MUTED else "Sound On")
     table.add_row("E", "Select Sound Effect Theme", SOUND_THEME.capitalize() if SOUND_THEME else "Proximity")
     table.add_row("C", "Select UI Color Theme", f"{UI_THEME.upper()}")
-    table.add_row("T", "Toggle Auto-Type Output", "ENABLED" if AUTO_TYPE else "DISABLED (Clipboard Only)")
+    output_labels = {
+        "clipboard": "CLIPBOARD COPY ONLY",
+        "type": "AUTO-TYPE (SLOW)",
+        "type_fast": "AUTO-TYPE (FAST)",
+    }
+    table.add_row("T", "Cycle Output Mode", output_labels.get(OUTPUT_MODE, OUTPUT_MODE.upper()))
     table.add_row("N", "Toggle Number Words -> Digits", "DIGITS" if NUMBER_DIGITS else "SPELLED OUT")
     table.add_row("O", "Toggle Middle Click Push-to-Talk", "ENABLED" if MIDDLE_CLICK_ENABLED else "DISABLED")
     bt_status = "LOCKED (No Media Pause)" if KEEP_BLUETOOTH_HANDSFREE else "AUTOSWITCH"
@@ -832,9 +900,9 @@ def select_audio_device():
         reset_terminal()
         return select_audio_device()
     
-    if choice == 'T':
-        AUTO_TYPE = not AUTO_TYPE
-        print(f"Auto-Type set to: {'Enabled' if AUTO_TYPE else 'Disabled (Clipboard Only)'}")
+    if choice.upper() == 'T':
+        cycle_output_mode()
+        print(f"Output Mode set to: {output_labels.get(OUTPUT_MODE, OUTPUT_MODE.upper())}")
         save_audio_config()
         reset_terminal()
         return select_audio_device()

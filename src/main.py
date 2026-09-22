@@ -178,6 +178,7 @@ class SimpleVoiceTranscriber:
             backend=t2.MODEL_BACKEND,
             muted=t2.IS_MUTED,
             auto_type=t2.AUTO_TYPE,
+            output_mode=getattr(t2, 'OUTPUT_MODE', 'clipboard'),
             sound_theme=t2.SOUND_THEME,
             ui_theme=getattr(t2, 'UI_THEME', 'auto'),
             punctuation_mode=getattr(t2, 'PUNCTUATION_MODE', 'full')
@@ -190,7 +191,8 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_record = self._on_tui_toggle_record
         self.tui.on_change_device = self.change_input_device
         self.tui.on_toggle_mute = self._on_tui_toggle_mute
-        self.tui.on_toggle_autotype = self._on_tui_toggle_autotype
+        self.tui.on_toggle_autotype = self._on_tui_cycle_output_mode
+        self.tui.on_cycle_output_mode = self._on_tui_cycle_output_mode
         self.tui.on_toggle_numbers = self._on_tui_toggle_numbers
         self.tui.on_toggle_middle_click = self._on_tui_toggle_middle_click
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
@@ -298,13 +300,21 @@ class SimpleVoiceTranscriber:
         status = "MUTED" if t2.IS_MUTED else "SOUND ENABLED"
         self.tui.print_event("🔊 Sound Toggle", f"Sound effects are now {status}", level="info")
 
-    def _on_tui_toggle_autotype(self):
+    def _on_tui_cycle_output_mode(self):
         import t2
-        t2.AUTO_TYPE = not t2.AUTO_TYPE
+        new_mode = t2.cycle_output_mode()
         t2.save_audio_config()
         self._sync_tui_state()
-        status = "AUTO-TYPE ENABLED" if t2.AUTO_TYPE else "CLIPBOARD COPY ONLY"
-        self.tui.print_event("⌨️ Auto-Type Mode", f"Output mode set to {status}", level="info")
+        labels = {
+            "clipboard": "CLIPBOARD ONLY",
+            "type": "AUTO-TYPE (SLOW/SAFE)",
+            "type_fast": "AUTO-TYPE (FAST/OPTIMIZED)",
+        }
+        self.tui.print_event("📋 Output Mode", f"Output mode set to {labels.get(new_mode, new_mode.upper())}", level="info")
+        if new_mode in ("type", "type_fast"):
+            self.tui.print_event("✍️ Formatting Mode", "Punctuation mode automatically set to Full Punctuation", level="info")
+
+    _on_tui_toggle_autotype = _on_tui_cycle_output_mode
 
     def _on_tui_toggle_numbers(self):
         import t2
@@ -569,24 +579,38 @@ class SimpleVoiceTranscriber:
             self.audio_frames = []
             
             if transcription:
+                import t2
+                effective_mode = getattr(t2, 'OUTPUT_MODE', 'clipboard')
+                # If Ctrl was held during push-to-talk activation, override to clipboard only
+                if self.copy_to_clipboard:
+                    effective_mode = "clipboard"
+
+                if effective_mode in ("type", "type_fast"):
+                    # Ensure terminal punctuation (period if missing) on transcription
+                    trimmed = transcription.rstrip()
+                    if trimmed and not trimmed.endswith(('.', '!', '?', ':', ';', '…')):
+                        transcription = trimmed + '.'
+                    else:
+                        transcription = trimmed
+
                 self.last_transcription = transcription
                 self.last_finish_time = time.time()
-                import t2
-                auto_type_setting = getattr(t2, 'AUTO_TYPE', True)
-                should_type = auto_type_setting and (t2.COPY_TO_CLIPBOARD != self.copy_to_clipboard)
 
-                if should_type:
+                if effective_mode in ("type", "type_fast"):
                     try:
                         logger.debug("Waiting for modifier release before typing...")
-                        timeout = 1.0
+                        is_fast = (effective_mode == "type_fast")
+                        timeout = 0.4 if is_fast else 1.0
                         start_wait = time.time()
                         while self.hotkey_system and self.hotkey_system.are_modifiers_pressed() and (time.time() - start_wait < timeout):
-                            time.sleep(0.02)
+                            time.sleep(0.01 if is_fast else 0.02)
                         
-                        time.sleep(0.05)
+                        time.sleep(0.01 if is_fast else 0.05)
                         
-                        if self.hotkey_system and self.hotkey_system.type_text(transcription):
-                            logger.info(f"Typed: {transcription}")
+                        # Append trailing space after terminal punctuation for seamless chaining across sessions
+                        text_to_type = transcription + ' '
+                        if self.hotkey_system and self.hotkey_system.type_text(text_to_type, fast=is_fast):
+                            logger.info(f"Typed ({'fast' if is_fast else 'slow'}): {text_to_type}")
                         else:
                             raise Exception("uinput typing failed or not available")
                     except Exception as e:

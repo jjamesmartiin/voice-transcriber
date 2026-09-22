@@ -60,7 +60,7 @@ class WSLClipboardSink(BaseClipboardSink):
             logger.error(f"Failed to copy to Windows clipboard: {e}")
             return False
 
-    def type_text(self, text: str) -> bool:
+    def type_text(self, text: str, fast: bool = False) -> bool:
         """Trigger a synthetic Ctrl+V paste in the active Windows window."""
         if self.bridge is not None:
             try:

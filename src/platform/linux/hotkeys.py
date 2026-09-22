@@ -85,7 +85,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
 
         return self.scan_for_devices()
 
-    def type_text(self, text):
+    def type_text(self, text, fast: bool = False):
         """Type text using the virtual keyboard device."""
         if not self.virtual_keyboard:
             logger.warning("Virtual keyboard not available for typing")
@@ -93,6 +93,18 @@ class LinuxHotkeyManager(BaseHotkeyManager):
 
         try:
             uinput = self.uinput
+
+            # In fast/optimized mode, normalize common Unicode punctuation before mapping
+            if fast:
+                text = (
+                    text.replace("“", '"')
+                    .replace("”", '"')
+                    .replace("‘", "'")
+                    .replace("’", "'")
+                    .replace("—", "-")
+                    .replace("–", "-")
+                    .replace("…", "...")
+                )
 
             key_map = {
                 "a": (uinput.KEY_A, False), "b": (uinput.KEY_B, False),
@@ -162,20 +174,61 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                 else:
                     continue
 
-                if shift:
-                    self.virtual_keyboard.emit(uinput.KEY_LEFTSHIFT, 1)
+                if fast:
+                    if shift:
+                        self.virtual_keyboard.emit(uinput.KEY_LEFTSHIFT, 1, syn=False)
+                        self.virtual_keyboard.emit(key, 1, syn=True)
+                        self.virtual_keyboard.emit(key, 0, syn=False)
+                        self.virtual_keyboard.emit(uinput.KEY_LEFTSHIFT, 0, syn=True)
+                    else:
+                        self.virtual_keyboard.emit(key, 1, syn=True)
+                        self.virtual_keyboard.emit(key, 0, syn=True)
+                    time.sleep(0.001)
+                else:
+                    if shift:
+                        self.virtual_keyboard.emit(uinput.KEY_LEFTSHIFT, 1)
 
-                self.virtual_keyboard.emit(key, 1)  # Press
-                self.virtual_keyboard.emit(key, 0)  # Release
+                    self.virtual_keyboard.emit(key, 1)  # Press
+                    self.virtual_keyboard.emit(key, 0)  # Release
 
-                if shift:
-                    self.virtual_keyboard.emit(uinput.KEY_LEFTSHIFT, 0)
+                    if shift:
+                        self.virtual_keyboard.emit(uinput.KEY_LEFTSHIFT, 0)
 
-                time.sleep(0.01)
+                    time.sleep(0.01)
 
             return True
         except Exception as e:
             logger.error(f"Error typing text via uinput: {e}")
+            return False
+
+    def paste_text(self, terminal: bool = False) -> bool:
+        """Emit Ctrl+V (or Ctrl+Shift+V for terminal) via the virtual keyboard."""
+        if not self.virtual_keyboard:
+            logger.warning("Virtual keyboard not available for paste")
+            return False
+
+        try:
+            uinput = self.uinput
+            ctrl = uinput.KEY_LEFTCTRL
+            v = uinput.KEY_V
+            if terminal:
+                shift = uinput.KEY_LEFTSHIFT
+                self.virtual_keyboard.emit(ctrl, 1)
+                self.virtual_keyboard.emit(shift, 1)
+                self.virtual_keyboard.emit(v, 1)
+                time.sleep(0.01)
+                self.virtual_keyboard.emit(v, 0)
+                self.virtual_keyboard.emit(shift, 0)
+                self.virtual_keyboard.emit(ctrl, 0)
+            else:
+                self.virtual_keyboard.emit(ctrl, 1)
+                self.virtual_keyboard.emit(v, 1)
+                time.sleep(0.01)
+                self.virtual_keyboard.emit(v, 0)
+                self.virtual_keyboard.emit(ctrl, 0)
+            return True
+        except Exception as e:
+            logger.error(f"Error emitting paste via uinput: {e}")
             return False
 
     def _is_keyboard_device(self, device):

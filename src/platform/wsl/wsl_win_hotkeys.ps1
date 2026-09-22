@@ -115,6 +115,17 @@ public class WinInterop {
         PlayDoneSound();
     }
 
+    public static void SendCtrlShiftV() {
+        // Send Ctrl+Shift+V for terminal paste
+        keybd_event((byte)VK_CONTROL, 0, 0, UIntPtr.Zero);
+        keybd_event((byte)VK_SHIFT, 0, 0, UIntPtr.Zero);
+        keybd_event(VK_V, 0, 0, UIntPtr.Zero);
+        keybd_event(VK_V, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        keybd_event((byte)VK_SHIFT, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        keybd_event((byte)VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        PlayDoneSound();
+    }
+
     public static void StartStdinListener() {
         System.Threading.Thread t = new System.Threading.Thread(() => {
             try {
@@ -125,6 +136,8 @@ public class WinInterop {
                             Environment.Exit(0);
                         } else if (line == "PASTE") {
                             SendCtrlV();
+                        } else if (line == "PASTE_TERMINAL") {
+                            SendCtrlShiftV();
                         } else if (line == "PLAY_DONE") {
                             PlayDoneSound();
                         } else if (line != null && line.StartsWith("SET_SOUND:")) {

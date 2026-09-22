@@ -73,6 +73,7 @@ class VoiceTranscriberTUI:
         self.model_backend = "cohere"
         self.is_muted = True
         self.auto_type = False
+        self.output_mode = "clipboard"
         self.copy_to_clipboard = True
         self.sound_theme = "proximity"
         self.last_transcription = ""
@@ -84,6 +85,7 @@ class VoiceTranscriberTUI:
         # Backend selection is config-file only (edit config/config.yaml, restart);
         # no runtime model toggle to avoid loading the other ASR backend unexpectedly.
         self.on_toggle_autotype = None
+        self.on_cycle_output_mode = None
         self.on_toggle_numbers = None
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
@@ -153,14 +155,18 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
             
-    def set_config_state(self, backend=None, muted=None, auto_type=None, sound_theme=None, ui_theme=None, punctuation_mode=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
             if muted is not None:
                 self.is_muted = muted
-            if auto_type is not None:
+            if output_mode is not None:
+                self.output_mode = output_mode
+                self.auto_type = (output_mode in ("type", "type_fast"))
+            elif auto_type is not None:
                 self.auto_type = auto_type
+                self.output_mode = "type" if auto_type else "clipboard"
             if sound_theme is not None:
                 self.sound_theme = sound_theme
             if ui_theme is not None:
@@ -227,12 +233,15 @@ class VoiceTranscriberTUI:
                 prompt.append("sound: on ", style="green")
             prompt.append("│ ", style="dim white")
 
-            if self.auto_type:
-                prompt.append("auto-type ", style="magenta")
+            out_mode = getattr(self, "output_mode", "clipboard")
+            if out_mode == "type":
+                prompt.append("auto-type (slow) ", style="bold green")
+            elif out_mode == "type_fast":
+                prompt.append("auto-type (fast) ", style="bold cyan")
             else:
                 prompt.append("clipboard ", style="cyan")
             prompt.append("│ ", style="dim white")
-            prompt.append("[Space] Rec  [M] Mic  [m] Mute  [n] Numbers  [o] Mouse  [c] Clipboard  [t] Theme  [q] Quit", style="dim white")
+            prompt.append("[Space] Rec  [M] Mic  [m] Mute  [n] Numbers  [o] Mouse  [c] Mode  [t] Theme  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
             prompt.append("RECORDING ", style="bold white on red")
@@ -456,7 +465,9 @@ class VoiceTranscriberTUI:
             if self.on_toggle_mute:
                 self.on_toggle_mute()
         elif ch.lower() == 'c':
-            if self.on_toggle_autotype:
+            if getattr(self, 'on_cycle_output_mode', None):
+                self.on_cycle_output_mode()
+            elif self.on_toggle_autotype:
                 self.on_toggle_autotype()
         elif ch.lower() == 't':
             if self.on_cycle_theme:

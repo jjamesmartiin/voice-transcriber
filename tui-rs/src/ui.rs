@@ -92,17 +92,20 @@ pub fn status_line_for(app: &App, state: &RunState, sub_state: &str) -> Line<'st
                 ));
             }
             spans.push(Span::styled("│ ", dim()));
-            if app.auto_type {
-                spans.push(Span::styled(
-                    "auto-type ",
-                    Style::default().fg(Color::Magenta),
-                ));
-            } else {
-                spans.push(Span::styled("clipboard ", cyan()));
+            match app.output_mode.as_str() {
+                "type" => spans.push(Span::styled(
+                    "auto-type (slow) ",
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                )),
+                "type_fast" => spans.push(Span::styled(
+                    "auto-type (fast) ",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                )),
+                _ => spans.push(Span::styled("clipboard ", cyan())),
             }
             spans.push(Span::styled("│ ", dim()));
             spans.push(Span::styled(
-                "[Space] Rec  [M] Mic  [m] Mute  [n] Numbers  [o] Mouse  [c] Clipboard  [t] Theme  [q] Quit",
+                "[Space] Rec  [M] Mic  [m] Mute  [n] Numbers  [o] Mouse  [c] Mode  [t] Theme  [q] Quit",
                 dim(),
             ));
         }

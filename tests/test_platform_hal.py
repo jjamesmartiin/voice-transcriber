@@ -129,6 +129,9 @@ class TestLinuxClipboardSink:
         assert sink.type_text("one") is True
         assert seen[-1] == ["ydotool", "type", "--", "one"]
 
+        assert sink.type_text("one", fast=True) is True
+        assert seen[-1] == ["ydotool", "type", "-d", "1", "-s", "1", "--", "one"]
+
 
 class TestImportSafety:
     """Every backend module must import on Linux, even without native deps."""
@@ -170,3 +173,38 @@ class TestHotkeysShimBackwardCompatibility:
         assert hotkeys.is_running_in_wsl() is True
         monkeypatch.setenv("VT_PLATFORM", hal.LINUX)
         assert hotkeys.is_running_in_wsl() is False
+
+
+class TestPasteTextSupport:
+    def test_linux_hotkey_manager_paste_text(self):
+        from unittest.mock import MagicMock
+        LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+        manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+        manager.virtual_keyboard = MagicMock()
+        try:
+            assert manager.paste_text(terminal=False) is True
+            assert manager.virtual_keyboard.emit.call_count >= 4
+
+            manager.virtual_keyboard.reset_mock()
+            assert manager.paste_text(terminal=True) is True
+            assert manager.virtual_keyboard.emit.call_count >= 6
+        finally:
+            manager.cleanup()
+
+    def test_linux_hotkey_manager_type_text_slow_and_fast(self):
+        from unittest.mock import MagicMock
+        LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+        manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+        manager.virtual_keyboard = MagicMock()
+        try:
+            # Slow mode
+            assert manager.type_text("Hi", fast=False) is True
+            assert manager.virtual_keyboard.emit.call_count > 0
+
+            # Fast mode with Unicode quotes normalization
+            manager.virtual_keyboard.reset_mock()
+            assert manager.type_text("“Hello”", fast=True) is True
+            assert manager.virtual_keyboard.emit.call_count > 0
+        finally:
+            manager.cleanup()
+

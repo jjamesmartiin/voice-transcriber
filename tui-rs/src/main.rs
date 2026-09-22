@@ -166,6 +166,7 @@ impl Runtime {
                 backend,
                 muted,
                 auto_type,
+                output_mode,
                 sound_theme,
                 ui_theme,
             } => app.apply_config(
@@ -174,6 +175,7 @@ impl Runtime {
                 backend,
                 muted,
                 auto_type,
+                output_mode,
                 sound_theme,
                 ui_theme,
             ),
@@ -331,7 +333,9 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                                 Intent::ToggleRecord => ipc::send_cmd(&writer, "toggle_record"),
                                 Intent::ChangeDevice => ipc::send_cmd(&writer, "change_device"),
                                 Intent::ToggleMute => ipc::send_cmd(&writer, "toggle_mute"),
-                                Intent::ToggleAutoType => ipc::send_cmd(&writer, "toggle_autotype"),
+                                Intent::ToggleAutoType => {
+                                    ipc::send_cmd(&writer, "cycle_output_mode")
+                                }
                                 Intent::ToggleNumbers => ipc::send_cmd(&writer, "toggle_numbers"),
                                 Intent::ToggleMiddleClick => {
                                     ipc::send_cmd(&writer, "toggle_middle_click")
@@ -434,7 +438,14 @@ fn run_local(demo_enabled: bool, theme: Theme) -> io::Result<()> {
                                 app.active_device = devices[(idx + 1) % devices.len()].to_string();
                             }
                             Intent::ToggleMute => app.is_muted = !app.is_muted,
-                            Intent::ToggleAutoType => app.auto_type = !app.auto_type,
+                            Intent::ToggleAutoType => {
+                                app.output_mode = match app.output_mode.as_str() {
+                                    "clipboard" => "type".to_string(),
+                                    "type" => "type_fast".to_string(),
+                                    _ => "clipboard".to_string(),
+                                };
+                                app.auto_type = app.output_mode == "type" || app.output_mode == "type_fast";
+                            }
                             Intent::ToggleNumbers => {}
                             Intent::ToggleMiddleClick => {}
                             Intent::CycleTheme => {
@@ -557,7 +568,7 @@ fn print_help() {
          \x20   Space / Enter     Start / stop recording\n\
          \x20   M, i              Audio device / settings menu\n\
          \x20   m                 Toggle sound effects\n\
-         \x20   c                 Toggle auto-type vs clipboard\n\
+         \x20   c                 Cycle output mode (Clipboard / Type / Paste / Paste Terminal)\n\
          \x20   n                 Toggle number-to-digits\n\
          \x20   o                 Toggle middle click push-to-talk\n\
          \x20   t                 Cycle UI theme\n\

@@ -274,3 +274,52 @@ def test_punctuation_modes_in_post_processor():
     # 4. Lowercase no punctuation
     assert clean_speech_transcription(sample, punctuation_mode="lowercase_no_punctuation") == "hello world this is voice transcriber"
 
+
+def test_output_mode_cycle():
+    t2.set_output_mode("clipboard")
+    assert t2.get_output_mode() == "clipboard"
+    assert t2.AUTO_TYPE is False
+    assert t2.COPY_TO_CLIPBOARD is True
+
+    # 1. clipboard -> type (auto-switches punctuation to full)
+    t2.set_punctuation_mode("no_punctuation")
+    assert t2.cycle_output_mode() == "type"
+    assert t2.AUTO_TYPE is True
+    assert t2.COPY_TO_CLIPBOARD is False
+    assert t2.PUNCTUATION_MODE == "full"
+
+    # 2. type -> type_fast (remains in full)
+    assert t2.cycle_output_mode() == "type_fast"
+    assert t2.AUTO_TYPE is True
+    assert t2.COPY_TO_CLIPBOARD is False
+    assert t2.PUNCTUATION_MODE == "full"
+
+    # 3. type_fast -> clipboard
+    assert t2.cycle_output_mode() == "clipboard"
+    assert t2.AUTO_TYPE is False
+    assert t2.COPY_TO_CLIPBOARD is True
+
+
+def test_output_mode_config_sync(tmp_path, monkeypatch):
+    yaml_config = tmp_path / "config.yaml"
+    import yaml
+
+    # Legacy paste migrates to type_fast
+    yaml_config.write_text(yaml.dump({"output_mode": "paste"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: yaml_config)
+
+    t2.load_audio_config()
+    assert t2.get_output_mode() == "type_fast"
+
+    # Save with type_fast
+    t2.set_output_mode("type_fast")
+    t2.save_audio_config()
+
+    saved = yaml.safe_load(yaml_config.read_text())
+    assert saved["output_mode"] == "type_fast"
+
+    # Test env override
+    monkeypatch.setenv("VT_OUTPUT_MODE", "type")
+    t2.load_audio_config()
+    assert t2.get_output_mode() == "type"
+

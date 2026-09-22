@@ -232,15 +232,43 @@ class WindowsHotkeyManager(BaseHotkeyManager):
         return self.hotkey_active
 
     # -- output ------------------------------------------------------------
-    def type_text(self, text):
+    def type_text(self, text, fast: bool = False):
         """Type text using the keyboard library."""
         if not self._kb_lib:
             return False
         try:
-            self._kb_lib.write(text)
+            self._kb_lib.write(text, delay=0.001 if fast else 0.01)
             return True
         except Exception as e:
             logger.error(f"Error typing text: {e}")
+            return False
+
+    def paste_text(self, terminal: bool = False) -> bool:
+        """Emit Ctrl+V (or Ctrl+Shift+V for terminal) on Windows."""
+        try:
+            if self._kb_lib:
+                chord = "ctrl+shift+v" if terminal else "ctrl+v"
+                self._kb_lib.send(chord)
+                return True
+            import ctypes
+            user32 = ctypes.windll.user32
+            VK_CONTROL = 0x11
+            VK_SHIFT = 0x10
+            VK_V = 0x56
+            KEYEVENTF_KEYUP = 0x0002
+
+            user32.keybd_event(VK_CONTROL, 0, 0, 0)
+            if terminal:
+                user32.keybd_event(VK_SHIFT, 0, 0, 0)
+            user32.keybd_event(VK_V, 0, 0, 0)
+            time.sleep(0.01)
+            user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
+            if terminal:
+                user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
+            user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+            return True
+        except Exception as e:
+            logger.error(f"Error emitting Windows paste: {e}")
             return False
 
     def run(self):

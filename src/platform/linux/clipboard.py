@@ -33,14 +33,14 @@ class LinuxClipboardSink(BaseClipboardSink):
             return result.returncode == 0
         return False
 
-    def type_text(self, text: str) -> bool:
+    def type_text(self, text: str, fast: bool = False) -> bool:
         if shutil.which("ydotool"):
-            subprocess.run(["ydotool", "type", "--", text], check=False)
+            cmd = ["ydotool", "type", "-d", "1", "-s", "1", "--", text] if fast else ["ydotool", "type", "--", text]
+            subprocess.run(cmd, check=False)
             return True
         if shutil.which("xdotool"):
-            subprocess.run(
-                ["xdotool", "type", "--clearmodifiers", "--", text], check=False
-            )
+            cmd = ["xdotool", "type", "--delay", "1", "--clearmodifiers", "--", text] if fast else ["xdotool", "type", "--clearmodifiers", "--", text]
+            subprocess.run(cmd, check=False)
             return True
         # Last-resort fallback: leave it on the clipboard.
         return self.copy_text(text)
