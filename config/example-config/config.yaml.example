@@ -34,6 +34,36 @@ is_muted: true
 auto_type: false
 
 # ------------------------------------------------------------------------------
+# Output Mode
+# Controls output delivery method and typing speed.
+# Available Options:
+#   - "clipboard" : Copy text to clipboard only
+#   - "type"      : Auto-type into focused window with safe 10ms key delay
+#   - "type_fast" : Optimized auto-type with 1ms key delay and Unicode quote normalization
+# Default: "clipboard"
+output_mode: "clipboard"
+
+# ------------------------------------------------------------------------------
+# Auto-Type Trailing Space
+# When auto-type / fast-type is active, controls whether a trailing space (' ') is
+# appended after the text so multiple dictations chain together seamlessly.
+# Available Options:
+#   - true  : Append trailing space (' ')
+#   - false : Do not append space (type exact transcription)
+# Default: true
+auto_type_trailing_space: true
+
+# ------------------------------------------------------------------------------
+# Auto-Type Full Punctuation Enforcement
+# When auto-type / fast-type is active, controls whether punctuation is automatically
+# set to full punctuation and terminal period enforced.
+# Available Options:
+#   - true  : Enforce full punctuation and terminal period on typed output
+#   - false : Preserve user-selected punctuation mode (e.g. no_punctuation / no_terminal_period)
+# Default: true
+auto_type_auto_punctuate: true
+
+# ------------------------------------------------------------------------------
 # Clipboard Copy Setting
 # Controls whether transcribed text is automatically placed in system clipboard.
 # Available Options:

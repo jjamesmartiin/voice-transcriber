@@ -116,6 +116,8 @@ def test_tui_handle_keypress():
     tui.on_toggle_mute = lambda: called.append("mute")
     tui.on_toggle_autotype = lambda: called.append("clipboard")
     tui.on_cycle_theme = lambda: called.append("theme")
+    tui.on_toggle_trailing_space = lambda: called.append("space")
+    tui.on_cycle_punctuation = lambda: called.append("punctuation")
 
     tui._handle_keypress('M')
     assert called == ["mic"]
@@ -126,6 +128,91 @@ def test_tui_handle_keypress():
     tui._handle_keypress('c')
     assert called == ["mic", "mute", "clipboard"]
 
+    tui._handle_keypress('s')
+    assert called == ["mic", "mute", "clipboard", "space"]
+
+    tui._handle_keypress('p')
+    assert called == ["mic", "mute", "clipboard", "space", "punctuation"]
+
     tui._handle_keypress('t')
-    assert called == ["mic", "mute", "clipboard", "theme"]
+    assert called == ["mic", "mute", "clipboard", "space", "punctuation", "theme"]
+
+    tui.on_open_settings_picker = lambda: called.append("settings")
+    tui._handle_keypress(',')
+    assert called[-1] == "settings"
+    tui._handle_keypress('S')
+    assert called[-1] == "settings"
+
+
+def test_tui_event_dividing_lines_follow_theme():
+    tui = VoiceTranscriberTUI(ui_theme="cyan")
+    assert tui.get_effective_color() == "cyan"
+
+    printed_items = []
+    original_print = tui.console.print
+    tui.console.print = lambda item: printed_items.append(item)
+
+    try:
+        # 1. Model Ready (Success) must follow chosen theme (cyan)
+        printed_items.clear()
+        tui.print_event("✅ Model Ready", "Loaded in 1.2s", level="success")
+        top, msg, bot = printed_items
+        assert "bold cyan" in str(top.spans[0].style)
+        assert "cyan" in str(bot.spans[0].style)
+
+        # 2. Trailing Space (Info) must follow chosen theme (cyan)
+        printed_items.clear()
+        tui.print_event("␣ Trailing Space", "Auto-type trailing space enabled", level="info")
+        top, msg, bot = printed_items
+        assert "bold cyan" in str(top.spans[0].style)
+        assert "cyan" in str(bot.spans[0].style)
+
+        # 3. No Speech Detected (Warning) must follow chosen theme (cyan)
+        printed_items.clear()
+        tui.print_warning("No Speech Detected", "No audio detected")
+        top, msg, bot = printed_items
+        assert "bold cyan" in str(top.spans[0].style)
+        assert "cyan" in str(bot.spans[0].style)
+
+        # 4. Error stays red
+        printed_items.clear()
+        tui.print_error("Model Load Failed", "Could not connect")
+        top, msg, bot = printed_items
+        assert "bold red" in str(top.spans[0].style)
+        assert "red" in str(bot.spans[0].style)
+
+        # 5. Switch to Magenta theme and verify Model Ready and Warning follow Magenta
+        tui.set_ui_theme("magenta")
+        assert tui.get_effective_color() == "magenta"
+
+        printed_items.clear()
+        tui.print_event("✅ Model Ready", "Model loaded", level="success")
+        top, msg, bot = printed_items
+        assert "bold magenta" in str(top.spans[0].style)
+        assert "magenta" in str(bot.spans[0].style)
+
+        printed_items.clear()
+        tui.print_warning("No Speech Detected", "No audio detected")
+        top, msg, bot = printed_items
+        assert "bold magenta" in str(top.spans[0].style)
+        assert "magenta" in str(bot.spans[0].style)
+    finally:
+        tui.console.print = original_print
+
+
+def test_theme_picker_key_dispatch():
+    tui = VoiceTranscriberTUI()
+    called = []
+    tui.on_open_theme_picker = lambda: called.append("picker")
+    tui._handle_keypress('t')
+    assert called == ["picker"]
+
+    called.clear()
+    tui._handle_keypress('T')
+    assert called == ["picker"]
+
+    import t2
+    assert hasattr(t2, 'select_theme_picker')
+
+
 

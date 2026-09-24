@@ -29,6 +29,8 @@ except Exception:
 MODEL_ID = "CohereLabs/cohere-transcribe-03-2026"
 MODEL_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 
+logger = logging.getLogger(__name__)
+
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*Init provider bridge failed.*")
 
@@ -385,7 +387,7 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
     # Attempt local load first
     for attempt_dtype in dtypes:
         try:
-            print(f"Loading Cohere model from {target_id} (dtype={attempt_dtype})...")
+            logger.info(f"Loading Cohere model from {target_id} (dtype={attempt_dtype})...")
             model, processor = _load_model_once(
                 target_id,
                 revision=revision if not local_path else None,
@@ -394,15 +396,15 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
                 local_files_only=bool(local_path),
                 device=device,
             )
-            print(f"Loaded Cohere model successfully (dtype={attempt_dtype}).")
+            logger.info(f"Loaded Cohere model successfully (dtype={attempt_dtype}).")
             return model, processor
         except Exception as e:
             last_err = e
-            print(f"Load attempt failed (dtype={attempt_dtype}): {e}")
+            logger.debug(f"Load attempt failed (dtype={attempt_dtype}): {e}")
 
     # Fall through to download / verify path
-    print(f"Model not in cache or update needed: {last_err}")
-    print(f"Downloading/Verifying model '{model_id}'...")
+    logger.info(f"Model not in cache or update needed: {last_err}")
+    logger.info(f"Downloading/Verifying model '{model_id}'...")
 
     check_auth()
     token = get_token()
@@ -417,17 +419,17 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
                 local_files_only=False,
                 device=device,
             )
-            print(f"Loaded Cohere model successfully (dtype={attempt_dtype}).")
+            logger.info(f"Loaded Cohere model successfully (dtype={attempt_dtype}).")
             return model, processor
         except Exception as e:
             last_err = e
             error_str = str(e).lower()
             if "403" in error_str or "access" in error_str or "unauthorized" in error_str or "401" in error_str:
-                print("\nError: Access denied to gated model.")
-                print(f"Make sure you have been granted access at: https://huggingface.co/{model_id}")
+                logger.error("Error: Access denied to gated model.")
+                logger.error(f"Make sure you have been granted access at: https://huggingface.co/{model_id}")
                 if token:
                     masked = token[:6] + "..." + token[-4:] if len(token) > 10 else "******"
-                    print(f"Current token (masked): {masked}")
+                    logger.error(f"Current token (masked): {masked}")
                 raise e
     raise last_err
 
@@ -439,7 +441,7 @@ def get_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
             start_time = time.time()
             _model, _processor = load_model(model_id, revision, device)
             elapsed = time.time() - start_time
-            print(f"Model loaded and ready in {elapsed:.2f} seconds")
+            logger.info(f"Model loaded and ready in {elapsed:.2f} seconds")
     
     return _model, _processor
 
@@ -448,7 +450,7 @@ def preload_model(device="cpu"):
         try:
             model, processor = get_model(device=device)
             
-            print("Warming up model...")
+            logger.info("Warming up model...")
             warmup_audio = np.zeros(int(16000 * 0.1), dtype=np.float32)
             
             with torch.inference_mode():
@@ -458,9 +460,9 @@ def preload_model(device="cpu"):
                     sample_rates=[16000],
                     language="en"
                 )
-            print("Warmup complete! Ready for instant transcription.")
+            logger.info("Warmup complete! Ready for instant transcription.")
         except Exception as e:
-            print(f"Preload/Warmup error: {e}")
+            logger.error(f"Preload/Warmup error: {e}")
     
     thread = threading.Thread(target=_preload)
     thread.daemon = True

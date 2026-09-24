@@ -111,7 +111,17 @@ pub enum Level {
 }
 
 impl Level {
-    pub fn color(self) -> Color {
+    /// Resolve the event colour. Info, Success, and Warning follow the user's
+    /// chosen theme colour; critical Errors remain Red.
+    pub fn color(self, theme_color: Color) -> Color {
+        match self {
+            Level::Error => Color::Red,
+            _ => theme_color,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn default_color(self) -> Color {
         match self {
             Level::Info => Color::Green,
             Level::Success => Color::Green,
@@ -158,6 +168,11 @@ pub struct App {
     pub is_muted: bool,
     pub auto_type: bool,
     pub output_mode: String,
+    pub trailing_space: bool,
+    pub auto_punctuate: bool,
+    pub number_digits: bool,
+    pub middle_click_enabled: bool,
+    pub punctuation_mode: String,
     #[allow(dead_code)]
     pub sound_theme: String,
     pub ui_theme: Theme,
@@ -183,6 +198,11 @@ impl App {
             is_muted: true,
             auto_type: false,
             output_mode: "clipboard".to_string(),
+            trailing_space: true,
+            auto_punctuate: true,
+            number_digits: true,
+            middle_click_enabled: true,
+            punctuation_mode: "full".to_string(),
             sound_theme: "proximity".to_string(),
             ui_theme,
             should_quit: false,
@@ -269,6 +289,15 @@ impl App {
         self.ui_theme
     }
 
+    pub fn cycle_punctuation(&mut self) {
+        self.punctuation_mode = match self.punctuation_mode.as_str() {
+            "full" => "no_terminal_period".to_string(),
+            "no_terminal_period" => "no_punctuation".to_string(),
+            "no_punctuation" => "lowercase_no_punctuation".to_string(),
+            _ => "full".to_string(),
+        };
+    }
+
     /// Apply a `cfg` message from the Python backend (authoritative config).
     pub fn apply_config(
         &mut self,
@@ -280,6 +309,11 @@ impl App {
         output_mode: Option<String>,
         sound_theme: Option<String>,
         ui_theme: Option<String>,
+        punctuation_mode: Option<String>,
+        trailing_space: Option<bool>,
+        auto_punctuate: Option<bool>,
+        number_digits: Option<bool>,
+        middle_click_enabled: Option<bool>,
     ) {
         if let Some(m) = mic {
             self.active_device = m;
@@ -307,6 +341,21 @@ impl App {
             if let Some(theme) = Theme::from_name(&t) {
                 self.ui_theme = theme;
             }
+        }
+        if let Some(p) = punctuation_mode {
+            self.punctuation_mode = p;
+        }
+        if let Some(sp) = trailing_space {
+            self.trailing_space = sp;
+        }
+        if let Some(ap) = auto_punctuate {
+            self.auto_punctuate = ap;
+        }
+        if let Some(n) = number_digits {
+            self.number_digits = n;
+        }
+        if let Some(mc) = middle_click_enabled {
+            self.middle_click_enabled = mc;
         }
     }
 }

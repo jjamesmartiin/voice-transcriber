@@ -10,6 +10,15 @@ is_muted = true
 # Controls whether transcription text is automatically typed into active window
 auto_type = false
 
+# Output delivery mode: "clipboard", "type" (safe 10ms), or "type_fast" (fast 1ms)
+output_mode = "clipboard"
+
+# Append trailing space (' ') in auto-type mode for chaining dictations (default true)
+auto_type_trailing_space = true
+
+# Enforce full punctuation and trailing period in auto-type mode (default true)
+auto_type_auto_punctuate = true
+
 # Automatically copy transcribed text to clipboard
 copy_to_clipboard = true
 

@@ -323,3 +323,111 @@ def test_output_mode_config_sync(tmp_path, monkeypatch):
     t2.load_audio_config()
     assert t2.get_output_mode() == "type"
 
+
+def test_auto_type_trailing_space_config_and_toggle(tmp_path, monkeypatch):
+    import yaml
+    yaml_config = tmp_path / "config.yaml"
+    yaml_config.write_text(yaml.dump({"auto_type_trailing_space": False}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: yaml_config)
+
+    t2.load_audio_config()
+    assert t2.get_auto_type_trailing_space() is False
+
+    # Toggle to True
+    t2.toggle_auto_type_trailing_space()
+    assert t2.get_auto_type_trailing_space() is True
+    t2.save_audio_config()
+
+    saved = yaml.safe_load(yaml_config.read_text())
+    assert saved["auto_type_trailing_space"] is True
+
+    # Test env override
+    monkeypatch.setenv("VT_AUTO_TYPE_TRAILING_SPACE", "0")
+    t2.load_audio_config()
+    assert t2.get_auto_type_trailing_space() is False
+
+
+def test_auto_type_auto_punctuate_config_and_toggle(tmp_path, monkeypatch):
+    import yaml
+    yaml_config = tmp_path / "config.yaml"
+    yaml_config.write_text(yaml.dump({"auto_type_auto_punctuate": False}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: yaml_config)
+
+    t2.load_audio_config()
+    assert t2.get_auto_type_auto_punctuate() is False
+
+    # When auto_punctuate is False, cycling output mode must NOT force full punctuation
+    t2.set_output_mode("clipboard")
+    t2.set_punctuation_mode("no_punctuation")
+    t2.cycle_output_mode()  # cycles to "type"
+    assert t2.PUNCTUATION_MODE == "no_punctuation"
+
+    # Toggle back to True
+    t2.toggle_auto_type_auto_punctuate()
+    assert t2.get_auto_type_auto_punctuate() is True
+    t2.save_audio_config()
+
+    saved = yaml.safe_load(yaml_config.read_text())
+    assert saved["auto_type_auto_punctuate"] is True
+
+    # When auto_punctuate is True, cycling output mode sets punctuation to full
+    t2.set_output_mode("clipboard")
+    t2.set_punctuation_mode("no_punctuation")
+    t2.cycle_output_mode()
+    assert t2.PUNCTUATION_MODE == "full"
+
+
+def test_main_typing_formatting_options(monkeypatch):
+    """Test that disabling trailing space and auto-punctuate works in main._do_process_recording."""
+    import main
+    from main import SimpleVoiceTranscriber
+    from unittest.mock import MagicMock
+    import numpy as np
+
+    monkeypatch.setattr(t2, 'OUTPUT_MODE', 'type_fast')
+    monkeypatch.setattr(t2, 'AUTO_TYPE_TRAILING_SPACE', False)
+    monkeypatch.setattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', False)
+
+    app = SimpleVoiceTranscriber.__new__(SimpleVoiceTranscriber)
+    app.recording = False
+    app.copy_to_clipboard = False
+    app._model_ready_event = MagicMock()
+    app._model_ready_event.is_set.return_value = True
+    app.model_load_error = None
+    app.tui = MagicMock()
+    app.visual_notification = MagicMock()
+    app.clipboard_sink = MagicMock()
+    app.start_time = 0.0
+    app.release_time = 1.0
+    app.last_finish_time = 0.0
+    app.audio_frames = np.ones(16000, dtype=np.float32) * 0.05
+    app.last_transcription = ""
+
+    typed = []
+    mock_hotkey = MagicMock()
+    mock_hotkey.are_modifiers_pressed.return_value = False
+    mock_hotkey.type_text.side_effect = lambda text, fast=False: typed.append(text) or True
+    app.hotkey_system = mock_hotkey
+
+    monkeypatch.setattr('main.process_audio_stream', lambda frames: ("hello world", 0.1))
+    monkeypatch.setattr('main.copy_to_clipboard_crossplatform', lambda text, sink=None: True)
+
+    app.process_recording()
+
+    # Should NOT have trailing period and should NOT have trailing space
+    assert len(typed) == 1
+    assert typed[0] == "hello world"
+
+    # Now enable trailing space and auto punctuate
+    monkeypatch.setattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True)
+    monkeypatch.setattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True)
+    app.audio_frames = np.ones(16000, dtype=np.float32) * 0.05
+    typed.clear()
+
+    app.process_recording()
+
+    assert len(typed) == 1
+    assert typed[0] == "hello world. "
+
+
+

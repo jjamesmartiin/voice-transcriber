@@ -74,6 +74,11 @@ class VoiceTranscriberTUI:
         self.is_muted = True
         self.auto_type = False
         self.output_mode = "clipboard"
+        self.trailing_space = True
+        self.auto_punctuate = True
+        self.number_digits = True
+        self.middle_click_enabled = True
+        self.punctuation_mode = "full"
         self.copy_to_clipboard = True
         self.sound_theme = "proximity"
         self.last_transcription = ""
@@ -86,9 +91,13 @@ class VoiceTranscriberTUI:
         # no runtime model toggle to avoid loading the other ASR backend unexpectedly.
         self.on_toggle_autotype = None
         self.on_cycle_output_mode = None
+        self.on_toggle_trailing_space = None
+        self.on_toggle_auto_punctuate = None
         self.on_toggle_numbers = None
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
+        self.on_open_theme_picker = None
+        self.on_set_theme = None
         self.on_reset_terminal = None
         self.on_quit = None
         
@@ -155,7 +164,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
             
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, middle_click_enabled=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -173,6 +182,14 @@ class VoiceTranscriberTUI:
                 self.ui_theme = ui_theme
             if punctuation_mode is not None:
                 self.punctuation_mode = punctuation_mode
+            if trailing_space is not None:
+                self.trailing_space = bool(trailing_space)
+            if auto_punctuate is not None:
+                self.auto_punctuate = bool(auto_punctuate)
+            if number_digits is not None:
+                self.number_digits = bool(number_digits)
+            if middle_click_enabled is not None:
+                self.middle_click_enabled = bool(middle_click_enabled)
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 
@@ -240,8 +257,41 @@ class VoiceTranscriberTUI:
                 prompt.append("auto-type (fast) ", style="bold cyan")
             else:
                 prompt.append("clipboard ", style="cyan")
+
+            if getattr(self, "auto_type", False):
+                prompt.append("│ ", style="dim white")
+                if getattr(self, "trailing_space", True):
+                    prompt.append("space: on ", style="green")
+                else:
+                    prompt.append("space: off ", style="dim white")
+
+                prompt.append("│ ", style="dim white")
+                if getattr(self, "auto_punctuate", True):
+                    prompt.append("auto-punct: on ", style="green")
+                else:
+                    prompt.append("auto-punct: off ", style="dim white")
+
             prompt.append("│ ", style="dim white")
-            prompt.append("[Space] Rec  [M] Mic  [m] Mute  [n] Numbers  [o] Mouse  [c] Mode  [t] Theme  [q] Quit", style="dim white")
+            punc_disp = {
+                "no_terminal_period": "no-period",
+                "no_punctuation": "none",
+                "lowercase_no_punctuation": "lower",
+            }.get(getattr(self, "punctuation_mode", "full"), "full")
+            prompt.append(f"punc: {punc_disp} ", style="cyan")
+
+            prompt.append("│ ", style="dim white")
+            if getattr(self, "number_digits", True):
+                prompt.append("num: digits ", style="green")
+            else:
+                prompt.append("num: words ", style="dim white")
+
+            prompt.append("│ ", style="dim white")
+            if getattr(self, "middle_click_enabled", True):
+                prompt.append("mouse: on ", style="green")
+            else:
+                prompt.append("mouse: off ", style="dim white")
+
+            prompt.append("\n  [Space] Rec  [S/,] Settings  [t] Theme  [M] Mic  [m] Mute  [c] Mode  [s] Space  [p] Punc  [n] Num  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
             prompt.append("RECORDING ", style="bold white on red")
@@ -349,17 +399,18 @@ class VoiceTranscriberTUI:
         self._pause_live()
         try:
             color = self.get_effective_color()
-            style_map = {"info": color, "success": "green", "warning": "yellow", "error": "red"}
+            style_map = {"info": color, "success": color, "warning": color, "error": "red"}
             event_color = style_map.get(level, color)
             timestamp = datetime.now().strftime("%H:%M:%S")
             w = self._get_term_width()
             
             top = Text()
-            top.append("─" * 4, style=event_color)
+            top.append("─" * 4, style=f"bold {event_color}")
             top.append(f" ⚙️ {title} ", style=f"bold {event_color}")
             top.append(f" [{timestamp}] ", style="dim white")
-            right_len = max(0, w - 16 - len(title))
-            top.append("─" * right_len + "\n", style=event_color)
+            rendered_len = len(top.plain)
+            right_len = max(2, w - rendered_len)
+            top.append("─" * right_len + "\n", style=f"bold {event_color}")
             self.console.print(top)
 
             msg = Text()
@@ -367,7 +418,7 @@ class VoiceTranscriberTUI:
             self.console.print(msg)
 
             bot = Text()
-            bot.append("─" * w + "\n", style=event_color)
+            bot.append("─" * w + "\n", style=f"{event_color}")
             self.console.print(bot)
         finally:
             self._resume_live()
@@ -469,8 +520,21 @@ class VoiceTranscriberTUI:
                 self.on_cycle_output_mode()
             elif self.on_toggle_autotype:
                 self.on_toggle_autotype()
+        elif ch == 's':
+            if getattr(self, 'on_toggle_trailing_space', None):
+                self.on_toggle_trailing_space()
+        elif ch in (',', 'S'):
+            if getattr(self, 'on_open_settings_picker', None):
+                self.on_open_settings_picker()
+            elif getattr(self, 'on_change_device', None):
+                self.on_change_device()
+        elif ch.lower() == 'p':
+            if getattr(self, 'on_cycle_punctuation', None):
+                self.on_cycle_punctuation()
         elif ch.lower() == 't':
-            if self.on_cycle_theme:
+            if getattr(self, 'on_open_theme_picker', None):
+                self.on_open_theme_picker()
+            elif self.on_cycle_theme:
                 self.on_cycle_theme()
             else:
                 self.cycle_ui_theme()

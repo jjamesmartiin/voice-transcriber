@@ -11,6 +11,8 @@
 mod app;
 mod demo;
 mod ipc;
+mod settings_picker;
+mod theme_picker;
 mod ui;
 
 use std::io;
@@ -19,7 +21,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::tty::IsTty;
 use ratatui::layout::Rect;
-use ratatui::widgets::{Paragraph, Widget, Wrap};
+use ratatui::widgets::{Clear, Paragraph, Widget, Wrap};
 use ratatui::{DefaultTerminal, TerminalOptions, Viewport};
 
 use app::{Action, App, Level, OutStatus, RunState, Theme};
@@ -169,6 +171,11 @@ impl Runtime {
                 output_mode,
                 sound_theme,
                 ui_theme,
+                punctuation_mode,
+                trailing_space,
+                auto_punctuate,
+                number_digits,
+                middle_click_enabled,
             } => app.apply_config(
                 mic,
                 secondary,
@@ -178,6 +185,11 @@ impl Runtime {
                 output_mode,
                 sound_theme,
                 ui_theme,
+                punctuation_mode,
+                trailing_space,
+                auto_punctuate,
+                number_digits,
+                middle_click_enabled,
             ),
             Wire::Tx {
                 text,
@@ -273,11 +285,17 @@ impl Runtime {
         if self.suspended {
             return Ok(());
         }
+        let (w, _) = crossterm::terminal::size().unwrap_or((80, 24));
+        let want = ui::max_status_height(app, w).max(1);
+        if want != self.viewport_h {
+            self.on_resize(app)?;
+        }
         self.terminal.draw(|frame| {
             let area = frame.area();
-            let line = ui::status_line(app);
+            frame.render_widget(Clear, area);
+            let text = ui::status_text(app);
             // Bottom-align within the viewport, and never draw outside it.
-            let h = (Paragraph::new(line.clone())
+            let h = (Paragraph::new(text.clone())
                 .wrap(Wrap { trim: false })
                 .line_count(area.width) as u16)
                 .clamp(1, area.height.max(1));
@@ -288,7 +306,7 @@ impl Runtime {
                 width: area.width,
                 height: h,
             };
-            frame.render_widget(Paragraph::new(line).wrap(Wrap { trim: false }), sub);
+            frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sub);
         })?;
         Ok(())
     }
@@ -336,9 +354,21 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                                 Intent::ToggleAutoType => {
                                     ipc::send_cmd(&writer, "cycle_output_mode")
                                 }
+                                Intent::ToggleTrailingSpace => {
+                                    ipc::send_cmd(&writer, "toggle_trailing_space")
+                                }
+                                Intent::CyclePunctuation => {
+                                    ipc::send_cmd(&writer, "cycle_punctuation")
+                                }
                                 Intent::ToggleNumbers => ipc::send_cmd(&writer, "toggle_numbers"),
                                 Intent::ToggleMiddleClick => {
                                     ipc::send_cmd(&writer, "toggle_middle_click")
+                                }
+                                Intent::SelectTheme => {
+                                    theme_picker::run_theme_picker(app.ui_theme, Some(&writer), Some(&rx), &mut app)?;
+                                }
+                                Intent::OpenSettingsPicker => {
+                                    settings_picker::run_settings_picker(Some(&writer), Some(&rx), &mut app)?;
                                 }
                                 Intent::CycleTheme => ipc::send_cmd(&writer, "cycle_theme"),
                                 Intent::ResetTerminal => ipc::send_cmd(&writer, "reset_terminal"),
@@ -446,8 +476,20 @@ fn run_local(demo_enabled: bool, theme: Theme) -> io::Result<()> {
                                 };
                                 app.auto_type = app.output_mode == "type" || app.output_mode == "type_fast";
                             }
+                            Intent::ToggleTrailingSpace => {
+                                app.trailing_space = !app.trailing_space;
+                            }
+                            Intent::CyclePunctuation => {
+                                app.cycle_punctuation();
+                            }
                             Intent::ToggleNumbers => {}
                             Intent::ToggleMiddleClick => {}
+                            Intent::SelectTheme => {
+                                theme_picker::run_theme_picker(app.ui_theme, None, None, &mut app)?;
+                            }
+                            Intent::OpenSettingsPicker => {
+                                settings_picker::run_settings_picker(None, None, &mut app)?;
+                            }
                             Intent::CycleTheme => {
                                 app.cycle_theme();
                             }
@@ -519,9 +561,14 @@ enum Intent {
     ChangeDevice,
     ToggleMute,
     ToggleAutoType,
+    ToggleTrailingSpace,
     ToggleNumbers,
     ToggleMiddleClick,
+    CyclePunctuation,
+    #[allow(dead_code)]
     CycleTheme,
+    SelectTheme,
+    OpenSettingsPicker,
     ResetTerminal,
     Quit,
 }
@@ -535,9 +582,12 @@ fn key_intent(key: KeyEvent) -> Option<Intent> {
         KeyCode::Char(' ') | KeyCode::Enter => Some(Intent::ToggleRecord),
         KeyCode::Char('m') => Some(Intent::ToggleMute),
         KeyCode::Char('c') => Some(Intent::ToggleAutoType),
+        KeyCode::Char('s') => Some(Intent::ToggleTrailingSpace),
+        KeyCode::Char('S') | KeyCode::Char(',') => Some(Intent::OpenSettingsPicker),
+        KeyCode::Char('p') | KeyCode::Char('P') => Some(Intent::CyclePunctuation),
         KeyCode::Char('n') => Some(Intent::ToggleNumbers),
         KeyCode::Char('o') | KeyCode::Char('O') => Some(Intent::ToggleMiddleClick),
-        KeyCode::Char('t') => Some(Intent::CycleTheme),
+        KeyCode::Char('t') | KeyCode::Char('T') => Some(Intent::SelectTheme),
         KeyCode::Char('r') => Some(Intent::ResetTerminal),
         KeyCode::Char('M') | KeyCode::Char('i') | KeyCode::Char('I') => Some(Intent::ChangeDevice),
         _ => None,

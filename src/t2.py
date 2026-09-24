@@ -28,6 +28,8 @@ import numpy as np
 import sounddevice as sd
 import soundfile as sf
 import warnings
+import logging
+logger = logging.getLogger(__name__)
 from transcribe2 import transcribe_audio, get_model
 import transcribe2
 import json
@@ -97,6 +99,8 @@ COPY_TO_CLIPBOARD = True
 AUTO_TYPE = False
 OUTPUT_MODES = ["clipboard", "type", "type_fast"]
 OUTPUT_MODE = "clipboard"
+AUTO_TYPE_TRAILING_SPACE = True
+AUTO_TYPE_AUTO_PUNCTUATE = True
 IS_MUTED = True
 NUMBER_DIGITS = True  # Convert spoken number words to digits ("twenty five" -> 25)
 MIDDLE_CLICK_ENABLED = True  # Push-to-talk by holding middle mouse button (>= 0.25s)
@@ -399,7 +403,7 @@ import transcribe2
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -415,7 +419,7 @@ def load_audio_config(file_path=None):
                     import tomllib
                     config = tomllib.loads(content)
                 except Exception as e:
-                    print(f"⚠️  Could not parse {CONFIG_FILE} as TOML ({e}); using defaults (file left untouched).")
+                    logger.warning(f"⚠️  Could not parse {CONFIG_FILE} as TOML ({e}); using defaults (file left untouched).")
                     config = {}
             elif CONFIG_FILE.suffix in ['.yaml', '.yml']:
                 try:
@@ -473,6 +477,20 @@ def load_audio_config(file_path=None):
                 ENABLE_SLM = False
             os.environ["VT_ENABLE_SLM"] = "1" if ENABLE_SLM else "0"
 
+            AUTO_TYPE_TRAILING_SPACE = config.get('auto_type_trailing_space', True)
+            env_trailing_space = os.environ.get("VT_AUTO_TYPE_TRAILING_SPACE", "").strip().lower()
+            if env_trailing_space in ["1", "true", "yes"]:
+                AUTO_TYPE_TRAILING_SPACE = True
+            elif env_trailing_space in ["0", "false", "no"]:
+                AUTO_TYPE_TRAILING_SPACE = False
+
+            AUTO_TYPE_AUTO_PUNCTUATE = config.get('auto_type_auto_punctuate', True)
+            env_auto_punctuate = os.environ.get("VT_AUTO_TYPE_AUTO_PUNCTUATE", "").strip().lower()
+            if env_auto_punctuate in ["1", "true", "yes"]:
+                AUTO_TYPE_AUTO_PUNCTUATE = True
+            elif env_auto_punctuate in ["0", "false", "no"]:
+                AUTO_TYPE_AUTO_PUNCTUATE = False
+
             env_number_digits = os.environ.get("VT_NUMBER_DIGITS", "").strip().lower()
             if env_number_digits in ["1", "true", "yes"]:
                 NUMBER_DIGITS = True
@@ -527,16 +545,16 @@ def load_audio_config(file_path=None):
                 idx = find_device_index(PRIMARY_DEVICE_NAME)
                 if idx is not None:
                     INPUT_DEVICE_INDEX = idx
-                    print(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME} (index {idx})")
+                    logger.info(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME} (index {idx})")
                 else:
-                    print(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
+                    logger.warning(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
             elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
                 idx = find_device_index(SECONDARY_DEVICE_NAME)
                 if idx is not None:
                     INPUT_DEVICE_INDEX = idx
-                    print(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME} (index {idx})")
+                    logger.info(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME} (index {idx})")
                 else:
-                    print(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
+                    logger.warning(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
             
             # If no override or override failed, try the standard auto logic
             if INPUT_DEVICE_INDEX is None:
@@ -544,32 +562,45 @@ def load_audio_config(file_path=None):
                 idx = find_device_index(PRIMARY_DEVICE_NAME)
                 if idx is not None:
                     INPUT_DEVICE_INDEX = idx
-                    print(f"Using primary audio device: {PRIMARY_DEVICE_NAME} (index {idx})")
+                    logger.info(f"Using primary audio device: {PRIMARY_DEVICE_NAME} (index {idx})")
                 else:
                     # Attempt to find secondary
                     idx = find_device_index(SECONDARY_DEVICE_NAME)
                     if idx is not None:
                         INPUT_DEVICE_INDEX = idx
-                        print(f"Using secondary audio device: {SECONDARY_DEVICE_NAME} (index {idx})")
+                        logger.info(f"Using secondary audio device: {SECONDARY_DEVICE_NAME} (index {idx})")
                     else:
                         # Fallback to index if names fail (for backward compatibility or if names are not set)
                         INPUT_DEVICE_INDEX = config.get('input_device_index')
                         if INPUT_DEVICE_INDEX is not None:
                             try:
                                 d = sd.query_devices(INPUT_DEVICE_INDEX)
-                                print(f"Falling back to saved device index {INPUT_DEVICE_INDEX}: {d['name']}")
+                                if d.get('max_input_channels', 0) > 0:
+                                    logger.info(f"Falling back to saved device index {INPUT_DEVICE_INDEX}: {d['name']}")
+                                else:
+                                    INPUT_DEVICE_INDEX = None
                             except:
                                 INPUT_DEVICE_INDEX = None
             
+            # Double check that the selected INPUT_DEVICE_INDEX actually exists and is valid
+            if INPUT_DEVICE_INDEX is not None:
+                try:
+                    with silence_stderr():
+                        d = sd.query_devices(INPUT_DEVICE_INDEX)
+                        if d.get('max_input_channels', 0) <= 0:
+                            INPUT_DEVICE_INDEX = None
+                except Exception:
+                    INPUT_DEVICE_INDEX = None
+
             if INPUT_DEVICE_INDEX is not None:
                 set_default_input_device(INPUT_DEVICE_INDEX)
                 # Print secondary device info
                 if SECONDARY_DEVICE_NAME:
                     sec_idx = find_device_index(SECONDARY_DEVICE_NAME)
                     if sec_idx is not None:
-                        print(f"Secondary audio device: {SECONDARY_DEVICE_NAME} (index {sec_idx})")
+                        logger.info(f"Secondary audio device: {SECONDARY_DEVICE_NAME} (index {sec_idx})")
             else:
-                print("No configured audio devices found. Using system default.")
+                logger.info("No configured audio devices found. Using system default.")
         
         # Apply Bluetooth hands-free policy on Linux / PipeWire
         apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
@@ -590,11 +621,11 @@ def load_audio_config(file_path=None):
             from post_processor import set_custom_dictionary
             set_custom_dictionary(dict_setting)
     except Exception as e:
-        print(f"Could not load audio config: {e}")
+        logger.warning(f"Could not load audio config: {e}")
 
 def save_audio_config(file_path=None):
     """Save audio device configuration to local file preserving existing keys and format"""
-    global CONFIG_FILE, AUTO_TYPE, OUTPUT_MODE, COPY_TO_CLIPBOARD
+    global CONFIG_FILE, AUTO_TYPE, OUTPUT_MODE, COPY_TO_CLIPBOARD, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     elif CONFIG_FILE is None:
@@ -641,6 +672,8 @@ def save_audio_config(file_path=None):
             'is_muted': IS_MUTED,
             'output_mode': OUTPUT_MODE,
             'auto_type': AUTO_TYPE,
+            'auto_type_trailing_space': AUTO_TYPE_TRAILING_SPACE,
+            'auto_type_auto_punctuate': AUTO_TYPE_AUTO_PUNCTUATE,
             'sound_theme': SOUND_THEME,
             'copy_to_clipboard': COPY_TO_CLIPBOARD,
             'ui_theme': UI_THEME,
@@ -665,9 +698,9 @@ def save_audio_config(file_path=None):
 
         with open(CONFIG_FILE, 'w') as f:
             f.write(out_content)
-        print(f"Saved audio device config to {CONFIG_FILE}")
+        logger.debug(f"Saved audio device config to {CONFIG_FILE}")
     except Exception as e:
-        print(f"Could not save audio config: {e}")
+        logger.error(f"Could not save audio config: {e}")
 
 
 def cycle_output_mode() -> str:
@@ -677,7 +710,7 @@ def cycle_output_mode() -> str:
     OUTPUT_MODE = OUTPUT_MODES[idx]
     AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
     COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
-    if AUTO_TYPE:
+    if AUTO_TYPE and AUTO_TYPE_AUTO_PUNCTUATE:
         set_punctuation_mode("full")
     return OUTPUT_MODE
 
@@ -694,13 +727,49 @@ def set_output_mode(mode: str) -> str:
         OUTPUT_MODE = "type_fast"
         AUTO_TYPE = True
         COPY_TO_CLIPBOARD = False
-    if AUTO_TYPE:
+    if AUTO_TYPE and AUTO_TYPE_AUTO_PUNCTUATE:
         set_punctuation_mode("full")
     return OUTPUT_MODE
 
 
 def get_output_mode() -> str:
     return OUTPUT_MODE
+
+
+def toggle_auto_type_trailing_space() -> bool:
+    global AUTO_TYPE_TRAILING_SPACE
+    AUTO_TYPE_TRAILING_SPACE = not AUTO_TYPE_TRAILING_SPACE
+    save_audio_config()
+    return AUTO_TYPE_TRAILING_SPACE
+
+
+def set_auto_type_trailing_space(enabled: bool) -> bool:
+    global AUTO_TYPE_TRAILING_SPACE
+    AUTO_TYPE_TRAILING_SPACE = bool(enabled)
+    save_audio_config()
+    return AUTO_TYPE_TRAILING_SPACE
+
+
+def get_auto_type_trailing_space() -> bool:
+    return AUTO_TYPE_TRAILING_SPACE
+
+
+def toggle_auto_type_auto_punctuate() -> bool:
+    global AUTO_TYPE_AUTO_PUNCTUATE
+    AUTO_TYPE_AUTO_PUNCTUATE = not AUTO_TYPE_AUTO_PUNCTUATE
+    save_audio_config()
+    return AUTO_TYPE_AUTO_PUNCTUATE
+
+
+def set_auto_type_auto_punctuate(enabled: bool) -> bool:
+    global AUTO_TYPE_AUTO_PUNCTUATE
+    AUTO_TYPE_AUTO_PUNCTUATE = bool(enabled)
+    save_audio_config()
+    return AUTO_TYPE_AUTO_PUNCTUATE
+
+
+def get_auto_type_auto_punctuate() -> bool:
+    return AUTO_TYPE_AUTO_PUNCTUATE
 
 
 def set_punctuation_mode(mode: str) -> None:
@@ -766,6 +835,182 @@ def get_dictionary():
         return {}
 
 
+def _read_key():
+    import termios, tty, select
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        if ch == '\x1b':
+            r, _, _ = select.select([fd], [], [], 0.05)
+            if r:
+                ch2 = sys.stdin.read(1)
+                if ch2 == '[':
+                    ch3 = sys.stdin.read(1)
+                    if ch3 == 'A': return 'UP'
+                    elif ch3 == 'B': return 'DOWN'
+                    elif ch3 == 'C': return 'RIGHT'
+                    elif ch3 == 'D': return 'LEFT'
+            return 'ESC'
+        elif ch in ('\r', '\n'):
+            return 'ENTER'
+        elif ch in ('\x7f', '\x08'):
+            return 'BACKSPACE'
+        elif ch == '\x03':
+            return 'CTRL_C'
+        elif ch == '\t':
+            return 'DOWN'
+        return ch
+    except Exception:
+        return sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
+def select_theme_picker(current_theme=None):
+    """Interactive theme picker with fuzzy search and arrow key navigation"""
+    global UI_THEME
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
+
+    palettes = [
+        ("auto", "Auto", "Detect from system terminal accent color"),
+        ("green", "Green", "Classic emerald / forest green"),
+        ("cyan", "Cyan", "Cyber electric cyan / aqua"),
+        ("blue", "Blue", "Ocean royal blue / cobalt"),
+        ("magenta", "Magenta", "Neon magenta / purple / violet"),
+        ("yellow", "Yellow", "Solar amber / gold / warm yellow"),
+        ("red", "Red", "Crimson / coral / bold red"),
+        ("white", "White", "Monochrome / crisp clean white"),
+    ]
+
+    active = (current_theme or UI_THEME or "auto").lower()
+    selected_idx = 0
+    for i, (name, _, _) in enumerate(palettes):
+        if name == active:
+            selected_idx = i
+            break
+
+    query = ""
+    console = Console()
+
+    def filter_palettes(q):
+        if not q.strip():
+            return list(enumerate(palettes))
+        q = q.strip().lower()
+        scored = []
+        for i, (name, label, desc) in enumerate(palettes):
+            score = 0
+            if name == q:
+                score = 1000
+            elif name.startswith(q):
+                score = 800 - len(q)
+            elif label.lower().startswith(q):
+                score = 700 - len(q)
+            elif q in name:
+                score = 600 - name.find(q) * 10
+            elif q in desc.lower():
+                score = 400 - desc.lower().find(q) * 5
+            else:
+                idx = 0
+                for c in name:
+                    if idx < len(q) and c == q[idx]:
+                        idx += 1
+                if idx == len(q):
+                    score = 200
+            if score > 0:
+                scored.append((score, i, palettes[i]))
+        scored.sort(key=lambda x: -x[0])
+        return [(i, p) for _, i, p in scored]
+
+    while True:
+        reset_terminal()
+        matches = filter_palettes(query)
+        if selected_idx >= len(matches):
+            selected_idx = max(0, len(matches) - 1)
+
+        preview_color = matches[selected_idx][1][0] if matches else active
+        if preview_color == "auto":
+            preview_color = "green"
+
+        table = Table(box=None, padding=(0, 1), show_header=False)
+        table.add_column("Ind", justify="right", width=2)
+        table.add_column("Dot", justify="center", width=2)
+        table.add_column("Name", width=10)
+        table.add_column("Description", width=42)
+        table.add_column("Action", width=12)
+
+        for row_i, (orig_i, (name, label, desc)) in enumerate(matches):
+            is_sel = (row_i == selected_idx)
+            is_active = (name == active)
+            dot_color = "green" if name == "auto" else name
+
+            ind = "❯" if is_sel else " "
+            ind_style = f"bold {dot_color}" if is_sel else "dim white"
+
+            name_style = f"bold {dot_color}" if is_sel else ("bold white" if is_active else "white")
+            desc_style = "bold white" if is_sel else "dim white"
+
+            status = "↵ Select" if is_sel else ("[Active]" if is_active else "")
+            status_style = f"bold black on {dot_color}" if is_sel else f"dim {dot_color}"
+
+            table.add_row(
+                Text(ind, style=ind_style),
+                Text("●", style=dot_color),
+                Text(label, style=name_style),
+                Text(desc, style=desc_style),
+                Text(status, style=status_style),
+            )
+
+        if not matches:
+            table.add_row("", "", "No match", f"No themes match '{query}'", "")
+
+        q_disp = query if query else "[dim]type to search (e.g. cyan, magenta)...[/dim]"
+        search_panel = Panel(
+            Text.from_markup(f"🔍 [bold]Filter:[/bold] [yellow]{q_disp}[/yellow]"),
+            border_style=preview_color,
+            padding=(0, 1)
+        )
+
+        footer = Text.from_markup("  [cyan][↑/↓][/cyan] Navigate   [cyan][Type][/cyan] Search   [green][Enter][/green] Apply   [red][Esc][/red] Cancel")
+        main_panel = Panel(
+            table,
+            title="🎨  Select UI Color Theme",
+            subtitle=footer,
+            border_style=preview_color,
+            padding=(0, 1)
+        )
+
+        console.print(search_panel)
+        console.print(main_panel)
+
+        key = _read_key()
+        if key in ('ESC', 'CTRL_C'):
+            return None
+        elif key == 'ENTER':
+            if matches:
+                chosen = matches[selected_idx][1][0]
+                UI_THEME = chosen
+                save_audio_config()
+                return chosen
+            return None
+        elif key in ('UP', 'k'):
+            if matches:
+                selected_idx = (selected_idx - 1) % len(matches)
+        elif key in ('DOWN', 'j', '\t'):
+            if matches:
+                selected_idx = (selected_idx + 1) % len(matches)
+        elif key == 'BACKSPACE':
+            query = query[:-1]
+            selected_idx = 0
+        elif len(key) == 1 and key.isprintable():
+            query += key
+            selected_idx = 0
+
+
 def select_audio_device():
     """Interactive audio device selection with Primary/Secondary support & Rich styling"""
     global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE, UI_THEME, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE
@@ -800,6 +1045,8 @@ def select_audio_device():
         "type_fast": "AUTO-TYPE (FAST)",
     }
     table.add_row("T", "Cycle Output Mode", output_labels.get(OUTPUT_MODE, OUTPUT_MODE.upper()))
+    table.add_row("D", "Toggle Auto-Type Trailing Space", "ENABLED (Appends ' ')" if AUTO_TYPE_TRAILING_SPACE else "DISABLED (Exact Text)")
+    table.add_row("F", "Toggle Auto-Type Full Punctuation", "ENABLED (Full + Period)" if AUTO_TYPE_AUTO_PUNCTUATE else "DISABLED (Preserve Mode)")
     table.add_row("N", "Toggle Number Words -> Digits", "DIGITS" if NUMBER_DIGITS else "SPELLED OUT")
     table.add_row("O", "Toggle Middle Click Push-to-Talk", "ENABLED" if MIDDLE_CLICK_ENABLED else "DISABLED")
     bt_status = "LOCKED (No Media Pause)" if KEEP_BLUETOOTH_HANDSFREE else "AUTOSWITCH"
@@ -828,15 +1075,7 @@ def select_audio_device():
         return True
 
     if choice.upper() == 'C':
-        palettes = ["auto", "green", "cyan", "blue", "magenta", "yellow", "red", "white"]
-        try:
-            curr_idx = palettes.index(UI_THEME.lower())
-            next_idx = (curr_idx + 1) % len(palettes)
-        except ValueError:
-            next_idx = 1
-        UI_THEME = palettes[next_idx]
-        print(f"UI Color Theme set to: {UI_THEME.upper()}")
-        save_audio_config()
+        select_theme_picker()
         reset_terminal()
         return select_audio_device()
     
@@ -903,6 +1142,20 @@ def select_audio_device():
     if choice.upper() == 'T':
         cycle_output_mode()
         print(f"Output Mode set to: {output_labels.get(OUTPUT_MODE, OUTPUT_MODE.upper())}")
+        save_audio_config()
+        reset_terminal()
+        return select_audio_device()
+
+    if choice.upper() == 'D':
+        toggle_auto_type_trailing_space()
+        print(f"Auto-Type Trailing Space set to: {'ENABLED' if AUTO_TYPE_TRAILING_SPACE else 'DISABLED'}")
+        save_audio_config()
+        reset_terminal()
+        return select_audio_device()
+
+    if choice.upper() == 'F':
+        toggle_auto_type_auto_punctuate()
+        print(f"Auto-Type Full Punctuation set to: {'ENABLED' if AUTO_TYPE_AUTO_PUNCTUATE else 'DISABLED'}")
         save_audio_config()
         reset_terminal()
         return select_audio_device()
@@ -1087,6 +1340,16 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                     print(f"Using secondary device: {SECONDARY_DEVICE_NAME}")
                     INPUT_DEVICE_INDEX = secondary_idx
                     set_default_input_device(INPUT_DEVICE_INDEX)
+
+    # Verify INPUT_DEVICE_INDEX is still valid before attempting recording
+    if INPUT_DEVICE_INDEX is not None:
+        try:
+            with silence_stderr():
+                d = sd.query_devices(INPUT_DEVICE_INDEX)
+                if d.get('max_input_channels', 0) <= 0:
+                    INPUT_DEVICE_INDEX = None
+        except Exception:
+            INPUT_DEVICE_INDEX = None
 
     q = queue.Queue()
 

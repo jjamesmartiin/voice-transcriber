@@ -83,9 +83,12 @@ class RatatuiTui:
         self.on_toggle_mute = None
         self.on_toggle_autotype = None
         self.on_cycle_output_mode = None
+        self.on_toggle_trailing_space = None
+        self.on_toggle_auto_punctuate = None
         self.on_toggle_numbers = None
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
+        self.on_set_theme = None
         self.on_reset_terminal = None
         self.on_quit = None
 
@@ -146,11 +149,23 @@ class RatatuiTui:
 
         self.print_header()
 
+        self._orig_stdout = sys.stdout
+        self._devnull = open(os.devnull, "w")
+        sys.stdout = self._devnull
+
         threading.Thread(target=self._read_loop, daemon=True).start()
         logger.info("Ratatui TUI connected on %s", self.socket_path)
 
     def stop(self):
         """Tear down the child process and socket."""
+        if hasattr(self, "_orig_stdout") and self._orig_stdout:
+            sys.stdout = self._orig_stdout
+        if hasattr(self, "_devnull") and self._devnull:
+            try:
+                self._devnull.close()
+            except Exception:
+                pass
+            self._devnull = None
         if self._proc is None and self._server is None:
             return
         self._send({"t": "quit"})
@@ -243,8 +258,18 @@ class RatatuiTui:
             self.on_toggle_numbers()
         elif cmd == "toggle_middle_click" and self.on_toggle_middle_click:
             self.on_toggle_middle_click()
+        elif cmd == "toggle_trailing_space" and getattr(self, "on_toggle_trailing_space", None):
+            self.on_toggle_trailing_space()
+        elif cmd == "toggle_auto_punctuate" and getattr(self, "on_toggle_auto_punctuate", None):
+            self.on_toggle_auto_punctuate()
         elif cmd == "cycle_theme" and self.on_cycle_theme:
             self.on_cycle_theme()
+        elif cmd == "set_theme":
+            theme = msg.get("theme")
+            if theme and getattr(self, "on_set_theme", None):
+                self.on_set_theme(theme)
+            elif self.on_cycle_theme:
+                self.on_cycle_theme()
         elif cmd == "cycle_punctuation" and getattr(self, "on_cycle_punctuation", None):
             self.on_cycle_punctuation()
         elif cmd == "reset_terminal" and self.on_reset_terminal:
@@ -281,7 +306,9 @@ class RatatuiTui:
         self._send({"t": "cfg", "secondary": device_name})
 
     def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None,
-                         sound_theme=None, ui_theme=None, punctuation_mode=None):
+                         sound_theme=None, ui_theme=None, punctuation_mode=None,
+                         trailing_space=None, auto_punctuate=None, number_digits=None,
+                         middle_click_enabled=None):
         msg = {"t": "cfg"}
         if backend is not None:
             self.model_backend = backend
@@ -307,6 +334,18 @@ class RatatuiTui:
         if punctuation_mode is not None:
             self.punctuation_mode = punctuation_mode
             msg["punctuation_mode"] = punctuation_mode
+        if trailing_space is not None:
+            self.trailing_space = bool(trailing_space)
+            msg["trailing_space"] = self.trailing_space
+        if auto_punctuate is not None:
+            self.auto_punctuate = bool(auto_punctuate)
+            msg["auto_punctuate"] = self.auto_punctuate
+        if number_digits is not None:
+            self.number_digits = bool(number_digits)
+            msg["number_digits"] = self.number_digits
+        if middle_click_enabled is not None:
+            self.middle_click_enabled = bool(middle_click_enabled)
+            msg["middle_click_enabled"] = self.middle_click_enabled
         self._send(msg)
 
     def get_effective_color(self):
@@ -318,6 +357,16 @@ class RatatuiTui:
             return accent
         return "green"
 
+    def set_ui_theme(self, theme_name):
+        """Update UI color theme dynamically"""
+        if (theme_name or "").lower() in COLOR_PALETTES:
+            self.ui_theme = theme_name.lower()
+        else:
+            self.ui_theme = "auto"
+        self._send({"t": "cfg", "ui_theme": self.ui_theme})
+        effective = self.get_effective_color()
+        self.print_event("THEME SWITCHED", f"UI Color Theme set to '{self.ui_theme}' (Active: {effective.upper()})", level="info")
+
     def cycle_ui_theme(self):
         try:
             idx = COLOR_PALETTES.index((self.ui_theme or "auto").lower())
@@ -325,6 +374,8 @@ class RatatuiTui:
             idx = 0
         self.ui_theme = COLOR_PALETTES[(idx + 1) % len(COLOR_PALETTES)]
         self._send({"t": "cfg", "ui_theme": self.ui_theme})
+        effective = self.get_effective_color()
+        self.print_event("THEME SWITCHED", f"UI Color Theme set to '{self.ui_theme}' (Active: {effective.upper()})", level="info")
         return self.ui_theme
 
     def print_transcription(self, text, elapsed_sec=0.0, copy_success=True,
@@ -360,6 +411,8 @@ class RatatuiTui:
     # TUI suspending/resuming so Python can own the terminal while it draws.
     def _pause_live(self):
         _dbg("pause_live -> suspend")
+        if hasattr(self, "_orig_stdout") and self._orig_stdout:
+            sys.stdout = self._orig_stdout
         self._send({"t": "suspend"})
         self._suspended = True
         time.sleep(0.25)
@@ -380,6 +433,8 @@ class RatatuiTui:
 
     def _resume_live(self):
         _dbg("resume_live -> resume")
+        if hasattr(self, "_devnull") and self._devnull and not self._devnull.closed:
+            sys.stdout = self._devnull
         with self._send_lock:
             self._suspended = False
             if self._closed or self._conn is None:

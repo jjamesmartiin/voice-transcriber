@@ -181,7 +181,11 @@ class SimpleVoiceTranscriber:
             output_mode=getattr(t2, 'OUTPUT_MODE', 'clipboard'),
             sound_theme=t2.SOUND_THEME,
             ui_theme=getattr(t2, 'UI_THEME', 'auto'),
-            punctuation_mode=getattr(t2, 'PUNCTUATION_MODE', 'full')
+            punctuation_mode=getattr(t2, 'PUNCTUATION_MODE', 'full'),
+            trailing_space=getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True),
+            auto_punctuate=getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True),
+            number_digits=getattr(t2, 'NUMBER_DIGITS', True),
+            middle_click_enabled=getattr(t2, 'MIDDLE_CLICK_ENABLED', True),
         )
         if hasattr(self, 'visual_notification') and self.visual_notification:
             self.visual_notification.set_active_device(get_active_device_name(include_model=False))
@@ -193,10 +197,14 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_mute = self._on_tui_toggle_mute
         self.tui.on_toggle_autotype = self._on_tui_cycle_output_mode
         self.tui.on_cycle_output_mode = self._on_tui_cycle_output_mode
+        self.tui.on_toggle_trailing_space = self._on_tui_toggle_trailing_space
+        self.tui.on_toggle_auto_punctuate = self._on_tui_toggle_auto_punctuate
         self.tui.on_toggle_numbers = self._on_tui_toggle_numbers
         self.tui.on_toggle_middle_click = self._on_tui_toggle_middle_click
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
+        self.tui.on_set_theme = self._on_tui_set_theme
+        self.tui.on_open_theme_picker = self.open_theme_picker
         self.tui.on_reset_terminal = self._on_tui_reset_terminal
         self.tui.on_quit = self._on_tui_quit
 
@@ -311,10 +319,26 @@ class SimpleVoiceTranscriber:
             "type_fast": "AUTO-TYPE (FAST/OPTIMIZED)",
         }
         self.tui.print_event("📋 Output Mode", f"Output mode set to {labels.get(new_mode, new_mode.upper())}", level="info")
-        if new_mode in ("type", "type_fast"):
+        if new_mode in ("type", "type_fast") and getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True):
             self.tui.print_event("✍️ Formatting Mode", "Punctuation mode automatically set to Full Punctuation", level="info")
 
     _on_tui_toggle_autotype = _on_tui_cycle_output_mode
+
+    def _on_tui_toggle_trailing_space(self):
+        import t2
+        new_state = t2.toggle_auto_type_trailing_space()
+        t2.save_audio_config()
+        self._sync_tui_state()
+        status = "ENABLED (Appends ' ')" if new_state else "DISABLED (Exact Text)"
+        self.tui.print_event("␣ Trailing Space", f"Auto-type trailing space is now {status}", level="info")
+
+    def _on_tui_toggle_auto_punctuate(self):
+        import t2
+        new_state = t2.toggle_auto_type_auto_punctuate()
+        t2.save_audio_config()
+        self._sync_tui_state()
+        status = "ENABLED (Full + Period)" if new_state else "DISABLED (Preserve User Punctuation)"
+        self.tui.print_event("✍️ Auto-Punctuate", f"Auto-type full punctuation enforcement is now {status}", level="info")
 
     def _on_tui_toggle_numbers(self):
         import t2
@@ -354,6 +378,42 @@ class SimpleVoiceTranscriber:
         t2.UI_THEME = new_theme
         t2.save_audio_config()
         self._sync_tui_state()
+
+    def _on_tui_set_theme(self, new_theme):
+        import t2
+        self.tui.set_ui_theme(new_theme)
+        t2.UI_THEME = new_theme
+        t2.save_audio_config()
+        self._sync_tui_state()
+
+    def open_theme_picker(self):
+        """Open interactive theme picker modal"""
+        if self.recording:
+            if hasattr(self, 'tui') and self.tui:
+                self.tui.print_warning("Settings Locked", "Cannot change settings while recording is active.")
+            return
+
+        if hasattr(self, 'tui') and self.tui:
+            self.tui._pause_live()
+
+        try:
+            import t2
+            chosen = t2.select_theme_picker(getattr(t2, 'UI_THEME', 'auto'))
+            t2.reset_terminal()
+            if chosen:
+                self.tui.set_ui_theme(chosen)
+                t2.UI_THEME = chosen
+                t2.save_audio_config()
+                self._sync_tui_state()
+        except Exception as e:
+            logger.debug(f"Theme picker error: {e}")
+            import t2
+            t2.reset_terminal()
+
+        self._sync_tui_state()
+        if hasattr(self, 'tui') and self.tui:
+            self.tui._resume_live()
+            self.tui.update_state("READY")
 
     def _on_tui_reset_terminal(self):
         import t2
@@ -586,12 +646,13 @@ class SimpleVoiceTranscriber:
                     effective_mode = "clipboard"
 
                 if effective_mode in ("type", "type_fast"):
-                    # Ensure terminal punctuation (period if missing) on transcription
-                    trimmed = transcription.rstrip()
-                    if trimmed and not trimmed.endswith(('.', '!', '?', ':', ';', '…')):
-                        transcription = trimmed + '.'
-                    else:
-                        transcription = trimmed
+                    if getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True):
+                        # Ensure terminal punctuation (period if missing) on transcription
+                        trimmed = transcription.rstrip()
+                        if trimmed and not trimmed.endswith(('.', '!', '?', ':', ';', '…')):
+                            transcription = trimmed + '.'
+                        else:
+                            transcription = trimmed
 
                 self.last_transcription = transcription
                 self.last_finish_time = time.time()
@@ -607,8 +668,8 @@ class SimpleVoiceTranscriber:
                         
                         time.sleep(0.01 if is_fast else 0.05)
                         
-                        # Append trailing space after terminal punctuation for seamless chaining across sessions
-                        text_to_type = transcription + ' '
+                        add_space = getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True)
+                        text_to_type = (transcription + ' ') if add_space else transcription
                         if self.hotkey_system and self.hotkey_system.type_text(text_to_type, fast=is_fast):
                             logger.info(f"Typed ({'fast' if is_fast else 'slow'}): {text_to_type}")
                         else:

@@ -56,6 +56,16 @@ pub enum Wire {
         sound_theme: Option<String>,
         #[serde(default)]
         ui_theme: Option<String>,
+        #[serde(default)]
+        punctuation_mode: Option<String>,
+        #[serde(default)]
+        trailing_space: Option<bool>,
+        #[serde(default)]
+        auto_punctuate: Option<bool>,
+        #[serde(default)]
+        number_digits: Option<bool>,
+        #[serde(default)]
+        middle_click_enabled: Option<bool>,
     },
     #[serde(rename = "tx")]
     Tx {
@@ -136,6 +146,14 @@ pub fn connect(path: &str) -> std::io::Result<(mpsc::Receiver<IpcEvent>, UnixStr
 /// Send a simple command with no payload.
 pub fn send_cmd(stream: &UnixStream, cmd: &str) {
     let line = format!("{{\"t\":\"cmd\",\"cmd\":\"{cmd}\"}}\n");
+    let mut w = stream;
+    let _ = w.write_all(line.as_bytes());
+    let _ = w.flush();
+}
+
+/// Send a command with a string property.
+pub fn send_cmd_value(stream: &UnixStream, cmd: &str, key: &str, val: &str) {
+    let line = format!("{{\"t\":\"cmd\",\"cmd\":\"{cmd}\",\"{key}\":\"{val}\"}}\n");
     let mut w = stream;
     let _ = w.write_all(line.as_bytes());
     let _ = w.flush();
