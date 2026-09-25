@@ -58,3 +58,27 @@ jobs:
           PYTHONPATH: src
         run: |
           python -m pytest tests/test_platform_hal.py tests/test_dictionary.py tests/test_config_sync.py tests/test_post_processor.py tests/test_tui.py tests/test_user_workflows.py tests/test_wsl.py -v --tb=short
+
+  unit-tests-wsl:
+    name: Unit tests (WSL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Run WSL unit tests
+        env:
+          VT_PLATFORM: wsl
+          WSL_DISTRO_NAME: NixOS
+        run: |
+          nix develop --command python -m pytest \
+            tests/test_platform_hal.py \
+            tests/test_dictionary.py \
+            tests/test_config_sync.py \
+            tests/test_post_processor.py \
+            tests/test_tui.py \
+            tests/test_user_workflows.py \
+            tests/test_wsl.py \
+            -q
