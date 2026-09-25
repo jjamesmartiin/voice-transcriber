@@ -81,7 +81,7 @@ class TestWSLPlatformDetection:
         class FakeUname:
             release = "5.15.153.1-microsoft-standard-WSL2"
 
-        monkeypatch.setattr(os, "uname", lambda: FakeUname())
+        monkeypatch.setattr(os, "uname", lambda: FakeUname(), raising=False)
         assert hal.detect_platform() == WSL
 
     def test_wsl_env_override_takes_precedence(self, monkeypatch):

@@ -137,13 +137,18 @@ def build_exe():
         "--log-level=INFO",
         
         # Add models directory
-        f"--add-data={MODELS_DIR};models",
+        f"--add-data={MODELS_DIR}{os.pathsep}models",
         
         # Add all src files to root (not in src/ subfolder)
-        f"--add-data={SRC_DIR};.",
+        f"--add-data={SRC_DIR}{os.pathsep}.",
         
         # Hidden imports
         "--hidden-import=hal",
+        "--hidden-import=platform.windows",
+        "--hidden-import=platform.windows.hotkeys",
+        "--hidden-import=platform.windows.clipboard",
+        "--hidden-import=platform.windows.audio_cues",
+        "--hidden-import=platform.windows.notifications",
         "--hidden-import=sounddevice",
         "--hidden-import=soundfile",
         "--hidden-import=numpy",
@@ -193,7 +198,7 @@ def build_exe():
         print("To test offline:")
         print("1. Disconnect network / enable Airplane mode")
         print("2. Run the EXE")
-        print("3. Test recording with both Whisper and Cohere")
+        print("3. Test recording with Cohere")
     else:
         print()
         print("=" * 60)

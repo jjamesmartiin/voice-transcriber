@@ -12,8 +12,19 @@ if "PULSE_SERVER" not in os.environ:
     elif os.path.exists("/mnt/wslg/PulseServer"):
         os.environ["PULSE_SERVER"] = "/mnt/wslg/PulseServer"
 
+def _is_wsl() -> bool:
+    if sys.platform == "win32":
+        return False
+    if "microsoft" in os.environ.get("WSL_DISTRO_NAME", "").lower():
+        return True
+    if os.path.exists("/mnt/wslg") or "WSL_INTEROP" in os.environ:
+        return True
+    if hasattr(os, "uname"):
+        return "microsoft" in os.uname().release.lower()
+    return False
+
 # In WSL, ALSA needs to be told to use PulseAudio explicitly, otherwise PortAudio finds 0 devices
-if "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg"):
+if _is_wsl():
     alsa_conf_path = "/tmp/vt-alsa-pulse.conf"
     if not os.path.exists(alsa_conf_path):
         with open(alsa_conf_path, "w") as f:
@@ -1102,7 +1113,7 @@ def select_audio_device():
     from rich.panel import Panel
     
     console = Console()
-    is_wsl = "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg")
+    is_wsl = _is_wsl()
     
     table = Table(expand=True, border_style="cyan", show_header=True, header_style="bold yellow")
     table.add_column("Key", style="bold cyan", width=6)
@@ -1309,7 +1320,7 @@ def select_audio_device():
     label = "Primary" if is_primary else "Secondary"
     
     # NEW LOGIC FOR WSL:
-    if "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg"):
+    if _is_wsl():
         print(f"\nWSL Environment detected. {label} device uses the Windows Default Microphone.")
         print("Opening Windows Sound Settings (ms-settings:sound) to change your microphone...")
         import subprocess
@@ -1378,7 +1389,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
     """Record audio using sounddevice with fallback and auto-recovery support"""
     global INPUT_DEVICE_INDEX, ACTUAL_RATE, LAST_USED_DEVICE_NAME
     
-    is_wsl = "microsoft" in os.uname().release.lower() or os.path.exists("/mnt/wslg")
+    is_wsl = _is_wsl()
     
     if is_wsl:
         # In WSL, we always rely on the single default ALSA-Pulse audio bridge
