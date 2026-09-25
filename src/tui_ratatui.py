@@ -92,6 +92,10 @@ class RatatuiTui:
         self.on_reset_terminal = None
         self.on_quit = None
 
+        # --- Mic monitoring ---
+        self._mic_monitor_stream = None
+        self._mic_monitor_running = False
+
         # --- IPC plumbing ---
         self._server = None
         self._conn = None
@@ -148,6 +152,7 @@ class RatatuiTui:
             self._pending.clear()
 
         self.print_header()
+        self.send_device_list()
 
         self._orig_stdout = sys.stdout
         self._devnull = open(os.devnull, "w")
@@ -158,6 +163,7 @@ class RatatuiTui:
 
     def stop(self):
         """Tear down the child process and socket."""
+        self.stop_mic_monitor()
         if hasattr(self, "_orig_stdout") and self._orig_stdout:
             sys.stdout = self._orig_stdout
         if hasattr(self, "_devnull") and self._devnull:
@@ -274,6 +280,28 @@ class RatatuiTui:
             self.on_cycle_punctuation()
         elif cmd == "reset_terminal" and self.on_reset_terminal:
             self.on_reset_terminal()
+        elif cmd == "get_devices":
+            self.send_device_list()
+        elif cmd == "start_mic_monitor":
+            idx = msg.get("index")
+            self.start_mic_monitor(int(idx) if idx is not None else None)
+        elif cmd == "stop_mic_monitor":
+            self.stop_mic_monitor()
+        elif cmd == "set_device":
+            name = msg.get("device")
+            idx = msg.get("index")
+            if name:
+                import t2
+                t2.PRIMARY_DEVICE_NAME = name
+                if idx is not None:
+                    try:
+                        t2.INPUT_DEVICE_INDEX = int(idx)
+                        t2.set_default_input_device(t2.INPUT_DEVICE_INDEX)
+                    except Exception:
+                        pass
+                t2.save_audio_config()
+                self.set_active_device(name)
+                self.print_event("🎤 Microphone Updated", f"Active microphone set to: {name}", level="success")
         elif cmd == "quit":
             if self.on_quit:
                 self.on_quit()
@@ -282,6 +310,54 @@ class RatatuiTui:
 
     def print_header(self):
         self._send({"t": "header"})
+
+    def send_device_list(self):
+        try:
+            import t2
+            devs = t2.get_input_devices()
+            self._send({"t": "devices", "devices": devs})
+        except Exception as e:
+            logger.debug(f"Failed to send devices: {e}")
+
+    def start_mic_monitor(self, device_idx=None):
+        self.stop_mic_monitor()
+        try:
+            import sounddevice as sd
+            import numpy as np
+            import t2
+
+            dev = device_idx if device_idx is not None else t2.INPUT_DEVICE_INDEX
+            self._mic_monitor_running = True
+
+            def audio_callback(indata, frames, time_info, status):
+                if not getattr(self, "_mic_monitor_running", False):
+                    raise sd.CallbackStop()
+                rms = float(np.sqrt(np.mean(indata**2)))
+                level = min(1.0, max(0.0, rms * 10.0))
+                self.update_vu_level(level)
+
+            self._mic_monitor_stream = sd.InputStream(
+                device=dev,
+                channels=1,
+                samplerate=16000,
+                blocksize=800,
+                callback=audio_callback,
+            )
+            self._mic_monitor_stream.start()
+        except Exception as e:
+            logger.debug(f"start_mic_monitor failed: {e}")
+
+    def stop_mic_monitor(self):
+        self._mic_monitor_running = False
+        stream = getattr(self, "_mic_monitor_stream", None)
+        if stream:
+            try:
+                stream.stop()
+                stream.close()
+            except Exception:
+                pass
+            self._mic_monitor_stream = None
+        self.update_vu_level(0.0)
 
     def update_state(self, state, sub_text=""):
         self.state = state

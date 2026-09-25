@@ -102,7 +102,7 @@ pub const SETTINGS: [SettingItem; 10] = [
 ];
 
 impl SettingItem {
-    pub fn value_and_badge(&self, app: &App) -> (String, &'static str, Color) {
+    pub fn value_and_badge(&self, app: &App, reset_done: bool) -> (String, &'static str, Color) {
         let c = app.effective_color().color();
         match self.kind {
             SettingKind::TrailingSpace => {
@@ -177,11 +177,21 @@ impl SettingItem {
                 };
                 (dev, "[SELECT]", Color::Yellow)
             }
-            SettingKind::ResetTerminal => (
-                "Reset terminal state & clipboard bridge".to_string(),
-                "[RUN]",
-                Color::Yellow,
-            ),
+            SettingKind::ResetTerminal => {
+                if reset_done {
+                    (
+                        "Terminal & clipboard bridge reset".to_string(),
+                        "[DONE]",
+                        Color::Green,
+                    )
+                } else {
+                    (
+                        "Reset terminal state & clipboard bridge".to_string(),
+                        "[RUN]",
+                        Color::Yellow,
+                    )
+                }
+            }
         }
     }
 }
@@ -253,6 +263,7 @@ pub struct SettingsPickerState {
     pub query: String,
     pub selected_index: usize,
     pub filtered_indices: Vec<usize>,
+    pub reset_done: bool,
 }
 
 impl SettingsPickerState {
@@ -261,6 +272,7 @@ impl SettingsPickerState {
             query: String::new(),
             selected_index: 0,
             filtered_indices: (0..SETTINGS.len()).collect(),
+            reset_done: false,
         }
     }
 
@@ -475,7 +487,7 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
             let actual_idx = scroll_offset + view_i;
             let is_selected = actual_idx == state.selected_index;
             let item = &SETTINGS[opt_idx];
-            let (val_str, badge, badge_color) = item.value_and_badge(app);
+            let (val_str, badge, badge_color) = item.value_and_badge(app, state.reset_done);
 
             let mut line_spans = Vec::new();
             if is_selected {
@@ -708,16 +720,31 @@ pub fn run_settings_picker(
                                     crossterm::terminal::enable_raw_mode()?;
                                 }
                                 SettingKind::Microphone => {
-                                    // Exit settings modal and trigger audio device selection
-                                    if let Some(w) = writer {
-                                        ipc::send_cmd(w, "change_device");
-                                    }
-                                    break;
+                                    // Open nested mic picker modal
+                                    let _ = crossterm::execute!(
+                                        io::stdout(),
+                                        crossterm::terminal::LeaveAlternateScreen
+                                    );
+                                    let _ = crate::mic_picker::run_mic_picker(
+                                        writer,
+                                        rx,
+                                        app,
+                                    );
+                                    let _ = crossterm::execute!(
+                                        io::stdout(),
+                                        crossterm::terminal::EnterAlternateScreen
+                                    );
+                                    crossterm::terminal::enable_raw_mode()?;
+                                    let _ = terminal.clear();
                                 }
                                 SettingKind::ResetTerminal => {
                                     if let Some(w) = writer {
                                         ipc::send_cmd(w, "reset_terminal");
                                     }
+                                    state.reset_done = true;
+                                    let _ = crossterm::terminal::enable_raw_mode();
+                                    let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Hide);
+                                    let _ = terminal.clear();
                                 }
                             }
                         }
@@ -785,7 +812,7 @@ mod tests {
         );
 
         // Test value and badge display
-        let (val, badge, _) = SETTINGS[0].value_and_badge(&app);
+        let (val, badge, _) = SETTINGS[0].value_and_badge(&app, false);
         assert!(!val.is_empty());
         assert!(!badge.is_empty());
 

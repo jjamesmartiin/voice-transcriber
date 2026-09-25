@@ -23,13 +23,29 @@ use std::os::unix::net::UnixStream;
 use std::sync::mpsc;
 use std::thread;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::app::{Level, OutStatus};
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+pub struct AudioDeviceInfo {
+    pub index: usize,
+    pub name: String,
+    #[serde(default)]
+    pub channels: usize,
+    #[serde(default)]
+    pub is_default: bool,
+    #[serde(default)]
+    pub is_active: bool,
+}
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "t")]
 pub enum Wire {
+    #[serde(rename = "devices")]
+    Devices {
+        devices: Vec<AudioDeviceInfo>,
+    },
     #[serde(rename = "state")]
     State {
         state: String,

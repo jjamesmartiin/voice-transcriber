@@ -11,6 +11,7 @@
 mod app;
 mod demo;
 mod ipc;
+mod mic_picker;
 mod settings_picker;
 mod theme_picker;
 mod ui;
@@ -160,6 +161,7 @@ impl Runtime {
     fn handle_wire(&mut self, app: &mut App, wire: Wire) -> io::Result<()> {
         let width = self.width();
         match wire {
+            Wire::Devices { devices } => app.update_devices(devices),
             Wire::State { state, sub } => app.update_state(RunState::from_wire(&state), sub),
             Wire::Vu { level } => app.update_vu(level),
             Wire::Cfg {
@@ -349,7 +351,9 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                                     app.should_quit = true;
                                 }
                                 Intent::ToggleRecord => ipc::send_cmd(&writer, "toggle_record"),
-                                Intent::ChangeDevice => ipc::send_cmd(&writer, "change_device"),
+                                Intent::ChangeDevice => {
+                                    mic_picker::run_mic_picker(Some(&writer), Some(&rx), &mut app)?;
+                                }
                                 Intent::ToggleMute => ipc::send_cmd(&writer, "toggle_mute"),
                                 Intent::ToggleAutoType => {
                                     ipc::send_cmd(&writer, "cycle_output_mode")
@@ -455,17 +459,7 @@ fn run_local(demo_enabled: bool, theme: Theme) -> io::Result<()> {
                                 }
                             }
                             Intent::ChangeDevice => {
-                                let devices = [
-                                    "HyperX QuadCast S",
-                                    "Built-in Analog Stereo",
-                                    "Blue Yeti",
-                                    "USB Audio Device",
-                                ];
-                                let idx = devices
-                                    .iter()
-                                    .position(|d| *d == app.active_device)
-                                    .unwrap_or(0);
-                                app.active_device = devices[(idx + 1) % devices.len()].to_string();
+                                mic_picker::run_mic_picker(None, None, &mut app)?;
                             }
                             Intent::ToggleMute => app.is_muted = !app.is_muted,
                             Intent::ToggleAutoType => {

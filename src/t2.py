@@ -237,6 +237,36 @@ def set_default_input_device(index):
             pass
 
 
+def get_input_devices():
+    """Return a list of available input audio devices with metadata."""
+    try:
+        import sounddevice as sd
+        devices = sd.query_devices()
+        input_devices = []
+        default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else None
+        for i, d in enumerate(devices):
+            if d.get('max_input_channels', 0) > 0:
+                name = d.get('name', f'Device {i}')
+                is_cur = False
+                if PRIMARY_DEVICE_NAME and PRIMARY_DEVICE_NAME.lower() in name.lower():
+                    is_cur = True
+                elif INPUT_DEVICE_INDEX is not None and i == INPUT_DEVICE_INDEX:
+                    is_cur = True
+                elif INPUT_DEVICE_INDEX is None and i == default_in:
+                    is_cur = True
+                input_devices.append({
+                    'index': i,
+                    'name': name,
+                    'channels': d.get('max_input_channels', 1),
+                    'is_default': (i == default_in),
+                    'is_active': is_cur,
+                })
+        return input_devices
+    except Exception as e:
+        logger.debug(f"Failed to query input devices: {e}")
+        return []
+
+
 def get_wireplumber_bt_autoswitch():
     """Check if WirePlumber autoswitch to headset profile is enabled."""
     import shutil
@@ -364,25 +394,26 @@ def reset_terminal():
     try:
         import os
         import subprocess
-        # Reset terminal state
-        os.system('reset')
+        # Only run external 'reset' command when NOT running inside vt-tui (which owns raw mode)
+        if not os.environ.get("VT_TUI_SOCKET") and not os.environ.get("VT_TUI_BIN"):
+            os.system('reset')
         
         # Kill stuck clipboard processes (Wayland)
         try:
             subprocess.run(['pkill', 'wl-copy'], stderr=subprocess.DEVNULL)
             subprocess.run(['pkill', 'wl-paste'], stderr=subprocess.DEVNULL)
-        except:
+        except Exception:
             pass
 
-        # Also re-initialize termios just in case
-        import termios, sys
-        fd = sys.stdin.fileno()
-        try:
-            termios.tcgetattr(fd)
-        except:
-            # If it's already broken, this might help
-            pass
-    except:
+        # Also re-initialize termios just in case (only if not in vt-tui)
+        if not os.environ.get("VT_TUI_SOCKET") and not os.environ.get("VT_TUI_BIN"):
+            import termios, sys
+            fd = sys.stdin.fileno()
+            try:
+                termios.tcgetattr(fd)
+            except Exception:
+                pass
+    except Exception:
         pass
 
 # Global device variable

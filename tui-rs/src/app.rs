@@ -162,6 +162,7 @@ pub struct App {
     pub spinner: usize,
     pub transcription_count: usize,
     pub active_device: String,
+    pub audio_devices: Vec<crate::ipc::AudioDeviceInfo>,
     #[allow(dead_code)]
     pub secondary_device: Option<String>,
     pub model_backend: String,
@@ -193,6 +194,22 @@ impl App {
             spinner: 0,
             transcription_count: 0,
             active_device: "HyperX QuadCast S".to_string(),
+            audio_devices: vec![
+                crate::ipc::AudioDeviceInfo {
+                    index: 0,
+                    name: "HyperX QuadCast S".to_string(),
+                    channels: 2,
+                    is_default: true,
+                    is_active: true,
+                },
+                crate::ipc::AudioDeviceInfo {
+                    index: 1,
+                    name: "Built-in Analog Stereo".to_string(),
+                    channels: 2,
+                    is_default: false,
+                    is_active: false,
+                },
+            ],
             secondary_device: Some("Built-in Analog Stereo".to_string()),
             model_backend: "cohere".to_string(),
             is_muted: true,
@@ -216,6 +233,12 @@ impl App {
             return self.ui_theme;
         }
         detect_system_theme()
+    }
+
+    pub fn update_devices(&mut self, devs: Vec<crate::ipc::AudioDeviceInfo>) {
+        if !devs.is_empty() {
+            self.audio_devices = devs;
+        }
     }
 
     pub fn elapsed_secs(&self) -> f32 {
