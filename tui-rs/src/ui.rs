@@ -329,12 +329,9 @@ pub fn transcription_block(
         Span::styled(format!(" {ts} "), dim()),
     ];
 
-    let mut used = 4 + format!(" ❯ #{} ", app.transcription_count).chars().count() + ts.len() + 2;
-
     if rec > 0.0 {
         spans.push(Span::styled("│ ", dim()));
         spans.push(Span::styled(format!("rec: {rec:.2}s "), cyan()));
-        used += 2 + format!("rec: {rec:.2}s ").chars().count();
     }
     if proc > 0.0 {
         spans.push(Span::styled("│ ", dim()));
@@ -342,30 +339,23 @@ pub fn transcription_block(
             format!("proc: {proc:.2}s "),
             Style::default().fg(Color::Yellow),
         ));
-        used += 2 + format!("proc: {proc:.2}s ").chars().count();
         spans.push(Span::styled("│ ", dim()));
         spans.push(Span::styled(
             format!("ready: {ready:.2}s "),
             Style::default().fg(Color::LightCyan),
         ));
-        used += 2 + format!("ready: {ready:.2}s ").chars().count();
     } else {
         spans.push(Span::styled("│ ", dim()));
         spans.push(Span::styled(
             format!("proc: {proc:.2}s "),
             Style::default().fg(Color::Yellow),
         ));
-        used += 2 + format!("proc: {proc:.2}s ").chars().count();
     }
     spans.push(Span::styled("│ ", dim()));
     spans.push(Span::styled(
-        format!("{status_str} "),
+        status_str,
         Style::default().fg(status_color),
     ));
-    used += 2 + status_str.len() + 1;
-
-    let right = (width as usize).saturating_sub(used).max(2);
-    spans.push(Span::styled("─".repeat(right), bold(c)));
 
     Block {
         top: Line::from(spans),

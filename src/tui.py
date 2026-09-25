@@ -375,10 +375,7 @@ class VoiceTranscriberTUI:
                 top_rule.append("│ ", style="dim white")
                 top_rule.append(f"proc: {elapsed_sec:.2f}s ", style="yellow")
             top_rule.append("│ ", style="dim white")
-            top_rule.append(f"{status_str} ", style=status_color)
-            rendered_len = len(top_rule.plain)
-            right_len = max(2, w - rendered_len)
-            top_rule.append("─" * right_len + "\n", style=f"bold {color}")
+            top_rule.append(f"{status_str}\n", style=status_color)
             self.console.print(top_rule)
 
             # Transcribed text body with prompt icon indent (clean wrapped, NO vertical side borders!)
