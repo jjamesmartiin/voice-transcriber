@@ -110,6 +110,14 @@ def cohere_models_dir():
     override = os.environ.get("VT_MODEL_DIR", "").strip()
     if override:
         return os.path.abspath(override)
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        for cand in [
+            os.path.join(sys._MEIPASS, "models", "cohere"),
+            os.path.join(sys._MEIPASS, "models"),
+            sys._MEIPASS,
+        ]:
+            if os.path.isdir(cand) and os.path.exists(os.path.join(cand, "config.json")):
+                return cand
     root = find_repo_root()
     if root:
         repo_dir = os.path.join(root, "models", "cohere")

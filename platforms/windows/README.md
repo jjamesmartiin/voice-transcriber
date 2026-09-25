@@ -47,8 +47,8 @@ python src\main.py
 - **Global Hotkeys**: Uses `pynput` and `keyboard` libraries to capture system-wide keystrokes even when Voice Transcriber is minimized or in the background.
 - **Audio Capture**: Captures 16kHz audio from your default Windows microphone via `sounddevice` (WASAPI/DirectSound).
 - **Audio Feedback**: Plays native Windows chimes (e.g. `Windows Proximity Notification.wav` or `Speech On/Off.wav`) via `winsound`.
-- **Active-Window Paste**: Copies transcription to Windows clipboard via `pyperclip` and injects `Ctrl+V` into your currently focused window via Win32 `keybd_event`.
-- **AI Processing**: Runs the full Whisper or Cohere model with streaming VAD, dynamic energy gating, and post-processing (Trie dictionary, formatting, number conversion).
+- **Active-Window Paste**: Copies transcription to Windows clipboard via `pyperclip` and injects keystrokes into your currently focused window via Win32 `SendInput` with full Unicode and emoji fidelity.
+- **AI Processing**: Runs the high-accuracy Cohere Transcribe model with streaming VAD, dynamic energy gating, and post-processing (Trie dictionary, formatting, number conversion).
 
 ---
 

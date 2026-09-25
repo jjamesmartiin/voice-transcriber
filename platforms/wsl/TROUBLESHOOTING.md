@@ -101,12 +101,8 @@ This guide covers common issues and resolutions for **Voice Transcriber (VT)** o
 
 ---
 
-### Switching Between Cohere and Faster-Whisper
-* **Offline / Fast Mode**: If you prefer fully offline transcription without Hugging Face authentication, switch to Faster-Whisper:
-  ```bash
-  VT_MODEL_BACKEND=whisper ./run.sh
-  ```
-  Or press **`Ctrl+Alt+I`** (or **`i`** in terminal) and press **`B`** to toggle backends.
+### Offline Operation
+* Once the Cohere Transcribe model is downloaded and cached locally on first run (in `~/.cache/huggingface/hub`), Voice Transcriber operates 100% offline without requiring internet access or active network connectivity.
 
 ---
 

@@ -29,7 +29,7 @@ This document explains how Voice Transcriber runs inside **NixOS on WSL2**, how 
 │  Audio Recorder (src/t2.py)                                 │
 │          │                                                  │
 │          ▼                                                  │
-│  Transcription Engine (Faster-Whisper / Cohere)             │
+│  Transcription Engine (Cohere Transcribe)                   │
 │  Managed entirely by Nix Flake (flake.nix)                  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -92,7 +92,7 @@ nix run .
 ```
 
 > **How it works:**
-> 1. Nix provides Faster-Whisper, PyTorch, PortAudio, and all Python dependencies in an isolated sandbox.
+> 1. Nix provides PyTorch, PortAudio, Cohere Transcribe, and all Python dependencies in an isolated sandbox.
 > 2. The app detects WSL and automatically connects to your Windows microphone via WSLg PulseAudio (`RDPSource`).
 > 3. It automatically connects a lightweight background bridge to Windows so you can press and hold **`Alt+Shift`** anywhere in Windows (Chrome, VS Code, Discord, etc.) to speak.
 > 4. When you release **`Alt+Shift`**, it transcribes in **~230ms** and pastes the text directly at your cursor in Windows.

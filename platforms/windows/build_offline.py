@@ -54,21 +54,13 @@ DIST_DIR = PROJECT_ROOT / "dist"
 MODELS_DIR = BUILD_DIR / "models"
 
 # Cache locations
-WHISPER_CACHE = Path(os.path.expanduser("~/.cache/whisper"))
 HF_CACHE = Path(os.path.expanduser("~/.cache/huggingface/hub"))
 
 def ensure_cached_models():
-    """Ensure both models are cached locally before building"""
+    """Ensure Cohere model is cached locally before building"""
     print("=" * 60)
-    print("Checking cached models...")
+    print("Checking cached Cohere model...")
     print("=" * 60)
-    
-    # Check Whisper
-    if WHISPER_CACHE.exists():
-        whisper_files = list(WHISPER_CACHE.glob("**/*"))
-        print(f"Whisper cache: {len(whisper_files)} files found")
-    else:
-        print("Whisper cache: NOT FOUND - will download during build")
     
     # Check Cohere
     cohere_model_dir = HF_CACHE / "models--CohereLabs--cohere-transcribe-03-2026"
@@ -90,13 +82,6 @@ def prepare_bundled_models():
         print("Cleaning up old build models...")
         shutil.rmtree(MODELS_DIR)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # Copy Whisper cache
-    if WHISPER_CACHE.exists():
-        dest_whisper = MODELS_DIR / "whisper"
-        copy_with_progress(WHISPER_CACHE, dest_whisper, "Copying Whisper cache")
-    else:
-        print("WARNING: No Whisper cache found - will be downloaded on first run")
     
     # Copy HuggingFace cache - Cohere model
     cohere_src = HF_CACHE / "models--CohereLabs--cohere-transcribe-03-2026"

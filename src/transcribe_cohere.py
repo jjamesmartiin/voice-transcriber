@@ -355,6 +355,10 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "cohere"),
         os.path.join(os.getcwd(), "models", "cohere"),
     ]
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        search_dirs.insert(0, os.path.join(sys._MEIPASS, "models", "cohere"))
+        search_dirs.insert(0, os.path.join(sys._MEIPASS, "models"))
+        search_dirs.insert(0, sys._MEIPASS)
     # Install target of the GitHub-release auto-installer: <repo>/models/cohere
     # when running from a git checkout, else the per-user dir (read-only Nix
     # store / AppImage installs).
