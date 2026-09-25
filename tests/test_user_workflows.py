@@ -134,6 +134,8 @@ class TestHandsFreeLatchWorkflow:
         cb_start = MagicMock()
         cb_stop = MagicMock()
         manager = LinuxHotkeyManager(cb_start, cb_stop)
+        if not getattr(manager, "evdev", None):
+            pytest.skip("Linux evdev dependency not available on this platform")
         manager.virtual_keyboard = MagicMock()
         manager.uinput = MagicMock()
 
@@ -212,6 +214,8 @@ class TestMiddleClickWorkflow:
         cb_start = MagicMock()
         cb_stop = MagicMock()
         manager = LinuxHotkeyManager(cb_start, cb_stop)
+        if not getattr(manager, "evdev", None):
+            pytest.skip("Linux evdev dependency not available on this platform")
         manager.virtual_keyboard = MagicMock()
         manager.uinput = MagicMock()
 
