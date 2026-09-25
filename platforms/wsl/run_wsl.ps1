@@ -45,7 +45,8 @@ $hasNixOS = $distros -match "NixOS"
 if (-not $hasNixOS) {
     Write-Warn "NixOS distribution not found in WSL."
     Write-Step "Checking for downloaded nixos.wsl image..."
-    $imagePath = "C:\Users\jjame\WSL\nixos.wsl"
+    $imageDir = Join-Path $env:USERPROFILE "WSL"
+    $imagePath = Join-Path $imageDir "nixos.wsl"
     if (Test-Path $imagePath) {
         Write-Step "Importing NixOS distribution from $imagePath ..."
         wsl --install --from-file $imagePath

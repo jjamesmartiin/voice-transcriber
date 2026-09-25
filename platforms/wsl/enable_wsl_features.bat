@@ -23,7 +23,12 @@ dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux 
 
 echo.
 echo [3/3] Importing NixOS distribution...
-wsl.exe --install --from-file "C:\Users\jjame\WSL\nixos.wsl"
+if exist "%USERPROFILE%\WSL\nixos.wsl" (
+    wsl.exe --install --from-file "%USERPROFILE%\WSL\nixos.wsl"
+) else (
+    echo [i] NixOS WSL image not found at %USERPROFILE%\WSL\nixos.wsl.
+    echo Please run platforms\wsl\setup_wsl.ps1 to download and register it automatically.
+)
 
 echo.
 echo ========================================================

@@ -143,7 +143,10 @@ class WindowsHotkeyManager(BaseHotkeyManager):
                         self.middle_click_active = False
                         if not self._is_main_hotkey_pressed():
                             self.hotkey_active = False
-                            if self.callback_stop:
+                            if self.latch_release:
+                                logger.debug("⏸️ Space-latched release - continuing recording hands-free")
+                                self.latch_release = False
+                            elif self.callback_stop:
                                 self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
         except Exception as e:
             logger.error(f"Error in mouse click handler: {e}")
@@ -190,8 +193,14 @@ class WindowsHotkeyManager(BaseHotkeyManager):
 
     def _on_press(self, key):
         try:
-            key_val = key if isinstance(key, self._KeyCode) else key
+            key_val = key if (isinstance(self._KeyCode, type) and isinstance(key, self._KeyCode)) else key
             self.pressed_keys.add(key_val)
+
+            # Space pressed while recording is active engages hands-free latch
+            is_space = (self._Key and key == self._Key.space) or (getattr(key, "char", None) == " ")
+            if is_space and self.hotkey_active:
+                logger.debug("Space latched - recording will hold after release")
+                self.latch_release = True
 
             if self._is_main_hotkey_pressed() and not self.hotkey_active:
                 logger.info("🎤 Starting recording...")
@@ -207,15 +216,19 @@ class WindowsHotkeyManager(BaseHotkeyManager):
 
     def _on_release(self, key):
         try:
-            key_val = key if isinstance(key, self._KeyCode) else key
+            key_val = key if (isinstance(self._KeyCode, type) and isinstance(key, self._KeyCode)) else key
             if key_val in self.pressed_keys:
                 self.pressed_keys.remove(key_val)
 
             if self.hotkey_active and not self.middle_click_active and not self._is_main_hotkey_pressed():
-                logger.info("🛑 Stopping recording...")
                 self.hotkey_active = False
-                if self.callback_stop:
-                    self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
+                if self.latch_release:
+                    logger.debug("⏸️ Space-latched release - continuing recording hands-free")
+                    self.latch_release = False
+                else:
+                    logger.info("🛑 Stopping recording...")
+                    if self.callback_stop:
+                        self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
         except Exception as e:
             logger.error(f"Error in key release handler: {e}")
 

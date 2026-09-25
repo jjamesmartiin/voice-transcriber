@@ -34,6 +34,9 @@ class WSLClipboardSink(BaseClipboardSink):
     def __init__(self, bridge=None):
         self.bridge = bridge
 
+    def set_bridge(self, bridge) -> None:
+        self.bridge = bridge
+
     def copy_text(self, text: str) -> bool:
         clip_exe = shutil.which("clip.exe") or _CLIP_FALLBACK
         try:
@@ -64,8 +67,11 @@ class WSLClipboardSink(BaseClipboardSink):
         """Trigger a synthetic Ctrl+V paste in the active Windows window."""
         if self.bridge is not None:
             try:
-                self.bridge.stop(copy_clipboard=True)
-                return True
+                if hasattr(self.bridge, "paste_text"):
+                    return bool(self.bridge.paste_text())
+                elif hasattr(self.bridge, "stop"):
+                    self.bridge.stop(copy_clipboard=True)
+                    return True
             except Exception as e:
                 logger.warning(f"WSL bridge paste failed: {e}")
         return False

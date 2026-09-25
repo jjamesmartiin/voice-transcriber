@@ -112,7 +112,8 @@ class SimpleVoiceTranscriber:
         # Proactively check microphone health on startup
         is_healthy, mic_issues = t2.check_microphone_health()
         if not is_healthy:
-            warn_msg = "⚠️ HARDWARE MICROPHONE NOT DETECTED BY WSL!\n" + "\n".join([f" • {issue}" for issue in mic_issues])
+            platform_name = self.platform.upper()
+            warn_msg = f"⚠️ HARDWARE MICROPHONE NOT DETECTED ({platform_name})!\n" + "\n".join([f" • {issue}" for issue in mic_issues])
             self.tui.print_warning("MICROPHONE HARDWARE WARNING", warn_msg)
         
         # Initialize visual notification (platform-appropriate backend)
@@ -465,6 +466,8 @@ class SimpleVoiceTranscriber:
                 # WSL forwards earcons through the same bridge process.
                 if hasattr(self.audio_cues, 'set_bridge'):
                     self.audio_cues.set_bridge(self.hotkey_system)
+                if hasattr(self.clipboard_sink, 'set_bridge'):
+                    self.clipboard_sink.set_bridge(self.hotkey_system)
                 return True
             else:
                 logger.error("Failed to initialize global hotkey system")
@@ -818,7 +821,7 @@ if __name__ == "__main__":
     def check_permissions():
         """Check if user has proper permissions for input device access"""
         from hotkeys import is_running_in_wsl
-        if is_running_in_wsl():
+        if is_running_in_wsl() or sys.platform.startswith("win") or hal.detect_platform() == hal.WINDOWS:
             return True
             
         import grp

@@ -415,21 +415,22 @@ def reset_terminal():
         import os
         import subprocess
         # Only run external 'reset' command when NOT running inside vt-tui (which owns raw mode)
-        if not os.environ.get("VT_TUI_SOCKET") and not os.environ.get("VT_TUI_BIN"):
+        if sys.platform != "win32" and not os.environ.get("VT_TUI_SOCKET") and not os.environ.get("VT_TUI_BIN"):
             os.system('reset')
         
         # Kill stuck clipboard processes (Wayland)
-        try:
-            subprocess.run(['pkill', 'wl-copy'], stderr=subprocess.DEVNULL)
-            subprocess.run(['pkill', 'wl-paste'], stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+        if sys.platform != "win32":
+            try:
+                subprocess.run(['pkill', 'wl-copy'], stderr=subprocess.DEVNULL)
+                subprocess.run(['pkill', 'wl-paste'], stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
 
         # Also re-initialize termios just in case (only if not in vt-tui)
-        if not os.environ.get("VT_TUI_SOCKET") and not os.environ.get("VT_TUI_BIN"):
-            import termios, sys
-            fd = sys.stdin.fileno()
+        if sys.platform != "win32" and not os.environ.get("VT_TUI_SOCKET") and not os.environ.get("VT_TUI_BIN"):
             try:
+                import termios, sys
+                fd = sys.stdin.fileno()
                 termios.tcgetattr(fd)
             except Exception:
                 pass
@@ -887,6 +888,31 @@ def get_dictionary():
 
 
 def _read_key():
+    if sys.platform == "win32":
+        try:
+            import msvcrt
+            ch = msvcrt.getwch()
+            if ch in ('\x00', '\xe0'):
+                ch2 = msvcrt.getwch()
+                if ch2 == 'H': return 'UP'
+                elif ch2 == 'P': return 'DOWN'
+                elif ch2 == 'M': return 'RIGHT'
+                elif ch2 == 'K': return 'LEFT'
+                return ''
+            elif ch == '\x1b':
+                return 'ESC'
+            elif ch in ('\r', '\n'):
+                return 'ENTER'
+            elif ch in ('\x7f', '\x08'):
+                return 'BACKSPACE'
+            elif ch == '\x03':
+                return 'CTRL_C'
+            elif ch == '\t':
+                return 'DOWN'
+            return ch
+        except Exception:
+            return sys.stdin.read(1)
+
     import termios, tty, select
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -1576,6 +1602,20 @@ def countdown_timer():
 
 def check_for_stop_key():
     """Check for space key"""
+    if sys.platform == "win32":
+        try:
+            import msvcrt
+            while not stop_recording.is_set():
+                if msvcrt.kbhit():
+                    c = msvcrt.getwch()
+                    if c == ' ':
+                        stop_recording.set()
+                        break
+                time.sleep(0.05)
+        except Exception:
+            pass
+        return
+
     import select
     try:
         import termios, tty
@@ -1675,6 +1715,13 @@ def record_and_transcribe():
 
 def getch():
     """Get single character with echo"""
+    if sys.platform == "win32":
+        try:
+            import msvcrt
+            return msvcrt.getwche()
+        except Exception:
+            return sys.stdin.read(1)
+
     try:
         import termios, tty
         fd = sys.stdin.fileno()

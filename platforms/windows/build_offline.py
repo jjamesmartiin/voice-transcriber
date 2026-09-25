@@ -164,22 +164,19 @@ def build_exe():
         "--hidden-import=numpy",
         "--hidden-import=torch",
         "--hidden-import=transformers",
-        "--hidden-import=faster_whisper",
         "--hidden-import=pynput",
         "--hidden-import=keyboard",
         "--hidden-import=pyperclip",
         "--hidden-import=psutil",
         "--hidden-import=tqdm",
         "--hidden-import=tokenizers",
-        "--hidden-import=ctranslate2",
         "--hidden-import=onnxruntime",
+        "--hidden-import=rich",
         
         # Collect all for these packages
         "--collect-all=transformers",
-        "--collect-all=faster_whisper",
         "--collect-all=torch",
         "--collect-all=tokenizers",
-        "--collect-all=ctranslate2",
         
         # Disable upx to avoid issues with large bundles
         "--upx-dir=NONE",

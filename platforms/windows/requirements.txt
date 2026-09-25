@@ -19,11 +19,9 @@ certifi==2026.2.25
 cffi==2.0.0
 charset-normalizer==3.4.7
 colorama==0.4.6
-ctranslate2==4.7.1
 datasets==4.8.4
 decorator==5.2.1
 dill==0.4.1
-faster-whisper==1.2.1
 filelock==3.28.0
 flatbuffers==25.12.19
 frozenlist==1.8.0
@@ -63,6 +61,7 @@ python-dateutil==2.9.0.post0
 PyYAML==6.0.3
 regex==2026.4.4
 requests==2.33.1
+rich>=13.0.0
 safetensors==0.7.0
 scikit-learn==1.8.0
 scipy==1.17.1

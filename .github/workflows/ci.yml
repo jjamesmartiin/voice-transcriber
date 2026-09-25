@@ -33,3 +33,26 @@ jobs:
             tests/test_micro_batcher_fast.py \
             tests/test_tui.py \
             -q
+
+  unit-tests-windows:
+    name: Unit tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest numpy soundfile pyyaml pyperclip pynput keyboard rich
+
+      - name: Run Windows unit tests
+        env:
+          VT_PLATFORM: windows
+          PYTHONPATH: src
+        run: |
+          python -m pytest tests/test_platform_hal.py tests/test_dictionary.py tests/test_config_sync.py tests/test_post_processor.py tests/test_tui.py -q

@@ -13,8 +13,12 @@ import os
 import time
 import select
 import threading
-import termios
-import tty
+try:
+    import termios
+    import tty
+except ImportError:
+    termios = None
+    tty = None
 import atexit
 import shutil
 from datetime import datetime
@@ -467,8 +471,13 @@ class VoiceTranscriberTUI:
     def _start_stdin_listener(self):
         """Start background thread watching stdin for direct terminal keypresses"""
         try:
+            if os.name == 'nt':
+                self.stdin_thread = threading.Thread(target=self._stdin_loop, daemon=True)
+                self.stdin_thread.start()
+                return
+
             fd = sys.stdin.fileno()
-            if os.isatty(fd):
+            if os.isatty(fd) and termios and tty:
                 self.old_termios = termios.tcgetattr(fd)
                 tty.setcbreak(fd)
                 atexit.register(self._restore_terminal)
@@ -479,7 +488,7 @@ class VoiceTranscriberTUI:
             pass
 
     def _restore_terminal(self):
-        if self.old_termios:
+        if self.old_termios and termios:
             try:
                 fd = sys.stdin.fileno()
                 termios.tcsetattr(fd, termios.TCSADRAIN, self.old_termios)
@@ -489,6 +498,23 @@ class VoiceTranscriberTUI:
 
     def _stdin_loop(self):
         """Loop listening for single terminal keypresses"""
+        if os.name == 'nt':
+            try:
+                import msvcrt
+                while self.running:
+                    try:
+                        if msvcrt.kbhit():
+                            ch = msvcrt.getwch()
+                            if ch:
+                                self._handle_keypress(ch)
+                        else:
+                            time.sleep(0.05)
+                    except Exception:
+                        break
+            except ImportError:
+                pass
+            return
+
         fd = sys.stdin.fileno()
         while self.running:
             try:

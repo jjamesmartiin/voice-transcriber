@@ -96,32 +96,11 @@ class WindowsVisualNotification:
         self.active_overlay.start()
 
     def _play_sound(self, sound_type):
-        try:
-            import t2
-
-            if getattr(t2, "IS_MUTED", False):
-                return
-        except Exception:
-            pass
-
-        def play():
-            try:
-                import winsound
-
-                alias = {
-                    "start": "SystemExclamation",
-                    "stop": "SystemAsterisk",
-                    "complete": "SystemExit",
-                }.get(sound_type, "SystemAsterisk")
-                winsound.PlaySound(alias, winsound.SND_ASYNC)
-            except Exception as e:
-                logger.debug(f"Sound failed: {e}")
-
-        threading.Thread(target=play, daemon=True).start()
+        # Audio cue playback is handled centrally by WindowsAudioCuePlayer via hal.
+        pass
 
     def show_recording(self):
         logger.info("Recording...")
-        self._play_sound("start")
         self._show_tkinter_overlay("● RECORDING", "#ff4444")
 
     def show_processing(self, message="Processing"):
@@ -133,7 +112,6 @@ class WindowsVisualNotification:
         if sub_text:
             message = f"✓ {sub_text[:30]}..."
         logger.info(f"Transcription: {sub_text}")
-        self._play_sound("complete")
         self._show_tkinter_overlay(message, "#00aa44")
 
     def show_error(self, message):

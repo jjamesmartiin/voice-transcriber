@@ -22,7 +22,7 @@ $env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
 $env:VT_PLATFORM = "windows"
 
 if (-not $env:VT_MODEL_BACKEND) {
-    $env:VT_MODEL_BACKEND = "whisper"
+    $env:VT_MODEL_BACKEND = "cohere"
 }
 
 # Verify Python

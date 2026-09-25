@@ -1,7 +1,7 @@
 # NixOS-WSL Setup Script for Voice Transcriber
 # Run this in an Administrator PowerShell prompt if Windows features are not yet enabled:
 # Right-click PowerShell -> "Run as Administrator", then run:
-# Set-Location "C:\Users\jjame\gitprojects\vt2" ; .\setup_wsl.ps1
+# Set-Location <path-to-repo> ; .\setup_wsl.ps1
 
 $ErrorActionPreference = "Stop"
 
@@ -34,7 +34,7 @@ try {
 
 # Step 2: Check / Download NixOS-WSL image
 Write-Step "2. Checking NixOS-WSL Image..."
-$imageDir = "C:\Users\jjame\WSL"
+$imageDir = Join-Path $env:USERPROFILE "WSL"
 $imagePath = Join-Path $imageDir "nixos.wsl"
 
 if (-not (Test-Path $imagePath)) {
@@ -76,7 +76,12 @@ Write-Success "Nix Flakes and PULSE_SERVER configured."
 # Step 5: Test Microphone Audio Passthrough
 Write-Step "5. Testing Microphone Audio Passthrough inside NixOS..."
 Write-Host "Querying audio devices inside NixOS WSL..." -ForegroundColor Cyan
-wsl -d NixOS -- bash -c "export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native; cd /mnt/c/Users/jjame/gitprojects/vt2 && python3 src/check_devices.py 2>/dev/null || true"
+
+$ScriptDir = $PSScriptRoot
+if (-not $ScriptDir) { $ScriptDir = Get-Location }
+$ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+$wslProjectPath = (wsl -d NixOS wslpath -u ($ProjectRoot.Replace('\', '/')) 2>&1).Trim()
+wsl -d NixOS -- bash -c "export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native; cd '$wslProjectPath' && python3 src/check_devices.py 2>/dev/null || true"
 
 Write-Host @"
 ======================================================
