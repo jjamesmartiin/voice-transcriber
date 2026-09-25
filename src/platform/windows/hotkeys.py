@@ -80,7 +80,10 @@ class WindowsHotkeyManager(BaseHotkeyManager):
                 on_release=self._on_release,
             )
             self.listener.start()
-            kb_lib.on_press(self._on_config_press, suppress=False)
+            try:
+                kb_lib.on_press(self._on_config_press, suppress=False)
+            except Exception as e:
+                logger.debug(f"Could not hook config keypresses: {e}")
 
             if self._pynput_mouse:
                 try:

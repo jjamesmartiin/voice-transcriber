@@ -90,11 +90,17 @@ def cleanup_after_tests():
     import gc
     gc.collect()
 
-def pytest_sessionfinish(session, exitstatus):
+def pytest_unconfigure(config):
     """
     Bypass buggy C-library (PyTorch/OpenBLAS) static destructors during Py_FinalizeEx
-    by performing a clean os._exit using pytest's exit status.
+    by performing a clean os._exit using pytest's exit status after all reporting.
     """
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    exitstatus = getattr(config, "_exitstatus", 0)
     os._exit(exitstatus)
 
 @pytest.fixture(scope="session")

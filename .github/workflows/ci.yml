@@ -56,4 +56,4 @@ jobs:
           VT_PLATFORM: windows
           PYTHONPATH: src
         run: |
-          python -m pytest tests/test_platform_hal.py tests/test_dictionary.py tests/test_config_sync.py tests/test_post_processor.py tests/test_tui.py tests/test_user_workflows.py -q
+          python -m pytest tests/test_platform_hal.py tests/test_dictionary.py tests/test_config_sync.py tests/test_post_processor.py tests/test_tui.py tests/test_user_workflows.py -v --tb=short
