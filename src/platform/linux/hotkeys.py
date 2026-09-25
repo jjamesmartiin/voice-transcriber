@@ -87,7 +87,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
 
     def type_text(self, text, fast: bool = False):
         """Type text using the virtual keyboard device."""
-        if not self.virtual_keyboard:
+        if not self.virtual_keyboard or not self.uinput:
             logger.warning("Virtual keyboard not available for typing")
             return False
 
@@ -203,7 +203,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
 
     def paste_text(self, terminal: bool = False) -> bool:
         """Emit Ctrl+V (or Ctrl+Shift+V for terminal) via the virtual keyboard."""
-        if not self.virtual_keyboard:
+        if not self.virtual_keyboard or not self.uinput:
             logger.warning("Virtual keyboard not available for paste")
             return False
 

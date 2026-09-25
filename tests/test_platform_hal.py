@@ -181,6 +181,7 @@ class TestPasteTextSupport:
         LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
         manager = LinuxHotkeyManager(MagicMock(), MagicMock())
         manager.virtual_keyboard = MagicMock()
+        manager.uinput = MagicMock()
         try:
             assert manager.paste_text(terminal=False) is True
             assert manager.virtual_keyboard.emit.call_count >= 4
@@ -196,6 +197,7 @@ class TestPasteTextSupport:
         LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
         manager = LinuxHotkeyManager(MagicMock(), MagicMock())
         manager.virtual_keyboard = MagicMock()
+        manager.uinput = MagicMock()
         try:
             # Slow mode
             assert manager.type_text("Hi", fast=False) is True
