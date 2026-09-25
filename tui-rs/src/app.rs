@@ -198,6 +198,7 @@ impl App {
                 crate::ipc::AudioDeviceInfo {
                     index: 0,
                     name: "HyperX QuadCast S".to_string(),
+                    display_name: Some("HyperX QuadCast S".to_string()),
                     channels: 2,
                     is_default: true,
                     is_active: true,
@@ -205,6 +206,7 @@ impl App {
                 crate::ipc::AudioDeviceInfo {
                     index: 1,
                     name: "Built-in Analog Stereo".to_string(),
+                    display_name: Some("Built-in Analog Stereo".to_string()),
                     channels: 2,
                     is_default: false,
                     is_active: false,

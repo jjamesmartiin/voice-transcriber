@@ -47,13 +47,14 @@ impl MicPickerState {
             let mut scored: Vec<(usize, i32)> = Vec::new();
             for (i, dev) in devices.iter().enumerate() {
                 let name = dev.name.to_lowercase();
-                if name == q {
+                let disp = dev.display_name.as_deref().unwrap_or("").to_lowercase();
+                if name == q || disp == q {
                     scored.push((i, 1000));
-                } else if name.starts_with(&q) {
+                } else if name.starts_with(&q) || disp.starts_with(&q) {
                     scored.push((i, 800 - q.len() as i32));
-                } else if let Some(pos) = name.find(&q) {
+                } else if let Some(pos) = name.find(&q).or_else(|| disp.find(&q)) {
                     scored.push((i, 600 - pos as i32 * 10));
-                } else if let Some(dist) = fuzzy_subsequence(&q, &name) {
+                } else if let Some(dist) = fuzzy_subsequence(&q, &name).or_else(|| fuzzy_subsequence(&q, &disp)) {
                     scored.push((i, 200 - dist as i32));
                 }
             }
@@ -254,7 +255,8 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
         .constraints([
             Constraint::Length(1), // Search input
             Constraint::Length(1), // Divider
-            Constraint::Min(6),    // Device list
+            Constraint::Length(1), // Live monitor note / tip
+            Constraint::Min(5),    // Device list
             Constraint::Length(1), // Bottom divider
             Constraint::Length(1), // Help footer
         ])
@@ -270,7 +272,7 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
     ];
     if state.query.is_empty() {
         search_spans.push(Span::styled(
-            "type to search (e.g. quadcast, usb, built-in)...",
+            "type to search (e.g. default, usb, quadcast)...",
             Style::default().add_modifier(Modifier::DIM),
         ));
     } else {
@@ -289,8 +291,15 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
     );
     frame.render_widget(Paragraph::new(Line::from(vec![sep_line])), chunks[1]);
 
+    // Live audio level helper tip
+    let tip = Line::from(vec![
+        Span::styled("  💡 Live Monitor: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled("Speak or hold Alt+Shift to preview audio levels in real time", Style::default().add_modifier(Modifier::DIM)),
+    ]);
+    frame.render_widget(Paragraph::new(tip), chunks[2]);
+
     // Device list
-    let list_area = chunks[2];
+    let list_area = chunks[3];
     let devices = &app.audio_devices;
 
     if state.filtered_indices.is_empty() {
@@ -340,11 +349,12 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
             // Total list_area.width = 2 (pointer) + 3 (icon) + name_w + 1 (gap) + 18 (vu) + 1 (gap) + 10 (badge)
             let fixed_w = 2 + 3 + 1 + 18 + 1 + 10;
             let name_w = (list_area.width as usize).saturating_sub(fixed_w).max(16);
-            let name_disp = if dev.name.chars().count() > name_w {
-                let head: String = dev.name.chars().take(name_w.saturating_sub(3)).collect();
+            let title = dev.display_name.as_deref().unwrap_or(&dev.name);
+            let name_disp = if title.chars().count() > name_w {
+                let head: String = title.chars().take(name_w.saturating_sub(3)).collect();
                 format!("{head}...")
             } else {
-                dev.name.clone()
+                title.to_string()
             };
 
             if is_selected {
@@ -408,7 +418,7 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
         "─".repeat(inner.width as usize),
         Style::default().fg(Color::DarkGray),
     );
-    frame.render_widget(Paragraph::new(Line::from(vec![bot_sep])), chunks[3]);
+    frame.render_widget(Paragraph::new(Line::from(vec![bot_sep])), chunks[4]);
 
     // Footer
     let footer = Line::from(vec![
@@ -421,7 +431,7 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
         Span::styled("[Esc] ", Style::default().fg(Color::Red)),
         Span::styled("Cancel", Style::default().add_modifier(Modifier::DIM)),
     ]);
-    frame.render_widget(Paragraph::new(footer), chunks[4]);
+    frame.render_widget(Paragraph::new(footer), chunks[5]);
 }
 
 /// Run the interactive mic picker on the alternate screen.
@@ -559,6 +569,7 @@ mod tests {
             AudioDeviceInfo {
                 index: 0,
                 name: "HyperX QuadCast S".to_string(),
+                display_name: Some("HyperX QuadCast S".to_string()),
                 channels: 2,
                 is_default: true,
                 is_active: true,
@@ -566,6 +577,7 @@ mod tests {
             AudioDeviceInfo {
                 index: 1,
                 name: "Built-in Analog Stereo".to_string(),
+                display_name: Some("Built-in Analog Stereo".to_string()),
                 channels: 2,
                 is_default: false,
                 is_active: false,
@@ -573,6 +585,7 @@ mod tests {
             AudioDeviceInfo {
                 index: 2,
                 name: "Blue Yeti Microphone".to_string(),
+                display_name: Some("Blue Yeti Microphone".to_string()),
                 channels: 2,
                 is_default: false,
                 is_active: false,

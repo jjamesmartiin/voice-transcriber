@@ -327,23 +327,42 @@ class RatatuiTui:
             import t2
 
             dev = device_idx if device_idx is not None else t2.INPUT_DEVICE_INDEX
+            if dev is None:
+                dev = "default"
             self._mic_monitor_running = True
 
             def audio_callback(indata, frames, time_info, status):
                 if not getattr(self, "_mic_monitor_running", False):
                     raise sd.CallbackStop()
                 rms = float(np.sqrt(np.mean(indata**2)))
-                level = min(1.0, max(0.0, rms * 10.0))
+                level = min(1.0, max(0.0, rms * 8.0))
                 self.update_vu_level(level)
 
-            self._mic_monitor_stream = sd.InputStream(
-                device=dev,
-                channels=1,
-                samplerate=16000,
-                blocksize=800,
-                callback=audio_callback,
-            )
-            self._mic_monitor_stream.start()
+            target_rate = 16000
+            try:
+                dev_info = sd.query_devices(dev)
+                target_rate = int(dev_info.get("default_samplerate", 16000))
+            except Exception:
+                pass
+
+            try:
+                self._mic_monitor_stream = sd.InputStream(
+                    device=dev,
+                    channels=1,
+                    samplerate=16000,
+                    blocksize=800,
+                    callback=audio_callback,
+                )
+                self._mic_monitor_stream.start()
+            except Exception:
+                self._mic_monitor_stream = sd.InputStream(
+                    device=dev,
+                    channels=1,
+                    samplerate=target_rate,
+                    blocksize=int(target_rate * 0.05),
+                    callback=audio_callback,
+                )
+                self._mic_monitor_stream.start()
         except Exception as e:
             logger.debug(f"start_mic_monitor failed: {e}")
 

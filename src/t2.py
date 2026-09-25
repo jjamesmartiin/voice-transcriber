@@ -238,30 +238,50 @@ def set_default_input_device(index):
 
 
 def get_input_devices():
-    """Return a list of available input audio devices with metadata."""
+    """Return a list of available input audio devices with metadata, prioritizing system defaults."""
     try:
         import sounddevice as sd
         devices = sd.query_devices()
-        input_devices = []
+        server_devices = []
+        hardware_devices = []
         default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else None
+
         for i, d in enumerate(devices):
             if d.get('max_input_channels', 0) > 0:
                 name = d.get('name', f'Device {i}')
+                lower = name.lower()
                 is_cur = False
-                if PRIMARY_DEVICE_NAME and PRIMARY_DEVICE_NAME.lower() in name.lower():
+                if PRIMARY_DEVICE_NAME and PRIMARY_DEVICE_NAME.lower() in lower:
                     is_cur = True
                 elif INPUT_DEVICE_INDEX is not None and i == INPUT_DEVICE_INDEX:
                     is_cur = True
-                elif INPUT_DEVICE_INDEX is None and i == default_in:
+                elif INPUT_DEVICE_INDEX is None and (i == default_in or lower == 'default'):
                     is_cur = True
-                input_devices.append({
+
+                display_name = name
+                if lower == 'default':
+                    display_name = 'System Default (Recommended)'
+                elif lower == 'pipewire':
+                    display_name = 'PipeWire Sound Server'
+                elif lower == 'pulse':
+                    display_name = 'PulseAudio Sound Server'
+
+                item = {
                     'index': i,
                     'name': name,
+                    'display_name': display_name,
                     'channels': d.get('max_input_channels', 1),
-                    'is_default': (i == default_in),
+                    'is_default': (i == default_in or lower == 'default'),
                     'is_active': is_cur,
-                })
-        return input_devices
+                }
+                if lower in ('default', 'pipewire', 'pulse'):
+                    server_devices.append(item)
+                else:
+                    hardware_devices.append(item)
+
+        # System default first, then PipeWire, then hardware devices
+        server_devices.sort(key=lambda x: 0 if x['name'].lower() == 'default' else 1)
+        return server_devices + hardware_devices
     except Exception as e:
         logger.debug(f"Failed to query input devices: {e}")
         return []
@@ -1500,6 +1520,30 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                 print("Fallback successful!")
         else:
             print("No valid secondary device found or secondary device is the same as failed device.")
+
+    # Ultimate fallback: try system default audio device if primary/secondary failed
+    if frames is None:
+        try:
+            with silence_stderr():
+                default_idx = find_device_index('default') or find_device_index('pipewire')
+            if default_idx is not None and default_idx != INPUT_DEVICE_INDEX:
+                print(f"Device failed. Attempting fallback to system default (index {default_idx})...")
+                frames = perform_recording(default_idx, RATE)
+                if frames is None:
+                    try:
+                        with silence_stderr():
+                            d_info = sd.query_devices(default_idx)
+                        d_rate = int(d_info['default_samplerate'])
+                        frames = perform_recording(default_idx, d_rate)
+                    except Exception:
+                        pass
+                if frames is not None:
+                    INPUT_DEVICE_INDEX = default_idx
+                    set_default_input_device(default_idx)
+                    print("System default fallback successful!")
+        except Exception:
+            pass
+
     elif frames is None:
         print(f"Recording failed on {OVERRIDE_MODE} device.")
 

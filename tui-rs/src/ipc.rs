@@ -32,6 +32,8 @@ pub struct AudioDeviceInfo {
     pub index: usize,
     pub name: String,
     #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
     pub channels: usize,
     #[serde(default)]
     pub is_default: bool,
