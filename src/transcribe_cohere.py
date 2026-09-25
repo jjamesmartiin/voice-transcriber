@@ -473,29 +473,7 @@ def preload_model(device="cpu"):
     thread.start()
     return thread
 
-def has_speech_activity(audio_data):
-    """Check if audio contains actual speech energy rather than silence / noise floor"""
-    if audio_data is None:
-        return False
-    if isinstance(audio_data, np.ndarray):
-        arr = audio_data
-    else:
-        arr = np.asarray(audio_data, dtype=np.float32)
-    if arr.size == 0:
-        return False
-    # Short-circuit peak computation first using max and min to avoid allocating an intermediate array
-    max_val = float(np.max(arr))
-    min_val = float(np.min(arr))
-    peak = max(abs(max_val), abs(min_val))
-    if peak >= 0.015:
-        return True
-    # If peak is borderline, compute RMS energy via zero-allocation SIMD dot product
-    if arr.dtype != np.float32:
-        arr = arr.astype(np.float32, copy=False)
-    if arr.ndim > 1:
-        arr = arr.ravel()
-    rms = float(np.sqrt(np.dot(arr, arr) / len(arr)))
-    return rms >= 0.0035
+from micro_batcher import has_speech_activity
 
 def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device="cpu", language="en"):
     # Guard against pure silence / background noise

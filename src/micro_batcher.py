@@ -22,6 +22,30 @@ from post_processor import clean_speech_transcription, STUTTER_PROTECTED_WORDS
 # VAD / worker energy gate).
 SPEECH_PEAK_THRESH = 0.015
 
+def has_speech_activity(audio_data):
+    """Check if audio contains actual speech energy rather than silence / noise floor"""
+    if audio_data is None:
+        return False
+    if isinstance(audio_data, np.ndarray):
+        arr = audio_data
+    else:
+        arr = np.asarray(audio_data, dtype=np.float32)
+    if arr.size == 0:
+        return False
+    # Short-circuit peak computation first using max and min to avoid allocating an intermediate array
+    max_val = float(np.max(arr))
+    min_val = float(np.min(arr))
+    peak = max(abs(max_val), abs(min_val))
+    if peak >= SPEECH_PEAK_THRESH:
+        return True
+    # If peak is borderline, compute RMS energy via zero-allocation SIMD dot product
+    if arr.dtype != np.float32:
+        arr = arr.astype(np.float32, copy=False)
+    if arr.ndim > 1:
+        arr = arr.ravel()
+    rms = float(np.sqrt(np.dot(arr, arr) / len(arr)))
+    return rms >= 0.0035
+
 def clean_hallucinations(text, skip_slm=False, is_intermediate=False):
     return clean_speech_transcription(text, skip_slm=skip_slm, is_intermediate=is_intermediate)
 

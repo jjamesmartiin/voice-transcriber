@@ -31,8 +31,8 @@ from micro_batcher import (
     StreamingMicroBatcher,
     deduplicate_text_overlap,
     trim_trailing_silence,
+    has_speech_activity,
 )
-from transcribe_cohere import has_speech_activity
 from tui import VoiceTranscriberTUI
 
 

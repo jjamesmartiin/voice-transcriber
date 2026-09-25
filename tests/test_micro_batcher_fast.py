@@ -12,8 +12,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from post_processor import clean_speech_transcription
-from micro_batcher import trim_trailing_silence, StreamingMicroBatcher
-from transcribe_cohere import has_speech_activity
+from micro_batcher import trim_trailing_silence, StreamingMicroBatcher, has_speech_activity
 
 class TestMicroBatchingEngine(unittest.TestCase):
 
