@@ -35,9 +35,11 @@ python src\main.py
 
 ## Controls
 
-- **Alt + Shift (hold)**: Push-to-Talk — hold while speaking, release to transcribe and paste to active window.
+- **Alt + Shift (hold)**: Push-to-Talk — hold while speaking, release to transcribe and paste/type to the active window.
 - **Space (tap while holding Alt + Shift)**: Hands-free recording — release keys and keep talking; tap `Alt + Shift` when finished to transcribe.
-- **Ctrl + Alt + I**: Open in-terminal interactive settings menu (change audio devices, models, UI theme, formatting level).
+- **Middle-click (hold ~0.25 s)**: Mouse Push-to-Talk. A quick click passes through and is ignored.
+- **Ctrl (held at release)**: Force clipboard output for this utterance even when auto-type is enabled.
+- **Ctrl + Alt + I** (or `i` in the terminal): Open the interactive settings menu (audio device, output mode, sound theme, UI theme, punctuation, numbers).
 
 ---
 
@@ -54,11 +56,33 @@ python src\main.py
 
 ## Automated Testing on Windows
 
-Before doing live dictation, verify the full cross-platform test suite on Windows:
+Before live dictation, verify the hardware-independent suite. The launcher
+creates the venv, installs `requirements.txt`, and runs pytest. From the repo
+root:
 ```powershell
-python -m pytest tests/test_end_to_end_crossplatform.py -v
-python -m pytest tests/test_platform_hal.py -v
+# Full suite (platform HAL, dictionary, config, post-processor, TUI, workflows, WSL):
+.\platforms\windows\run.ps1 test
+
+# Targeted run — extra arguments are forwarded to pytest:
+.\platforms\windows\run.ps1 test tests\test_platform_hal.py -v
 ```
+
+Or directly from `platforms\windows\`, with the venv active and `PYTHONPATH=src`:
+```powershell
+.\run.ps1 test
+```
+
+Or directly, with the venv active and `PYTHONPATH=src`:
+```powershell
+python -m pytest tests/test_platform_hal.py tests/test_dictionary.py `
+  tests/test_config_sync.py tests/test_post_processor.py tests/test_tui.py `
+  tests/test_user_workflows.py tests/test_wsl.py -v
+```
+
+> These tests are PyTorch-free, so they run on a bare Python install. The
+> acoustic end-to-end suite (`tests/test_end_to_end_crossplatform.py`) needs the
+> model weights loaded and is run separately:
+> `python -m pytest tests/test_end_to_end_crossplatform.py -v`
 
 ---
 

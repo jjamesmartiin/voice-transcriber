@@ -39,13 +39,26 @@ python3 src/main.py
 
 ## Hotkeys
 
-- `Alt+Shift` (hold): Record while held; transcribe and copy/paste on release.
-- `Space` (tap while holding `Alt+Shift`): Hands-free latch mode. Release keys and continue speaking; tap `Alt+Shift` again to stop.
-- `Ctrl+Alt+I`: Open in-terminal interactive settings menu.
+- `Alt+Shift` (hold): Push-to-Talk — record while held; transcribe and paste/type on release.
+- `Space` (tap while holding `Alt+Shift`): Hands-free latch mode. Release the keys and continue speaking; tap `Alt+Shift` again to stop.
+- Middle-click (hold ~0.25 s): Mouse Push-to-Talk. A quick click passes through and is ignored.
+- `Ctrl` (held at release): Force clipboard output for this utterance even when auto-type is enabled.
+- `Ctrl+Alt+I` (or `i` in the terminal): Open the interactive settings menu.
 
 ## Verification
 
-Run test suites:
+Run the hardware-independent suite (no audio devices or model weights required):
 ```bash
-nix develop --command python -m pytest tests/test_end_to_end_crossplatform.py -v
+nix run .#test
+```
+
+Or targeted subsets:
+```bash
+nix develop --command python -m pytest tests/test_end_to_end_crossplatform.py tests/test_platform_hal.py -v
+nix develop --command python -m pytest tests/test_dictionary.py tests/test_post_processor.py tests/test_config_sync.py tests/test_tui.py tests/test_user_workflows.py tests/test_wsl.py
+```
+
+The live speaker→microphone acoustic suite needs real audio hardware:
+```bash
+nix develop --command python tests/test_live_speaker_mic_loopback.py all
 ```

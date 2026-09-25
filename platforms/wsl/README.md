@@ -95,7 +95,15 @@ nix run .
 > 1. Nix provides PyTorch, PortAudio, Cohere Transcribe, and all Python dependencies in an isolated sandbox.
 > 2. The app detects WSL and automatically connects to your Windows microphone via WSLg PulseAudio (`RDPSource`).
 > 3. It automatically connects a lightweight background bridge to Windows so you can press and hold **`Alt+Shift`** anywhere in Windows (Chrome, VS Code, Discord, etc.) to speak.
-> 4. When you release **`Alt+Shift`**, it transcribes in **~230ms** and pastes the text directly at your cursor in Windows.
+> 4. When you release **`Alt+Shift`**, it transcribes in **~380ms** and pastes the text directly at your cursor in Windows.
+
+### Controls
+
+- `Alt+Shift` (hold): Push-to-Talk (captured by the Windows-host bridge).
+- `Space` (tap while holding `Alt+Shift`): Hands-free latch mode.
+- Middle-click (hold ~0.25 s): Mouse Push-to-Talk, forwarded to the host bridge.
+- `Ctrl` (held at release): Force clipboard output instead of auto-type.
+- `Ctrl+Alt+I` (or `i` in the terminal): Interactive settings menu.
 
 ---
 
@@ -104,9 +112,15 @@ nix run .
 nix run .#test
 ```
 
-### Run Performance Latency Benchmark
+Or targeted subsets from inside WSL:
 ```bash
-nix run .#benchmark
+nix develop --command python -m pytest tests/test_platform_hal.py tests/test_wsl.py -v
+nix develop --command python -m pytest tests/test_dictionary.py tests/test_post_processor.py tests/test_config_sync.py tests/test_tui.py tests/test_user_workflows.py
+```
+
+### Run Synthetic End-to-End Benchmark
+```bash
+nix develop --command python tests/benchmark_synthetic_e2e.py
 ```
 
 ---
@@ -116,11 +130,10 @@ nix run .#benchmark
 Tested on NixOS WSL2 with sample audio (3.80s speech, 16000Hz 1ch PCM):
 
 | Transcription Engine | Model Size | Cold Load | Avg Warm Latency | Min / Max Latency | Real-Time Factor (RTF) | Throughput / Speedup | Accuracy Score |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Faster Whisper** | `small` (offline) | 0.58 s | **231.8 ms** | 227 ms / 236 ms | **0.061x** | **16.4x faster** than real-time | **100% PASS** |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Cohere Transcribe** | `03-2026` | 0.90 s | **377.3 ms** | 374 ms / 380 ms | **0.099x** | **10.1x faster** than real-time | **100% PASS** |
 
 ### Benchmark Highlights:
-- **Instant Response**: Warm latency is only **~231ms** for Whisper and **~377ms** for Cohere, producing near-instantaneous transcription after releasing the hotkey.
-- **Ultra-low RTF (0.061x)**: The pipeline transcribes over **16 seconds of speech per second**.
-- **Microphone Passthrough**: Captured through WSLg PulseAudio UNIX socket (`RDPSource` 16000Hz PCM) with zero perceived latency.
+- **Instant Response**: Warm latency is **~377 ms**, producing near-instantaneous transcription after releasing the hotkey.
+- **Ultra-low RTF (0.099x)**: The pipeline transcribes over **10 seconds of speech per second**.
+- **Microphone Passthrough**: Captured through the WSLg PulseAudio UNIX socket (`RDPSource` 16000Hz PCM) with zero perceived latency.
