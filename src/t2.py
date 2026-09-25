@@ -36,6 +36,7 @@ import json
 import re
 import tempfile
 import contextlib
+import subprocess
 from pathlib import Path
 
 # Tracking the most recent model preload thread
@@ -388,6 +389,7 @@ def check_microphone_health():
     # 1. PulseAudio source verification (WSL / Linux)
     if os.path.exists("/mnt/wslg") or os.environ.get("WSL_DISTRO_NAME"):
         try:
+            import subprocess
             res = subprocess.run(["pactl", "list", "sources", "short"], capture_output=True, text=True, timeout=2)
             if res.returncode == 0:
                 lines = [l for l in res.stdout.strip().split("\n") if l]
