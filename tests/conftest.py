@@ -78,6 +78,27 @@ class PowerCpuMonitor:
 def cpu_power_monitor():
     return PowerCpuMonitor()
 
+
+@pytest.fixture
+def fake_asr(monkeypatch):
+    """Replace the ASR backend with a deterministic stub (no model / no torch).
+
+    Patches ``transcribe2.transcribe_audio``, which is the single seam used by
+    both ``main.process_audio_stream`` and ``micro_batcher``'s worker. Tests can
+    mutate ``state['text']`` to control the returned transcript.
+    """
+    import transcribe2
+
+    state = {"text": "hello world", "calls": []}
+
+    def _fake_transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device="cpu", language="en"):
+        n = 0 if audio_data is None else len(audio_data)
+        state["calls"].append(n)
+        return state["text"]
+
+    monkeypatch.setattr(transcribe2, "transcribe_audio", _fake_transcribe_audio, raising=False)
+    return state
+
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_after_tests():
     """Unload ML models and collect garbage at session teardown."""
