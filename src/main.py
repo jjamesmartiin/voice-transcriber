@@ -849,6 +849,13 @@ class SimpleVoiceTranscriber:
         # model-load watcher was already started in __init__). A slow or stalled
         # load must never freeze the app; recordings made meanwhile wait for the
         # model in background threads.
+        # Warm the input stream so the first push-to-talk press captures
+        # instantly instead of paying the PortAudio device-open cost then.
+        try:
+            threading.Thread(target=t2.prewarm_input_stream, daemon=True).start()
+        except Exception:
+            pass
+
         self.running = True
 
         try:

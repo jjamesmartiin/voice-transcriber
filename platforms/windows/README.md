@@ -64,6 +64,7 @@ $env:PYTHONPATH = "src"
 - **Hardware/OS Abstraction Layer (HAL)**: Auto-detects Windows host and loads `src/platform/windows/`.
 - **Global Hotkeys**: Uses `pynput` and `keyboard` libraries to capture system-wide keystrokes even when Voice Transcriber is minimized or in the background.
 - **Audio Capture**: Captures 16kHz audio from your default Windows microphone via `sounddevice` (WASAPI/DirectSound).
+- **Instant Capture Start**: Keeps the WASAPI input stream constructed (stopped between recordings) so push-to-talk doesn't drop the first syllable while the device opens. Set `VT_WARM_MIC=0` to disable (opens the device fresh on each recording).
 - **Audio Feedback**: Plays native Windows chimes (e.g. `Windows Proximity Notification.wav` or `Speech On/Off.wav`) via `winsound`.
 - **Active-Window Paste**: Copies transcription to Windows clipboard via `pyperclip` and injects keystrokes into your currently focused window via Win32 `SendInput` with full Unicode and emoji fidelity.
 - **AI Processing**: Runs the high-accuracy Cohere Transcribe model with streaming VAD, dynamic energy gating, and post-processing (Trie dictionary, formatting, number conversion).

@@ -34,6 +34,7 @@ if _is_wsl():
 import queue
 import pyperclip
 import threading
+import atexit
 import time
 import numpy as np
 import sounddevice as sd
@@ -1560,6 +1561,112 @@ def select_audio_device():
     """Interactive settings and configuration picker (matches Linux ratatui frontend)."""
     return select_settings_picker()
 
+# ---------------------------------------------------------------------------
+# Warm input-stream cache (Windows/WASAPI)
+# ---------------------------------------------------------------------------
+# Opening a PortAudio input stream costs ~50-300ms on Windows/WASAPI, which
+# clipped the first syllable of push-to-talk dictation. We keep the constructed
+# stream alive (stopped between recordings) so the next press starts capturing
+# instantly. No audio is captured while the stream is stopped. Disable with
+# VT_WARM_MIC=0. Other platforms keep the original per-recording open.
+_stream_cache = {}
+_stream_cache_lock = threading.Lock()
+_active_warm_sink = {"queue": None, "lock": threading.Lock()}
+
+
+def _warm_mic_enabled() -> bool:
+    if not sys.platform.startswith("win"):
+        return False
+    return os.environ.get("VT_WARM_MIC", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _cached_stream_callback(indata, frames, time_info, status):
+    if status:
+        print(status, file=sys.stderr)
+    with _active_warm_sink["lock"]:
+        q = _active_warm_sink["queue"]
+    if q is not None:
+        q.put(indata.copy())
+
+
+def _get_cached_input_stream(device_idx, rate):
+    """Return a constructed (possibly stopped) stream for this device/rate.
+
+    Opens it once, then reuses it across recordings so the device-open cost is
+    paid a single time instead of on every push-to-talk press.
+    """
+    key = (device_idx, rate, CHANNELS)
+    stale = []
+    with _stream_cache_lock:
+        for k in list(_stream_cache):
+            if k != key:
+                stale.append(_stream_cache.pop(k))
+        stream = _stream_cache.get(key)
+        if stream is None:
+            stream = sd.InputStream(
+                samplerate=rate,
+                channels=CHANNELS,
+                callback=_cached_stream_callback,
+                device=device_idx,
+                blocksize=1024,
+                latency="low",
+            )
+            _stream_cache[key] = stream
+    for s in stale:
+        try:
+            s.stop()
+            s.close()
+        except Exception:
+            pass
+    return stream
+
+
+def _drop_cached_input_stream(device_idx, rate):
+    with _stream_cache_lock:
+        stream = _stream_cache.pop((device_idx, rate, CHANNELS), None)
+    if stream is not None:
+        try:
+            stream.stop()
+            stream.close()
+        except Exception:
+            pass
+
+
+def _close_cached_input_streams():
+    with _stream_cache_lock:
+        streams = list(_stream_cache.values())
+        _stream_cache.clear()
+    for s in streams:
+        try:
+            s.stop()
+            s.close()
+        except Exception:
+            pass
+
+
+atexit.register(_close_cached_input_streams)
+
+
+def prewarm_input_stream():
+    """Construct (but do not start) the cached input stream at startup.
+
+    Pays the one-time PortAudio device-open cost before the first
+    push-to-talk press so the first dictation is not clipped. No audio is
+    captured while the stream is stopped. Windows-only; a no-op elsewhere or
+    with ``VT_WARM_MIC=0``.
+    """
+    if not _warm_mic_enabled():
+        return
+    try:
+        device_idx = INPUT_DEVICE_INDEX
+        if device_idx is None:
+            device_idx = sd.default.device[0]
+        if device_idx is not None and int(device_idx) >= 0:
+            _get_cached_input_stream(device_idx, RATE)
+    except Exception as e:
+        logger.debug(f"Input stream prewarm skipped: {e}")
+
+
 def record_audio_stream(interactive_mode=False, stream_callback=None):
     """Record audio using sounddevice with fallback and auto-recovery support"""
     global INPUT_DEVICE_INDEX, ACTUAL_RATE, LAST_USED_DEVICE_NAME
@@ -1587,9 +1694,65 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
         except ImportError:
             scipy = None
 
+        def _consume():
+            while not stop_recording.is_set():
+                try:
+                    # Use a shorter timeout for better responsiveness to the stop event
+                    frame = q.get(timeout=0.05)
+                    if rate != 16000 and scipy is not None:
+                        frame_flat = frame.flatten().astype(np.float32)
+                        frame_processed = scipy.signal.resample_poly(frame_flat, 16000, rate).astype(np.float32)
+                    else:
+                        frame_processed = frame.ravel() if frame.ndim > 1 else frame
+
+                    frames.append(frame_processed)
+                    if stream_callback:
+                        stream_callback(frame_processed)
+                except queue.Empty:
+                    continue
+
+            # Drain any remaining frames in the queue
+            while not q.empty():
+                try:
+                    frame = q.get_nowait()
+                    if rate != 16000 and scipy is not None:
+                        frame_flat = frame.flatten().astype(np.float32)
+                        frame_processed = scipy.signal.resample_poly(frame_flat, 16000, rate).astype(np.float32)
+                    else:
+                        frame_processed = frame.ravel() if frame.ndim > 1 else frame
+
+                    frames.append(frame_processed)
+                    if stream_callback:
+                        stream_callback(frame_processed)
+                except queue.Empty:
+                    break
+
         try:
             # Suppress ALSA/PortAudio errors at OS level
             with silence_stderr():
+                # Fast path: reuse a warm stream so capture starts instantly
+                # (no device-open gap on the first syllable).
+                if _warm_mic_enabled():
+                    try:
+                        stream = _get_cached_input_stream(device_idx, rate)
+                        with _active_warm_sink["lock"]:
+                            _active_warm_sink["queue"] = q
+                        stream.start()
+                        try:
+                            _consume()
+                        finally:
+                            try:
+                                stream.stop()
+                            except Exception:
+                                pass
+                            with _active_warm_sink["lock"]:
+                                _active_warm_sink["queue"] = None
+                        return frames
+                    except Exception as e:
+                        logger.debug(f"Warm input stream failed ({e}); falling back to a fresh open")
+                        _drop_cached_input_stream(device_idx, rate)
+
+                # Cold path: open a fresh stream for this recording
                 # Use blocksize=1024 and latency='low' for instant audio capture response
                 stream = None
                 try:
@@ -1609,37 +1772,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                         device=device_idx,
                     )
                 with stream:
-                    while not stop_recording.is_set():
-                        try:
-                            # Use a shorter timeout for better responsiveness to the stop event
-                            frame = q.get(timeout=0.05)
-                            if rate != 16000 and scipy is not None:
-                                frame_flat = frame.flatten().astype(np.float32)
-                                frame_processed = scipy.signal.resample_poly(frame_flat, 16000, rate).astype(np.float32)
-                            else:
-                                frame_processed = frame.ravel() if frame.ndim > 1 else frame
-
-                            frames.append(frame_processed)
-                            if stream_callback:
-                                stream_callback(frame_processed)
-                        except queue.Empty:
-                            continue
-                    
-                    # Drain any remaining frames in the queue
-                    while not q.empty():
-                        try:
-                            frame = q.get_nowait()
-                            if rate != 16000 and scipy is not None:
-                                frame_flat = frame.flatten().astype(np.float32)
-                                frame_processed = scipy.signal.resample_poly(frame_flat, 16000, rate).astype(np.float32)
-                            else:
-                                frame_processed = frame.ravel() if frame.ndim > 1 else frame
-
-                            frames.append(frame_processed)
-                            if stream_callback:
-                                stream_callback(frame_processed)
-                        except queue.Empty:
-                            break
+                    _consume()
             return frames
         except Exception as e:
             # If it's specifically a sample rate error, we'll try a fallback in the parent
