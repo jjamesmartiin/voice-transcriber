@@ -35,9 +35,14 @@ One-time setup: `sudo usermod -a -G input $USER` (then re-login) so global
 hotkeys work without root. See the [Linux guide](platforms/linux/README.md).
 
 ### Windows (native)
-From PowerShell in the repo root:
+From the repo root:
+```cmd
+# Double-click or run from Command Prompt / PowerShell:
+setup.bat   # (One-time) creates .venv and installs dependencies
+run.bat     # Launches the application
+```
+Or via PowerShell:
 ```powershell
-# Creates .venv, installs platforms/windows/requirements.txt, launches the app
 .\platforms\windows\run.ps1
 ```
 Requires Python 3.10+. See the [Windows guide](platforms/windows/README.md).

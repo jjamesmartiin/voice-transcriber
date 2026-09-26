@@ -71,8 +71,18 @@ class WindowsHotkeyManager(BaseHotkeyManager):
             self._pynput_mouse = None
 
         self.ALT_KEYS = {Key.alt_l, Key.alt_r}
+        if hasattr(Key, "alt"):
+            self.ALT_KEYS.add(Key.alt)
+        if hasattr(Key, "alt_gr"):
+            self.ALT_KEYS.add(Key.alt_gr)
+
         self.SHIFT_KEYS = {Key.shift_l, Key.shift_r}
+        if hasattr(Key, "shift"):
+            self.SHIFT_KEYS.add(Key.shift)
+
         self.CTRL_KEYS = {Key.ctrl_l, Key.ctrl_r}
+        if hasattr(Key, "ctrl"):
+            self.CTRL_KEYS.add(Key.ctrl)
 
         try:
             self.listener = pynput_keyboard.Listener(
@@ -249,15 +259,20 @@ class WindowsHotkeyManager(BaseHotkeyManager):
 
     # -- output ------------------------------------------------------------
     def type_text(self, text, fast: bool = False):
-        """Type text using the keyboard library."""
-        if not self._kb_lib:
-            return False
+        """Type text using SendInput with Unicode fidelity, falling back to keyboard library."""
         try:
-            self._kb_lib.write(text, delay=0.001 if fast else 0.01)
-            return True
+            from .clipboard import WindowsClipboardSink
+            sink = WindowsClipboardSink()
+            return sink.type_text(text, fast=fast)
         except Exception as e:
-            logger.error(f"Error typing text: {e}")
-            return False
+            logger.debug(f"WindowsClipboardSink typing failed ({e}), falling back to keyboard lib")
+        if self._kb_lib:
+            try:
+                self._kb_lib.write(text, delay=0 if fast else 0.01)
+                return True
+            except Exception as e:
+                logger.error(f"Error typing text via keyboard lib: {e}")
+        return False
 
     def paste_text(self, terminal: bool = False) -> bool:
         """Emit Ctrl+V (or Ctrl+Shift+V for terminal) on Windows."""

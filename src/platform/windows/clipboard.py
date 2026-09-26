@@ -107,7 +107,8 @@ class WindowsClipboardSink(BaseClipboardSink):
 
                         user32.SendInput(1, ctypes.byref(down), ctypes.sizeof(INPUT))
                         user32.SendInput(1, ctypes.byref(up), ctypes.sizeof(INPUT))
-                        time.sleep(delay)
+                        if not fast and delay > 0:
+                            time.sleep(delay)
                     return True
                 except Exception as e:
                     logger.debug(f"SendInput Unicode typing failed, falling back to keybd_event: {e}")
@@ -125,7 +126,8 @@ class WindowsClipboardSink(BaseClipboardSink):
                 user32.keybd_event(vk, 0, _KEYEVENTF_KEYUP, 0)
                 if shift_needed:
                     user32.keybd_event(_SHIFT_VK, 0, _KEYEVENTF_KEYUP, 0)
-                time.sleep(delay)
+                if not fast and delay > 0:
+                    time.sleep(delay)
             return True
         except Exception as e:
             logger.error(f"Windows typing failed: {e}")

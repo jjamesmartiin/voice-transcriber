@@ -1570,51 +1570,6 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
         # In WSL, we always rely on the single default ALSA-Pulse audio bridge
         INPUT_DEVICE_INDEX = None
         set_default_input_device(None)
-    else:
-        # Manual Override Logic for Native Windows/Linux
-        if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
-            primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
-            if primary_idx is not None:
-                if INPUT_DEVICE_INDEX != primary_idx:
-                    print(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME}")
-                    INPUT_DEVICE_INDEX = primary_idx
-                    set_default_input_device(INPUT_DEVICE_INDEX)
-            else:
-                print(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
-        elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
-            secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
-            if secondary_idx is not None:
-                if INPUT_DEVICE_INDEX != secondary_idx:
-                    print(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME}")
-                    INPUT_DEVICE_INDEX = secondary_idx
-                    set_default_input_device(INPUT_DEVICE_INDEX)
-            else:
-                print(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
-        elif PRIMARY_DEVICE_NAME:
-            # Auto-recovery: Always try to see if the primary device has returned before starting
-            primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
-            if primary_idx is not None:
-                if INPUT_DEVICE_INDEX != primary_idx:
-                    print(f"Switching to primary device: {PRIMARY_DEVICE_NAME}")
-                    INPUT_DEVICE_INDEX = primary_idx
-                    set_default_input_device(INPUT_DEVICE_INDEX)
-            elif SECONDARY_DEVICE_NAME:
-                # If primary is gone, ensure we at least use the secondary if it's available
-                secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
-                if secondary_idx is not None and INPUT_DEVICE_INDEX != secondary_idx:
-                    print(f"Using secondary device: {SECONDARY_DEVICE_NAME}")
-                    INPUT_DEVICE_INDEX = secondary_idx
-                    set_default_input_device(INPUT_DEVICE_INDEX)
-
-    # Verify INPUT_DEVICE_INDEX is still valid before attempting recording
-    if INPUT_DEVICE_INDEX is not None:
-        try:
-            with silence_stderr():
-                d = sd.query_devices(INPUT_DEVICE_INDEX)
-                if d.get('max_input_channels', 0) <= 0:
-                    INPUT_DEVICE_INDEX = None
-        except Exception:
-            INPUT_DEVICE_INDEX = None
 
     q = queue.Queue()
 
@@ -1635,7 +1590,25 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
         try:
             # Suppress ALSA/PortAudio errors at OS level
             with silence_stderr():
-                with sd.InputStream(samplerate=rate, channels=CHANNELS, callback=callback, device=device_idx):
+                # Use blocksize=1024 and latency='low' for instant audio capture response
+                stream = None
+                try:
+                    stream = sd.InputStream(
+                        samplerate=rate,
+                        channels=CHANNELS,
+                        callback=callback,
+                        device=device_idx,
+                        blocksize=1024,
+                        latency="low",
+                    )
+                except Exception:
+                    stream = sd.InputStream(
+                        samplerate=rate,
+                        channels=CHANNELS,
+                        callback=callback,
+                        device=device_idx,
+                    )
+                with stream:
                     while not stop_recording.is_set():
                         try:
                             # Use a shorter timeout for better responsiveness to the stop event
@@ -1683,6 +1656,62 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
         input_thread.start()
         
         print("Recording... Press Space to stop")
+
+    # Fast path: If INPUT_DEVICE_INDEX is already known, immediately record without
+    # scanning all audio endpoints across all host APIs on every push-to-talk press.
+    frames = None
+    if not is_wsl and INPUT_DEVICE_INDEX is not None:
+        frames = perform_recording(INPUT_DEVICE_INDEX, RATE)
+        if frames is not None:
+            ACTUAL_RATE = 16000
+            return frames
+
+    # Fallback / Auto-Recovery Path: triggered only if INPUT_DEVICE_INDEX was None or recording failed
+    if not is_wsl:
+        # Manual Override Logic for Native Windows/Linux
+        if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
+            primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
+            if primary_idx is not None:
+                if INPUT_DEVICE_INDEX != primary_idx:
+                    print(f"[Override] Using primary device: {PRIMARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = primary_idx
+                    set_default_input_device(INPUT_DEVICE_INDEX)
+            else:
+                print(f"[Override] Primary device not found: {PRIMARY_DEVICE_NAME}")
+        elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
+            secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
+            if secondary_idx is not None:
+                if INPUT_DEVICE_INDEX != secondary_idx:
+                    print(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = secondary_idx
+                    set_default_input_device(INPUT_DEVICE_INDEX)
+            else:
+                print(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
+        elif PRIMARY_DEVICE_NAME:
+            # Auto-recovery: Always try to see if the primary device has returned before starting
+            primary_idx = find_device_index(PRIMARY_DEVICE_NAME)
+            if primary_idx is not None:
+                if INPUT_DEVICE_INDEX != primary_idx:
+                    print(f"Switching to primary device: {PRIMARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = primary_idx
+                    set_default_input_device(INPUT_DEVICE_INDEX)
+            elif SECONDARY_DEVICE_NAME:
+                # If primary is gone, ensure we at least use the secondary if it's available
+                secondary_idx = find_device_index(SECONDARY_DEVICE_NAME)
+                if secondary_idx is not None and INPUT_DEVICE_INDEX != secondary_idx:
+                    print(f"Using secondary device: {SECONDARY_DEVICE_NAME}")
+                    INPUT_DEVICE_INDEX = secondary_idx
+                    set_default_input_device(INPUT_DEVICE_INDEX)
+
+        # Verify INPUT_DEVICE_INDEX is still valid
+        if INPUT_DEVICE_INDEX is not None:
+            try:
+                with silence_stderr():
+                    d = sd.query_devices(INPUT_DEVICE_INDEX)
+                    if d.get('max_input_channels', 0) <= 0:
+                        INPUT_DEVICE_INDEX = None
+            except Exception:
+                INPUT_DEVICE_INDEX = None
     
     # Try primary/current device
     frames = perform_recording(INPUT_DEVICE_INDEX, RATE)

@@ -282,6 +282,29 @@ class TestWindowsHotkeyManagerLatching:
         finally:
             manager.cleanup()
 
+    def test_windows_hotkey_manager_type_text_delegates(self, monkeypatch):
+        import ctypes
+        sendinput_calls = []
+
+        class FakeUser32:
+            def SendInput(self, n, p_inputs, cb_size):
+                sendinput_calls.append(n)
+                return n
+
+        class FakeWindll:
+            user32 = FakeUser32()
+
+        monkeypatch.setattr(ctypes, "windll", FakeWindll(), raising=False)
+        from unittest.mock import MagicMock
+        WindowsHotkeyManager = hal.load_backend("windows", "hotkeys").WindowsHotkeyManager
+        manager = WindowsHotkeyManager(MagicMock(), MagicMock())
+        try:
+            assert manager.type_text("Hi", fast=True) is True
+            # 'H' (2 events) + 'i' (2 events) -> 4 SendInput calls
+            assert len(sendinput_calls) == 4
+        finally:
+            manager.cleanup()
+
 
 class TestWindowsTuiCompatibility:
     def test_tui_imports_and_runs_without_termios(self, monkeypatch):

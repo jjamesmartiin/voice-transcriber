@@ -25,42 +25,69 @@ if (-not $env:VT_MODEL_BACKEND) {
     $env:VT_MODEL_BACKEND = "cohere"
 }
 
-# Verify Python
-try {
-    $v = python --version 2>&1
-    if ($v -notmatch "Python (\d+)\.(\d+)" -or [int]$matches[1] -lt 3 -or [int]$matches[2] -lt 10) {
-        Write-Error "Python 3.10+ required. Found: $v"
+# 1. Discover host Python (check 'python' then 'py -3')
+$hostPythonCmd = $null
+$hostPythonArgs = @()
+
+if (Get-Command python -ErrorAction SilentlyContinue) {
+    try {
+        $v = & python --version 2>&1
+        if ($v -match "Python (\d+)\.(\d+)" -and ([int]$matches[1] -gt 3 -or ([int]$matches[1] -eq 3 -and [int]$matches[2] -ge 10))) {
+            $hostPythonCmd = "python"
+        }
+    } catch {}
+}
+
+if (-not $hostPythonCmd -and (Get-Command py -ErrorAction SilentlyContinue)) {
+    try {
+        $v = & py -3 --version 2>&1
+        if ($v -match "Python (\d+)\.(\d+)" -and ([int]$matches[1] -gt 3 -or ([int]$matches[1] -eq 3 -and [int]$matches[2] -ge 10))) {
+            $hostPythonCmd = "py"
+            $hostPythonArgs = @("-3")
+        }
+    } catch {}
+}
+
+$pythonExe = Join-Path $VenvDir "Scripts\python.exe"
+
+# If venv doesn't exist, verify host python before creating
+if (-not (Test-Path $VenvDir) -or -not (Test-Path $pythonExe)) {
+    if (-not $hostPythonCmd) {
+        Write-Host "`n[ERROR] Python 3.10+ was not found on your system." -ForegroundColor Red
+        Write-Host "Please install Python 3.10+ from https://www.python.org/downloads/" -ForegroundColor Yellow
+        Write-Host "Make sure to check 'Add python.exe to PATH' during installation.`n" -ForegroundColor Yellow
         exit 1
     }
-} catch {
-    Write-Error "Python not found. Please install Python 3.10+ from python.org"
+    Write-Host "Creating virtual environment at $VenvDir..." -ForegroundColor Cyan
+    & $hostPythonCmd @hostPythonArgs -m venv $VenvDir
+}
+
+if (-not (Test-Path $pythonExe)) {
+    Write-Host "[ERROR] Virtual environment Python executable not found at $pythonExe" -ForegroundColor Red
     exit 1
 }
 
-# Ensure virtual environment
-if (-not (Test-Path $VenvDir)) {
-    Write-Host "Creating virtual environment at $VenvDir..."
-    python -m venv $VenvDir
-}
-
-$pipExe = Join-Path $VenvDir "Scripts\pip.exe"
-$pythonExe = Join-Path $VenvDir "Scripts\python.exe"
-
-# Install dependencies if sounddevice or pynput is missing
+# 2. Check and install dependencies if missing
 $needsInstall = $true
 try {
-    $check = & $pythonExe -c "import sounddevice, pynput, keyboard, pyperclip; print('OK')" 2>$null
+    $check = & $pythonExe -c "import sounddevice, pynput, keyboard, pyperclip, rich; print('OK')" 2>$null
     if ($check -match "OK") { $needsInstall = $false }
 } catch {}
 
 if ($needsInstall -and (Test-Path $ReqFile)) {
-    Write-Host "Installing Windows dependencies..."
-    & $pipExe install -r $ReqFile --quiet
+    Write-Host "Installing Windows dependencies via pip..." -ForegroundColor Cyan
+    & $pythonExe -m pip install --upgrade pip --quiet
+    & $pythonExe -m pip install -r $ReqFile
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Dependency installation from $ReqFile failed." -ForegroundColor Red
+        Write-Host "Please review the pip errors above, or run: .\platforms\windows\setup.ps1" -ForegroundColor Yellow
+        exit $LASTEXITCODE
+    }
 }
 
 $env:PYTHONPATH = $SrcDir
 
-# Test mode
+# 3. Test mode
 if ($args -and $args[0] -eq "test") {
     if ($args.Count -gt 1) {
         $testArgs = $args[1..($args.Count - 1)]
@@ -78,13 +105,13 @@ if ($args -and $args[0] -eq "test") {
     exit $LASTEXITCODE
 }
 
-# Build mode
+# 4. Build mode
 if ($args -and $args[0] -eq "build") {
     $buildScript = Join-Path $ScriptDir "build_offline.py"
     & $pythonExe $buildScript
     exit $LASTEXITCODE
 }
 
-# Run application
-Write-Host "Starting Voice Transcriber (Backend: $env:VT_MODEL_BACKEND)..."
+# 5. Run application
+Write-Host "Starting Voice Transcriber (Backend: $env:VT_MODEL_BACKEND)..." -ForegroundColor Green
 & $pythonExe (Join-Path $SrcDir "main.py")

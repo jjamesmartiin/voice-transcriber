@@ -7,28 +7,42 @@ Run Voice Transcriber natively on Windows with global hotkeys, Windows audio cue
 ## Quick Start
 
 ### 1. Prerequisites
-- Python 3.10+ installed on Windows (with "Add Python to PATH" enabled).
-- PowerShell 5.1+ or PowerShell 7+.
+- Python 3.10+ installed on Windows (from https://www.python.org/downloads/ with "Add python.exe to PATH" checked).
+- PowerShell 5.1+ or PowerShell 7+ (or Command Prompt).
 
-### 2. Setup Virtual Environment
-In PowerShell from the repository root:
-```powershell
-# Create and activate virtual environment
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+### 2. One-Click Setup & Launch
+From the repository root, you can simply run the batch launchers:
+```cmd
+# Run setup (creates venv and installs dependencies):
+setup.bat
 
-# Install Windows dependencies
-pip install -r platforms\windows\requirements.txt
+# Launch Voice Transcriber:
+run.bat
 ```
 
-### 3. Launch the Application
+### 3. Setup via PowerShell
+Or if you prefer PowerShell:
 ```powershell
-# Using the Windows launcher:
-.\platforms\windows\run.ps1
+# Run the automated setup script:
+.\platforms\windows\setup.ps1
 
-# Or run directly with Python:
+# Launch the application:
+.\platforms\windows\run.ps1
+```
+
+### 4. Manual Setup (Alternative)
+If setting up manually from the repository root:
+```powershell
+# Create virtual environment
+python -m venv .venv
+
+# Install dependencies (using python -m pip ensures pip runs even if not activated)
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r platforms\windows\requirements.txt
+
+# Launch:
 $env:PYTHONPATH = "src"
-python src\main.py
+.\.venv\Scripts\python.exe src\main.py
 ```
 
 ---
