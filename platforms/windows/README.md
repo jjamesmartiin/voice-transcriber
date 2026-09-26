@@ -39,7 +39,9 @@ python src\main.py
 - **Space (tap while holding Alt + Shift)**: Hands-free recording — release keys and keep talking; tap `Alt + Shift` when finished to transcribe.
 - **Middle-click (hold ~0.25 s)**: Mouse Push-to-Talk. A quick click passes through and is ignored.
 - **Ctrl (held at release)**: Force clipboard output for this utterance even when auto-type is enabled.
-- **Ctrl + Alt + I** (or `i` in the terminal): Open the interactive settings menu (audio device, output mode, sound theme, UI theme, punctuation, numbers).
+- **Ctrl + Alt + I** (or `S`, `,`, `i` in the terminal): Open the interactive Settings modal (`⚙️ Settings & Configuration`) with real-time fuzzy filter, in-place toggle badges, and sub-pickers.
+- **M** (in the terminal): Open the interactive Microphone device picker (`🎤 Microphone Input Device`).
+- **t** (in the terminal): Open the interactive UI Color Theme picker (`🎨 Select UI Color Theme`).
 
 ---
 

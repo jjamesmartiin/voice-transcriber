@@ -65,7 +65,9 @@ See the [WSL guide](platforms/wsl/README.md) and
 | **`Space`** (tap while holding `Alt+Shift`) | **Hands-Free Latch.** Release the keys and keep speaking; tap `Alt+Shift` again when finished. |
 | **Middle-click** (hold ~0.25 s) | **Mouse Push-to-Talk.** A quick click (< 0.25 s) passes through and is ignored. |
 | **`Ctrl`** (held at release) | **Clipboard override.** Forces clipboard output for this utterance even when auto-type is enabled. |
-| **`Ctrl+Alt+I`** (or `i` in the terminal) | **Settings menu.** Pick audio device, output mode, sound theme, UI theme, punctuation, and number handling. |
+| **`Ctrl+Alt+I`** (or `S`, `,`, `i` in terminal) | **Settings modal.** Interactive modal (`⚙️ Settings & Configuration`) with fuzzy search, in-place toggle badges, output modes, and formatting. |
+| **`M`** (in terminal) | **Microphone picker.** Interactive device picker modal (`🎤 Microphone Input Device`) with active and default indicators. |
+| **`t`** (in terminal) | **Theme picker.** Interactive UI accent color palette modal (`🎨 Select UI Color Theme`). |
 
 Hotkey behaviour is portable across all three platforms, including the
 hands-free latch and the middle-click hold threshold.
@@ -83,6 +85,11 @@ Set `VT_TUI=rich` to force the original Rich frontend, or `VT_TUI_BIN=/path` to
 point at a specific `vt-tui` binary (e.g. a local `cargo` build during frontend
 development). If no binary is found, the app falls back to Rich automatically —
 this is the default on native Windows.
+
+Both frontends share complete 1:1 visual and interactive parity:
+- **Interactive Modal Pickers**: `⚙️ Settings & Configuration`, `🎤 Microphone Input Device`, and `🎨 Select UI Color Theme` overlays with real-time search filtering, arrow/Tab navigation, and in-place toggling.
+- **Inline CLI Prompt Stream**: Responsive status prompt line with active mic, model, sound, output mode, trailing space, punctuation, numbers, and mouse hold badges.
+- **Clean Word-Wrapped Transcriptions**: Direct terminal scrollback with timing metadata dividers and zero border interference for 100% clean copy-paste.
 
 ---
 

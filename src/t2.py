@@ -900,6 +900,52 @@ def get_dictionary():
         return {}
 
 
+COLOR_PALETTES = ["auto", "green", "cyan", "blue", "magenta", "yellow", "red", "white"]
+
+
+def _fuzzy_subsequence(pattern: str, target: str) -> int | None:
+    p_idx = 0
+    dist = 0
+    p_len = len(pattern)
+    for i, c in enumerate(target):
+        if p_idx < p_len and c == pattern[p_idx]:
+            p_idx += 1
+            dist += i
+    if p_idx == p_len:
+        return dist
+    return None
+
+
+def _score_setting(query: str, title: str, keywords: str = "") -> int | None:
+    if not query:
+        return 0
+    q = query.strip().lower()
+    if not q:
+        return 0
+    t = title.lower()
+    kw = keywords.lower()
+
+    if t == q:
+        return 1000
+    if t.startswith(q):
+        return 800 - len(q)
+    if q in t:
+        return 600 - t.find(q) * 10
+    if kw and q in kw:
+        return 400 - kw.find(q) * 5
+
+    dist = _fuzzy_subsequence(q, t)
+    if dist is not None:
+        return 200 - dist
+
+    if kw:
+        dist_kw = _fuzzy_subsequence(q, kw)
+        if dist_kw is not None:
+            return 100 - dist_kw
+
+    return None
+
+
 def _read_key():
     if sys.platform == "win32":
         try:
@@ -911,6 +957,7 @@ def _read_key():
                 elif ch2 == 'P': return 'DOWN'
                 elif ch2 == 'M': return 'RIGHT'
                 elif ch2 == 'K': return 'LEFT'
+                elif ch2 == '\x0f': return 'UP'  # Shift+Tab
                 return ''
             elif ch == '\x1b':
                 return 'ESC'
@@ -942,6 +989,7 @@ def _read_key():
                     elif ch3 == 'B': return 'DOWN'
                     elif ch3 == 'C': return 'RIGHT'
                     elif ch3 == 'D': return 'LEFT'
+                    elif ch3 == 'Z': return 'UP'  # Shift+Tab
             return 'ESC'
         elif ch in ('\r', '\n'):
             return 'ENTER'
@@ -965,6 +1013,7 @@ def select_theme_picker(current_theme=None):
     from rich.table import Table
     from rich.panel import Panel
     from rich.text import Text
+    from rich import box
 
     palettes = [
         ("auto", "Auto", "Detect from system terminal accent color"),
@@ -1017,7 +1066,7 @@ def select_theme_picker(current_theme=None):
         return [(i, p) for _, i, p in scored]
 
     while True:
-        reset_terminal()
+        console.clear()
         matches = filter_palettes(query)
         if selected_idx >= len(matches):
             selected_idx = max(0, len(matches) - 1)
@@ -1062,6 +1111,7 @@ def select_theme_picker(current_theme=None):
         search_panel = Panel(
             Text.from_markup(f"🔍 [bold]Filter:[/bold] [yellow]{q_disp}[/yellow]"),
             border_style=preview_color,
+            box=box.ROUNDED,
             padding=(0, 1)
         )
 
@@ -1071,6 +1121,7 @@ def select_theme_picker(current_theme=None):
             title="🎨  Select UI Color Theme",
             subtitle=footer,
             border_style=preview_color,
+            box=box.ROUNDED,
             padding=(0, 1)
         )
 
@@ -1079,18 +1130,422 @@ def select_theme_picker(current_theme=None):
 
         key = _read_key()
         if key in ('ESC', 'CTRL_C'):
+            console.clear()
             return None
         elif key == 'ENTER':
             if matches:
                 chosen = matches[selected_idx][1][0]
                 UI_THEME = chosen
                 save_audio_config()
+                console.clear()
                 return chosen
+            console.clear()
             return None
-        elif key in ('UP', 'k'):
+        elif key == 'UP':
             if matches:
                 selected_idx = (selected_idx - 1) % len(matches)
-        elif key in ('DOWN', 'j', '\t'):
+        elif key in ('DOWN', '\t'):
+            if matches:
+                selected_idx = (selected_idx + 1) % len(matches)
+        elif key == 'BACKSPACE':
+            query = query[:-1]
+            selected_idx = 0
+        elif len(key) == 1 and key.isprintable():
+            query += key
+            selected_idx = 0
+
+
+def select_microphone_picker():
+    """Interactive microphone picker with fuzzy search and arrow key navigation"""
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, UI_THEME
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich import box
+
+    console = Console()
+    devices = get_input_devices()
+    if not devices:
+        return None
+
+    selected_idx = 0
+    for i, dev in enumerate(devices):
+        if dev.get('is_active'):
+            selected_idx = i
+            break
+
+    query = ""
+
+    def filter_devs(q):
+        if not q.strip():
+            return list(enumerate(devices))
+        q = q.strip().lower()
+        scored = []
+        for i, dev in enumerate(devices):
+            score = _score_setting(q, dev['name'])
+            if score is not None:
+                scored.append((score, i, dev))
+        scored.sort(key=lambda x: -x[0])
+        return [(i, d) for _, i, d in scored]
+
+    while True:
+        console.clear()
+        matches = filter_devs(query)
+        if selected_idx >= len(matches):
+            selected_idx = max(0, len(matches) - 1)
+
+        theme_color = UI_THEME.lower() if UI_THEME and UI_THEME.lower() in COLOR_PALETTES and UI_THEME.lower() != "auto" else "green"
+
+        table = Table(box=None, padding=(0, 1), show_header=False, expand=True)
+        table.add_column("Ind", justify="right", width=2)
+        table.add_column("Dot", justify="center", width=2)
+        table.add_column("Name", ratio=1)
+        table.add_column("Badges", justify="right", width=22)
+
+        for row_i, (orig_i, dev) in enumerate(matches):
+            is_sel = (row_i == selected_idx)
+            is_active = dev.get('is_active', False)
+            is_default = dev.get('is_default', False)
+
+            ind = "❯ " if is_sel else "  "
+            ind_style = f"bold {theme_color}" if is_sel else "dim white"
+
+            dot = "●" if is_active else "○"
+            dot_style = "bold green" if is_active else "dim white"
+
+            name_style = f"bold {theme_color}" if is_sel else ("bold white" if is_active else "white")
+
+            badges = Text()
+            if is_default:
+                badges.append("[DEFAULT] ", style="bold cyan")
+            if is_active:
+                badges.append("[ACTIVE]", style="bold green")
+
+            table.add_row(
+                Text(ind, style=ind_style),
+                Text(dot, style=dot_style),
+                Text(dev['name'], style=name_style),
+                badges,
+            )
+
+        if not matches:
+            table.add_row("", "", f"No devices match '{query}'. Press Backspace or Esc.", "")
+
+        q_disp = query if query else "[dim]type to search (e.g. default, usb, quadcast)...[/dim]"
+        search_panel = Panel(
+            Text.from_markup(f"🔍 [bold]Filter:[/bold] [yellow]{q_disp}[/yellow]"),
+            border_style=theme_color,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+        tip = Text.from_markup("  [yellow]🎙 Live Monitor:[/yellow] [dim]Speak or hold Alt+Shift to preview audio levels in real time[/dim]\n")
+
+        footer = Text.from_markup(
+            "  [cyan][↑/↓][/cyan] Navigate   [cyan][Type][/cyan] Search   [green][Enter][/green] Select   [red][Esc][/red] Cancel"
+        )
+
+        main_content = Table.grid(expand=True)
+        main_content.add_row(tip)
+        main_content.add_row(table)
+
+        main_panel = Panel(
+            main_content,
+            title="🎤  Microphone Input Device",
+            subtitle=footer,
+            border_style=theme_color,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+        console.print(search_panel)
+        console.print(main_panel)
+
+        key = _read_key()
+        if key in ('ESC', 'CTRL_C'):
+            console.clear()
+            return None
+        elif key == 'ENTER' or (key == ' ' and not query):
+            if matches:
+                chosen_dev = matches[selected_idx][1]
+                PRIMARY_DEVICE_NAME = chosen_dev['name']
+                INPUT_DEVICE_INDEX = chosen_dev['index']
+                set_default_input_device(INPUT_DEVICE_INDEX)
+                save_audio_config()
+                console.clear()
+                return PRIMARY_DEVICE_NAME
+            console.clear()
+            return None
+        elif key == 'UP':
+            if matches:
+                selected_idx = (selected_idx - 1) % len(matches)
+        elif key in ('DOWN', '\t'):
+            if matches:
+                selected_idx = (selected_idx + 1) % len(matches)
+        elif key == 'BACKSPACE':
+            query = query[:-1]
+            selected_idx = 0
+        elif len(key) == 1 and key.isprintable():
+            query += key
+            selected_idx = 0
+
+
+def select_settings_picker():
+    """Interactive settings picker modal with live in-place toggling and fuzzy search."""
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE
+    global MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE
+    global UI_THEME, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE
+    global AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, OUTPUT_MODE, PUNCTUATION_MODE
+
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich import box
+
+    console = Console()
+    reset_done = False
+    query = ""
+    selected_idx = 0
+
+    settings_defs = [
+        {
+            "id": "trailing_space",
+            "icon": "␣ ",
+            "title": "Trailing Space",
+            "keywords": "trailing space auto type whitespace append space",
+        },
+        {
+            "id": "auto_punctuate",
+            "icon": "✍️ ",
+            "title": "Auto-Punctuation",
+            "keywords": "auto punctuate punctuation period sentence grammar enforcement",
+        },
+        {
+            "id": "number_digits",
+            "icon": "🔢",
+            "title": "Number Conversion",
+            "keywords": "numbers digits words spelled format numeric conversion",
+        },
+        {
+            "id": "middle_click",
+            "icon": "🖱️ ",
+            "title": "Mouse Hotkey",
+            "keywords": "middle click mouse hotkey push to talk button hold",
+        },
+        {
+            "id": "sound_mute",
+            "icon": "🔊",
+            "title": "Sound Effects",
+            "keywords": "sound effects mute volume chimes audio audio cues notify",
+        },
+        {
+            "id": "output_mode",
+            "icon": "🚀",
+            "title": "Output Mode",
+            "keywords": "output mode clipboard type typing paste speed fast slow safe",
+        },
+        {
+            "id": "punctuation_mode",
+            "icon": "📝",
+            "title": "Formatting Mode",
+            "keywords": "formatting mode punctuation period lowercase none full",
+        },
+        {
+            "id": "theme",
+            "icon": "🎨",
+            "title": "UI Color Theme",
+            "keywords": "theme color ui palette cyan magenta green blue yellow red white",
+        },
+        {
+            "id": "microphone",
+            "icon": "🎤",
+            "title": "Audio Device (Mic)",
+            "keywords": "mic microphone audio device input hardware primary secondary",
+        },
+        {
+            "id": "reset_terminal",
+            "icon": "🔄",
+            "title": "Reset Terminal",
+            "keywords": "reset terminal clipboard bridge clear state fix",
+        },
+    ]
+
+    def get_setting_state(item_id):
+        eff_theme = UI_THEME.lower() if UI_THEME and UI_THEME.lower() in COLOR_PALETTES and UI_THEME.lower() != "auto" else "green"
+        if item_id == "trailing_space":
+            if AUTO_TYPE_TRAILING_SPACE:
+                return "Enabled (appends ' ')", "[ON]", "green"
+            else:
+                return "Disabled (exact text)", "[OFF]", "dim white"
+        elif item_id == "auto_punctuate":
+            if AUTO_TYPE_AUTO_PUNCTUATE:
+                return "Enabled (full + period)", "[ON]", "green"
+            else:
+                return "Disabled (preserve user)", "[OFF]", "dim white"
+        elif item_id == "number_digits":
+            if NUMBER_DIGITS:
+                return "Digits (1, 2, 3)", "[DIGITS]", "green"
+            else:
+                return "Words (one, two, three)", "[WORDS]", "dim white"
+        elif item_id == "middle_click":
+            if MIDDLE_CLICK_ENABLED:
+                return "Enabled (hold middle click)", "[ON]", "green"
+            else:
+                return "Disabled", "[OFF]", "dim white"
+        elif item_id == "sound_mute":
+            if not IS_MUTED:
+                return "Enabled (sound chimes on)", "[ON]", "green"
+            else:
+                return "Muted (silent)", "[MUTED]", "red"
+        elif item_id == "output_mode":
+            mode = OUTPUT_MODE
+            if mode == "type_fast":
+                return "Auto-Type (Fast / Optimized)", "[FAST]", "cyan"
+            elif mode == "type":
+                return "Auto-Type (Slow / Safe)", "[SLOW]", "cyan"
+            else:
+                return "Clipboard Only", "[CLIP]", "cyan"
+        elif item_id == "punctuation_mode":
+            mode = PUNCTUATION_MODE
+            if mode == "no_terminal_period":
+                return "No Trailing Period (Semi-Formal)", "[SEMI]", "cyan"
+            elif mode == "no_punctuation":
+                return "No Punctuation", "[NONE]", "cyan"
+            elif mode == "lowercase_no_punctuation":
+                return "Lowercase Without Punctuation", "[LOWER]", "cyan"
+            else:
+                return "Full Punctuation", "[FULL]", "cyan"
+        elif item_id == "theme":
+            name = (UI_THEME or "auto").capitalize()
+            return f"{name} palette", "[PICKER]", eff_theme
+        elif item_id == "microphone":
+            dev = PRIMARY_DEVICE_NAME or "Default Microphone"
+            if len(dev) > 30:
+                dev = dev[:27] + "..."
+            return dev, "[SELECT]", "yellow"
+        elif item_id == "reset_terminal":
+            if reset_done:
+                return "Terminal & clipboard bridge reset", "[DONE]", "green"
+            else:
+                return "Reset terminal state & clipboard bridge", "[RUN]", "yellow"
+        return "", "", "white"
+
+    def filter_settings(q):
+        if not q.strip():
+            return list(enumerate(settings_defs))
+        q = q.strip().lower()
+        scored = []
+        for i, item in enumerate(settings_defs):
+            score = _score_setting(q, item["title"], item["keywords"])
+            if score is not None:
+                scored.append((score, i, item))
+        scored.sort(key=lambda x: -x[0])
+        return [(i, item) for _, i, item in scored]
+
+    while True:
+        console.clear()
+        matches = filter_settings(query)
+        if selected_idx >= len(matches):
+            selected_idx = max(0, len(matches) - 1)
+
+        eff_theme = UI_THEME.lower() if UI_THEME and UI_THEME.lower() in COLOR_PALETTES and UI_THEME.lower() != "auto" else "green"
+
+        table = Table(box=None, padding=(0, 1), show_header=False, expand=True)
+        table.add_column("Ind", justify="right", width=2)
+        table.add_column("Icon", justify="center", width=3)
+        table.add_column("Title", width=20)
+        table.add_column("Description", ratio=1)
+        table.add_column("Badge", justify="right", width=12)
+
+        for row_i, (orig_i, item) in enumerate(matches):
+            is_sel = (row_i == selected_idx)
+            val_str, badge, badge_color = get_setting_state(item["id"])
+
+            ind = "❯ " if is_sel else "  "
+            ind_style = f"bold {eff_theme}" if is_sel else "dim white"
+
+            title_style = f"bold {eff_theme}" if is_sel else "bold white"
+            desc_style = "bold white" if is_sel else "dim white"
+            badge_style = f"bold {badge_color}"
+
+            table.add_row(
+                Text(ind, style=ind_style),
+                Text(item["icon"], style="default"),
+                Text(item["title"], style=title_style),
+                Text(val_str, style=desc_style),
+                Text(badge, style=badge_style),
+            )
+
+        if not matches:
+            table.add_row("", "", f"No settings match '{query}'. Press Backspace or Esc.", "", "")
+
+        q_disp = query if query else "[dim]type to search (e.g. space, num, mouse, punc, mode)...[/dim]"
+        search_panel = Panel(
+            Text.from_markup(f"🔍 [bold]Filter:[/bold] [yellow]{q_disp}[/yellow]"),
+            border_style=eff_theme,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+        footer = Text.from_markup(
+            "  [cyan][↑/↓][/cyan] Navigate   [cyan][Type][/cyan] Search   [green][Enter/Space][/green] Toggle   [red][Esc][/red] Close"
+        )
+        main_panel = Panel(
+            table,
+            title="⚙️  Settings & Configuration",
+            subtitle=footer,
+            border_style=eff_theme,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+        console.print(search_panel)
+        console.print(main_panel)
+
+        key = _read_key()
+        if key in ('ESC', 'CTRL_C'):
+            save_audio_config()
+            console.clear()
+            return True
+        elif key in ('q', 'Q') and not query:
+            save_audio_config()
+            console.clear()
+            return True
+        elif key == 'ENTER' or (key == ' ' and not query):
+            if matches:
+                item_id = matches[selected_idx][1]["id"]
+                if item_id == "trailing_space":
+                    toggle_auto_type_trailing_space()
+                elif item_id == "auto_punctuate":
+                    toggle_auto_type_auto_punctuate()
+                elif item_id == "number_digits":
+                    set_number_digits(not NUMBER_DIGITS)
+                    save_audio_config()
+                elif item_id == "middle_click":
+                    set_middle_click_enabled(not MIDDLE_CLICK_ENABLED)
+                    save_audio_config()
+                elif item_id == "sound_mute":
+                    IS_MUTED = not IS_MUTED
+                    save_audio_config()
+                elif item_id == "output_mode":
+                    cycle_output_mode()
+                    save_audio_config()
+                elif item_id == "punctuation_mode":
+                    cycle_punctuation_mode()
+                    save_audio_config()
+                elif item_id == "theme":
+                    select_theme_picker()
+                elif item_id == "microphone":
+                    select_microphone_picker()
+                elif item_id == "reset_terminal":
+                    reset_terminal()
+                    reset_done = True
+        elif key == 'UP':
+            if matches:
+                selected_idx = (selected_idx - 1) % len(matches)
+        elif key in ('DOWN', '\t'):
             if matches:
                 selected_idx = (selected_idx + 1) % len(matches)
         elif key == 'BACKSPACE':
@@ -1102,288 +1557,8 @@ def select_theme_picker(current_theme=None):
 
 
 def select_audio_device():
-    """Interactive audio device selection with Primary/Secondary support & Rich styling"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE, UI_THEME, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE
-    
-    # Always reset terminal before interaction to fix terminal state
-    reset_terminal() 
-    
-    from rich.console import Console
-    from rich.table import Table
-    from rich.panel import Panel
-    
-    console = Console()
-    is_wsl = _is_wsl()
-    
-    table = Table(expand=True, border_style="cyan", show_header=True, header_style="bold yellow")
-    table.add_column("Key", style="bold cyan", width=6)
-    table.add_column("Setting Description", style="white")
-    table.add_column("Current Status", style="bold green")
-
-    if is_wsl:
-        table.add_row("W", "Open Windows Microphone Settings", "WSL Bridge Active")
-    else:
-        table.add_row("P", "Set Primary Device", PRIMARY_DEVICE_NAME or "Not Set")
-        table.add_row("S", "Set Secondary Device", SECONDARY_DEVICE_NAME or "Not Set")
-        
-    table.add_row("M", "Toggle Sound Effects", "MUTED" if IS_MUTED else "Sound On")
-    table.add_row("E", "Select Sound Effect Theme", SOUND_THEME.capitalize() if SOUND_THEME else "Proximity")
-    table.add_row("C", "Select UI Color Theme", f"{UI_THEME.upper()}")
-    output_labels = {
-        "clipboard": "CLIPBOARD COPY ONLY",
-        "type": "AUTO-TYPE (SLOW)",
-        "type_fast": "AUTO-TYPE (FAST)",
-    }
-    table.add_row("T", "Cycle Output Mode", output_labels.get(OUTPUT_MODE, OUTPUT_MODE.upper()))
-    table.add_row("D", "Toggle Auto-Type Trailing Space", "ENABLED (Appends ' ')" if AUTO_TYPE_TRAILING_SPACE else "DISABLED (Exact Text)")
-    table.add_row("F", "Toggle Auto-Type Full Punctuation", "ENABLED (Full + Period)" if AUTO_TYPE_AUTO_PUNCTUATE else "DISABLED (Preserve Mode)")
-    table.add_row("N", "Toggle Number Words -> Digits", "DIGITS" if NUMBER_DIGITS else "SPELLED OUT")
-    table.add_row("O", "Toggle Middle Click Push-to-Talk", "ENABLED" if MIDDLE_CLICK_ENABLED else "DISABLED")
-    bt_status = "LOCKED (No Media Pause)" if KEEP_BLUETOOTH_HANDSFREE else "AUTOSWITCH"
-    table.add_row("B", "Keep Bluetooth Hands-Free", bt_status)
-    table.add_row("R", "Reset Terminal & Audio Bridge", "Ready")
-    
-    if not is_wsl:
-        p_marker = "[ACTIVE]" if OVERRIDE_MODE == 'primary' else ""
-        s_marker = "[ACTIVE]" if OVERRIDE_MODE == 'secondary' else ""
-        a_marker = "[ACTIVE]" if OVERRIDE_MODE == 'auto' else ""
-        table.add_row("p", "Use Primary Device (Manual Override)", p_marker or "Inactive")
-        table.add_row("s", "Use Secondary Device (Manual Override)", s_marker or "Inactive")
-        table.add_row("a", "Automatic Selection (Default)", a_marker or "Inactive")
-        
-    table.add_row("q / ↵", "Save and Exit Configuration Menu", "Done")
-
-    panel = Panel(table, title="⚙️  Voice Transcriber Settings", border_style="bright_cyan", padding=(0, 1))
-    console.print(panel)
-    console.print("[dim white]Press choice key: [/dim white]", end="")
-    
-    choice = getch()
-    print() # Newline after getch
-    
-    if choice.lower() in ['q', '\r', '\n']: 
-        reset_terminal()
-        return True
-
-    if choice.upper() == 'C':
-        select_theme_picker()
-        reset_terminal()
-        return select_audio_device()
-    
-    if choice.lower() == 'r':
-        reset_terminal()
-        return select_audio_device()
-    
-    if choice.lower() == 'm':
-        IS_MUTED = not IS_MUTED
-        print(f"Sounds {'Muted' if IS_MUTED else 'Enabled'}")
-        save_audio_config()
-        reset_terminal()
-        return select_audio_device()
-    
-    if choice.upper() == 'E':
-        reset_terminal()
-        print("\n--- Select Sound Effect Theme ---")
-        print("  1. Proximity Chime (Default - Modern soft Windows chime)")
-        print("  2. Speech Tones (Cortana Speech On/Off)")
-        print("  3. Windows Notify (Classic Ding)")
-        print("  4. Subtle Tap (Navigation Start)")
-        print("  5. Retro Classic (Tada / Chimes)")
-        print("  6. Muted (Silent)")
-        print("  7. Custom Windows .wav Path")
-        print("  b. Back to main menu")
-        print("\nYour choice (1-7): ", end="", flush=True)
-        s_choice = getch()
-        print()
-        theme_map = {
-            '1': 'proximity',
-            '2': 'speech',
-            '3': 'notify',
-            '4': 'navigation',
-            '5': 'classic',
-            '6': 'silent'
-        }
-        if s_choice in theme_map:
-            SOUND_THEME = theme_map[s_choice]
-            IS_MUTED = (SOUND_THEME == 'silent')
-        elif s_choice == '7':
-            custom_p = input("Enter full path to .wav file: ").strip()
-            if custom_p:
-                SOUND_THEME = custom_p
-                
-        # Send update to active hotkey bridge if running
-        try:
-            import hotkeys
-            hotkeys.set_global_sound_theme(SOUND_THEME)
-        except:
-            pass
-            
-        save_audio_config()
-        reset_terminal()
-        return select_audio_device()
-    
-    if choice.upper() == 'B':
-        KEEP_BLUETOOTH_HANDSFREE = not KEEP_BLUETOOTH_HANDSFREE
-        apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
-        print(f"Keep Bluetooth Hands-Free set to: {'ENABLED (No Media Pause)' if KEEP_BLUETOOTH_HANDSFREE else 'DISABLED (Auto-switch enabled)'}")
-        save_audio_config()
-        reset_terminal()
-        return select_audio_device()
-    
-    if choice.upper() == 'T':
-        cycle_output_mode()
-        print(f"Output Mode set to: {output_labels.get(OUTPUT_MODE, OUTPUT_MODE.upper())}")
-        save_audio_config()
-        reset_terminal()
-        return select_audio_device()
-
-    if choice.upper() == 'D':
-        toggle_auto_type_trailing_space()
-        print(f"Auto-Type Trailing Space set to: {'ENABLED' if AUTO_TYPE_TRAILING_SPACE else 'DISABLED'}")
-        save_audio_config()
-        reset_terminal()
-        return select_audio_device()
-
-    if choice.upper() == 'F':
-        toggle_auto_type_auto_punctuate()
-        print(f"Auto-Type Full Punctuation set to: {'ENABLED' if AUTO_TYPE_AUTO_PUNCTUATE else 'DISABLED'}")
-        save_audio_config()
-        reset_terminal()
-        return select_audio_device()
-
-    if choice == 'N':
-        set_number_digits(not NUMBER_DIGITS)
-        print(f"Number conversion set to: {'DIGITS' if NUMBER_DIGITS else 'SPELLED OUT'}")
-        save_audio_config()
-        reset_terminal()
-        return select_audio_device()
-
-    if choice.upper() == 'O':
-        set_middle_click_enabled(not MIDDLE_CLICK_ENABLED)
-        print(f"Middle click hold mode set to: {'ENABLED' if MIDDLE_CLICK_ENABLED else 'DISABLED'}")
-        save_audio_config()
-        reset_terminal()
-        return select_audio_device()
-        
-    if is_wsl and choice.lower() == 'w':
-        print("\nWSL Environment detected. The WSL bridge automatically uses the Windows Default Microphone.")
-        print("Opening Windows Sound Settings (ms-settings:sound) to change your microphone...")
-        import subprocess
-        try:
-            subprocess.run(['powershell.exe', '-NoProfile', '-Command', 'Start-Process', 'ms-settings:sound'], 
-                           check=False, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-        except:
-            pass
-        reset_terminal()
-        return select_audio_device()
-        
-    if not is_wsl:
-        if choice == 'p':
-            OVERRIDE_MODE = 'primary'
-            if PRIMARY_DEVICE_NAME:
-                idx = find_device_index(PRIMARY_DEVICE_NAME)
-                if idx is not None:
-                    INPUT_DEVICE_INDEX = idx
-                    set_default_input_device(INPUT_DEVICE_INDEX)
-                    print(f"Set to Primary Device: {PRIMARY_DEVICE_NAME}")
-                else:
-                    print(f"Primary device not found: {PRIMARY_DEVICE_NAME}")
-            else:
-                print("Primary device not configured yet.")
-            save_audio_config()
-            return True
-        elif choice == 's':
-            OVERRIDE_MODE = 'secondary'
-            if SECONDARY_DEVICE_NAME:
-                idx = find_device_index(SECONDARY_DEVICE_NAME)
-                if idx is not None:
-                    INPUT_DEVICE_INDEX = idx
-                    set_default_input_device(INPUT_DEVICE_INDEX)
-                    print(f"Set to Secondary Device: {SECONDARY_DEVICE_NAME}")
-                else:
-                    print(f"Secondary device not found: {SECONDARY_DEVICE_NAME}")
-            else:
-                print("Secondary device not configured yet.")
-            save_audio_config()
-            return True
-        elif choice.lower() == 'a':
-            OVERRIDE_MODE = 'auto'
-            print("Mode: Automatic Selection")
-            # Let record_audio_stream handle the logic for auto selection
-            save_audio_config()
-            return True
-
-    if choice not in ['P', 'S']:
-        print("Invalid choice.")
-        return False
-        
-    is_primary = (choice == 'P')
-    label = "Primary" if is_primary else "Secondary"
-    
-    # NEW LOGIC FOR WSL:
-    if _is_wsl():
-        print(f"\nWSL Environment detected. {label} device uses the Windows Default Microphone.")
-        print("Opening Windows Sound Settings (ms-settings:sound) to change your microphone...")
-        import subprocess
-        try:
-            subprocess.run(['powershell.exe', '-NoProfile', '-Command', 'Start-Process', 'ms-settings:sound'], 
-                           check=False, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-        except:
-            pass
-        reset_terminal()
-        return True
-    
-    print(f"\nAvailable Audio Input Devices for {label}:")
-    print("=" * 60)
-    
-    devices = sd.query_devices()
-    input_devices = [(i, d) for i, d in enumerate(devices) if d['max_input_channels'] > 0]
-    
-    for i, (device_idx, device_info) in enumerate(input_devices):
-        markers = []
-        if PRIMARY_DEVICE_NAME and PRIMARY_DEVICE_NAME.lower() in device_info['name'].lower():
-            markers.append("PRIMARY")
-        if SECONDARY_DEVICE_NAME and SECONDARY_DEVICE_NAME.lower() in device_info['name'].lower():
-            markers.append("SECONDARY")
-            
-        marker_str = " ← " + " & ".join(markers) if markers else ""
-        print(f"  {i}: {device_info['name']}{marker_str}")
-    
-    if not input_devices:
-        print("No input devices found!")
-        return False
-    
-    try:
-        prompt = f"Enter the number (0-{len(input_devices)-1}) of the device you want to use as {label}, or 'c' to cancel: "
-        # Use regular input here because we need numbers (could be multi-digit)
-        # But ensure we are in a sane terminal state
-        print(prompt, end="", flush=True)
-        choice = input().strip().lower()
-        if choice == 'c' or not choice: return False
-        
-        device_idx = int(choice)
-        if 0 <= device_idx < len(input_devices):
-            selected_idx = input_devices[device_idx][0]
-            selected_name = input_devices[device_idx][1]['name']
-            
-            if is_primary:
-                PRIMARY_DEVICE_NAME = selected_name
-                INPUT_DEVICE_INDEX = selected_idx
-                set_default_input_device(INPUT_DEVICE_INDEX)
-            else:
-                SECONDARY_DEVICE_NAME = selected_name
-            
-            print(f"{label} Selected: {selected_name}")
-            save_audio_config()
-            reset_terminal()
-            return True
-        else:
-            print("Invalid choice")
-            reset_terminal()
-            return False
-    except Exception as e:
-        print(f"Selection error: {e}")
-        reset_terminal()
-        return False
+    """Interactive settings and configuration picker (matches Linux ratatui frontend)."""
+    return select_settings_picker()
 
 def record_audio_stream(interactive_mode=False, stream_callback=None):
     """Record audio using sounddevice with fallback and auto-recovery support"""

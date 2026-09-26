@@ -206,6 +206,8 @@ class SimpleVoiceTranscriber:
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
         self.tui.on_set_theme = self._on_tui_set_theme
         self.tui.on_open_theme_picker = self.open_theme_picker
+        self.tui.on_open_settings_picker = self.open_settings_picker
+        self.tui.on_open_mic_picker = self.open_mic_picker
         self.tui.on_reset_terminal = self._on_tui_reset_terminal
         self.tui.on_quit = self._on_tui_quit
 
@@ -408,6 +410,83 @@ class SimpleVoiceTranscriber:
                 self._sync_tui_state()
         except Exception as e:
             logger.debug(f"Theme picker error: {e}")
+            import t2
+            t2.reset_terminal()
+
+        self._sync_tui_state()
+        if hasattr(self, 'tui') and self.tui:
+            self.tui._resume_live()
+            self.tui.update_state("READY")
+
+    def open_settings_picker(self):
+        """Open interactive settings & configuration modal"""
+        if self.recording:
+            if hasattr(self, 'tui') and self.tui:
+                self.tui.print_warning("Settings Locked", "Cannot change settings while recording is active.")
+            return
+
+        if hasattr(self, 'tui') and self.tui:
+            self.tui._pause_live()
+
+        try:
+            import t2
+            if t2.select_settings_picker():
+                if hasattr(self, 'tui') and self.tui:
+                    self.tui.print_event("⚙️ Configuration", "Settings updated successfully!", level="success")
+            t2.reset_terminal()
+            if hasattr(self, 'visual_notification') and self.visual_notification:
+                self.visual_notification.set_active_device(get_active_device_name(include_model=False))
+        except Exception as e:
+            if hasattr(self, 'tui') and self.tui:
+                self.tui.print_error("Configuration Error", str(e))
+            _dbg_path = os.environ.get("VT_TUI_DEBUG")
+            if _dbg_path:
+                try:
+                    import traceback
+                    with open(_dbg_path, "a", encoding="utf-8") as _f:
+                        _f.write("open_settings_picker error: " + repr(e) + "\n")
+                        _f.write(traceback.format_exc())
+                except OSError:
+                    pass
+            import t2
+            t2.reset_terminal()
+
+        self._sync_tui_state()
+        if hasattr(self, 'tui') and self.tui:
+            self.tui._resume_live()
+            self.tui.update_state("READY")
+
+    def open_mic_picker(self):
+        """Open interactive microphone picker modal"""
+        if self.recording:
+            if hasattr(self, 'tui') and self.tui:
+                self.tui.print_warning("Settings Locked", "Cannot change settings while recording is active.")
+            return
+
+        if hasattr(self, 'tui') and self.tui:
+            self.tui._pause_live()
+
+        try:
+            import t2
+            chosen = t2.select_microphone_picker()
+            if chosen:
+                if hasattr(self, 'tui') and self.tui:
+                    self.tui.print_event("🎤 Microphone", f"Active microphone set to: {chosen}", level="success")
+                if hasattr(self, 'visual_notification') and self.visual_notification:
+                    self.visual_notification.set_active_device(chosen)
+            t2.reset_terminal()
+        except Exception as e:
+            if hasattr(self, 'tui') and self.tui:
+                self.tui.print_error("Microphone Selection Error", str(e))
+            _dbg_path = os.environ.get("VT_TUI_DEBUG")
+            if _dbg_path:
+                try:
+                    import traceback
+                    with open(_dbg_path, "a", encoding="utf-8") as _f:
+                        _f.write("open_mic_picker error: " + repr(e) + "\n")
+                        _f.write(traceback.format_exc())
+                except OSError:
+                    pass
             import t2
             t2.reset_terminal()
 
@@ -751,38 +830,8 @@ class SimpleVoiceTranscriber:
             logger.info("Ready for next recording")
 
     def change_input_device(self):
-        """Open audio device selection menu via hotkey or TUI shortcut"""
-        if self.recording:
-            if hasattr(self, 'tui') and self.tui:
-                self.tui.print_warning("Settings Locked", "Cannot change settings while recording is active.")
-            return
-
-        if hasattr(self, 'tui') and self.tui:
-            self.tui._pause_live()
-
-        try:
-            if select_audio_device():
-                if hasattr(self, 'tui') and self.tui:
-                    self.tui.print_event("⚙️ Audio Configuration", "Audio device and settings updated successfully!", level="success")
-            reset_terminal()
-        except Exception as e:
-            if hasattr(self, 'tui') and self.tui:
-                self.tui.print_error("Audio Configuration Error", str(e))
-            _dbg_path = os.environ.get("VT_TUI_DEBUG")
-            if _dbg_path:
-                try:
-                    import traceback
-                    with open(_dbg_path, "a", encoding="utf-8") as _f:
-                        _f.write("change_input_device error: " + repr(e) + "\n")
-                        _f.write(traceback.format_exc())
-                except OSError:
-                    pass
-            reset_terminal()
-            
-        self._sync_tui_state()
-        if hasattr(self, 'tui') and self.tui:
-            self.tui._resume_live()
-            self.tui.update_state("READY")
+        """Open settings & configuration menu via hotkey or TUI shortcut"""
+        self.open_settings_picker()
 
     def run(self):
         """Run the voice transcriber with Live TUI"""

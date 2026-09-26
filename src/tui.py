@@ -101,6 +101,8 @@ class VoiceTranscriberTUI:
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
         self.on_open_theme_picker = None
+        self.on_open_settings_picker = None
+        self.on_open_mic_picker = None
         self.on_set_theme = None
         self.on_reset_terminal = None
         self.on_quit = None
@@ -532,8 +534,15 @@ class VoiceTranscriberTUI:
         if ch in [' ', '\r', '\n']:
             if self.on_toggle_record:
                 self.on_toggle_record()
-        elif ch in ['M', 'i', 'I']:
-            if self.on_change_device:
+        elif ch == 'M':
+            if getattr(self, 'on_open_mic_picker', None):
+                self.on_open_mic_picker()
+            elif self.on_change_device:
+                self.on_change_device()
+        elif ch in (',', 'S', 'i', 'I'):
+            if getattr(self, 'on_open_settings_picker', None):
+                self.on_open_settings_picker()
+            elif getattr(self, 'on_change_device', None):
                 self.on_change_device()
         elif ch == 'm':
             if self.on_toggle_mute:

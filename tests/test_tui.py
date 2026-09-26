@@ -215,4 +215,82 @@ def test_theme_picker_key_dispatch():
     assert hasattr(t2, 'select_theme_picker')
 
 
+def test_settings_and_mic_picker_key_dispatch():
+    tui = VoiceTranscriberTUI()
+    called = []
+    tui.on_open_settings_picker = lambda: called.append("settings")
+    tui.on_open_mic_picker = lambda: called.append("mic_picker")
+
+    # Settings triggers: S, ,, i, I
+    tui._handle_keypress('S')
+    assert called[-1] == "settings"
+
+    tui._handle_keypress(',')
+    assert called[-1] == "settings"
+
+    tui._handle_keypress('i')
+    assert called[-1] == "settings"
+
+    tui._handle_keypress('I')
+    assert called[-1] == "settings"
+
+    # Mic trigger: M
+    tui._handle_keypress('M')
+    assert called[-1] == "mic_picker"
+
+    import t2
+    assert hasattr(t2, 'select_settings_picker')
+    assert hasattr(t2, 'select_microphone_picker')
+    assert hasattr(t2, 'select_audio_device')
+
+
+def test_score_setting_fuzzy_matching():
+    import t2
+    # Exact match
+    assert t2._score_setting("trailing space", "Trailing Space", "auto type") == 1000
+    # Prefix match
+    assert t2._score_setting("trail", "Trailing Space", "auto type") > 700
+    # Keyword match
+    assert t2._score_setting("auto type", "Trailing Space", "trailing space auto type") is not None
+    # Fuzzy subsequence match
+    assert t2._score_setting("trsp", "Trailing Space") is not None
+    # No match
+    assert t2._score_setting("nonexistentqueryxyz", "Trailing Space", "kw") is None
+
+
+def test_read_key_windows_simulation(monkeypatch):
+    import t2
+    # Simulate Windows platform
+    monkeypatch.setattr(t2.sys, "platform", "win32")
+
+    class FakeMsvcrt:
+        def __init__(self, key_seq):
+            self.seq = list(key_seq)
+
+        def getwch(self):
+            if self.seq:
+                return self.seq.pop(0)
+            return ''
+
+    # Test arrow keys
+    monkeypatch.setattr(t2, "sys", t2.sys)
+    import sys
+    fake_mod = FakeMsvcrt(['\xe0', 'H'])
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_mod)
+    assert t2._read_key() == 'UP'
+
+    fake_mod = FakeMsvcrt(['\xe0', 'P'])
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_mod)
+    assert t2._read_key() == 'DOWN'
+
+    fake_mod = FakeMsvcrt(['\r'])
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_mod)
+    assert t2._read_key() == 'ENTER'
+
+    fake_mod = FakeMsvcrt(['\x1b'])
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_mod)
+    assert t2._read_key() == 'ESC'
+
+
+
 
