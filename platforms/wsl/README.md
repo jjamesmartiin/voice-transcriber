@@ -108,14 +108,17 @@ nix run .
 ---
 
 ### Run Test Suite
+
+From the repo root — `./test.sh` auto-detects WSL and runs `tests/shared` + `tests/wsl`:
 ```bash
-nix run .#test
+./test.sh
 ```
 
-Or targeted subsets from inside WSL:
+Targeted tiers:
 ```bash
-nix develop --command python -m pytest tests/test_platform_hal.py tests/test_wsl.py -v
-nix develop --command python -m pytest tests/test_dictionary.py tests/test_post_processor.py tests/test_config_sync.py tests/test_tui.py tests/test_user_workflows.py
+./test.sh shared     # cross-platform, model-free
+./test.sh platform   # tests/wsl
+./test.sh e2e        # model/audio end-to-end (local only)
 ```
 
 ### Run Synthetic End-to-End Benchmark

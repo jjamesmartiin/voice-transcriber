@@ -139,38 +139,40 @@ Platform detection lives in `src/platform/__init__.py`; override it with
 ## Testing & CI
 
 GitHub Actions runs a three-OS matrix on every push and PR
-(`.github/workflows/ci.yml`):
+(`.github/workflows/ci.yml`). Each job runs the **shared** tier plus its own
+platform tier:
 
-| CI job | Runner | Environment |
+| CI job | Runner | Command |
 | :--- | :--- | :--- |
-| **Unit tests (Linux)** | `ubuntu-latest` | Nix dev shell |
-| **Unit tests (Windows)** | `windows-latest` | Python 3.11 + `pip` (no PyTorch needed) |
-| **Unit tests (WSL)** | `ubuntu-latest` | Nix dev shell with `VT_PLATFORM=wsl` |
+| **Unit tests (Linux)** | `ubuntu-latest` | `pytest tests/shared tests/linux` (Nix dev shell) |
+| **Unit tests (Windows)** | `windows-latest` | `pytest tests/shared tests/windows` (no PyTorch needed) |
+| **Unit tests (WSL)** | `ubuntu-latest` | `pytest tests/shared tests/wsl` (Nix, `VT_PLATFORM=wsl`) |
+
+### Test tiers
+
+| Tier | Directory | Needs model? | Runs where |
+| :--- | :--- | :--- | :--- |
+| **Shared** | `tests/shared/` | No | All three OSes, every push |
+| **Platform** | `tests/linux/`, `tests/windows/`, `tests/wsl/` | No | That OS only, every push |
+| **End-to-end** | `tests/e2e/` | Yes | Local only (never CI) |
 
 ### Running the tests locally
 
-```bash
-# Linux / WSL — run the entire tests/ directory
-nix run .#test
+One command per tier, from the repo root:
 
-# Linux / WSL — targeted subsets
-nix develop --command python -m pytest tests/test_end_to_end_crossplatform.py tests/test_platform_hal.py -v
-nix develop --command python -m pytest tests/test_dictionary.py tests/test_micro_batcher_fast.py tests/test_config_sync.py tests/test_tui.py tests/test_user_workflows.py tests/test_wsl.py
+| Tier | Linux / WSL | Windows |
+| :--- | :--- | :--- |
+| **All (shared + platform)** | `./test.sh` | `.\test.ps1` |
+| **Shared only** | `./test.sh shared` | `.\test.ps1 shared` |
+| **Platform only** | `./test.sh platform` | `.\test.ps1 windows` |
+| **End-to-end (model)** | `./test.sh e2e` | `.\test.ps1 e2e` |
 
-# Linux / WSL — live acoustic loopback (needs a real speaker + mic)
-nix develop --command python tests/test_live_speaker_mic_loopback.py all
-```
+`./test.sh` auto-detects Linux vs WSL and runs the matching platform tier. Both
+scripts forward extra args to pytest, e.g. `.\test.ps1 shared -k tui -v`. The
+launchers also work: `.\platforms\windows\run.ps1 test`.
 
-```powershell
-# Windows (native) — full hardware-independent suite
-.\platforms\windows\run.ps1 test
-
-# Windows (native) — targeted subset (extra args are forwarded to pytest)
-.\platforms\windows\run.ps1 test tests\test_platform_hal.py -v
-```
-
-The acoustic end-to-end and live speaker→microphone suites require real audio
-devices and a loaded model, so they are intentionally **not** part of CI. See
+The **end-to-end** tier needs the downloaded ASR model and (for the loopback
+suite) a real speaker + mic, so it is intentionally **not** part of CI. See
 [`docs/agent_testing_workflow.md`](docs/agent_testing_workflow.md) for the
 release-quality protocol.
 

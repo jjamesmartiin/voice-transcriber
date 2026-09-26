@@ -93,14 +93,8 @@ if ($args -and $args[0] -eq "test") {
         $testArgs = $args[1..($args.Count - 1)]
         & $pythonExe -m pytest @testArgs
     } else {
-        & $pythonExe -m pytest (Join-Path $RepoRoot "tests\test_platform_hal.py") `
-                               (Join-Path $RepoRoot "tests\test_dictionary.py") `
-                               (Join-Path $RepoRoot "tests\test_config_sync.py") `
-                               (Join-Path $RepoRoot "tests\test_post_processor.py") `
-                               (Join-Path $RepoRoot "tests\test_tui.py") `
-                               (Join-Path $RepoRoot "tests\test_user_workflows.py") `
-                               (Join-Path $RepoRoot "tests\test_wsl.py") `
-                               (Join-Path $RepoRoot "tests\test_end_to_end_crossplatform.py") -v
+        & $pythonExe -m pytest (Join-Path $RepoRoot "tests\shared") `
+                               (Join-Path $RepoRoot "tests\windows") -v
     }
     exit $LASTEXITCODE
 }

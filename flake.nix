@@ -196,7 +196,9 @@
               export PYTHONPATH=$PYTHONPATH:$(pwd):$(pwd)/src
               export OPENBLAS_NUM_THREADS=1
               export MKL_NUM_THREADS=1
-              ${pythonEnv}/bin/python -m pytest tests/ "$@"
+              TIER=tests/linux
+              if [ -n "''${WSL_DISTRO_NAME:-}" ] || [ -e /mnt/wslg ]; then TIER=tests/wsl; fi
+              ${pythonEnv}/bin/python -m pytest tests/shared "$TIER" "$@"
               exit_code=$?
               if [ $exit_code -eq 139 ] || [ $exit_code -eq 136 ]; then
                 exit 0
@@ -278,7 +280,7 @@
               export PS1='\[\033[1;32m\][VT-dev:\w]\$\[\033[0m\] '
               echo "🎙️ VT Development Environment Ready!"
               echo "To run the app: python src/main.py"
-              echo "To run tests: python -m pytest tests/"
+              echo "To run tests: python -m pytest tests/shared tests/linux"
             '';
           };
         });

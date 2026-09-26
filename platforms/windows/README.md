@@ -72,33 +72,22 @@ $env:PYTHONPATH = "src"
 
 ## Automated Testing on Windows
 
-Before live dictation, verify the hardware-independent suite. The launcher
-creates the venv, installs `requirements.txt`, and runs pytest. From the repo
-root:
+From the repo root, one command per tier:
 ```powershell
-# Full suite (platform HAL, dictionary, config, post-processor, TUI, workflows, WSL):
+.\test.ps1              # shared + Windows tiers (all)
+.\test.ps1 shared       # cross-platform, model-free
+.\test.ps1 windows      # Windows-specific
+.\test.ps1 e2e          # model/audio end-to-end (local only)
+```
+
+The launcher runs the same shared + Windows tiers:
+```powershell
 .\platforms\windows\run.ps1 test
-
-# Targeted run — extra arguments are forwarded to pytest:
-.\platforms\windows\run.ps1 test tests\test_platform_hal.py -v
 ```
 
-Or directly from `platforms\windows\`, with the venv active and `PYTHONPATH=src`:
-```powershell
-.\run.ps1 test
-```
-
-Or directly, with the venv active and `PYTHONPATH=src`:
-```powershell
-python -m pytest tests/test_platform_hal.py tests/test_dictionary.py `
-  tests/test_config_sync.py tests/test_post_processor.py tests/test_tui.py `
-  tests/test_user_workflows.py tests/test_wsl.py -v
-```
-
-> These tests are PyTorch-free, so they run on a bare Python install. The
-> acoustic end-to-end suite (`tests/test_end_to_end_crossplatform.py`) needs the
-> model weights loaded and is run separately:
-> `python -m pytest tests/test_end_to_end_crossplatform.py -v`
+> The shared/platform tiers are PyTorch-free, so they run on a bare Python
+> install. The end-to-end tier (`tests/e2e/`) needs the model weights and is run
+> separately with `.\test.ps1 e2e`.
 
 ---
 

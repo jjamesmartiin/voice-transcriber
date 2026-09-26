@@ -47,18 +47,20 @@ python3 src/main.py
 
 ## Verification
 
-Run the hardware-independent suite (no audio devices or model weights required):
+Run the shared + Linux tiers (no audio devices or model weights required),
+from the repo root:
 ```bash
-nix run .#test
+./test.sh
 ```
 
-Or targeted subsets:
+Targeted tiers:
 ```bash
-nix develop --command python -m pytest tests/test_end_to_end_crossplatform.py tests/test_platform_hal.py -v
-nix develop --command python -m pytest tests/test_dictionary.py tests/test_post_processor.py tests/test_config_sync.py tests/test_tui.py tests/test_user_workflows.py tests/test_wsl.py
+./test.sh shared     # cross-platform, model-free
+./test.sh platform   # tests/linux
+./test.sh e2e        # model/audio end-to-end (local only)
 ```
 
 The live speaker→microphone acoustic suite needs real audio hardware:
 ```bash
-nix develop --command python tests/test_live_speaker_mic_loopback.py all
+nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
 ```

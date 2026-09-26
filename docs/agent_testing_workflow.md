@@ -23,10 +23,10 @@ Before finalizing any changes, the AI Agent must execute the acoustic loopback i
 
 ```bash
 # 1. Run full live speaker-to-microphone loopback suite
-nix develop --command python tests/test_live_speaker_mic_loopback.py all
+nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
 
 # 2. Run fast unit test suite (micro-batching, VAD, casing, post-processor)
-nix develop --command python tests/test_micro_batcher_fast.py
+./test.sh shared
 
 # 3. Run synthetic end-to-end latency benchmarks
 nix develop --command python tests/benchmark_synthetic_e2e.py
@@ -40,12 +40,12 @@ When validating code modifications, the AI Agent follows an iterative 4-step loo
 
 ```mermaid
 flowchart TD
-    A["1. Apply Code Modification"] --> B["2. Run Single Sample Benchmark: python tests/test_live_speaker_mic_loopback.py <sample_id>"]
+    A["1. Apply Code Modification"] --> B["2. Run Single Sample Benchmark: python tests/e2e/test_live_speaker_mic_loopback.py <sample_id>"]
     B --> C["3. Inspect Captured Clipboard Text & Post-Release Latency"]
     C --> D{"Does Latency <= 1.15s AND Accuracy >= 80%?"}
     D -- No --> E["Analyze Root Cause Logs & Refine Code"]
     E --> A
-    D -- Yes --> F["4. Run Full Suite: python tests/test_live_speaker_mic_loopback.py all"]
+    D -- Yes --> F["4. Run Full Suite: python tests/e2e/test_live_speaker_mic_loopback.py all"]
     F --> G{"All Samples Pass Gates?"}
     G -- Yes --> H["Validation Successful (Proceed to Finalize)"]
     G -- No --> E
