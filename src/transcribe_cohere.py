@@ -96,6 +96,11 @@ def _configure_torch_runtime(device="cpu"):
             if hasattr(torch, "set_num_threads"):
                 torch.set_num_threads(target_threads)
             _cached_cpu_threads = target_threads
+            if hasattr(torch, "set_flush_denormal"):
+                try:
+                    torch.set_flush_denormal(True)
+                except Exception:
+                    pass
 
 def _cpu_supports_bf16():
     """Detect native CPU bfloat16 support (AVX512-BF16 or AMX-BF16)."""
@@ -198,6 +203,32 @@ def _optimize_cohere_runtime(model, processor):
                         }
             return result
         processor.__call__ = cached_processor_call
+
+    # 3. Tokenizer fast decoding optimization (eliminates O(N*M) uncached all_special_ids property lookup)
+    if hasattr(processor, "tokenizer"):
+        tok = processor.tokenizer
+        if not getattr(tok, "_fast_decode_patched", False):
+            try:
+                special_ids_set = set(tok.convert_tokens_to_ids(tok.all_special_tokens))
+                added = getattr(tok, "_added_tokens_decoder", getattr(tok, "added_tokens_decoder", {}))
+                c2t = getattr(tok, "_convert_id_to_token", None)
+
+                if c2t is not None:
+                    def fast_convert_ids_to_tokens(self, ids, skip_special_tokens=False):
+                        if isinstance(ids, int):
+                            return added[ids].content if ids in added else c2t(ids)
+                        tokens = []
+                        for index in ids:
+                            idx = int(index)
+                            if skip_special_tokens and idx in special_ids_set:
+                                continue
+                            tokens.append(added[idx].content if idx in added else c2t(idx))
+                        return tokens
+
+                    tok.convert_ids_to_tokens = fast_convert_ids_to_tokens.__get__(tok, type(tok))
+                    tok._fast_decode_patched = True
+            except Exception as e:
+                logger.debug(f"Tokenizer decode optimization skipped: {e}")
     return model, processor
 
 class _Conv1dAsLinear(nn.Module):

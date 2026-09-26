@@ -1697,8 +1697,8 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
         def _consume():
             while not stop_recording.is_set():
                 try:
-                    # Use a shorter timeout for better responsiveness to the stop event
-                    frame = q.get(timeout=0.05)
+                    # Responsive 10ms timeout for instant stop_recording detection
+                    frame = q.get(timeout=0.01)
                     if rate != 16000 and scipy is not None:
                         frame_flat = frame.flatten().astype(np.float32)
                         frame_processed = scipy.signal.resample_poly(frame_flat, 16000, rate).astype(np.float32)

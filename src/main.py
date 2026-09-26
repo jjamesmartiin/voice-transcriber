@@ -746,10 +746,12 @@ class SimpleVoiceTranscriber:
                         is_fast = (effective_mode == "type_fast")
                         timeout = 0.4 if is_fast else 1.0
                         start_wait = time.time()
+                        had_modifiers = bool(self.hotkey_system and self.hotkey_system.are_modifiers_pressed())
                         while self.hotkey_system and self.hotkey_system.are_modifiers_pressed() and (time.time() - start_wait < timeout):
                             time.sleep(0.01 if is_fast else 0.02)
                         
-                        time.sleep(0.01 if is_fast else 0.05)
+                        if had_modifiers:
+                            time.sleep(0.01 if is_fast else 0.05)
                         
                         add_space = getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True)
                         text_to_type = (transcription + ' ') if add_space else transcription
