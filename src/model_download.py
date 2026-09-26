@@ -44,6 +44,9 @@ SAFETENSORS_SHA256 = "987bd3e141c7bfdb5a78f5db11397ee7737308357e6cc0a3f36a4979b1
 DEFAULT_RELEASE_BASE = (
     "https://github.com/jjamesmartiin/voice-transcriber/releases/latest/download"
 )
+FALLBACK_RELEASE_BASE = (
+    "https://github.com/jjamesmartiin/voice-transcriber/releases/download/v1.1.0"
+)
 
 # Minimal set whose presence means "a local copy exists and can be loaded".
 _REQUIRED_LOCAL = [
@@ -270,20 +273,28 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
         return None
 
     prefix = f"cohere-transcribe-{revision}"
-    base_url = (base_url or _release_base()).rstrip("/")
-    print(f"Local model not found at {dest}.\n"
-          f"Downloading Cohere model parts from {base_url} (Apache-2.0 release asset)...")
+    primary_base = (base_url or _release_base()).rstrip("/")
+    candidates = [primary_base]
+    if FALLBACK_RELEASE_BASE not in candidates:
+        candidates.append(FALLBACK_RELEASE_BASE)
 
-    try:
-        manifest, resolved_url = _fetch_part_manifest(base_url, prefix)
-    except Exception as e:
-        print(f"Could not fetch model manifest ({e}). Falling back to Hugging Face "
-              f"(requires token/access).")
-        return None
+    manifest = None
+    resolved_url = None
+    for cand in candidates:
+        try:
+            cand_manifest, cand_resolved = _fetch_part_manifest(cand, prefix)
+            if cand_manifest:
+                manifest = cand_manifest
+                resolved_url = cand_resolved
+                base_url = cand
+                break
+        except Exception:
+            continue
+
     if not manifest:
-        print(f"Manifest at {base_url} contained no {prefix}.partN.xz entries. "
-              f"Falling back to Hugging Face.")
+        print(f"Could not fetch model manifest from release assets ({candidates}).")
         return None
+    print(f"Downloading Cohere model parts from {base_url} (Apache-2.0 release asset)...")
 
     part_names = sorted(manifest)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
