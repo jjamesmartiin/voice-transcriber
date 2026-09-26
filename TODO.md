@@ -9,6 +9,7 @@
 - [x] Reorganize `tests/` into tiers (`shared/`, `linux/`, `windows/`, `wsl/`, `e2e/`) with `./test.sh` / `.\test.ps1` one-liners.
 - [x] Document custom dictionary usage, YAML syntax, and Trie matching in `README.md`
 - [x] Add CLI and API tool for managing dictionary entries (`src/dictionary.py`: `add`, `remove`, `list`, `test`, `path`)
+- [x] Add context-aware homophone disambiguation rules (developer cues vs. everyday English guards) with human- and LLM-friendly schema in `config/dictionary.yaml` and CLI support
 - [x] Optimize model downloader (`src/model_download.py`): fast-fail HTTP 404s without retries, Python 3.10 `tarfile.extractall` guard, and CLI entrypoint
 - [x] Fix Windows keystroke injection CRLF double-enter issue in `src/platform/windows/clipboard.py`
 - [x] Update GitHub Actions `DeterminateSystems/nix-installer-action` to v19 in workflows
