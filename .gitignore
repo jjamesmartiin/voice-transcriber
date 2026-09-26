@@ -16,5 +16,8 @@ result
 /config.yaml
 /config.yml
 /audio_device_config.json
+# Secret: Hugging Face token file read by the WSL launcher / offline build.
+# Must never be committed.
+/HF_TOKEN
 __pycache__/
 *.pyc
