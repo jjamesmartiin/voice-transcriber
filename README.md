@@ -12,7 +12,7 @@ host environments: **Linux (Wayland/X11)**, **Windows (native)**, and
 | Platform | Status | Hotkeys | Output injection | Audio capture | Guide | Quick run |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Linux (Wayland / X11)** | Supported | `evdev` + `uinput` | `wl-copy` / `ydotool` / `xdotool` | PulseAudio / PipeWire | [Linux guide](platforms/linux/README.md) | `nix run .` or `./platforms/linux/run.sh` |
-| **Windows (native)** | Supported | `pynput` + `keyboard` | Win32 `SendInput` (Unicode/emoji) | WASAPI / DirectSound | [Windows guide](platforms/windows/README.md) | `.\platforms\windows\run.ps1` |
+| **Windows (native)** | Supported | `pynput` + `keyboard` | Win32 `SendInput` (Unicode/emoji) | WASAPI / DirectSound | [Windows guide](platforms/windows/README.md) | `run.bat` |
 | **Windows (WSL2 / NixOS)** | Supported | Windows-host bridge (PowerShell ⇄ socket IPC) | Host-side synthetic paste (`clip.exe` + `Ctrl+V`) | WSLg PulseAudio (`RDPSource`) | [WSL guide](platforms/wsl/README.md) | `powershell -File platforms\wsl\run_wsl.ps1` |
 
 All three share the same engine, ASR backend, post-processor, and config format.
@@ -37,14 +37,22 @@ hotkeys work without root. See the [Linux guide](platforms/linux/README.md).
 ### Windows (native)
 From the repo root:
 ```cmd
-# Double-click or run from Command Prompt / PowerShell:
+# Recommended (runs without PowerShell execution policy restrictions):
 setup.bat   # (One-time) creates .venv and installs dependencies
 run.bat     # Launches the application
 ```
-Or via PowerShell:
+Or via PowerShell (downloaded scripts require `-ExecutionPolicy Bypass`):
 ```powershell
-.\platforms\windows\run.ps1
+# One-time setup:
+powershell -ExecutionPolicy Bypass -File .\platforms\windows\setup.ps1
+
+# Launch:
+powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1
 ```
+*(Tip: Or run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` once in your PowerShell session.)*
+
+> **Note on path length (`[WinError 206]`):** Windows has a 260-character path limit by default. If extracting from a zip, place the repository in a short path (e.g. `C:\voice-transcriber`) rather than deeply nested download folders, or enable `LongPathsEnabled`. See [Windows Troubleshooting](platforms/windows/README.md#troubleshooting).
+
 Requires Python 3.10+. See the [Windows guide](platforms/windows/README.md).
 
 ### Windows via WSL2 (NixOS)
@@ -169,7 +177,7 @@ One command per tier, from the repo root:
 
 `./test.sh` auto-detects Linux vs WSL and runs the matching platform tier. Both
 scripts forward extra args to pytest, e.g. `.\test.ps1 shared -k tui -v`. The
-launchers also work: `.\platforms\windows\run.ps1 test`.
+launchers also work: `run.bat test` (or `powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 test`).
 
 The **end-to-end** tier needs the downloaded ASR model and (for the loopback
 suite) a real speaker + mic, so it is intentionally **not** part of CI. See
@@ -212,7 +220,7 @@ access.
 | Target | Command | Output |
 | :--- | :--- | :--- |
 | **Linux (Nix)** | `nix build .` | `result/bin/vt` |
-| **Windows (offline EXE)** | `.\platforms\windows\run.ps1 build` (or `python platforms\windows\build_offline.py`) | `dist/VoiceTranscriber/` (PyInstaller `--onedir`, bundles the model) |
+| **Windows (offline EXE)** | `run.bat build` (or `powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 build`) | `dist/VoiceTranscriber/` (PyInstaller `--onedir`, bundles the model) |
 
 The Windows build is self-contained (~2–3 GB: Python + PyTorch + Cohere
 weights) and needs no Python install on the target machine. See

@@ -10,8 +10,8 @@ Run Voice Transcriber natively on Windows with global hotkeys, Windows audio cue
 - Python 3.10+ installed on Windows (from https://www.python.org/downloads/ with "Add python.exe to PATH" checked).
 - PowerShell 5.1+ or PowerShell 7+ (or Command Prompt).
 
-### 2. One-Click Setup & Launch
-From the repository root, you can simply run the batch launchers:
+### 2. One-Click Setup & Launch (Recommended)
+From the repository root, you can simply run the batch launchers (by double-clicking them in File Explorer, or running from Command Prompt / PowerShell):
 ```cmd
 # Run setup (creates venv and installs dependencies):
 setup.bat
@@ -20,15 +20,19 @@ setup.bat
 run.bat
 ```
 
+> **Note:** The `.bat` launchers automatically bypass PowerShell's script execution policy (`-ExecutionPolicy Bypass`), so you will not run into digital signature or `PSSecurityException` errors on downloaded scripts.
+
 ### 3. Setup via PowerShell
-Or if you prefer PowerShell:
+If you prefer running via PowerShell directly, pass `-ExecutionPolicy Bypass` (since Windows blocks downloaded `.ps1` scripts by default):
 ```powershell
 # Run the automated setup script:
-.\platforms\windows\setup.ps1
+powershell -ExecutionPolicy Bypass -File .\platforms\windows\setup.ps1
 
 # Launch the application:
-.\platforms\windows\run.ps1
+powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1
 ```
+
+*(Tip: Alternatively, you can run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` once in your PowerShell session to allow running `.\platforms\windows\setup.ps1` and `.\platforms\windows\run.ps1` directly.)*
 
 ### 4. Manual Setup (Alternative)
 If setting up manually from the repository root:
@@ -82,8 +86,12 @@ From the repo root, one command per tier:
 ```
 
 The launcher runs the same shared + Windows tiers:
+```cmd
+run.bat test
+```
+or via PowerShell:
 ```powershell
-.\platforms\windows\run.ps1 test
+powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 test
 ```
 
 > The shared/platform tiers are PyTorch-free, so they run on a bare Python
@@ -95,7 +103,49 @@ The launcher runs the same shared + Windows tiers:
 ## Building a Standalone Offline EXE
 
 To package Voice Transcriber into a self-contained `.exe`:
+```cmd
+run.bat build
+```
+or via PowerShell:
 ```powershell
-python build_offline.py
+powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 build
+```
+or directly with Python:
+```powershell
+python platforms\windows\build_offline.py
 ```
 This produces an offline distribution in `dist/` that requires no Python installation on the target Windows machine.
+
+---
+
+## Troubleshooting
+
+### 1. Script Cannot Be Loaded (`PSSecurityException` / `UnauthorizedAccess`)
+**Symptom:**
+```text
+setup.ps1 cannot be loaded. The file is not digitally signed. You cannot run this script on the current system.
+```
+**Cause:** Windows restricts running downloaded `.ps1` scripts by default ("Mark of the Web").  
+**Fix:**
+- Use the batch file: **`setup.bat`** (or **`run.bat`**). It automatically bypasses the execution policy for that run.
+- Or pass `-ExecutionPolicy Bypass` in PowerShell:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\platforms\windows\setup.ps1
+  ```
+- Or unblock scripts for your current PowerShell terminal session:
+  ```powershell
+  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+  ```
+
+### 2. Path Too Long (`[WinError 206] The filename or extension is too long`)
+**Symptom:**
+```text
+ERROR: Could not install packages due to an OSError: [WinError 206] The filename or extension is too long: '...\.venv\Lib\site-packages\...'
+```
+**Cause:** Windows enforces a legacy 260-character maximum path limit (`MAX_PATH`) by default. Downloading a GitHub zip extracts by default into deeply nested directories (e.g. `Downloads\voice-transcriber-<hash>\voice-transcriber-<hash>\`), which exceeds 260 characters when `pip` installs package dependencies.  
+**Fix:**
+- **Automated (Zero manual typing):** Run **`setup.bat`** and click **Yes** when Windows prompts for permission to enable long path support. `setup.bat` will enable `LongPathsEnabled` and resume setup automatically.
+- **Alternative:** Move or rename the extracted project folder to a shorter path (e.g. `C:\voice-transcriber`), or enable long paths manually in an Administrator PowerShell window:
+  ```powershell
+  New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+  ```

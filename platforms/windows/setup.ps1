@@ -1,6 +1,7 @@
 # Voice Transcriber - Windows Environment Setup Script
-# Run directly in PowerShell or by double-clicking setup.bat:
-# .\platforms\windows\setup.ps1
+# Recommended: Double-click setup.bat in the repository root (bypasses execution policy)
+# Or run in PowerShell with execution policy bypass:
+# powershell -ExecutionPolicy Bypass -File .\platforms\windows\setup.ps1
 
 $ErrorActionPreference = "Stop"
 
@@ -29,6 +30,41 @@ if (Test-Path (Join-Path $ScriptDir "..\..\src")) {
 $VenvDir = Join-Path $RepoRoot ".venv"
 $ReqFile = Join-Path $ScriptDir "requirements.txt"
 if (-not (Test-Path $ReqFile)) { $ReqFile = Join-Path $RepoRoot "requirements.txt" }
+
+function Ensure-LongPathsSupport {
+    $current = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -ErrorAction SilentlyContinue).LongPathsEnabled
+    if ($current -eq 1) {
+        return $true
+    }
+
+    # Attempt to set directly if already running with admin privileges
+    try {
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -Type DWord -ErrorAction Stop
+        Write-Success "Windows long path support enabled."
+        return $true
+    } catch {}
+
+    # Prompt user via UAC to enable LongPathsEnabled so no manual steps are needed
+    Write-Host "`n[SETUP] Windows 260-character path limit (MAX_PATH) is currently active." -ForegroundColor Cyan
+    Write-Host "Enabling long path support prevents '[WinError 206] filename too long' errors in deep folders." -ForegroundColor Cyan
+    Write-Host "Requesting permission to enable long paths (a Windows prompt will appear)..." -ForegroundColor Yellow
+
+    try {
+        $cmd = "Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -Type DWord -Force"
+        $proc = Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`"" -PassThru -Wait -WindowStyle Hidden
+        $current = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -ErrorAction SilentlyContinue).LongPathsEnabled
+        if ($current -eq 1) {
+            Write-Success "Windows long path support successfully enabled!"
+            return $true
+        }
+    } catch {
+        Write-Warn "Administrator permission was not granted to enable long paths."
+    }
+
+    return $false
+}
+
+$longPathsEnabled = Ensure-LongPathsSupport
 
 # Step 1: Detect Python
 Write-Step "1. Checking host Python installation..."
@@ -67,6 +103,23 @@ if (-not $hostPythonCmd) {
 Write-Step "2. Setting up virtual environment (.venv)..."
 $pythonExe = Join-Path $VenvDir "Scripts\python.exe"
 
+# If long paths could not be enabled and the repo path is long, use a directory junction to AppData to avoid MAX_PATH
+if (-not $longPathsEnabled -and $RepoRoot.Length -gt 70 -and -not (Test-Path $VenvDir)) {
+    $shortVenv = Join-Path $env:LOCALAPPDATA "VoiceTranscriber\venv"
+    Write-Host "Using short path ($shortVenv) with directory junction to avoid Windows path limit..." -ForegroundColor Cyan
+    try {
+        $shortParent = Split-Path $shortVenv
+        if (-not (Test-Path $shortParent)) { New-Item -ItemType Directory -Path $shortParent -Force | Out-Null }
+        & $hostPythonCmd @hostPythonArgs -m venv $shortVenv
+        if (Test-Path (Join-Path $shortVenv "Scripts\python.exe")) {
+            New-Item -ItemType Junction -Path $VenvDir -Target $shortVenv | Out-Null
+            Write-Success "Linked virtual environment to $VenvDir via directory junction."
+        }
+    } catch {
+        Write-Warn "Junction fallback failed; falling back to standard venv creation: $_"
+    }
+}
+
 if (-not (Test-Path $VenvDir) -or -not (Test-Path $pythonExe)) {
     Write-Host "Creating virtual environment at $VenvDir..."
     & $hostPythonCmd @hostPythonArgs -m venv $VenvDir
@@ -76,13 +129,13 @@ if (-not (Test-Path $VenvDir) -or -not (Test-Path $pythonExe)) {
     }
     Write-Success "Virtual environment created."
 } else {
-    Write-Success "Virtual environment already exists at $VenvDir."
+    Write-Success "Virtual environment ready at $VenvDir."
 }
 
 # Step 3: Upgrade pip and tooling
-Write-Step "3. Ensuring pip and setup tools are up to date..."
+Write-Step "3. Ensuring pip is up to date..."
 & $pythonExe -m ensurepip --upgrade 2>$null
-& $pythonExe -m pip install --upgrade pip setuptools wheel --quiet
+& $pythonExe -m pip install --upgrade pip --quiet
 Write-Success "Pip is up to date."
 
 # Step 4: Install Dependencies
@@ -97,6 +150,11 @@ if (Test-Path $ReqFile) {
 
 if ($LASTEXITCODE -ne 0) {
     Write-Err "pip install returned exit code $LASTEXITCODE. Please check the error messages above."
+    if (-not $longPathsEnabled) {
+        Write-Host "`n[TIP] If you encountered [WinError 206] (path too long):" -ForegroundColor Yellow
+        Write-Host "  Re-run setup.bat and click 'Yes' on the Windows permission prompt to enable long paths," -ForegroundColor Yellow
+        Write-Host "  or move the project to a shorter folder path (e.g. C:\voice-transcriber)." -ForegroundColor Yellow
+    }
     exit $LASTEXITCODE
 }
 Write-Success "Dependency installation complete."
@@ -118,7 +176,7 @@ Write-Host @"
              Setup Completed Successfully!
 ======================================================
 You can now run Voice Transcriber using any of:
-  - Double-click:  run.bat
-  - PowerShell:    .\platforms\windows\run.ps1
-  - Python venv:   .\.venv\Scripts\python.exe src\main.py
+  - Batch launcher: run.bat (or double-click run.bat)
+  - PowerShell:     powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1
+  - Python venv:    .\.venv\Scripts\python.exe src\main.py
 "@ -ForegroundColor Green

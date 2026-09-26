@@ -17,6 +17,23 @@ $SrcDir = Join-Path $RepoRoot "src"
 $ReqFile = Join-Path $ScriptDir "requirements.txt"
 if (-not (Test-Path $ReqFile)) { $ReqFile = Join-Path $RepoRoot "requirements.txt" }
 
+function Ensure-LongPathsSupport {
+    $current = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -ErrorAction SilentlyContinue).LongPathsEnabled
+    if ($current -eq 1) { return $true }
+    try {
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -Type DWord -ErrorAction Stop
+        return $true
+    } catch {}
+    try {
+        $cmd = "Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -Type DWord -Force"
+        $proc = Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`"" -PassThru -Wait -WindowStyle Hidden
+        $current = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -ErrorAction SilentlyContinue).LongPathsEnabled
+        if ($current -eq 1) { return $true }
+    } catch {}
+    return $false
+}
+Ensure-LongPathsSupport | Out-Null
+
 $env:PIP_DISABLE_PIP_VERSION_WARNING = "1"
 $env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
 $env:VT_PLATFORM = "windows"
@@ -80,7 +97,8 @@ if ($needsInstall -and (Test-Path $ReqFile)) {
     & $pythonExe -m pip install -r $ReqFile
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Dependency installation from $ReqFile failed." -ForegroundColor Red
-        Write-Host "Please review the pip errors above, or run: .\platforms\windows\setup.ps1" -ForegroundColor Yellow
+        Write-Host "Please review the pip errors above, or run setup.bat (or: powershell -ExecutionPolicy Bypass -File .\platforms\windows\setup.ps1)" -ForegroundColor Yellow
+        Write-Host "If you encountered [WinError 206] (path too long), move the folder to a shorter path (e.g. C:\voice-transcriber) or enable LongPaths in Windows." -ForegroundColor Yellow
         exit $LASTEXITCODE
     }
 }
