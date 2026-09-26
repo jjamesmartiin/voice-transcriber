@@ -276,8 +276,10 @@ class RatatuiTui:
                 self.on_set_theme(theme)
             elif self.on_cycle_theme:
                 self.on_cycle_theme()
-        elif cmd == "cycle_punctuation" and getattr(self, "on_cycle_punctuation", None):
+        elif cmd in ("cycle_punctuation", "cycle_preset") and getattr(self, "on_cycle_punctuation", None):
             self.on_cycle_punctuation()
+        elif cmd == "open_preset_picker" and getattr(self, "on_open_preset_picker", None):
+            self.on_open_preset_picker()
         elif cmd == "reset_terminal" and self.on_reset_terminal:
             self.on_reset_terminal()
         elif cmd == "get_devices":

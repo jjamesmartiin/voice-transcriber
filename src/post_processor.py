@@ -1054,30 +1054,47 @@ def _strip_punctuation(text: str) -> str:
 
 
 def apply_punctuation_mode(text: str, mode: str | None = None) -> str:
-    """Format transcribed text according to the selected punctuation mode.
+    """Format transcribed text according to the selected mode preset.
 
-    Modes:
-      - full (default): standard capitalization and terminal/internal punctuation.
-      - no_terminal_period (semi-formal): retains internal punctuation and capitalization,
-        but omits trailing periods at the end of the text.
-      - no_punctuation: removes punctuation marks, preserving casing and intra-token
-        separators (decimals, IPs, paths, contractions).
-      - lowercase_no_punctuation: as above, and lowercased.
+    Presets:
+      - default (standard): standard capitalization, grammar, and terminal/internal punctuation.
+      - casual (no_terminal_period): internal punctuation and capitalization, but no trailing period.
+      - autocorrect: phone-style capitalization (sentence starts, capital 'I'), with punctuation stripped.
+      - aesthetic_lowercase: all lowercase (even 'i'), but internal/expressive punctuation kept (no trailing period).
+      - gen_z (pure_gen_z): all lowercase, zero punctuation, zero grammar enforcement.
     """
     if not text:
         return text
     mode_str = (mode or _PUNCTUATION_MODE or "full").strip().lower().replace("-", "_")
 
-    if mode_str in ("no_terminal_period", "semi_formal", "no_period", "no_ending_period"):
+    if mode_str in ("default", "full", "standard"):
+        return text
+
+    elif mode_str in ("casual", "no_terminal_period", "semi_formal", "no_period", "no_ending_period"):
         trimmed = text.rstrip()
         if trimmed.endswith("."):
             return trimmed.rstrip(". ")
         return trimmed
 
-    elif mode_str in ("no_punctuation", "none", "no_punct"):
-        return _strip_punctuation(text)
+    elif mode_str in ("autocorrect", "phone", "no_punctuation", "none", "no_punct"):
+        # Autocorrect / phone-style: strip punctuation while preserving intra-token separators (e.g. don't)
+        stripped = _strip_punctuation(text)
+        # Ensure standalone 'i' or contractions like "i'm" are capitalized
+        capped = re.sub(r"\bi\b", "I", stripped)
+        capped = re.sub(r"\bi'([a-zA-Z]+)\b", r"I'\1", capped)
+        if capped and capped[0].islower():
+            capped = capped[0].upper() + capped[1:]
+        return capped
 
-    elif mode_str in ("lowercase_no_punctuation", "lowercase_no_punct"):
+    elif mode_str in ("aesthetic_lowercase", "aesthetic", "lowercase_punct", "lower_punct"):
+        # Aesthetic lowercase: lowercase everything, keep punctuation, drop trailing period
+        lowered = text.lower().rstrip()
+        if lowered.endswith("."):
+            lowered = lowered.rstrip(". ")
+        return lowered
+
+    elif mode_str in ("gen_z", "genz", "pure_gen_z", "lowercase_no_punctuation", "lowercase_no_punct"):
+        # Pure Gen Z: all lowercase, zero punctuation
         return _strip_punctuation(text.lower())
 
     return text
@@ -1528,7 +1545,8 @@ def clean_speech_transcription(
         return ""
         
     # 14. Ensure complete statement utterances end with terminal punctuation
-    if not is_intermediate:
+    eff_punc_mode = (punctuation_mode or _PUNCTUATION_MODE or "full").strip().lower().replace("-", "_")
+    if not is_intermediate and eff_punc_mode in ("default", "full", "standard"):
         if not cleaned.endswith((".", "!", "?", ":")):
             if len(cleaned.split(None, 3)) >= 3:
                 cleaned += "."

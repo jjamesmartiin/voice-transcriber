@@ -19,6 +19,7 @@ use crate::theme_picker;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingKind {
     TrailingSpace,
+    #[allow(dead_code)]
     AutoPunctuate,
     NumberDigits,
     MiddleClick,
@@ -38,18 +39,24 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 10] = [
+pub const SETTINGS: [SettingItem; 9] = [
+    SettingItem {
+        kind: SettingKind::PunctuationMode,
+        icon: "✨",
+        title: "Mode Preset",
+        keywords: "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
+    },
+    SettingItem {
+        kind: SettingKind::OutputMode,
+        icon: "🚀",
+        title: "Output Delivery",
+        keywords: "output mode delivery clipboard type typing paste speed fast slow safe",
+    },
     SettingItem {
         kind: SettingKind::TrailingSpace,
         icon: "␣ ",
         title: "Trailing Space",
         keywords: "trailing space auto type whitespace append space",
-    },
-    SettingItem {
-        kind: SettingKind::AutoPunctuate,
-        icon: "📝",
-        title: "Auto-Punctuation",
-        keywords: "auto punctuate punctuation period sentence grammar enforcement",
     },
     SettingItem {
         kind: SettingKind::NumberDigits,
@@ -59,27 +66,15 @@ pub const SETTINGS: [SettingItem; 10] = [
     },
     SettingItem {
         kind: SettingKind::MiddleClick,
-        icon: "🔘",
+        icon: "🖱️ ",
         title: "Mouse Hotkey",
         keywords: "middle click mouse hotkey push to talk button hold",
     },
     SettingItem {
         kind: SettingKind::SoundMute,
-        icon: "🔊",
+        icon: "🔔",
         title: "Sound Effects",
         keywords: "sound effects mute volume chimes audio audio cues notify",
-    },
-    SettingItem {
-        kind: SettingKind::OutputMode,
-        icon: "📋",
-        title: "Output Mode",
-        keywords: "output mode clipboard type typing paste speed fast slow safe",
-    },
-    SettingItem {
-        kind: SettingKind::PunctuationMode,
-        icon: "📄",
-        title: "Formatting Mode",
-        keywords: "formatting mode punctuation period lowercase none full",
     },
     SettingItem {
         kind: SettingKind::Theme,
@@ -89,7 +84,7 @@ pub const SETTINGS: [SettingItem; 10] = [
     },
     SettingItem {
         kind: SettingKind::Microphone,
-        icon: "🎤",
+        icon: "🎙️",
         title: "Audio Device (Mic)",
         keywords: "mic microphone audio device input hardware primary secondary",
     },
@@ -155,15 +150,22 @@ impl SettingItem {
                 (desc.to_string(), badge, Color::Cyan)
             }
             SettingKind::PunctuationMode => {
-                let (desc, badge) = match app.punctuation_mode.as_str() {
-                    "no_terminal_period" => ("No Trailing Period (Semi-Formal)", "[SEMI]"),
-                    "no_punctuation" => ("No Punctuation", "[NONE]"),
-                    "lowercase_no_punctuation" => {
-                        ("Lowercase Without Punctuation", "[LOWER]")
+                let (desc, badge, color) = match app.punctuation_mode.as_str() {
+                    "no_terminal_period" | "casual" => {
+                        ("Casual (No Ending Period)", "[CASUAL]", Color::Yellow)
                     }
-                    _ => ("Full Punctuation", "[FULL]"),
+                    "no_punctuation" | "autocorrect" => {
+                        ("Autocorrect (Phone Style)", "[PHONE]", Color::Blue)
+                    }
+                    "aesthetic_lowercase" | "aesthetic" => {
+                        ("Aesthetic Lowercase", "[AESTHETIC]", Color::Magenta)
+                    }
+                    "lowercase_no_punctuation" | "gen_z" => {
+                        ("Pure Gen Z (No Caps/Punct)", "[GEN Z]", Color::Cyan)
+                    }
+                    _ => ("Default (Standard)", "[DEFAULT]", Color::Green),
                 };
-                (desc.to_string(), badge, Color::Cyan)
+                (desc.to_string(), badge, color)
             }
             SettingKind::Theme => {
                 let name = app.ui_theme.name();

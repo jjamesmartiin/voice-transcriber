@@ -79,6 +79,7 @@ See the [WSL guide](platforms/wsl/README.md) and
 | **Middle-click** (hold ~0.25 s) | **Mouse Push-to-Talk.** A quick click (< 0.25 s) passes through and is ignored. |
 | **`Ctrl`** (held at release) | **Clipboard override.** Forces clipboard output for this utterance even when auto-type is enabled. |
 | **`Ctrl+Alt+I`** (or `S`, `,`, `i` in terminal) | **Settings modal.** Interactive modal (`⚙️ Settings & Configuration`) with fuzzy search, in-place toggle badges, output modes, and formatting. |
+| **`g`** (in terminal) | **Mode preset switcher.** Interactive modal (`✨ Mode Preset Switcher`) with live formatting previews for Default, Casual, Autocorrect, Aesthetic Lowercase, and Pure Gen Z modes. |
 | **`M`** (in terminal) | **Microphone picker.** Interactive device picker modal (`🎤 Microphone Input Device`) with active and default indicators. |
 | **`t`** (in terminal) | **Theme picker.** Interactive UI accent color palette modal (`🎨 Select UI Color Theme`). |
 

@@ -121,7 +121,7 @@ KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-revert
 SOUND_THEME = "proximity"
 UI_THEME = "auto"
 PUNCTUATION_MODE = "full"
-PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "lowercase_no_punctuation"]
+PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "aesthetic_lowercase", "gen_z"]
 WAIT_FOR_MODEL_ON_STARTUP = True
 ENABLE_SLM = False
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
@@ -515,18 +515,12 @@ def load_audio_config(file_path=None):
             MIDDLE_CLICK_ENABLED = config.get('middle_click_enabled', True)
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
 
-            raw_punct = config.get('punctuation_mode') or config.get('formatting_level') or 'full'
-            if raw_punct in ('semi-formal', 'semi_formal'):
-                PUNCTUATION_MODE = 'no_terminal_period'
-            else:
-                PUNCTUATION_MODE = str(raw_punct).strip().lower()
+            raw_punct = config.get('preset') or config.get('mode_preset') or config.get('punctuation_mode') or config.get('formatting_level') or 'full'
+            PUNCTUATION_MODE = get_canonical_preset_name(raw_punct)
 
-            env_punct = os.environ.get("VT_PUNCTUATION_MODE", "").strip().lower()
+            env_punct = os.environ.get("VT_PRESET", "").strip().lower() or os.environ.get("VT_PUNCTUATION_MODE", "").strip().lower()
             if env_punct:
-                if env_punct in ('semi-formal', 'semi_formal'):
-                    PUNCTUATION_MODE = 'no_terminal_period'
-                else:
-                    PUNCTUATION_MODE = env_punct
+                PUNCTUATION_MODE = get_canonical_preset_name(env_punct)
 
             WAIT_FOR_MODEL_ON_STARTUP = config.get('wait_for_model_on_startup', True)
             env_wait = os.environ.get("VT_WAIT_FOR_MODEL_ON_STARTUP", "").strip().lower()
@@ -747,6 +741,7 @@ def save_audio_config(file_path=None):
             'middle_click_enabled': MIDDLE_CLICK_ENABLED,
             'keep_bluetooth_handsfree': KEEP_BLUETOOTH_HANDSFREE,
             'punctuation_mode': PUNCTUATION_MODE,
+            'preset': PUNCTUATION_MODE,
             'enable_slm': ENABLE_SLM,
             'wait_for_model_on_startup': WAIT_FOR_MODEL_ON_STARTUP,
         })
@@ -838,12 +833,37 @@ def get_auto_type_auto_punctuate() -> bool:
     return AUTO_TYPE_AUTO_PUNCTUATE
 
 
+def get_canonical_preset_name(name: str) -> str:
+    """Normalize aliases to canonical preset id."""
+    clean = str(name or "full").strip().lower().replace("-", "_")
+    if clean in ("default", "full", "standard"):
+        return "full"
+    elif clean in ("casual", "no_terminal_period", "semi_formal", "no_period", "no_ending_period"):
+        return "no_terminal_period"
+    elif clean in ("autocorrect", "no_punctuation", "phone", "none", "no_punct"):
+        return "no_punctuation"
+    elif clean in ("aesthetic_lowercase", "aesthetic", "lowercase_punct", "lower_punct"):
+        return "aesthetic_lowercase"
+    elif clean in ("gen_z", "genz", "pure_gen_z", "lowercase_no_punctuation", "lowercase_no_punct"):
+        return "gen_z"
+    return "full"
+
+
+def get_preset_display_name(name: str) -> str:
+    canon = get_canonical_preset_name(name)
+    return {
+        "full": "Default (Standard)",
+        "no_terminal_period": "Casual (No Ending Period)",
+        "no_punctuation": "Autocorrect (Phone Style)",
+        "aesthetic_lowercase": "Aesthetic Lowercase",
+        "gen_z": "Pure Gen Z (No Caps/Punct)",
+    }.get(canon, "Default (Standard)")
+
+
 def set_punctuation_mode(mode: str) -> None:
     """Runtime setter for punctuation formatting mode; keeps post-processor in sync."""
     global PUNCTUATION_MODE
-    clean = str(mode).strip().lower()
-    if clean in ("semi-formal", "semi_formal"):
-        clean = "no_terminal_period"
+    clean = get_canonical_preset_name(mode)
     PUNCTUATION_MODE = clean
     try:
         from post_processor import set_punctuation_mode as post_set_punct
@@ -853,9 +873,10 @@ def set_punctuation_mode(mode: str) -> None:
 
 
 def cycle_punctuation_mode() -> str:
-    """Cycle through the 4 punctuation modes and save."""
+    """Cycle through the 5 preset modes and save."""
     global PUNCTUATION_MODE
-    idx = PUNCTUATION_MODES.index(PUNCTUATION_MODE) if PUNCTUATION_MODE in PUNCTUATION_MODES else 0
+    canon = get_canonical_preset_name(PUNCTUATION_MODE)
+    idx = PUNCTUATION_MODES.index(canon) if canon in PUNCTUATION_MODES else 0
     next_mode = PUNCTUATION_MODES[(idx + 1) % len(PUNCTUATION_MODES)]
     set_punctuation_mode(next_mode)
     return next_mode
@@ -1292,6 +1313,146 @@ def select_microphone_picker():
             selected_idx = 0
 
 
+def select_preset_picker(current_preset=None):
+    """Interactive mode preset picker modal with live preview and fuzzy search."""
+    global PUNCTUATION_MODE
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich import box
+
+    presets = [
+        ("default", "Default (Standard)", "[DEFAULT]", "Full punctuation, standard capitalization, and grammar rules", "Hey, how are you? I think we should go.", "green"),
+        ("casual", "Casual (No Ending Period)", "[CASUAL]", "Standard capitalization and commas, but no period at the end", "Hey, how are you? I think we should go", "yellow"),
+        ("autocorrect", "Autocorrect (Phone Style)", "[PHONE]", "Capitalizes sentence starts and 'I', but strips punctuation", "Hey how are you I think we should go", "blue"),
+        ("aesthetic_lowercase", "Aesthetic Lowercase", "[AESTHETIC]", "Keeps commas and questions, but all lowercase (even 'i')", "hey, how are you? i think we should go", "magenta"),
+        ("gen_z", "Pure Gen Z", "[GEN Z]", "All lowercase, zero punctuation, zero grammar enforcement", "hey how are you i think we should go", "cyan"),
+    ]
+
+    active = get_canonical_preset_name(current_preset or PUNCTUATION_MODE)
+    active_pid = {
+        "full": "default",
+        "no_terminal_period": "casual",
+        "no_punctuation": "autocorrect",
+        "aesthetic_lowercase": "aesthetic_lowercase",
+        "gen_z": "gen_z",
+    }.get(active, "default")
+
+    selected_idx = 0
+    for i, (pid, _, _, _, _, _) in enumerate(presets):
+        if pid == active_pid:
+            selected_idx = i
+            break
+
+    query = ""
+    console = Console()
+
+    def filter_presets(q):
+        if not q.strip():
+            return list(enumerate(presets))
+        q = q.strip().lower()
+        scored = []
+        for i, (pid, name, badge, desc, preview, color) in enumerate(presets):
+            score = 0
+            if pid == q or q in pid:
+                score += 500
+            if q in name.lower():
+                score += 300
+            if q in desc.lower():
+                score += 200
+            if score > 0:
+                scored.append((score, i, presets[i]))
+        scored.sort(key=lambda x: -x[0])
+        return [(i, p) for _, i, p in scored]
+
+    while True:
+        console.clear()
+        matches = filter_presets(query)
+        if selected_idx >= len(matches):
+            selected_idx = max(0, len(matches) - 1)
+
+        eff_theme = UI_THEME.lower() if UI_THEME and UI_THEME.lower() in COLOR_PALETTES and UI_THEME.lower() != "auto" else "green"
+
+        table = Table(box=None, padding=(0, 1), show_header=False, expand=True)
+        table.add_column("Indicator", justify="center", width=3)
+        table.add_column("Name", width=28)
+        table.add_column("Badge", justify="center", width=14)
+        table.add_column("Preview / Description")
+
+        for row_idx, (orig_idx, (pid, name, badge, desc, preview, color)) in enumerate(matches):
+            is_cursor = (row_idx == selected_idx)
+            is_active = (pid == active_pid)
+
+            if is_active:
+                indicator = Text("●", style=f"bold {color}")
+            else:
+                indicator = Text("○", style="dim white")
+
+            name_style = f"bold {color}" if is_cursor else ("bold white" if is_active else "white")
+            if is_cursor:
+                name_text = Text(f"> {name}", style=name_style)
+            else:
+                name_text = Text(f"  {name}", style=name_style)
+
+            badge_text = Text(badge, style=f"bold {color}" if (is_cursor or is_active) else "dim white")
+
+            detail = Text()
+            detail.append(f'"{preview}"\n', style=f"italic {color}" if is_cursor else "italic white")
+            detail.append(f"  {desc}", style="dim white")
+
+            table.add_row(indicator, name_text, badge_text, detail)
+
+        search_text = Text("  Search: ", style="bold white")
+        search_text.append(query if query else "(type to search presets)", style="cyan" if query else "dim white")
+        search_panel = Panel(search_text, box=box.ROUNDED, border_style=eff_theme, padding=(0, 1))
+
+        main_panel = Panel(
+            table,
+            title="[bold white]✨ Mode Preset Switcher[/bold white]",
+            subtitle="[dim white]↑/↓ Navigate · Enter Select · Esc Cancel[/dim white]",
+            border_style=eff_theme,
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+
+        console.print(search_panel)
+        console.print(main_panel)
+
+        key = _read_key()
+        if key in ("ESC", "CTRL_C", "q", "Q"):
+            console.clear()
+            return None
+        elif key == "ENTER":
+            if matches:
+                chosen = matches[selected_idx][1][0]
+                canon = {
+                    "default": "full",
+                    "casual": "no_terminal_period",
+                    "autocorrect": "no_punctuation",
+                    "aesthetic_lowercase": "aesthetic_lowercase",
+                    "gen_z": "gen_z",
+                }.get(chosen, "full")
+                set_punctuation_mode(canon)
+                save_audio_config()
+                console.clear()
+                return canon
+            console.clear()
+            return None
+        elif key == "UP":
+            if matches:
+                selected_idx = (selected_idx - 1) % len(matches)
+        elif key in ("DOWN", "\t"):
+            if matches:
+                selected_idx = (selected_idx + 1) % len(matches)
+        elif key == "BACKSPACE":
+            query = query[:-1]
+            selected_idx = 0
+        elif len(key) == 1 and key.isprintable():
+            query += key
+            selected_idx = 0
+
+
 def select_settings_picker():
     """Interactive settings picker modal with live in-place toggling and fuzzy search."""
     global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE
@@ -1312,20 +1473,26 @@ def select_settings_picker():
 
     settings_defs = [
         {
+            "id": "preset",
+            "icon": "✨ ",
+            "title": "Mode Preset",
+            "keywords": "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
+        },
+        {
+            "id": "output_mode",
+            "icon": "🚀 ",
+            "title": "Output Delivery",
+            "keywords": "output mode delivery clipboard type typing paste speed fast slow safe",
+        },
+        {
             "id": "trailing_space",
             "icon": "␣ ",
             "title": "Trailing Space",
             "keywords": "trailing space auto type whitespace append space",
         },
         {
-            "id": "auto_punctuate",
-            "icon": "✍️ ",
-            "title": "Auto-Punctuation",
-            "keywords": "auto punctuate punctuation period sentence grammar enforcement",
-        },
-        {
             "id": "number_digits",
-            "icon": "🔢",
+            "icon": "🔢 ",
             "title": "Number Conversion",
             "keywords": "numbers digits words spelled format numeric conversion",
         },
@@ -1337,37 +1504,25 @@ def select_settings_picker():
         },
         {
             "id": "sound_mute",
-            "icon": "🔊",
+            "icon": "🔔 ",
             "title": "Sound Effects",
             "keywords": "sound effects mute volume chimes audio audio cues notify",
         },
         {
-            "id": "output_mode",
-            "icon": "🚀",
-            "title": "Output Mode",
-            "keywords": "output mode clipboard type typing paste speed fast slow safe",
-        },
-        {
-            "id": "punctuation_mode",
-            "icon": "📝",
-            "title": "Formatting Mode",
-            "keywords": "formatting mode punctuation period lowercase none full",
-        },
-        {
             "id": "theme",
-            "icon": "🎨",
+            "icon": "🎨 ",
             "title": "UI Color Theme",
             "keywords": "theme color ui palette cyan magenta green blue yellow red white",
         },
         {
             "id": "microphone",
-            "icon": "🎤",
+            "icon": "🎙️ ",
             "title": "Audio Device (Mic)",
             "keywords": "mic microphone audio device input hardware primary secondary",
         },
         {
             "id": "reset_terminal",
-            "icon": "🔄",
+            "icon": "🔄 ",
             "title": "Reset Terminal",
             "keywords": "reset terminal clipboard bridge clear state fix",
         },
@@ -1375,16 +1530,23 @@ def select_settings_picker():
 
     def get_setting_state(item_id):
         eff_theme = UI_THEME.lower() if UI_THEME and UI_THEME.lower() in COLOR_PALETTES and UI_THEME.lower() != "auto" else "green"
-        if item_id == "trailing_space":
+        if item_id in ("preset", "punctuation_mode"):
+            canon = get_canonical_preset_name(PUNCTUATION_MODE)
+            if canon == "no_terminal_period":
+                return "Casual (No Ending Period)", "[CASUAL]", "yellow"
+            elif canon == "no_punctuation":
+                return "Autocorrect (Phone Style)", "[PHONE]", "blue"
+            elif canon == "aesthetic_lowercase":
+                return "Aesthetic Lowercase", "[AESTHETIC]", "magenta"
+            elif canon == "gen_z":
+                return "Pure Gen Z (No Caps/Punct)", "[GEN Z]", "cyan"
+            else:
+                return "Default (Standard)", "[DEFAULT]", "green"
+        elif item_id == "trailing_space":
             if AUTO_TYPE_TRAILING_SPACE:
                 return "Enabled (appends ' ')", "[ON]", "green"
             else:
                 return "Disabled (exact text)", "[OFF]", "dim white"
-        elif item_id == "auto_punctuate":
-            if AUTO_TYPE_AUTO_PUNCTUATE:
-                return "Enabled (full + period)", "[ON]", "green"
-            else:
-                return "Disabled (preserve user)", "[OFF]", "dim white"
         elif item_id == "number_digits":
             if NUMBER_DIGITS:
                 return "Digits (1, 2, 3)", "[DIGITS]", "green"
@@ -1408,16 +1570,6 @@ def select_settings_picker():
                 return "Auto-Type (Slow / Safe)", "[SLOW]", "cyan"
             else:
                 return "Clipboard Only", "[CLIP]", "cyan"
-        elif item_id == "punctuation_mode":
-            mode = PUNCTUATION_MODE
-            if mode == "no_terminal_period":
-                return "No Trailing Period (Semi-Formal)", "[SEMI]", "cyan"
-            elif mode == "no_punctuation":
-                return "No Punctuation", "[NONE]", "cyan"
-            elif mode == "lowercase_no_punctuation":
-                return "Lowercase Without Punctuation", "[LOWER]", "cyan"
-            else:
-                return "Full Punctuation", "[FULL]", "cyan"
         elif item_id == "theme":
             name = (UI_THEME or "auto").capitalize()
             return f"{name} palette", "[PICKER]", eff_theme
@@ -1517,10 +1669,17 @@ def select_settings_picker():
         elif key == 'ENTER' or (key == ' ' and not query):
             if matches:
                 item_id = matches[selected_idx][1]["id"]
-                if item_id == "trailing_space":
+                if item_id in ("preset", "punctuation_mode"):
+                    if key == 'ENTER':
+                        select_preset_picker()
+                    else:
+                        cycle_punctuation_mode()
+                    save_audio_config()
+                elif item_id == "output_mode":
+                    cycle_output_mode()
+                    save_audio_config()
+                elif item_id == "trailing_space":
                     toggle_auto_type_trailing_space()
-                elif item_id == "auto_punctuate":
-                    toggle_auto_type_auto_punctuate()
                 elif item_id == "number_digits":
                     set_number_digits(not NUMBER_DIGITS)
                     save_audio_config()
@@ -1529,12 +1688,6 @@ def select_settings_picker():
                     save_audio_config()
                 elif item_id == "sound_mute":
                     IS_MUTED = not IS_MUTED
-                    save_audio_config()
-                elif item_id == "output_mode":
-                    cycle_output_mode()
-                    save_audio_config()
-                elif item_id == "punctuation_mode":
-                    cycle_punctuation_mode()
                     save_audio_config()
                 elif item_id == "theme":
                     select_theme_picker()

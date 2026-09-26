@@ -578,7 +578,7 @@ fn key_intent(key: KeyEvent) -> Option<Intent> {
         KeyCode::Char('c') => Some(Intent::ToggleAutoType),
         KeyCode::Char('s') => Some(Intent::ToggleTrailingSpace),
         KeyCode::Char('S') | KeyCode::Char(',') => Some(Intent::OpenSettingsPicker),
-        KeyCode::Char('p') | KeyCode::Char('P') => Some(Intent::CyclePunctuation),
+        KeyCode::Char('p') | KeyCode::Char('P') | KeyCode::Char('g') | KeyCode::Char('G') => Some(Intent::CyclePunctuation),
         KeyCode::Char('n') => Some(Intent::ToggleNumbers),
         KeyCode::Char('o') | KeyCode::Char('O') => Some(Intent::ToggleMiddleClick),
         KeyCode::Char('t') | KeyCode::Char('T') => Some(Intent::SelectTheme),

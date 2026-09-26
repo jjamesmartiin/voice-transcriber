@@ -268,11 +268,16 @@ def test_punctuation_modes_in_post_processor():
     assert clean_speech_transcription(sample, punctuation_mode="no_terminal_period") == "Hello world, this is voice transcriber"
     assert clean_speech_transcription(sample, punctuation_mode="semi-formal") == "Hello world, this is voice transcriber"
 
-    # 3. No punctuation
+    # 3. No punctuation / autocorrect
     assert clean_speech_transcription(sample, punctuation_mode="no_punctuation") == "Hello world this is voice transcriber"
+    assert clean_speech_transcription(sample, punctuation_mode="autocorrect") == "Hello world this is voice transcriber"
 
-    # 4. Lowercase no punctuation
+    # 4. Aesthetic lowercase
+    assert clean_speech_transcription(sample, punctuation_mode="aesthetic_lowercase") == "hello world, this is voice transcriber"
+
+    # 5. Pure Gen Z / Lowercase no punctuation
     assert clean_speech_transcription(sample, punctuation_mode="lowercase_no_punctuation") == "hello world this is voice transcriber"
+    assert clean_speech_transcription(sample, punctuation_mode="gen_z") == "hello world this is voice transcriber"
 
 
 def test_output_mode_cycle():

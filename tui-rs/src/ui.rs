@@ -130,12 +130,13 @@ pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Lin
 
             l1.push(Span::styled("│ ", dim()));
             let punc_disp = match app.punctuation_mode.as_str() {
-                "no_terminal_period" => "no-period",
-                "no_punctuation" => "none",
-                "lowercase_no_punctuation" => "lower",
-                _ => "full",
+                "no_terminal_period" | "casual" => "casual",
+                "no_punctuation" | "autocorrect" => "autocorrect",
+                "aesthetic_lowercase" | "aesthetic" => "aesthetic",
+                "lowercase_no_punctuation" | "gen_z" => "gen-z",
+                _ => "default",
             };
-            l1.push(Span::styled(format!("punc: {punc_disp} "), cyan()));
+            l1.push(Span::styled(format!("preset: {punc_disp} "), cyan()));
 
             l1.push(Span::styled("│ ", dim()));
             if app.number_digits {
@@ -152,7 +153,7 @@ pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Lin
             }
 
             let l2: Vec<Span<'static>> = vec![
-                Span::styled("  [Space] Rec  [S/,] Settings  [t] Theme  [M] Mic  [m] Mute  [c] Mode  [s] Space  [p] Punc  [n] Num  [q] Quit", dim()),
+                Span::styled("  [Space] Rec  [S/,] Settings  [g] Preset  [t] Theme  [M] Mic  [m] Mute  [c] Mode  [s] Space  [n] Num  [q] Quit", dim()),
             ];
 
             vec![Line::from(l1), Line::from(l2)]

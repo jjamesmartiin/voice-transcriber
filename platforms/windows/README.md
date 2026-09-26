@@ -58,6 +58,7 @@ $env:PYTHONPATH = "src"
 - **Middle-click (hold ~0.25 s)**: Mouse Push-to-Talk. A quick click passes through and is ignored.
 - **Ctrl (held at release)**: Force clipboard output for this utterance even when auto-type is enabled.
 - **Ctrl + Alt + I** (or `S`, `,`, `i` in the terminal): Open the interactive Settings modal (`⚙️ Settings & Configuration`) with real-time fuzzy filter, in-place toggle badges, and sub-pickers.
+- **g** (in the terminal): Open the interactive Mode Preset switcher (`✨ Mode Preset Switcher`) for Default, Casual, Autocorrect, Aesthetic Lowercase, and Pure Gen Z modes.
 - **M** (in the terminal): Open the interactive Microphone device picker (`🎤 Microphone Input Device`).
 - **t** (in the terminal): Open the interactive UI Color Theme picker (`🎨 Select UI Color Theme`).
 

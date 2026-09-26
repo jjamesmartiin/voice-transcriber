@@ -82,6 +82,25 @@ def test_no_terminal_period_keeps_internal_punctuation():
     assert pp.apply_punctuation_mode("Hello, world.", mode="no_terminal_period") == "Hello, world"
     assert pp.apply_punctuation_mode("Really?", mode="no_terminal_period") == "Really?"
     assert pp.apply_punctuation_mode("Hi.", mode="semi-formal") == "Hi"
+    assert pp.apply_punctuation_mode("Hi.", mode="casual") == "Hi"
+
+
+def test_autocorrect_mode_capitalizes_sentence_and_i_without_punctuation():
+    out = pp.apply_punctuation_mode("hello, world! i think i'm ready, don't you?", mode="autocorrect")
+    assert out == "Hello world I think I'm ready don't you"
+
+
+def test_aesthetic_lowercase_mode_keeps_punctuation_lowercased():
+    out = pp.apply_punctuation_mode("Hello, World! I think I'm ready, don't you?", mode="aesthetic_lowercase")
+    assert out == "hello, world! i think i'm ready, don't you?"
+    # Strips trailing period
+    out_period = pp.apply_punctuation_mode("Hello, World. I am here.", mode="aesthetic_lowercase")
+    assert out_period == "hello, world. i am here"
+
+
+def test_pure_gen_z_mode_no_caps_no_punctuation():
+    out = pp.apply_punctuation_mode("Hello, World! I think I'm ready, don't you?", mode="gen_z")
+    assert out == "hello world i think i'm ready don't you"
 
 
 # ---------------------------------------------------------------------------

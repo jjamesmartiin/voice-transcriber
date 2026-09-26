@@ -63,16 +63,18 @@ auto_type_auto_punctuate: true
 copy_to_clipboard: true
 
 # ------------------------------------------------------------------------------
-# Punctuation & Formatting Mode
-# Controls formatting, capitalization, and punctuation styles for output.
-# Available Options:
-#   - "full"                     : Standard full capitalization and terminal punctuation (periods, questions, commas)
-#   - "no_terminal_period"       : Full capitalization and internal punctuation, but omits the trailing period at the end
-#   - "no_punctuation"           : Strips all punctuation marks, preserving capitalization
-#   - "lowercase_no_punctuation" : Strips all punctuation and lowercases all words
-# (Legacy alias: "semi-formal" -> "no_terminal_period")
-# Default: "full"
-punctuation_mode: "full"
+# Mode Preset (Formatting & Capitalization Style)
+# Controls grammar rules, casing, and punctuation styles for output.
+# Selectable at runtime via [g] key in TUI or 'Mode Preset' in settings [S].
+# Available Presets:
+#   - "default"             : Standard capitalization, grammar, and full punctuation with terminal period.
+#   - "casual"              : Standard capitalization and internal commas, but omits the trailing period.
+#   - "autocorrect"         : Phone-style capitalization (sentence starts and capital 'I'), with all punctuation stripped.
+#   - "aesthetic_lowercase" : All lowercase (even 'i'), but internal/expressive punctuation kept (no trailing period).
+#   - "gen_z"               : Pure Gen Z mode: all lowercase, zero punctuation, zero grammar enforcement.
+# (Backwards-compatible aliases: punctuation_mode: "full" | "no_terminal_period" | "no_punctuation" | "lowercase_no_punctuation")
+# Default: "default"
+preset: "default"
 
 # ------------------------------------------------------------------------------
 # Small Language Model (SLM) Grammar & Polishing Pass (Optional)

@@ -203,6 +203,7 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_numbers = self._on_tui_toggle_numbers
         self.tui.on_toggle_middle_click = self._on_tui_toggle_middle_click
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
+        self.tui.on_open_preset_picker = self.open_preset_picker
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
         self.tui.on_set_theme = self._on_tui_set_theme
         self.tui.on_open_theme_picker = self.open_theme_picker
@@ -366,14 +367,38 @@ class SimpleVoiceTranscriber:
         new_mode = t2.cycle_punctuation_mode()
         t2.save_audio_config()
         self._sync_tui_state()
-        labels = {
-            "full": "Full Punctuation",
-            "no_terminal_period": "No Trailing Period (Semi-Formal)",
-            "no_punctuation": "No Punctuation",
-            "lowercase_no_punctuation": "Lowercase Without Punctuation"
-        }
-        disp = labels.get(new_mode, new_mode)
-        self.tui.print_event("📝 Formatting Mode", f"Punctuation mode set to {disp}", level="info")
+        disp = t2.get_preset_display_name(new_mode)
+        self.tui.print_event("✨ Mode Preset", f"Preset set to {disp}", level="info")
+
+    def open_preset_picker(self):
+        """Open interactive mode preset picker modal"""
+        if self.recording:
+            if hasattr(self, "tui") and self.tui:
+                self.tui.print_warning("Settings Locked", "Cannot change settings while recording is active.")
+            return
+
+        if hasattr(self, "tui") and self.tui:
+            self.tui._pause_live()
+
+        try:
+            import t2
+            chosen = t2.select_preset_picker(getattr(t2, "PUNCTUATION_MODE", "full"))
+            t2.reset_terminal()
+            if chosen:
+                t2.set_punctuation_mode(chosen)
+                t2.save_audio_config()
+                self._sync_tui_state()
+                disp = t2.get_preset_display_name(chosen)
+                self.tui.print_event("✨ Mode Preset", f"Active preset set to {disp}", level="success")
+        except Exception as e:
+            logger.debug(f"Preset picker error: {e}")
+            import t2
+            t2.reset_terminal()
+
+        self._sync_tui_state()
+        if hasattr(self, "tui") and self.tui:
+            self.tui._resume_live()
+            self.tui.update_state("READY")
 
     def _on_tui_cycle_theme(self):
         import t2
@@ -729,7 +754,8 @@ class SimpleVoiceTranscriber:
                     effective_mode = "clipboard"
 
                 if effective_mode in ("type", "type_fast"):
-                    if getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True):
+                    canon_preset = getattr(t2, 'get_canonical_preset_name', lambda x: x)(getattr(t2, 'PUNCTUATION_MODE', 'full'))
+                    if getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True) and canon_preset == 'full':
                         # Ensure terminal punctuation (period if missing) on transcription
                         trimmed = transcription.rstrip()
                         if trimmed and not trimmed.endswith(('.', '!', '?', ':', ';', '…')):

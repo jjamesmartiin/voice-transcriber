@@ -316,9 +316,10 @@ impl App {
 
     pub fn cycle_punctuation(&mut self) {
         self.punctuation_mode = match self.punctuation_mode.as_str() {
-            "full" => "no_terminal_period".to_string(),
-            "no_terminal_period" => "no_punctuation".to_string(),
-            "no_punctuation" => "lowercase_no_punctuation".to_string(),
+            "full" | "default" => "no_terminal_period".to_string(),
+            "no_terminal_period" | "casual" => "no_punctuation".to_string(),
+            "no_punctuation" | "autocorrect" => "aesthetic_lowercase".to_string(),
+            "aesthetic_lowercase" | "aesthetic" => "lowercase_no_punctuation".to_string(),
             _ => "full".to_string(),
         };
     }

@@ -101,6 +101,7 @@ class VoiceTranscriberTUI:
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
         self.on_open_theme_picker = None
+        self.on_open_preset_picker = None
         self.on_open_settings_picker = None
         self.on_open_mic_picker = None
         self.on_set_theme = None
@@ -279,11 +280,16 @@ class VoiceTranscriberTUI:
 
             prompt.append("│ ", style="dim white")
             punc_disp = {
-                "no_terminal_period": "no-period",
-                "no_punctuation": "none",
-                "lowercase_no_punctuation": "lower",
-            }.get(getattr(self, "punctuation_mode", "full"), "full")
-            prompt.append(f"punc: {punc_disp} ", style="cyan")
+                "no_terminal_period": "casual",
+                "casual": "casual",
+                "no_punctuation": "autocorrect",
+                "autocorrect": "autocorrect",
+                "aesthetic_lowercase": "aesthetic",
+                "aesthetic": "aesthetic",
+                "lowercase_no_punctuation": "gen-z",
+                "gen_z": "gen-z",
+            }.get(getattr(self, "punctuation_mode", "default"), "default")
+            prompt.append(f"preset: {punc_disp} ", style="cyan")
 
             prompt.append("│ ", style="dim white")
             if getattr(self, "number_digits", True):
@@ -297,7 +303,7 @@ class VoiceTranscriberTUI:
             else:
                 prompt.append("mouse: off ", style="dim white")
 
-            prompt.append("\n  [Space] Rec  [S/,] Settings  [t] Theme  [M] Mic  [m] Mute  [c] Mode  [s] Space  [p] Punc  [n] Num  [q] Quit", style="dim white")
+            prompt.append("\n  [Space] Rec  [S/,] Settings  [g] Preset  [t] Theme  [M] Mic  [m] Mute  [c] Mode  [s] Space  [n] Num  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
             prompt.append("RECORDING ", style="bold white on red")
@@ -562,6 +568,11 @@ class VoiceTranscriberTUI:
                 self.on_change_device()
         elif ch.lower() == 'p':
             if getattr(self, 'on_cycle_punctuation', None):
+                self.on_cycle_punctuation()
+        elif ch.lower() == 'g':
+            if getattr(self, 'on_open_preset_picker', None):
+                self.on_open_preset_picker()
+            elif getattr(self, 'on_cycle_punctuation', None):
                 self.on_cycle_punctuation()
         elif ch.lower() == 't':
             if getattr(self, 'on_open_theme_picker', None):
