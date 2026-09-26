@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_event_block_colors_follow_theme() {
-        let mut app = App::new("1.0.3", Theme::Cyan);
+        let mut app = App::new("1.1.0", Theme::Cyan);
         assert_eq!(app.effective_color(), Theme::Cyan);
 
         // Model Ready (Success) should follow theme (Cyan)

@@ -791,7 +791,7 @@ mod tests {
 
     #[test]
     fn test_settings_state_navigation_and_toggle() {
-        let app = App::new("1.0.3", Theme::Cyan);
+        let app = App::new("1.1.0", Theme::Cyan);
         let mut state = SettingsPickerState::new();
         assert_eq!(state.filtered_indices.len(), SETTINGS.len());
 

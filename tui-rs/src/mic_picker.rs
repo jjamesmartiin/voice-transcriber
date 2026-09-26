@@ -564,7 +564,7 @@ mod tests {
 
     #[test]
     fn test_mic_picker_filtering() {
-        let mut app = App::new("1.0.3", Theme::Cyan);
+        let mut app = App::new("1.1.0", Theme::Cyan);
         app.audio_devices = vec![
             AudioDeviceInfo {
                 index: 0,
@@ -609,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_mic_picker_render() {
-        let mut app = App::new("1.0.3", Theme::Cyan);
+        let mut app = App::new("1.1.0", Theme::Cyan);
         app.vu_level = 0.52;
         let state = MicPickerState::new(app.audio_devices.len());
         let backend = ratatui::backend::TestBackend::new(80, 24);
