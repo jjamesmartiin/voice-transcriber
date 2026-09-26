@@ -66,7 +66,7 @@ $env:PYTHONPATH = "src"
 - **Audio Capture**: Captures 16kHz audio from your default Windows microphone via `sounddevice` (WASAPI/DirectSound).
 - **Instant Capture Start**: Keeps the WASAPI input stream constructed (stopped between recordings) so push-to-talk doesn't drop the first syllable while the device opens. Set `VT_WARM_MIC=0` to disable (opens the device fresh on each recording).
 - **Audio Feedback**: Plays native Windows chimes (e.g. `Windows Proximity Notification.wav` or `Speech On/Off.wav`) via `winsound`.
-- **Active-Window Paste**: Copies transcription to Windows clipboard via `pyperclip` and injects keystrokes into your currently focused window via Win32 `SendInput` with full Unicode and emoji fidelity.
+- **Auto-Type with Per-App Fallback**: Injects real virtual-key keystrokes into the focused window (Unicode/emoji via `KEYEVENTF_UNICODE`). Fast mode auto-drops to slow pacing for classic controls (Notepad, RichEdit, `Edit`) that garble rapid injection — terminals and modern apps stay instant. Override per window class with `VT_TYPE_FAST_CLASSES` / `VT_TYPE_SLOW_CLASSES` (comma-separated).
 - **AI Processing**: Runs the high-accuracy Cohere Transcribe model with streaming VAD, dynamic energy gating, and post-processing (Trie dictionary, formatting, number conversion).
 
 ---

@@ -16,24 +16,41 @@ import hal  # noqa: E402
 
 
 class TestWindowsClipboardSink:
-    def test_windows_sendinput_unicode_typing(self, monkeypatch):
+    def test_ascii_uses_virtual_keys_and_emoji_uses_unicode(self, monkeypatch):
         import ctypes
-        sendinput_calls = []
 
         class FakeUser32:
+            def __init__(self):
+                self.sendinput = 0
+                self.keybd = []
+
+            def VkKeyScanW(self, cp):
+                return {
+                    ord("H"): 0x0148,  # shift + VK_H
+                    ord("e"): 0x65,
+                    ord("l"): 0x6C,
+                    ord("o"): 0x6F,
+                    ord(" "): 0x20,
+                }.get(cp, -1)
+
+            def keybd_event(self, vk, scan, flags, extra):
+                self.keybd.append((vk, flags))
+
             def SendInput(self, n, p_inputs, cb_size):
-                sendinput_calls.append(n)
+                self.sendinput += n
                 return n
 
-        class FakeWindll:
-            user32 = FakeUser32()
-
-        monkeypatch.setattr(ctypes, "windll", FakeWindll(), raising=False)
+        fake = FakeUser32()
+        monkeypatch.setattr(ctypes, "windll", type("W", (), {"user32": fake})(), raising=False)
         sink = hal.get_clipboard_sink(hal.WINDOWS)
-        # Test Unicode + emoji text (Hello space = 6 units, 🚀 = 2 surrogate units -> 8 total units)
-        assert sink.type_text("Hello 🚀", fast=True) is True
-        # 1 down + 1 up call per unit -> 16 calls to SendInput
-        assert len(sendinput_calls) == 16
+
+        assert sink.type_text("Hello \U0001F680", fast=True) is True
+        # ASCII/space goes through real virtual keys (fast + classic-control
+        # compatible): 'H' with shift (4 events) + 'ello ' (2 each) = 14.
+        assert len(fake.keybd) == 14
+        # The emoji is non-typable, so its 2 UTF-16 code units use KEYEVENTF_UNICODE
+        # (one SendInput call each for down + up).
+        assert fake.sendinput == 4
 
     def test_windows_typing_fallback_to_keybd_event(self, monkeypatch):
         import ctypes
@@ -88,11 +105,16 @@ class TestWindowsHotkeyManagerLatching:
 
     def test_windows_hotkey_manager_type_text_delegates(self, monkeypatch):
         import ctypes
-        sendinput_calls = []
+        keybd_calls = []
 
         class FakeUser32:
+            def VkKeyScanW(self, cp):
+                return {ord("H"): 0x0148, ord("i"): 0x69}.get(cp, -1)
+
+            def keybd_event(self, vk, scan, flags, extra):
+                keybd_calls.append((vk, flags))
+
             def SendInput(self, n, p_inputs, cb_size):
-                sendinput_calls.append(n)
                 return n
 
         class FakeWindll:
@@ -104,8 +126,8 @@ class TestWindowsHotkeyManagerLatching:
         manager = WindowsHotkeyManager(MagicMock(), MagicMock())
         try:
             assert manager.type_text("Hi", fast=True) is True
-            # 'H' (2 events) + 'i' (2 events) -> 4 SendInput calls
-            assert len(sendinput_calls) == 4
+            # 'H' (shift down/up + key down/up = 4) + 'i' (2) = 6 keybd_event calls
+            assert len(keybd_calls) == 6
         finally:
             manager.cleanup()
 
