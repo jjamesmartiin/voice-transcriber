@@ -62,7 +62,6 @@ dictionary:
   pcb: PCB
   plc: PLC
   uart: UART
-  you art: UART
   spi: SPI
   i2c: I2C
   i two c: I2C
@@ -71,7 +70,6 @@ dictionary:
   g p i o: GPIO
   modbus: Modbus
   pololu: Pololu
-  stack up: stackup
 
   # Networking & Protocols
   vlan: VLAN
@@ -97,10 +95,132 @@ dictionary:
   0x dead beef: "0xDEADBEEF"
   0xdeadbeef: "0xDEADBEEF"
   3735928559: "0xDEADBEEF"
-  carrier code: carrierCode
-  carriercode: carrierCode
-  exit hook: exitHook
-  exithook: exitHook
-  server setup: server_setup
-  work notes: work_notes
-  merge requests: merge_requests
+
+# ---------------------------------------------------------------------------
+# Contextual Disambiguation Rules
+# ---------------------------------------------------------------------------
+# Used when a spoken phrase sounds identical to an ordinary English phrase
+# (homophone) and requires surrounding context to decide whether to replace.
+# - target: Desired technical term / casing
+# - spoken: Phonetic collision phrases emitted by ASR
+# - triggers_before: Preceding developer/action verbs confirming technical context
+# - triggers_after: Following technical nouns confirming technical context
+# - guards: Everyday English words that cancel replacement (keeps normal speech)
+contextual_rules:
+  - target: Gitea
+    spoken:
+      - "get tea"
+      - "git tea"
+      - "git ea"
+    triggers_before:
+      - "push to"
+      - "pushed to"
+      - "push it to"
+      - "pull from"
+      - "clone from"
+      - "commit to"
+      - "repo on"
+      - "hosted on"
+      - "our"
+      - "self hosted"
+      - "self-hosted"
+      - "and"
+    triggers_after:
+      - "server"
+      - "instance"
+      - "repo"
+      - "repository"
+      - "remote"
+      - "url"
+      - "link"
+      - "webhook"
+      - "token"
+    guards:
+      - "cup of"
+      - "drink"
+      - "hot"
+      - "iced"
+      - "green"
+      - "black"
+      - "herbal"
+      - "some"
+      - "grab"
+      - "have"
+      - "want"
+      - "like to"
+      - "order"
+      - "with"
+      - "together"
+      - "cafe"
+
+  - target: GitHub
+    spoken:
+      - "get home"
+      - "get hub"
+    triggers_before:
+      - "push to"
+      - "pushed to"
+      - "push it to"
+      - "pull from"
+      - "clone from"
+      - "commit to"
+      - "repo on"
+      - "hosted on"
+    triggers_after:
+      - "and gitea"
+      - "and get tea"
+      - "and gitlab"
+      - "repo"
+      - "repository"
+      - "actions"
+      - "pull request"
+      - "pr"
+      - "issue"
+      - "release"
+    guards:
+      - "drive"
+      - "walk"
+      - "run"
+      - "time to"
+      - "need to"
+      - "heading"
+      - "safe"
+      - "dinner"
+      - "tonight"
+      - "before dark"
+      - "bike"
+      - "wheel"
+      - "bearing"
+
+  - target: UART
+    spoken:
+      - "you art"
+      - "u art"
+    triggers_before:
+      - "over"
+      - "via"
+      - "using"
+      - "connect to"
+    triggers_after:
+      - "port"
+      - "bus"
+      - "pins"
+      - "interface"
+      - "baud"
+      - "cable"
+      - "communication"
+      - "module"
+      - "bridge"
+      - "rx"
+      - "tx"
+    guards:
+      - "are you"
+      - "if you"
+      - "thank you"
+      - "you are an"
+      - "major"
+      - "student"
+      - "class"
+      - "museum"
+      - "gallery"
+

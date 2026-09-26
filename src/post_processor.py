@@ -1097,6 +1097,108 @@ _CUSTOM_DICT_REPLACER = None
 _CUSTOM_DICT_INITIALIZED = False
 HOMOPHONE_REPAIR_PATTERNS: list[tuple[re.Pattern, str]] = []
 
+
+class ContextualRule:
+    """A context-aware word replacement rule that checks surrounding triggers and guards."""
+
+    def __init__(
+        self,
+        target: str,
+        spoken: list[str],
+        triggers_before: list[str] | None = None,
+        triggers_after: list[str] | None = None,
+        guards: list[str] | None = None,
+    ):
+        self.target = str(target).strip()
+        self.spoken = [" ".join(str(s).strip().split()).lower() for s in (spoken or []) if str(s).strip()]
+        self.triggers_before = [" ".join(str(b).strip().split()).lower() for b in (triggers_before or []) if str(b).strip()]
+        self.triggers_after = [" ".join(str(a).strip().split()).lower() for a in (triggers_after or []) if str(a).strip()]
+        self.guards = [" ".join(str(g).strip().split()).lower() for g in (guards or []) if str(g).strip()]
+
+        # Compile guard regex (negative lookahead/lookbehind filter for standard English)
+        self.guard_pattern = None
+        if self.guards:
+            guards_escaped = "|".join(re.escape(g) for g in sorted(self.guards, key=len, reverse=True))
+            self.guard_pattern = re.compile(rf"(?<!\w)({guards_escaped})(?!\w)", re.IGNORECASE)
+
+        # Compile trigger patterns
+        self.patterns: list[tuple[str, re.Pattern]] = []
+        if self.triggers_before and self.spoken:
+            bef_esc = "|".join(re.escape(b) for b in sorted(self.triggers_before, key=len, reverse=True))
+            spk_esc = "|".join(re.escape(s) for s in sorted(self.spoken, key=len, reverse=True))
+            # Matches: <triggers_before> (optional filler like "it", "code", "changes") <spoken>
+            p = re.compile(
+                rf"(?<!\w)({bef_esc})\s+(?:(?:it|changes|code|branch)\s+)?({spk_esc})(?!\w)",
+                re.IGNORECASE,
+            )
+            self.patterns.append(("before", p))
+
+        if self.triggers_after and self.spoken:
+            aft_esc = "|".join(re.escape(a) for a in sorted(self.triggers_after, key=len, reverse=True))
+            spk_esc = "|".join(re.escape(s) for s in sorted(self.spoken, key=len, reverse=True))
+            p = re.compile(rf"(?<!\w)({spk_esc})\s+({aft_esc})(?!\w)", re.IGNORECASE)
+            self.patterns.append(("after", p))
+
+    def apply(self, text: str) -> str:
+        text_lower = text.lower()
+        if not any(s in text_lower for s in self.spoken):
+            return text
+
+        if self.guard_pattern and self.guard_pattern.search(text):
+            return text
+
+        for kind, pat in self.patterns:
+            if kind == "before":
+                text = pat.sub(rf"\1 {self.target}", text)
+            elif kind == "after":
+                text = pat.sub(rf"{self.target} \2", text)
+        return text
+
+    def to_dict(self) -> dict:
+        d = {"target": self.target, "spoken": self.spoken}
+        if self.triggers_before:
+            d["triggers_before"] = self.triggers_before
+        if self.triggers_after:
+            d["triggers_after"] = self.triggers_after
+        if self.guards:
+            d["guards"] = self.guards
+        return d
+
+
+_CONTEXTUAL_RULES: list[ContextualRule] = []
+
+
+def set_contextual_rules(rules: list[dict | ContextualRule] | None) -> None:
+    """Set and compile contextual word/phrase rules."""
+    global _CONTEXTUAL_RULES
+    if not rules:
+        _CONTEXTUAL_RULES = []
+        return
+
+    compiled = []
+    for r in rules:
+        if isinstance(r, ContextualRule):
+            compiled.append(r)
+        elif isinstance(r, dict):
+            target = r.get("target")
+            spoken = r.get("spoken")
+            if target and spoken:
+                compiled.append(
+                    ContextualRule(
+                        target=target,
+                        spoken=spoken if isinstance(spoken, list) else [spoken],
+                        triggers_before=r.get("triggers_before") or r.get("before"),
+                        triggers_after=r.get("triggers_after") or r.get("after"),
+                        guards=r.get("guards") or r.get("protect"),
+                    )
+                )
+    _CONTEXTUAL_RULES = compiled
+
+
+def get_contextual_rules() -> list[ContextualRule]:
+    """Returns active contextual rules."""
+    return list(_CONTEXTUAL_RULES)
+
 def set_custom_dictionary(mapping: dict[str, str] | None) -> None:
     """
     Sets and compiles the custom word/phrase replacement dictionary.
@@ -1147,8 +1249,9 @@ def get_custom_dictionary() -> dict[str, str]:
 
 
 def reset_custom_dictionary() -> None:
-    """Resets the custom replacement dictionary to empty."""
+    """Resets the custom replacement dictionary and contextual rules to empty."""
     set_custom_dictionary(None)
+    set_contextual_rules(None)
 
 
 def load_custom_dictionary_from_file(file_path: str | os.PathLike) -> dict[str, str]:
@@ -1167,10 +1270,13 @@ def load_custom_dictionary_from_file(file_path: str | os.PathLike) -> dict[str, 
         else:
             data = json.loads(content) if content.strip() else {}
         
-        if isinstance(data, dict) and "dictionary" in data and isinstance(data["dictionary"], dict):
-            mapping = data["dictionary"]
-        elif isinstance(data, dict):
-            mapping = data
+        if isinstance(data, dict):
+            if "contextual_rules" in data and isinstance(data["contextual_rules"], list):
+                set_contextual_rules(data["contextual_rules"])
+            if "dictionary" in data and isinstance(data["dictionary"], dict):
+                mapping = data["dictionary"]
+            else:
+                mapping = {k: v for k, v in data.items() if k != "contextual_rules" and isinstance(v, (str, int, float))}
         else:
             mapping = {}
             
@@ -1216,6 +1322,8 @@ def _auto_load_dictionary_if_needed() -> None:
                     data = json.loads(content) if content.strip() else {}
                 
                 if isinstance(data, dict):
+                    if "contextual_rules" in data and isinstance(data["contextual_rules"], list):
+                        set_contextual_rules(data["contextual_rules"])
                     dict_file = data.get("dictionary_file")
                     if dict_file and Path(dict_file).exists():
                         load_custom_dictionary_from_file(dict_file)
@@ -1402,11 +1510,16 @@ def clean_speech_transcription(
         for pat, repl in HOMOPHONE_REPAIR_PATTERNS:
             cleaned = pat.sub(repl, cleaned)
 
-    # 13d. Apply custom vocabulary / phrase dictionary substitutions (~5 us)
+    # 13d. Apply context-aware word/phrase disambiguation rules
+    if _CONTEXTUAL_RULES:
+        for rule in _CONTEXTUAL_RULES:
+            cleaned = rule.apply(cleaned)
+
+    # 13e. Apply custom vocabulary / phrase dictionary substitutions (~5 us)
     if _CUSTOM_DICT_REPLACER is not None:
         cleaned = _CUSTOM_DICT_REPLACER(cleaned)
 
-    # 13e. Clean spoken Unix file paths and subnet notation
+    # 13f. Clean spoken Unix file paths and subnet notation
     if "slash" in cleaned_lower:
         cleaned = clean_spoken_paths(cleaned)
 

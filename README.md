@@ -291,6 +291,52 @@ dictionary:
 - **Word-Boundary Protection**: Shorter words will not corrupt longer words (e.g., `pr` will not match the "pr" inside "program" or "spring").
 - **Acronym Preservation**: Target words with capital letters (e.g., `GitHub`, `PR`, `Kubernetes`, `CI`) are automatically protected from mid-sentence lowercasing.
 
+### Contextual Disambiguation Rules
+
+Some technical terms sound identical to everyday English words (homophones). For example:
+- *"push to **get tea**"* should become *"push to **Gitea**"*, but *"would you like to **get tea** with me?"* must remain untouched.
+- *"connect over **you art** port"* should become *"connect over **UART** port"*, but *"are you an **art** student?"* must remain untouched.
+
+Contextual rules solve this by requiring surrounding trigger words (before or after) and guarding against everyday English vocabulary:
+
+```yaml
+contextual_rules:
+  - target: Gitea
+    spoken: ["get tea", "git tea", "git ea"]
+    triggers_before: ["push to", "pull from", "clone from", "commit to", "repo on", "hosted on", "our"]
+    triggers_after: ["server", "instance", "repo", "repository", "remote", "url"]
+    guards: ["cup of", "drink", "hot", "iced", "with", "would you like to", "order"]
+```
+
+#### Managing Contextual Rules via CLI
+```bash
+# Add a contextual rule
+python -m src.dictionary add-contextual \
+  --target "Gitea" \
+  --spoken "get tea, git tea" \
+  --before "push to, pull from, clone from, hosted on" \
+  --after "server, repo, instance" \
+  --guards "cup of, drink, iced, green, with, like to"
+
+# List configured contextual rules
+python -m src.dictionary list-contextual
+
+# Remove a contextual rule
+python -m src.dictionary remove-contextual "Gitea"
+```
+
+#### Prompting an LLM to Generate Rules
+If you ask an AI assistant to add a technical term, you can simply give it examples:
+> *"Whenever I say 'you art', I mean 'UART' when talking about serial ports or pins, but keep it 'art' if I talk about museums or drawing."*
+
+The LLM can directly emit the clean YAML entry:
+```yaml
+  - target: UART
+    spoken: ["you art", "u art"]
+    triggers_after: ["port", "bus", "pins", "interface", "baud"]
+    guards: ["museum", "gallery", "drawing", "class", "student"]
+```
+
 ---
 
 ## License

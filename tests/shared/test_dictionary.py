@@ -223,3 +223,68 @@ def test_dictionary_module_cli_and_helpers(tmp_path):
     # 5. Remove non-existent entry returns False
     assert dictionary.remove_entry("non_existent_phrase", path=custom_yaml) is False
 
+
+def test_contextual_rules_developer_vs_social_disambiguation():
+    """Verify that contextual rules disambiguate homophones in developer contexts
+    without corrupting everyday English."""
+    repo_root = Path(__file__).resolve().parents[2]
+    post_processor.load_custom_dictionary_from_file(repo_root / "config" / "dictionary.yaml")
+
+    # Developer context -> converts to Gitea / GitHub / UART
+    dev_1 = post_processor.clean_speech_transcription("push to get tea", skip_slm=True)
+    assert "Gitea" in dev_1
+
+    dev_2 = post_processor.clean_speech_transcription("Let's push to get home and get tea", skip_slm=True)
+    assert "GitHub" in dev_2
+    assert "Gitea" in dev_2
+
+    dev_3 = post_processor.clean_speech_transcription("check the get tea server status", skip_slm=True)
+    assert "Gitea server" in dev_3
+
+    dev_4 = post_processor.clean_speech_transcription("connect to device over you art port", skip_slm=True)
+    assert "UART port" in dev_4
+
+    # Everyday social / beverage / domestic context -> preserved untouched
+    social_1 = post_processor.clean_speech_transcription("hey would you like to get tea with me", skip_slm=True)
+    assert "Gitea" not in social_1
+    assert "get tea" in social_1.lower()
+
+    social_2 = post_processor.clean_speech_transcription("let's grab some iced get tea", skip_slm=True)
+    assert "Gitea" not in social_2
+
+    social_3 = post_processor.clean_speech_transcription("I need to get home before dinner", skip_slm=True)
+    assert "GitHub" not in social_3
+    assert "get home" in social_3.lower()
+
+    social_4 = post_processor.clean_speech_transcription("are you an art student at the gallery", skip_slm=True)
+    assert "UART" not in social_4
+
+
+def test_contextual_rules_cli_and_roundtrip(tmp_path):
+    import dictionary
+    custom_yaml = tmp_path / "test_contextual.yaml"
+
+    # Add contextual rule
+    is_new = dictionary.add_contextual_rule(
+        target="Kubectl",
+        spoken=["cube control", "cube ctl"],
+        triggers_before=["run", "apply"],
+        triggers_after=["get", "describe"],
+        guards=["remote control", "game control"],
+        path=custom_yaml,
+    )
+    assert is_new is True
+
+    # Load and verify
+    rules = dictionary.load_contextual_rules(path=custom_yaml)
+    assert len(rules) == 1
+    assert rules[0]["target"] == "Kubectl"
+    assert "cube control" in rules[0]["spoken"]
+    assert "run" in rules[0]["triggers_before"]
+    assert "remote control" in rules[0]["guards"]
+
+    # Remove contextual rule
+    assert dictionary.remove_contextual_rule("Kubectl", path=custom_yaml) is True
+    assert len(dictionary.load_contextual_rules(path=custom_yaml)) == 0
+
+
