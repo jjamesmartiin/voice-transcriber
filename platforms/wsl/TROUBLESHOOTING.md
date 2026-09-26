@@ -13,7 +13,7 @@ This guide covers common issues and resolutions for **Voice Transcriber (VT)** o
    - [Hotkey Permission Denied (`/dev/input`)](#hotkey-permission-denied-devinput)
    - [Stuck or Unresponsive Clipboard (`wl-clipboard`)](#stuck-or-unresponsive-clipboard-wl-clipboard)
 3. [Model & Transcription Issues](#3-model--transcription-issues)
-   - [Hugging Face Authentication (`HF_TOKEN`)](#hugging-face-authentication-hf_token)
+   - [Model download fails on first run](#model-download-fails-on-first-run)
    - [Switching Between Cohere and Faster-Whisper](#switching-between-cohere-and-faster-whisper)
 4. [Audio & Sound Themes](#4-audio--sound-themes)
    - [Customizing Audio Cues](#customizing-audio-cues)
@@ -90,19 +90,20 @@ This guide covers common issues and resolutions for **Voice Transcriber (VT)** o
 
 ## 3. Model & Transcription Issues
 
-### Hugging Face Authentication (`HF_TOKEN`)
-* **Symptom**: App errors on first startup with `Access to model CohereLabs/cohere-transcribe-03-2026 is gated`.
-* **Fix**:
-  1. Accept the model terms on Hugging Face: [Cohere Transcribe Model](https://huggingface.co/CohereLabs/cohere-transcribe-03-2026).
-  2. Create a file named `HF_TOKEN` in the repository root directory containing your Hugging Face API token:
-     ```bash
-     echo "your_hf_token_here" > HF_TOKEN
-     ```
+### Model download fails on first run
+* **Symptom**: App errors on first startup while fetching the Cohere model.
+* **Fix**: The weights come from the Apache-2.0 GitHub release assets and need
+  network access once. Ensure you can reach `github.com`, or set `VT_MODEL_DIR`
+  to a directory containing `model.safetensors` (e.g. a checkout's
+  `models/cohere/`).
 
 ---
 
 ### Offline Operation
-* Once the Cohere Transcribe model is downloaded and cached locally on first run (in `~/.cache/huggingface/hub`), Voice Transcriber operates 100% offline without requiring internet access or active network connectivity.
+* Once the Cohere Transcribe model is installed locally on first run (under
+  `models/cohere/` in a checkout, or the per-user `vt/models/cohere` dir),
+  Voice Transcriber operates 100% offline without requiring internet access or
+  active network connectivity.
 
 ---
 

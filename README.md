@@ -196,8 +196,7 @@ The only backend is **Cohere Transcribe**
 2. A per-user install dir (`%APPDATA%\vt\models\cohere` on Windows,
    `~/.local/share/vt/models/cohere` elsewhere, or `$XDG_DATA_HOME/vt`).
 3. **Auto-download of the Apache-2.0 GitHub release asset** — no Hugging Face
-   account required.
-4. Hugging Face (only if a token is configured), then first-run download.
+   account or token required.
 
 Once the weights are on disk the app runs **fully offline** with no network
 access.
@@ -205,9 +204,6 @@ access.
 > **Note for Windows testers:** `models/` is gitignored, so a fresh clone has
 > no weights. First launch auto-installs them from the GitHub release asset,
 > which is the one slow step (a few minutes) before dictation starts.
-
-If you do pull from Hugging Face, set `hf_token` in `config/config.yaml` or
-export `HF_TOKEN` in your environment (the model is gated there).
 
 ---
 

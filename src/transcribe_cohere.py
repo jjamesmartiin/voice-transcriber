@@ -12,7 +12,6 @@ import torch.nn as nn
 from torch import Tensor
 import numpy as np
 from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
-from huggingface_hub import login
 
 try:
     from post_processor import clean_speech_transcription
@@ -97,83 +96,6 @@ def _configure_torch_runtime(device="cpu"):
             if hasattr(torch, "set_num_threads"):
                 torch.set_num_threads(target_threads)
             _cached_cpu_threads = target_threads
-
-def _token_from_config():
-    """Read hf_token from local config.yaml/config.yml (root or config/ dir)."""
-    import json as _json
-    project_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-    candidates = [
-        _os.path.join(_os.getcwd(), "config.yaml"),
-        _os.path.join(_os.getcwd(), "config.yml"),
-        _os.path.join(project_root, "config.yaml"),
-        _os.path.join(project_root, "config.yml"),
-        _os.path.join(project_root, "config", "config.yaml"),
-        _os.path.join(project_root, "config", "config.yml"),
-        _os.path.join(project_root, "config.json"),
-        _os.path.join(project_root, "config", "config.json"),
-    ]
-    for path in candidates:
-        if not _os.path.exists(path):
-            continue
-        try:
-            with open(path, "r") as f:
-                content = f.read()
-            if path.endswith(".json"):
-                data = _json.loads(content)
-            else:
-                import yaml
-                data = yaml.safe_load(content) or {}
-            if isinstance(data, dict):
-                token = data.get("hf_token")
-                if token:
-                    return str(token).strip()
-        except Exception:
-            continue
-    return None
-
-def get_token():
-    """Resolve Hugging Face token from config.yaml, env var, or huggingface-cli login."""
-    token = _token_from_config()
-    if token:
-        return token
-
-    token = _os.environ.get("HF_TOKEN")
-    if token:
-        return token
-
-    token_path = _os.path.expanduser("~/.cache/huggingface/token")
-    if _os.path.exists(token_path):
-        try:
-            with open(token_path, "r") as f:
-                token = f.read().strip()
-                if token:
-                    return token
-        except:
-            pass
-
-    return None
-
-def check_auth():
-    token = get_token()
-    
-    if token:
-        masked = token[:6] + "..." + token[-4:] if len(token) > 10 else "******"
-        print(f"Authentication detected (token: {masked})")
-        try:
-            login(token=token, add_to_git_credential=False)
-            _os.environ["HF_TOKEN"] = token
-            return True
-        except Exception as e:
-            print(f"Error during Hugging Face login: {e}")
-            return False
-
-    print("\nHugging Face Authentication Info")
-    print(f"The model '{MODEL_ID}' is gated and requires access.")
-    print("  - Set 'hf_token' in your local config.yaml (gitignored)")
-    print("  - Or set the HF_TOKEN environment variable")
-    print("  - Or log in via 'huggingface-cli login'")
-    print(f"Access must be granted at: https://huggingface.co/{MODEL_ID}\n")
-    return False
 
 def _cpu_supports_bf16():
     """Detect native CPU bfloat16 support (AVX512-BF16 or AMX-BF16)."""
@@ -346,21 +268,17 @@ def _maybe_quantize_dynamic(model, device):
         return model
 
 
-def _load_model_once(target_id, revision, token, dtype, local_files_only, device):
+def _load_model_once(target_id, dtype, local_files_only, device):
     _configure_torch_runtime(device)
     processor = AutoProcessor.from_pretrained(
         target_id,
-        revision=revision,
         trust_remote_code=True,
-        token=token,
         local_files_only=local_files_only,
     )
     model = AutoModelForSpeechSeq2Seq.from_pretrained(
         target_id,
-        revision=revision,
         torch_dtype=dtype,
         trust_remote_code=True,
-        token=token,
         local_files_only=local_files_only,
     ).to(device)
     
@@ -375,7 +293,13 @@ def _load_model_once(target_id, revision, token, dtype, local_files_only, device
     return model, processor
 
 def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
-    token = get_token()
+    """Load the Cohere model from a local copy.
+
+    The weights are distributed as Apache-2.0 GitHub-release assets (see
+    ``model_download``) and installed locally on first run, so no Hugging Face
+    account or token is required. ``model_id``/``revision`` are kept for
+    signature compatibility and provenance only.
+    """
     dtype = _resolve_dtype(device)
 
     # Search local candidate directories first
@@ -400,15 +324,19 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
             local_path = candidate
             break
 
-    # No local copy yet: try the mirrored Apache-2.0 GitHub-release asset first,
-    # so users never need a Hugging Face account. Falls back to HF below.
+    # No local copy yet: fetch the mirrored Apache-2.0 GitHub-release assets.
     if local_path is None and ensure_local_cohere is not None:
-        print("No local Cohere model found. Checking GitHub release assets...")
+        print("No local Cohere model found. Downloading GitHub release assets...")
         installed = ensure_local_cohere()
         if installed:
             local_path = installed
 
-    target_id = local_path if local_path else model_id
+    if not local_path:
+        raise RuntimeError(
+            "No local Cohere model found and the GitHub release download failed. "
+            "Set VT_MODEL_DIR to a directory containing model.safetensors, or run "
+            "with network access so the release assets can be fetched."
+        )
 
     # Prefer the resolved dtype; fall back to FP32 on CPU if BF16 load fails
     # (e.g. an unsupported op in the model code) so the app never breaks.
@@ -417,16 +345,13 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
         dtypes.append(torch.float32)
 
     last_err = None
-    # Attempt local load first
     for attempt_dtype in dtypes:
         try:
-            logger.info(f"Loading Cohere model from {target_id} (dtype={attempt_dtype})...")
+            logger.info(f"Loading Cohere model from {local_path} (dtype={attempt_dtype})...")
             model, processor = _load_model_once(
-                target_id,
-                revision=revision if not local_path else None,
-                token=token,
+                local_path,
                 dtype=attempt_dtype,
-                local_files_only=bool(local_path),
+                local_files_only=True,
                 device=device,
             )
             logger.info(f"Loaded Cohere model successfully (dtype={attempt_dtype}).")
@@ -435,35 +360,6 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
             last_err = e
             logger.debug(f"Load attempt failed (dtype={attempt_dtype}): {e}")
 
-    # Fall through to download / verify path
-    logger.info(f"Model not in cache or update needed: {last_err}")
-    logger.info(f"Downloading/Verifying model '{model_id}'...")
-
-    check_auth()
-    token = get_token()
-
-    for attempt_dtype in dtypes:
-        try:
-            model, processor = _load_model_once(
-                model_id,
-                revision=revision,
-                token=token,
-                dtype=attempt_dtype,
-                local_files_only=False,
-                device=device,
-            )
-            logger.info(f"Loaded Cohere model successfully (dtype={attempt_dtype}).")
-            return model, processor
-        except Exception as e:
-            last_err = e
-            error_str = str(e).lower()
-            if "403" in error_str or "access" in error_str or "unauthorized" in error_str or "401" in error_str:
-                logger.error("Error: Access denied to gated model.")
-                logger.error(f"Make sure you have been granted access at: https://huggingface.co/{model_id}")
-                if token:
-                    masked = token[:6] + "..." + token[-4:] if len(token) > 10 else "******"
-                    logger.error(f"Current token (masked): {masked}")
-                raise e
     raise last_err
 
 def get_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):

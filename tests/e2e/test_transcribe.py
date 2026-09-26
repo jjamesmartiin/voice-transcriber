@@ -77,25 +77,6 @@ def _run_backend(backend_id, backend_name):
 
     transcribe2._backend = None
 
-    # Gated Cohere model requires an HF token to download; skip cleanly if unavailable
-    if backend_id == "cohere":
-        import transcribe_cohere
-        if not transcribe_cohere.get_token():
-            test_files = sorted(glob.glob(os.path.join(test_dir, "*.mp3")))
-            results = []
-            for test_file in test_files:
-                test_num = os.path.basename(test_file).replace(".mp3", "")
-                results.append({
-                    "test_num": test_num,
-                    "backend_name": backend_name,
-                    "score": 1.0,
-                    "status": "SKIP",
-                    "result": "Skipped (No HF token)",
-                    "load_time": 0.0,
-                    "transcribe_time": 0.0,
-                })
-            return results
-
     test_files = sorted(glob.glob(os.path.join(test_dir, "*.mp3")))
     results = []
     for test_file in test_files:

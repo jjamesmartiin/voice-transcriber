@@ -3,17 +3,7 @@
 # ==============================================================================
 # Copy this file to 'config.yaml' (in root directory or config/ directory) to override defaults.
 # Format: YAML
-# NOTE: config.yaml is gitignored, so secrets like hf_token below stay out of git.
-
-# ------------------------------------------------------------------------------
-# Hugging Face Token (optional)
-# Required to download the gated Cohere model from Hugging Face. Ignored once the
-# model is cached locally (models/cohere). Keep it in your local config.yaml only.
-# Available Options:
-#   - "hf_..." : Your Hugging Face access token
-#   - null     : No token (fall back to HF_TOKEN env var or huggingface-cli login)
-# Default: null
-hf_token: null
+# NOTE: config.yaml is gitignored, so local secrets stay out of git.
 
 # ------------------------------------------------------------------------------
 # Audio Notification Mute Setting

@@ -20,7 +20,7 @@ def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
     # Setup temporary yaml config file
     yaml_config = tmp_path / "config.yaml"
     initial_data = {
-        "hf_token": "hf_test_secret_token_12345",
+        "api_key": "test_api_key_12345",
         "model_backend": "cohere",
         "is_muted": True,
         "auto_type": False,
@@ -50,9 +50,9 @@ def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
     # Save config
     t2.save_audio_config()
 
-    # Verify YAML content preserved extra keys (hf_token, ui_theme) and saved new values
+    # Verify YAML content preserved extra keys (api_key, ui_theme) and saved new values
     saved_content = yaml.safe_load(yaml_config.read_text())
-    assert saved_content["hf_token"] == "hf_test_secret_token_12345"
+    assert saved_content["api_key"] == "test_api_key_12345"
     assert saved_content["ui_theme"] == "auto"  # extra key preserved unchanged
     assert saved_content["is_muted"] is False
     assert saved_content["auto_type"] is True

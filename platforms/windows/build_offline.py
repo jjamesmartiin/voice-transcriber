@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Build script for offline Voice Transcriber EXE
-Bundles both Whisper and Cohere models for completely offline operation
+Bundles the local Cohere model (models/cohere) for completely offline operation
 """
 import os
 import sys
@@ -53,22 +53,21 @@ BUILD_DIR = PROJECT_ROOT / "build"
 DIST_DIR = PROJECT_ROOT / "dist"
 MODELS_DIR = BUILD_DIR / "models"
 
-# Cache locations
-HF_CACHE = Path(os.path.expanduser("~/.cache/huggingface/hub"))
+# Local model location (installed from the GitHub release assets on first run)
+LOCAL_COHERE = PROJECT_ROOT / "models" / "cohere"
 
 def ensure_cached_models():
-    """Ensure Cohere model is cached locally before building"""
+    """Ensure the Cohere model is present locally before building"""
     print("=" * 60)
-    print("Checking cached Cohere model...")
+    print("Checking local Cohere model...")
     print("=" * 60)
-    
-    # Check Cohere
-    cohere_model_dir = HF_CACHE / "models--CohereLabs--cohere-transcribe-03-2026"
-    if cohere_model_dir.exists():
-        print(f"Cohere cache: FOUND at {cohere_model_dir}")
+
+    if (LOCAL_COHERE / "model.safetensors").exists():
+        print(f"Cohere model: FOUND at {LOCAL_COHERE}")
     else:
-        print("Cohere cache: NOT FOUND - will download during build")
-    
+        print(f"Cohere model: NOT FOUND at {LOCAL_COHERE}")
+        print("  Run the app once (online) to install it from the GitHub release assets.")
+
     print()
     
 def prepare_bundled_models():
@@ -83,34 +82,15 @@ def prepare_bundled_models():
         shutil.rmtree(MODELS_DIR)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Copy HuggingFace cache - Cohere model
-    cohere_src = HF_CACHE / "models--CohereLabs--cohere-transcribe-03-2026"
-    if cohere_src.exists():
-        print(f"\nFound Cohere model in cache: {cohere_src.name}")
-        dest_hf = MODELS_DIR / "huggingface" / "hub"
-        dest_cohere = dest_hf / "models--CohereLabs--cohere-transcribe-03-2026"
-        os.makedirs(dest_hf, exist_ok=True)
-        copy_with_progress(cohere_src, dest_cohere, "Copying Cohere model")
+    # The runtime loads from models/cohere (installed from the GitHub release
+    # assets on first run). Bundle that directory so the EXE runs fully offline.
+    if (LOCAL_COHERE / "model.safetensors").exists():
+        print(f"\nFound local Cohere model: {LOCAL_COHERE}")
+        dest_cohere = MODELS_DIR / "cohere"
+        copy_with_progress(LOCAL_COHERE, dest_cohere, "Copying Cohere model")
     else:
-        print("\nWARNING: No Cohere model cache found!")
-        print("  The model will be downloaded on first run of the EXE")
-        print("  To avoid this, run the app while connected to the internet first")
-    
-    # Copy HF_TOKEN if it exists
-    token_locations = [
-        PROJECT_ROOT / "HF_TOKEN",
-        SRC_DIR.parent / "HF_TOKEN",
-    ]
-    for token_loc in token_locations:
-        if token_loc.exists():
-            dest_token = MODELS_DIR / "HF_TOKEN"
-            shutil.copy2(token_loc, dest_token)
-            print(f"Copied HF_TOKEN to {dest_token}")
-            break
-    else:
-        print("\nNOTE: No HF_TOKEN found in project root")
-        print("  If the Cohere model is gated, you'll need to provide HF_TOKEN at runtime")
-        print("  Create a file named 'HF_TOKEN' next to the EXE with your token")
+        print(f"\nWARNING: No local Cohere model found at {LOCAL_COHERE}")
+        print("  Run the app once (online) to install it, then rebuild.")
     
     print(f"\nBundle prepared at: {MODELS_DIR}")
     

@@ -70,12 +70,6 @@ $wslPath = $wslPath.Trim()
 
 Write-Host "Project WSL Path: $wslPath" -ForegroundColor Gray
 
-# 4. Check HF_TOKEN
-$tokenFile = Join-Path $ProjectRoot "HF_TOKEN"
-if (-not (Test-Path $tokenFile)) {
-    Write-Warn "Optional: Create 'HF_TOKEN' file in project root if using Cohere models."
-}
-
 # 5. Handle command arguments (test / check-audio / run)
 if ($args -and $args[0] -eq "check-audio") {
     Write-Step "Running audio device diagnostics inside NixOS WSL..."

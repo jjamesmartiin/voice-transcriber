@@ -32,7 +32,7 @@ Build a **single self-contained EXE** that:
 
 **Cohere** (`transcribe_cohere.py`):
 - Uses `transformers` library
-- Cached locally in: `~/.cache/huggingface/hub`
+- Installed locally in: `models/cohere` (from the GitHub release assets)
 - Code: `AutoProcessor.from_pretrained()`, `AutoModelForSpeechSeq2Seq.from_pretrained()`
 
 ### Step 2: Model Loading for Bundled Models
@@ -59,28 +59,21 @@ def get_model_dir():
     return None
 ```
 
-For Cohere, update `load_model()` to pass `local_files_only=False` during build but `True` at runtime (or check `_MEIPASS` first).
+For Cohere, `load_model()` resolves a local copy under `models/cohere` (or `_MEIPASS/models/cohere` when frozen) and loads it with `local_files_only=True` — no network or token at runtime.
 
 ### Step 3: Prepare Model Cache for Build
 
 Before building:
 
-1. **Run app once with network** to cache the Cohere model
-2. **Verify cache location**:
-   - `~/.cache/huggingface/hub/` - contains Cohere model files
+1. **Run app once online** to install the Cohere model from the GitHub release assets
+2. **Verify install location**:
+   - `models/cohere/` - contains Cohere model files
 
 ### Step 4: Create Build Script
 
 Run `python platforms/windows/build_offline.py`
 
-### Step 5: Include HF_TOKEN
-
-For Cohere gated model access:
-
-1. Place `HF_TOKEN` file in project root before building
-2. `build_offline.py` copies `HF_TOKEN` into the bundle
-
-### Step 6: Build and Test
+### Step 5: Build and Test
 
 1. Run build script: `python platforms/windows/build_offline.py`
 2. Test EXE with network disabled
@@ -90,8 +83,7 @@ For Cohere gated model access:
 
 ## Pre-Build Checklist
 
-- [ ] Cohere model cached locally (`~/.cache/huggingface/hub/`)
-- [ ] HF_TOKEN file available for Cohere model
+- [ ] Cohere model present locally (`models/cohere/`)
 - [ ] PyInstaller installed: `pip install pyinstaller`
 - [ ] Windows dependencies installed: `pip install -r platforms/windows/requirements.txt`
 
