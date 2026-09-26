@@ -152,6 +152,9 @@ class WindowsClipboardSink(BaseClipboardSink):
             return False
 
     def type_text(self, text: str, fast: bool = False) -> bool:
+        if not text:
+            return True
+        text = text.replace("\r\n", "\n")
         try:
             import ctypes
             import time

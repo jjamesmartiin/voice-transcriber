@@ -195,3 +195,31 @@ def test_gitea_variants_are_safe_and_get_tea_is_untouched():
     drink = post_processor.clean_speech_transcription("let's get tea", skip_slm=True)
     assert "gitea" not in drink.lower()
     assert "get tea" in drink.lower()
+
+
+def test_dictionary_module_cli_and_helpers(tmp_path):
+    import dictionary
+    custom_yaml = tmp_path / "custom_dict.yaml"
+
+    # 1. Add new entry
+    is_new = dictionary.add_entry("cube ctl", "kubectl", path=custom_yaml)
+    assert is_new is True
+
+    # 2. Load dictionary
+    loaded = dictionary.load_dictionary(path=custom_yaml)
+    assert loaded.get("cube ctl") == "kubectl"
+
+    # 3. Update existing entry
+    is_new_update = dictionary.add_entry("cube ctl", "Kubectl", path=custom_yaml)
+    assert is_new_update is False
+    loaded2 = dictionary.load_dictionary(path=custom_yaml)
+    assert loaded2.get("cube ctl") == "Kubectl"
+
+    # 4. Remove entry
+    removed = dictionary.remove_entry("cube ctl", path=custom_yaml)
+    assert removed is True
+    assert "cube ctl" not in dictionary.load_dictionary(path=custom_yaml)
+
+    # 5. Remove non-existent entry returns False
+    assert dictionary.remove_entry("non_existent_phrase", path=custom_yaml) is False
+

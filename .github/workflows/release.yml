@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+        uses: DeterminateSystems/nix-installer-action@v19
 
       - name: Build and bundle the app into a single AppImage
         run: |

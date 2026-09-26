@@ -245,6 +245,54 @@ Options can also be toggled live from the settings menu (`Ctrl+Alt+I`).
 
 ---
 
+## Custom Word & Phrase Dictionary
+
+Voice Transcriber includes a high-speed Trie-compacted custom dictionary replacer (~0.005 ms execution time) that matches spoken words and technical phrases case-insensitively, respects word boundaries, and applies exact replacement casing and formatting.
+
+The dictionary lives in `config/dictionary.yaml`.
+
+### Quick-Add via CLI
+
+You can add, list, remove, or test dictionary entries directly from the terminal without manually editing YAML files:
+
+```bash
+# Add or update a spoken phrase -> replacement mapping
+python -m src.dictionary add "cube ctl" "kubectl"
+python -m src.dictionary add "deep seq" "Deepseek"
+
+# Test how a sentence is transformed by the dictionary & post-processor
+python -m src.dictionary test "i deployed on nixos using cube ctl"
+# Output: "I deployed on NixOS using kubectl."
+
+# List current dictionary entries (optionally filtered)
+python -m src.dictionary list
+python -m src.dictionary list nixos
+
+# Remove an entry
+python -m src.dictionary remove "cube ctl"
+```
+
+### Manual YAML Editing
+
+You can also edit `config/dictionary.yaml` directly:
+
+```yaml
+dictionary:
+  # Spoken phrase: Desired Output
+  cube ctl: kubectl
+  k eight s: Kubernetes
+  git hub: GitHub
+  pull request: PR
+  pull request review: PR review
+  c pipeline: CI pipeline
+```
+
+- **Case-Insensitive Matching**: `github`, `GitHub`, and `GIT HUB` all match the rule.
+- **Word-Boundary Protection**: Shorter words will not corrupt longer words (e.g., `pr` will not match the "pr" inside "program" or "spring").
+- **Acronym Preservation**: Target words with capital letters (e.g., `GitHub`, `PR`, `Kubernetes`, `CI`) are automatically protected from mid-sentence lowercasing.
+
+---
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE). The bundled Cohere Transcribe model

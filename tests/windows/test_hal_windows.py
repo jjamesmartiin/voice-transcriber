@@ -71,6 +71,26 @@ class TestWindowsClipboardSink:
         assert sink.type_text("A", fast=True) is True
         assert len(keybd_calls) == 2  # key down, key up
 
+    def test_crlf_normalized_to_single_return(self, monkeypatch):
+        import ctypes
+        keybd_calls = []
+
+        class FakeUser32:
+            def VkKeyScanW(self, char_code):
+                return 0x41  # 'A'
+
+            def keybd_event(self, vk, scan, flags, extra):
+                keybd_calls.append((vk, flags))
+
+        monkeypatch.setattr(ctypes, "windll", type("W", (), {"user32": FakeUser32()})(), raising=False)
+        sink = hal.get_clipboard_sink(hal.WINDOWS)
+        # "A\r\nB" has 1 CRLF newline. It should emit 1 VK_RETURN (down, up = 2 events).
+        # Plus 'A' (2 events) and 'B' (2 events) -> total 6 keybd events.
+        assert sink.type_text("A\r\nB", fast=True) is True
+        vk_returns = [vk for vk, flags in keybd_calls if vk == 0x0D]
+        assert len(vk_returns) == 2  # down, up for a SINGLE Return key event
+        assert len(keybd_calls) == 6
+
 
 class TestWindowsHotkeyManagerLatching:
     def test_windows_space_latch(self):

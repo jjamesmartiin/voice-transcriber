@@ -235,6 +235,14 @@ def _fetch_part_manifest(base_url, prefix):
                 resolved_url = resp.geturl()
                 data = resp.read()
             break
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code in (404, 410):
+                # Release asset missing (e.g. latest release does not mirror model weights):
+                # fast-fail immediately so fallback candidates can be tried with zero delay.
+                break
+            print(f"Manifest attempt {attempt}/3 for {sums_url} failed: {e}", flush=True)
+            time.sleep(2 * attempt)
         except (urllib.error.URLError, OSError, socket.timeout) as e:
             last_err = e
             print(f"Manifest attempt {attempt}/3 for {sums_url} failed: {e}", flush=True)
@@ -319,7 +327,10 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
         # Extract into a staging dir, then atomically move into place.
         staging = os.path.join(tmp_root, "extracted")
         with tarfile.open(tar_path, "r") as tf:
-            tf.extractall(staging, filter="data")
+            if hasattr(tarfile, "data_filter"):
+                tf.extractall(staging, filter="data")
+            else:
+                tf.extractall(staging)
         weights = os.path.join(staging, "model.safetensors")
         got = _sha256_file(weights)
         if got != SAFETENSORS_SHA256:
@@ -342,3 +353,32 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
         return None
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="python -m src.model_download",
+        description="Download and verify Cohere model assets from GitHub release.",
+    )
+    parser.add_argument("--dest", default=None, help="Target installation directory (default: models/cohere)")
+    parser.add_argument("--verify-only", action="store_true", help="Only verify existing local model files")
+    args = parser.parse_args()
+
+    target = args.dest or cohere_models_dir()
+    if args.verify_only:
+        if is_local_model_complete(target):
+            print(f"✓ Cohere model at {target} is complete and valid.")
+            sys.exit(0)
+        else:
+            print(f"✕ Cohere model at {target} is missing or incomplete.")
+            sys.exit(1)
+
+    result = ensure_local_cohere(dest=target)
+    if result:
+        print(f"✓ Cohere model ready at {result}")
+        sys.exit(0)
+    else:
+        print("✕ Model download or verification failed.")
+        sys.exit(1)
+
