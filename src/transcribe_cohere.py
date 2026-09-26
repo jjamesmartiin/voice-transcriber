@@ -70,12 +70,28 @@ def _configure_torch_runtime(device="cpu"):
         if env_threads.isdigit():
             target_threads = max(1, min(int(env_threads), os.cpu_count() or 8))
         else:
-            # 8 threads achieves the optimal throughput/latency on CPU (1.05s median
-            # for 5s audio at 0.21x RTF vs 1.20s at 4 threads, ~12% faster). Capping
-            # at 8 threads avoids oversubscribing modern multi-core CPUs while keeping
-            # power consumption and CPU thermals minimal. Override with VT_CPU_THREADS.
+            # 8 threads achieved the best throughput/latency on the original
+            # 8-core Linux tuning box (1.05s median for 5s audio at 0.21x RTF
+            # vs 1.20s at 4 threads).
             cpu_cnt = os.cpu_count() or 8
-            target_threads = max(1, min(cpu_cnt, 8))
+            if sys.platform.startswith("win"):
+                # Windows is frequently CPU-only (no CUDA), so make use of the
+                # actual physical cores instead of a hard 8-thread ceiling. On a
+                # 12-core / 24-thread Zen 5 (Ryzen AI 9 HX 370) a 30s clip took
+                # 6.85s at 8 threads, 5.08s at 12 (physical), and *slower* again
+                # at 24 (7.47s, SMT oversubscription). Physical cores hit the
+                # sweet spot. Linux keeps the historical min(cpu_cnt, 8) to stay
+                # bit-for-bit unchanged.
+                phys_cores = None
+                try:
+                    import psutil
+                    phys_cores = psutil.cpu_count(logical=False)
+                except Exception:
+                    # Fallback: assume 2 logical threads per physical core.
+                    phys_cores = max(1, cpu_cnt // 2)
+                target_threads = max(1, min(cpu_cnt, phys_cores or 8))
+            else:
+                target_threads = max(1, min(cpu_cnt, 8))
             
         if _cached_cpu_threads != target_threads:
             if hasattr(torch, "set_num_threads"):
@@ -161,11 +177,24 @@ def check_auth():
 
 def _cpu_supports_bf16():
     """Detect native CPU bfloat16 support (AVX512-BF16 or AMX-BF16)."""
+    # Linux: /proc/cpuinfo is authoritative and has always been the source of
+    # truth here, so keep this path first to leave Linux/WSL detection untouched.
     try:
         with open("/proc/cpuinfo") as f:
             flags = f.read()
-        if "avx512_bf16" in flags or "amx_bf16" in flags:
-            return True
+        return "avx512_bf16" in flags or "amx_bf16" in flags
+    except Exception:
+        pass
+    # Windows (and any other non-/proc platform): use NumPy's CPUID-based CPU
+    # feature table. Without this, Windows always fell back to float32 even on
+    # CPUs that natively support BF16 (e.g. Zen 4/5, Sapphire Rapids), roughly
+    # halving CPU inference speed instead of using the bit-lossless BF16 weights.
+    try:
+        um = getattr(np, "_core", getattr(np, "core", None))
+        um = getattr(um, "_multiarray_umath", None)
+        feats = getattr(um, "__cpu_features__", None)
+        if feats is not None:
+            return bool(feats.get("AVX512BF16")) or bool(feats.get("AMXBF16"))
     except Exception:
         pass
     return False

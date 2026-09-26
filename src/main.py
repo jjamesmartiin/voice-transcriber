@@ -674,7 +674,8 @@ class SimpleVoiceTranscriber:
                 print(f"⚠️ [vLLM SLM On-Demand Polish] No changes made or guardrail triggered: Clipboard preserved.")
                 return
 
-        if (self.audio_frames is None or self.audio_frames.size == 0) and not getattr(self, 'micro_batcher', None):
+        micro_batcher = getattr(self, 'micro_batcher', None)
+        if not micro_batcher and (self.audio_frames is None or len(self.audio_frames) == 0):
             # Hide recording notification
             try:
                 self.visual_notification.hide_notification()
