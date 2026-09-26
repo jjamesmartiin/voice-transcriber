@@ -1,6 +1,6 @@
 """WSL clipboard backend: Windows host clipboard via ``clip.exe``.
 
-Contract (locked by ``tests/test_end_to_end_crossplatform.py``):
+Contract (locked by ``tests/e2e/test_end_to_end_crossplatform.py``):
 
 * ``copy_text`` feeds UTF-16LE bytes to ``clip.exe`` (found on ``PATH`` or at
   the canonical ``/mnt/c/...`` location).

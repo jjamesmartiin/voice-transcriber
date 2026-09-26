@@ -86,7 +86,7 @@ def test_recording_time_and_buffer_performance():
     import subprocess
     import sys
 
-    src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+    src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
     env = dict(os.environ)
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = src_dir + (os.pathsep + existing if existing else "")

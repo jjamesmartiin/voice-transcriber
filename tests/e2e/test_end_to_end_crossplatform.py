@@ -18,7 +18,7 @@ This module is the executable specification for the Cross-Platform Convergence
 
 Everything runs headless inside the Nix environment::
 
-    nix develop --command python -m pytest tests/test_end_to_end_crossplatform.py -v
+    nix develop --command python -m pytest tests/e2e/test_end_to_end_crossplatform.py -v
 
 The platform adapters implemented here are *contract reference
 implementations*. Phase 3 of the plan extracts them into ``src/platform/``;
@@ -48,7 +48,7 @@ import soundfile as sf
 # ---------------------------------------------------------------------------
 # Paths / source import
 # ---------------------------------------------------------------------------
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = REPO_ROOT / "src"
 TEST_AUDIO_DIR = REPO_ROOT / "tests" / "test_transcribe"
 if str(SRC_DIR) not in sys.path:
@@ -339,7 +339,7 @@ def transcription_accuracy(expected: str, actual: str) -> float:
     """
     Token accuracy against ground truth.
 
-    Matches the repo's convention (``tests/test_transcribe.py``) by measuring how
+    Matches the repo's convention (``tests/e2e/test_transcribe.py``) by measuring how
     many ground-truth tokens the hypothesis recalls, while also considering
     order-preserving sequence similarity via ``SequenceMatcher``. Extra ASR
     tokens (e.g. a stray "team") do not unfairly penalise a correct result.

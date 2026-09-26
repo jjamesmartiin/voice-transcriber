@@ -10,7 +10,7 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
 # Keep these tests offline and deterministic: never hit a local SLM endpoint.
 os.environ.setdefault("VT_ENABLE_SLM", "0")

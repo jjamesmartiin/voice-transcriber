@@ -13,7 +13,7 @@ import soundfile as sf
 from pathlib import Path
 
 # Ensure src is in sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 import transcribe2
 from micro_batcher import StreamingMicroBatcher
 
@@ -28,7 +28,7 @@ def run_tests():
     
     transcribe2._backend = None
     
-    test_dir = Path(__file__).resolve().parent / "test_transcribe"
+    test_dir = Path(__file__).resolve().parents[2] / "tests" / "test_transcribe"
     
     # Warmup
     print("Pre-loading Cohere model...")

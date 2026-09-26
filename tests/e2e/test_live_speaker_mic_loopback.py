@@ -23,7 +23,7 @@ import numpy as np
 import soundfile as sf
 import sounddevice as sd
 
-src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src")
 sys.path.insert(0, src_dir)
 
 from main import SimpleVoiceTranscriber
@@ -130,7 +130,7 @@ def score_transcription(expected, actual):
 
 
 def run_single_test(sample_id, transcriber, out_device=None, in_device=None):
-    test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_transcribe")
+    test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests", "test_transcribe")
     audio_path = os.path.join(test_dir, f"{sample_id}.mp3")
     md_path = os.path.join(test_dir, f"{sample_id}.md")
     

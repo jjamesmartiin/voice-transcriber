@@ -12,7 +12,7 @@ import time
 import pytest
 from pathlib import Path
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../src")))
 
 import post_processor
 import t2
@@ -175,7 +175,7 @@ def test_dictionary_execution_latency():
 def test_shipped_dictionary_maps_github_variants():
     """Regression: the shipped dictionary had GitLab but not GitHub, so dictated
     "git hub"/"get hub" fell through un-repaired."""
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parents[2]
     mapping = post_processor.load_custom_dictionary_from_file(repo_root / "config" / "dictionary.yaml")
     assert mapping.get("github") == "GitHub"
     for variant in ("git hub", "git-hub", "get hub"):
@@ -187,7 +187,7 @@ def test_gitea_variants_are_safe_and_get_tea_is_untouched():
     """Only unambiguous variants may map to Gitea. 'get tea' is ordinary English
     (a drink) and must survive untouched — a context-free dictionary cannot
     disambiguate it, so it must not have an entry."""
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parents[2]
     mapping = post_processor.load_custom_dictionary_from_file(repo_root / "config" / "dictionary.yaml")
     for variant in ("gitea", "git ea", "git tea"):
         assert mapping.get(variant) == "Gitea", f"missing dictionary variant {variant!r}"

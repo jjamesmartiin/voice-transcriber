@@ -13,7 +13,7 @@ import soundfile as sf
 from pathlib import Path
 
 # Ensure src is in sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 import transcribe2
 from micro_batcher import StreamingMicroBatcher
@@ -35,7 +35,7 @@ def calculate_word_accuracy(expected, actual):
     return len(overlap) / len(set(norm_exp))
 
 def run_micro_batching_tests():
-    test_dir = Path(__file__).resolve().parent / "test_transcribe"
+    test_dir = Path(__file__).resolve().parents[2] / "tests" / "test_transcribe"
     samples = sorted(test_dir.glob("*.mp3"))
     
     print("=" * 95)

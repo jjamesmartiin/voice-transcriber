@@ -9,7 +9,7 @@ import sys
 import unittest
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 from post_processor import clean_speech_transcription
 from micro_batcher import trim_trailing_silence, StreamingMicroBatcher, has_speech_activity
@@ -233,9 +233,15 @@ class TestMicroBatchingEngine(unittest.TestCase):
     def test_number_words_disabled(self):
         """Test VT_NUMBER_DIGITS=0 disables number conversion."""
         from post_processor import convert_number_words_to_digits as conv
+        old_env = os.environ.get("VT_NUMBER_DIGITS")
         os.environ["VT_NUMBER_DIGITS"] = "0"
-        self.assertEqual(conv("twenty five people"), "twenty five people")
-        os.environ["VT_NUMBER_DIGITS"] = "1"
+        try:
+            self.assertEqual(conv("twenty five people"), "twenty five people")
+        finally:
+            if old_env is None:
+                os.environ.pop("VT_NUMBER_DIGITS", None)
+            else:
+                os.environ["VT_NUMBER_DIGITS"] = old_env
 
     def test_deduplicate_text_overlap_cases(self):
         """Test intelligent text overlap deduplication across chunk boundaries."""

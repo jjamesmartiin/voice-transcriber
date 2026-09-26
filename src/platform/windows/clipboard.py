@@ -1,6 +1,6 @@
 """Native Windows clipboard + keystroke-injection backend.
 
-Contract (locked by ``tests/test_end_to_end_crossplatform.py``):
+Contract (locked by ``tests/e2e/test_end_to_end_crossplatform.py``):
 
 * ``copy_text`` uses ``pyperclip``.
 * ``type_text`` injects keystrokes via ``user32.keybd_event`` (no extra deps).

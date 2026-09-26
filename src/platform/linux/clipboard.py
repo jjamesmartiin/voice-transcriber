@@ -1,6 +1,6 @@
 """Linux clipboard + synthetic-typing backend.
 
-Contract (locked by ``tests/test_end_to_end_crossplatform.py``):
+Contract (locked by ``tests/e2e/test_end_to_end_crossplatform.py``):
 
 * ``copy_text`` prefers Wayland ``wl-copy`` (matching ``src/t2.py``), falls back
   to X11 ``xclip -selection clipboard``, and returns ``False`` when neither is

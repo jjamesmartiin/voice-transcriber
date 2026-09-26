@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test transcription accuracy against expected results.
-Run: python tests/test_transcribe.py
+Run: python tests/e2e/test_transcribe.py
 
 The ASR backend (Cohere) runs in a subprocess so the torch runtime is isolated
 from the test process.
@@ -13,8 +13,8 @@ import glob
 import json
 import subprocess
 
-test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_transcribe")
-src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests", "test_transcribe")
+src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src")
 sys.path.insert(0, src_dir)
 
 import numpy as np
