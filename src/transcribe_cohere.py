@@ -28,6 +28,10 @@ except Exception:
 MODEL_ID = "CohereLabs/cohere-transcribe-03-2026"
 MODEL_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 
+SUPPORTED_LANGUAGES = [
+    "en", "fr", "de", "es", "it", "pt", "nl", "pl", "el", "ar", "ja", "zh", "vi", "ko"
+]
+
 logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -435,6 +439,14 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     # Guard against pure silence / background noise
     if audio_data is not None and not has_speech_activity(audio_data):
         return ""
+
+    eff_language = (language or os.environ.get("VT_LANGUAGE", "en")).strip().lower()
+    if eff_language not in SUPPORTED_LANGUAGES:
+        logger.warning(
+            "Language %r is not supported by Cohere Transcribe (%s). Defaulting to 'en'.",
+            eff_language, ", ".join(SUPPORTED_LANGUAGES)
+        )
+        eff_language = "en"
         
     try:
         model, processor = get_model(device=device)
@@ -459,13 +471,13 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
                     processor=processor,
                     audio_arrays=[audio_data],
                     sample_rates=[sample_rate],
-                    language=language
+                    language=eff_language
                 )
             else:
                 results = model.transcribe(
                     processor=processor,
                     audio_files=[audio_path],
-                    language=language
+                    language=eff_language
                 )
             
             if isinstance(results, list):

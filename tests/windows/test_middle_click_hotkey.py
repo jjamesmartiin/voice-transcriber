@@ -23,6 +23,7 @@ def test_windows_middle_click_hold():
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = WindowsHotkeyManager(cb_start, cb_stop)
+    manager.set_middle_click_enabled(True)
     try:
         from pynput.mouse import Button
 

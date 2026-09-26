@@ -81,7 +81,7 @@ class VoiceTranscriberTUI:
         self.trailing_space = True
         self.auto_punctuate = True
         self.number_digits = True
-        self.middle_click_enabled = True
+        self.middle_click_enabled = False
         self.punctuation_mode = "full"
         self.copy_to_clipboard = True
         self.sound_theme = "proximity"
@@ -298,7 +298,7 @@ class VoiceTranscriberTUI:
                 prompt.append("num: words ", style="dim white")
 
             prompt.append("│ ", style="dim white")
-            if getattr(self, "middle_click_enabled", True):
+            if getattr(self, "middle_click_enabled", False):
                 prompt.append("mouse: on ", style="green")
             else:
                 prompt.append("mouse: off ", style="dim white")

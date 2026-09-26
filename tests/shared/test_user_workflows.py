@@ -209,6 +209,10 @@ class TestHandsFreeLatchWorkflow:
 # 3. Middle-Click Push-to-Talk & Quick Click Cancellation
 # ===========================================================================
 class TestMiddleClickWorkflow:
+    def test_middle_click_default_disabled(self):
+        import t2
+        assert t2.MIDDLE_CLICK_ENABLED is False
+
     def test_middle_click_hold_and_quick_cancel_linux(self):
         LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
         cb_start = MagicMock()
@@ -218,6 +222,7 @@ class TestMiddleClickWorkflow:
             pytest.skip("Linux evdev dependency not available on this platform")
         manager.virtual_keyboard = MagicMock()
         manager.uinput = MagicMock()
+        manager.set_middle_click_enabled(True)
 
         try:
             btn_middle = 274

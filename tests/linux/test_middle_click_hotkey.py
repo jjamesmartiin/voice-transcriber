@@ -40,6 +40,7 @@ def test_linux_device_filtering():
     """Verify mouse devices with BTN_MIDDLE are detected and uinput is excluded."""
     LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
     manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    manager.set_middle_click_enabled(True)
     try:
         # Standard keyboard
         kb = FakeDevice("Standard Keyboard", [56, 100, 42, 54, 57, 28, 30])
@@ -76,6 +77,7 @@ def test_linux_quick_middle_click_does_not_trigger():
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = LinuxHotkeyManager(cb_start, cb_stop)
+    manager.set_middle_click_enabled(True)
     try:
         # Press middle click (BTN_MIDDLE = 274)
         manager.handle_key_event(FakeEvdevEvent(274, 1))
@@ -99,6 +101,7 @@ def test_linux_middle_click_hold_triggers_and_releases():
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = LinuxHotkeyManager(cb_start, cb_stop)
+    manager.set_middle_click_enabled(True)
     try:
         # Press middle click
         manager.handle_key_event(FakeEvdevEvent(274, 1))
@@ -131,6 +134,7 @@ def test_linux_middle_click_space_latch():
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = LinuxHotkeyManager(cb_start, cb_stop)
+    manager.set_middle_click_enabled(True)
     try:
         # Press and hold middle click
         manager.handle_key_event(FakeEvdevEvent(274, 1))
@@ -183,6 +187,7 @@ def test_linux_middle_click_quick_click_cancels():
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = LinuxHotkeyManager(cb_start, cb_stop)
+    manager.set_middle_click_enabled(True)
     try:
         # Press middle click (274, 1)
         manager.handle_key_event(FakeEvdevEvent(274, 1))

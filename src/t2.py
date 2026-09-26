@@ -116,12 +116,13 @@ AUTO_TYPE_TRAILING_SPACE = True
 AUTO_TYPE_AUTO_PUNCTUATE = True
 IS_MUTED = True
 NUMBER_DIGITS = True  # Convert spoken number words to digits ("twenty five" -> 25)
-MIDDLE_CLICK_ENABLED = True  # Push-to-talk by holding middle mouse button (>= 0.25s)
+MIDDLE_CLICK_ENABLED = False  # Push-to-talk by holding middle mouse button (>= 0.25s)
 KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
 UI_THEME = "auto"
 PUNCTUATION_MODE = "full"
 PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "aesthetic_lowercase", "gen_z"]
+LANGUAGE = "en"
 WAIT_FOR_MODEL_ON_STARTUP = True
 ENABLE_SLM = False
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
@@ -512,7 +513,7 @@ def load_audio_config(file_path=None):
             AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
             COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
             NUMBER_DIGITS = config.get('number_digits', True)
-            MIDDLE_CLICK_ENABLED = config.get('middle_click_enabled', True)
+            MIDDLE_CLICK_ENABLED = config.get('middle_click_enabled', False)
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
 
             raw_punct = config.get('preset') or config.get('mode_preset') or config.get('punctuation_mode') or config.get('formatting_level') or 'full'
@@ -521,6 +522,11 @@ def load_audio_config(file_path=None):
             env_punct = os.environ.get("VT_PRESET", "").strip().lower() or os.environ.get("VT_PUNCTUATION_MODE", "").strip().lower()
             if env_punct:
                 PUNCTUATION_MODE = get_canonical_preset_name(env_punct)
+
+            LANGUAGE = config.get('language', 'en')
+            env_lang = os.environ.get("VT_LANGUAGE", "").strip().lower()
+            if env_lang:
+                LANGUAGE = env_lang
 
             WAIT_FOR_MODEL_ON_STARTUP = config.get('wait_for_model_on_startup', True)
             env_wait = os.environ.get("VT_WAIT_FOR_MODEL_ON_STARTUP", "").strip().lower()
@@ -742,6 +748,7 @@ def save_audio_config(file_path=None):
             'keep_bluetooth_handsfree': KEEP_BLUETOOTH_HANDSFREE,
             'punctuation_mode': PUNCTUATION_MODE,
             'preset': PUNCTUATION_MODE,
+            'language': LANGUAGE,
             'enable_slm': ENABLE_SLM,
             'wait_for_model_on_startup': WAIT_FOR_MODEL_ON_STARTUP,
         })

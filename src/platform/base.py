@@ -74,7 +74,7 @@ class BaseHotkeyManager:
         self.hotkey_active = False
         self.latch_release = False
         self.copy_to_clipboard_mode = False
-        self.middle_click_enabled = True
+        self.middle_click_enabled = False
 
         # Non-empty when the backend successfully initialised; ``main.py`` uses
         # this to decide whether global hotkeys are available.

@@ -77,6 +77,20 @@ copy_to_clipboard: true
 preset: "default"
 
 # ------------------------------------------------------------------------------
+# Spoken Language Setting & Disclaimer
+# Voice Transcriber is designed and optimized specifically for English ("en").
+# The real-time post-processor (verbal retractions like "scratch that", stutter
+# deduplication, filler-word stripping, number conversion, homophone repair, and
+# casing) is written exclusively for English.
+#
+# Disclaimer: The underlying Cohere Transcribe model supports 14 languages:
+#   ["en", "fr", "de", "es", "it", "pt", "nl", "pl", "el", "ar", "ja", "zh", "vi", "ko"]
+# You can set a non-English language code here or via VT_LANGUAGE, but English is
+# the primary officially supported language for the full post-processing pipeline.
+# Default: "en"
+language: "en"
+
+# ------------------------------------------------------------------------------
 # Small Language Model (SLM) Grammar & Polishing Pass (Optional)
 # Enables an on-demand CPU Small Language Model pass (e.g. Qwen2.5-0.5B / SmolLM2-360M)
 # to fix spelling and context grammar mistakes.

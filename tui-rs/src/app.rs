@@ -220,7 +220,7 @@ impl App {
             trailing_space: true,
             auto_punctuate: true,
             number_digits: true,
-            middle_click_enabled: true,
+            middle_click_enabled: false,
             punctuation_mode: "full".to_string(),
             sound_theme: "proximity".to_string(),
             ui_theme,

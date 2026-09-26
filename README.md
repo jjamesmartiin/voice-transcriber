@@ -210,6 +210,12 @@ The only backend is **Cohere Transcribe**
 Once the weights are on disk the app runs **fully offline** with no network
 access.
 
+### Language Support & Disclaimer
+
+- **Primary / Officially Supported**: **English (`en`)**
+- **Model Architecture**: The underlying acoustic weights (`CohereLabs/cohere-transcribe-03-2026`) support 14 languages: English (`en`), French (`fr`), German (`de`), Spanish (`es`), Italian (`it`), Portuguese (`pt`), Dutch (`nl`), Polish (`pl`), Greek (`el`), Arabic (`ar`), Japanese (`ja`), Chinese (`zh`), Vietnamese (`vi`), and Korean (`ko`).
+- **English Pipeline Disclaimer**: Voice Transcriber is designed and optimized specifically for **English dictation**. The post-processor (verbal retraction parser like *"scratch that"*, filler-word removal, stutter collapse, number-to-digit conversion, homophone disambiguation, and casing) is written exclusively for English. Other languages can be specified via `VT_LANGUAGE` or `config.yaml` (`language: "<code\>"`), but English is the primary officially supported language.
+
 > **Note for Windows testers:** `models/` is gitignored, so a fresh clone has
 > no weights. First launch auto-installs them from the GitHub release asset,
 > which is the one slow step (a few minutes) before dictation starts.

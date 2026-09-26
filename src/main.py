@@ -186,7 +186,7 @@ class SimpleVoiceTranscriber:
             trailing_space=getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True),
             auto_punctuate=getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True),
             number_digits=getattr(t2, 'NUMBER_DIGITS', True),
-            middle_click_enabled=getattr(t2, 'MIDDLE_CLICK_ENABLED', True),
+            middle_click_enabled=getattr(t2, 'MIDDLE_CLICK_ENABLED', False),
         )
         if hasattr(self, 'visual_notification') and self.visual_notification:
             self.visual_notification.set_active_device(get_active_device_name(include_model=False))
@@ -566,7 +566,7 @@ class SimpleVoiceTranscriber:
                     if hasattr(self.audio_cues, 'set_sound_theme'):
                         self.audio_cues.set_sound_theme(theme)
                 if hasattr(self.hotkey_system, 'set_middle_click_enabled'):
-                    self.hotkey_system.set_middle_click_enabled(getattr(t2, 'MIDDLE_CLICK_ENABLED', True))
+                    self.hotkey_system.set_middle_click_enabled(getattr(t2, 'MIDDLE_CLICK_ENABLED', False))
                 # WSL forwards earcons through the same bridge process.
                 if hasattr(self.audio_cues, 'set_bridge'):
                     self.audio_cues.set_bridge(self.hotkey_system)
