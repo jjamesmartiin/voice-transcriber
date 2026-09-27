@@ -8,6 +8,12 @@ dictionary:
   deep seq: Deepseek
   deep seek: Deepseek
 
+  # Pi Coding Agent (ASR tends to hear "pi" as "pie")
+  pie coding agent: pi coding agent
+  pie coding: pi coding
+  pie agent: pi agent
+  pie cli: pi cli
+
   # Nix / NixOS
   nixos: NixOS
   nix os: NixOS
