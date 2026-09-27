@@ -139,10 +139,10 @@ pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Lin
             l1.push(Span::styled(format!("preset: {punc_disp} "), cyan()));
 
             l1.push(Span::styled("│ ", dim()));
-            if app.number_digits {
-                l1.push(Span::styled("num: digits ", Style::default().fg(Color::Green)));
-            } else {
-                l1.push(Span::styled("num: words ", dim()));
+            match app.number_mode.as_str() {
+                "digits" => l1.push(Span::styled("num: digits ", Style::default().fg(Color::Green))),
+                "words" => l1.push(Span::styled("num: words ", dim())),
+                _ => l1.push(Span::styled("num: auto ", cyan())),
             }
 
             l1.push(Span::styled("│ ", dim()));
@@ -256,6 +256,7 @@ pub fn max_status_height(app: &App, width: u16) -> u16 {
     full_app.trailing_space = true;
     full_app.auto_punctuate = true;
     full_app.number_digits = true;
+    full_app.number_mode = "auto".to_string();
     full_app.middle_click_enabled = true;
     full_app.punctuation_mode = "lowercase_no_punctuation".to_string();
 

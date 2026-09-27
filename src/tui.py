@@ -81,6 +81,7 @@ class VoiceTranscriberTUI:
         self.trailing_space = True
         self.auto_punctuate = True
         self.number_digits = True
+        self.number_mode = "auto"
         self.middle_click_enabled = False
         self.punctuation_mode = "full"
         self.copy_to_clipboard = True
@@ -171,7 +172,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
             
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, middle_click_enabled=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, middle_click_enabled=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -193,6 +194,8 @@ class VoiceTranscriberTUI:
                 self.trailing_space = bool(trailing_space)
             if auto_punctuate is not None:
                 self.auto_punctuate = bool(auto_punctuate)
+            if number_mode is not None:
+                self.number_mode = str(number_mode).strip().lower()
             if number_digits is not None:
                 self.number_digits = bool(number_digits)
             if middle_click_enabled is not None:
@@ -292,10 +295,16 @@ class VoiceTranscriberTUI:
             prompt.append(f"preset: {punc_disp} ", style="cyan")
 
             prompt.append("│ ", style="dim white")
-            if getattr(self, "number_digits", True):
-                prompt.append("num: digits ", style="green")
-            else:
-                prompt.append("num: words ", style="dim white")
+            num_mode = getattr(self, "number_mode", None)
+            if num_mode not in ("auto", "digits", "words"):
+                num_mode = "digits" if getattr(self, "number_digits", True) else "words"
+            num_labels = {
+                "auto": ("num: auto ", "cyan"),
+                "digits": ("num: digits ", "green"),
+                "words": ("num: words ", "dim white"),
+            }
+            num_label, num_style = num_labels[num_mode]
+            prompt.append(num_label, style=num_style)
 
             prompt.append("│ ", style="dim white")
             if getattr(self, "middle_click_enabled", False):

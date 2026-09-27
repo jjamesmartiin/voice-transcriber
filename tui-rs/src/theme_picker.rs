@@ -497,6 +497,7 @@ pub fn run_theme_picker(
                             trailing_space,
                             auto_punctuate,
                             number_digits,
+                            number_mode,
                             middle_click_enabled,
                         } => {
                             app.apply_config(
@@ -512,6 +513,7 @@ pub fn run_theme_picker(
                                 trailing_space,
                                 auto_punctuate,
                                 number_digits,
+                                number_mode,
                                 middle_click_enabled,
                             );
                         }

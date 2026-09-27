@@ -186,6 +186,7 @@ class SimpleVoiceTranscriber:
             trailing_space=getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True),
             auto_punctuate=getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True),
             number_digits=getattr(t2, 'NUMBER_DIGITS', True),
+            number_mode=getattr(t2, 'NUMBER_MODE', 'auto'),
             middle_click_enabled=getattr(t2, 'MIDDLE_CLICK_ENABLED', False),
         )
         if hasattr(self, 'visual_notification') and self.visual_notification:
@@ -346,11 +347,15 @@ class SimpleVoiceTranscriber:
 
     def _on_tui_toggle_numbers(self):
         import t2
-        t2.set_number_digits(not t2.NUMBER_DIGITS)
+        mode = t2.cycle_number_mode()
         t2.save_audio_config()
         self._sync_tui_state()
-        status = "DIGITS" if t2.NUMBER_DIGITS else "SPELLED OUT"
-        self.tui.print_event("🔢 Number Conversion", f"Numbers are now transcribed as {status}", level="info")
+        status = {
+            "auto": "AUTO (consecutive numbers only)",
+            "digits": "ALL DIGITS",
+            "words": "WORDS ONLY",
+        }.get(mode, mode.upper())
+        self.tui.print_event("🔢 Number Conversion", f"Number formatting is now {status}", level="info")
 
     def _on_tui_toggle_middle_click(self):
         import t2

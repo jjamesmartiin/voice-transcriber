@@ -598,14 +598,22 @@ def _preserve_i_casing(char: str, text: str = "", pos: int = 0) -> str:
 # ---------------------------------------------------------------------------
 # Number words -> digits conversion
 # ---------------------------------------------------------------------------
-# Gated by VT_NUMBER_DIGITS (default "1"; set to "0" to keep number words).
-# Also toggleable at runtime via set_number_digits_enabled() (driven by the
-# t2.NUMBER_DIGITS config setting and the TUI 'n' hotkey).
-# Converts spoken numbers into actual digits, e.g.:
-#   "six seven zero six seven zero six nine nine six" -> "7606706996"  (phone/digit string)
-#   "twenty five" -> "25", "one hundred and fifty" -> "150", "two thousand twenty four" -> "2024"
-#   "twenty first" -> "21st", "fifth" -> "5th", "three point one four" -> "3.14"
-#   "fifty percent" -> "50%", "five pm" -> "5 PM", "nineteen eighty five" -> "1985"
+# Three conversion modes, selectable via VT_NUMBER_DIGITS or at runtime via
+# set_number_digits_mode() (driven by the t2.NUMBER_MODE config setting and the
+# TUI 'n' hotkey):
+#   "auto"   (default): only collapse runs of 2+ consecutive spoken digits
+#                       (phone numbers, serial numbers). Isolated number words
+#                       in natural conversation stay spelled out.
+#   "digits"          : convert every spoken number to digits, e.g.
+#                       "six seven zero six seven zero six nine nine six" -> "7606706996"
+#                       "twenty five" -> "25", "one hundred and fifty" -> "150"
+#                       "twenty first" -> "21st", "fifth" -> "5th"
+#                       "three point one four" -> "3.14"
+#                       "fifty percent" -> "50%", "five pm" -> "5 PM"
+#                       "nineteen eighty five" -> "1985"
+#   "words"           : never convert (keep "one, two, three").
+# VT_NUMBER_DIGITS env var accepts "1"/"true" (digits), "0"/"false" (words),
+# or "auto"/"digits"/"words".
 
 _NUMBER_ONES = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -984,12 +992,90 @@ def _has_number_words(text_lower: str) -> bool:
     return False
 
 
+NUMBER_MODES = ("auto", "digits", "words")
+
+# Canonical runtime mode. "auto" is the smart default: only consecutive digit
+# runs (phone/serial numbers) are collapsed, isolated numbers stay as words.
+_number_digits_mode = "auto"
+
+
+def normalize_number_mode(value) -> str:
+    """Coerce a bool / "1"/"0" / mode string into a canonical number mode.
+
+    Backwards compatibility: ``True`` (or ``"1"``) means full conversion
+    (``"digits"``) and ``False`` (or ``"0"``) means ``"words"``. Unknown values
+    fall back to the smart ``"auto"`` mode.
+    """
+    if isinstance(value, bool):
+        return "digits" if value else "words"
+    if isinstance(value, (int, float)):
+        return "digits" if value else "words"
+    if value is None:
+        return "auto"
+    mode = str(value).strip().lower()
+    if mode in ("auto", "smart", "consecutive", "consecutive_numbers"):
+        return "auto"
+    if mode in ("digits", "digit", "numeric", "numbers", "number", "1", "true", "yes", "on"):
+        return "digits"
+    if mode in ("words", "word", "spelled", "spelled_out", "spell", "0", "false", "no", "off"):
+        return "words"
+    return "auto"
+
+
+def _effective_number_mode() -> str:
+    """Resolve the active mode, honoring an explicit VT_NUMBER_DIGITS override."""
+    env = os.environ.get("VT_NUMBER_DIGITS")
+    if env is not None and env.strip() != "":
+        return normalize_number_mode(env)
+    return _number_digits_mode
+
+
+def get_number_digits_mode() -> str:
+    """Return the active number conversion mode ("auto" / "digits" / "words")."""
+    return _number_digits_mode
+
+
+def set_number_digits_mode(mode) -> None:
+    """Set the runtime number conversion mode (used by the 'n' hotkey)."""
+    global _number_digits_mode
+    _number_digits_mode = normalize_number_mode(mode)
+
+
+def is_number_digits_enabled() -> bool:
+    """True when any conversion is active (i.e. mode is not "words")."""
+    return _number_digits_mode != "words"
+
+
+def set_number_digits_enabled(enabled) -> None:
+    """Backwards-compatible toggle: True -> "digits", False -> "words".
+
+    Also accepts the canonical mode strings ("auto"/"digits"/"words").
+    """
+    set_number_digits_mode(enabled)
+
+
 def convert_number_words_to_digits(text: str, text_lower: str | None = None) -> str:
-    """Convert spoken number words in text to digits (no-op if disabled via env or runtime toggle)."""
-    if os.environ.get("VT_NUMBER_DIGITS", "1") != "1" or not _number_digits_enabled:
+    """Convert spoken number words in text to digits according to the active mode.
+
+    - ``"words"``: return text unchanged.
+    - ``"auto"``: collapse only runs of 2+ consecutive digit words
+      ("five five five one two one two" -> "5551212"); isolated numbers such as
+      "bring one of them over here" / "I have two dogs" stay spelled out.
+    - ``"digits"``: full conversion of cardinals, ordinals, years, decimals,
+      percents, times and digit strings.
+    """
+    mode = _effective_number_mode()
+    if mode == "words":
         return text
     if not text:
         return ""
+
+    if mode == "auto":
+        # Smart mode: only consecutive spoken digits (phone/serial numbers).
+        if _DIGIT_STRING_REGEX.search(text):
+            return _DIGIT_STRING_REGEX.sub(_expand_digit_string, text)
+        return text
+
     if text_lower is None:
         text_lower = text.lower()
     if not _has_number_words(text_lower):
@@ -998,15 +1084,6 @@ def convert_number_words_to_digits(text: str, text_lower: str | None = None) -> 
     if _DIGIT_STRING_REGEX.search(converted):
         converted = _DIGIT_STRING_REGEX.sub(_expand_digit_string, converted)
     return converted
-
-
-_number_digits_enabled = True
-
-
-def set_number_digits_enabled(enabled: bool) -> None:
-    """Runtime toggle for number-word -> digit conversion (used by the 'n' hotkey)."""
-    global _number_digits_enabled
-    _number_digits_enabled = bool(enabled)
 
 
 # ---------------------------------------------------------------------------

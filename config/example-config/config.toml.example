@@ -30,8 +30,9 @@ copy_to_clipboard = true
 #   - "lowercase_no_punctuation" : Strips all punctuation and lowercases all words
 punctuation_mode = "full"
 
-# Convert spoken number words to digits ("twenty five" -> 25)
-number_digits = true
+# Convert spoken number words to digits. Options: auto (consecutive numbers
+# only), digits (always), words (never). Default: auto
+number_digits = "auto"
 
 # Enable optional Small Language Model (SLM) grammar polish pass
 # (default false; opt-in and requires a local vLLM endpoint)

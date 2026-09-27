@@ -250,7 +250,7 @@ Supported options:
 - `copy_to_clipboard`: `true` or `false`.
 - `auto_type_trailing_space`: append a space after auto-typed text.
 - `auto_type_auto_punctuate`: enforce terminal punctuation on auto-typed text.
-- `number_digits`: `true` (convert spoken numbers to digits) or `false`.
+- `number_digits`: `auto` (default: only consecutive spoken digits such as phone/serial numbers become digits, isolated numbers stay words), `digits` (always convert), or `words` (never convert). Legacy `true`/`false` are accepted as aliases for `digits`/`words`.
 - `keep_bluetooth_handsfree`: `true` keeps Bluetooth devices in hands-free mode so media does not pause when recording ends.
 - `punctuation_mode`: `full`, `no_terminal_period`, `no_punctuation`, or `lowercase_no_punctuation` (legacy alias `semi-formal` → `no_terminal_period`).
 - `enable_slm`: `true` to enable the optional local vLLM grammar-polish pass (default `false`).

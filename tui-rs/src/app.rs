@@ -172,6 +172,7 @@ pub struct App {
     pub trailing_space: bool,
     pub auto_punctuate: bool,
     pub number_digits: bool,
+    pub number_mode: String,
     pub middle_click_enabled: bool,
     pub punctuation_mode: String,
     #[allow(dead_code)]
@@ -220,6 +221,7 @@ impl App {
             trailing_space: true,
             auto_punctuate: true,
             number_digits: true,
+            number_mode: "auto".to_string(),
             middle_click_enabled: false,
             punctuation_mode: "full".to_string(),
             sound_theme: "proximity".to_string(),
@@ -339,6 +341,7 @@ impl App {
         trailing_space: Option<bool>,
         auto_punctuate: Option<bool>,
         number_digits: Option<bool>,
+        number_mode: Option<String>,
         middle_click_enabled: Option<bool>,
     ) {
         if let Some(m) = mic {
@@ -377,8 +380,12 @@ impl App {
         if let Some(ap) = auto_punctuate {
             self.auto_punctuate = ap;
         }
-        if let Some(n) = number_digits {
+        if let Some(m) = number_mode {
+            self.number_mode = m;
+            self.number_digits = self.number_mode != "words";
+        } else if let Some(n) = number_digits {
             self.number_digits = n;
+            self.number_mode = (if n { "digits" } else { "words" }).to_string();
         }
         if let Some(mc) = middle_click_enabled {
             self.middle_click_enabled = mc;

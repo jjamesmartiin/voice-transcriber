@@ -106,14 +106,17 @@ wait_for_model_on_startup: true
 
 # ------------------------------------------------------------------------------
 # Number Words -> Digits Conversion
-# Controls whether spoken number words are transcribed as actual digits
-# ("twenty five" -> 25, "six seven zero..." -> 670...). Toggleable at runtime
-# with the [n] key in the TUI or the 'N' option in the settings menu.
+# Controls how spoken number words are transcribed. Toggleable at runtime with
+# the [n] key in the TUI or the 'Number Conversion' option in the settings menu.
 # Available Options:
-#   - true  : Convert number words to digits (recommended)
-#   - false : Keep number words spelled out
-# Default: true
-number_digits: true
+#   - auto   : Only runs of 2+ consecutive spoken digits become digits, so phone
+#              numbers / serial numbers convert ("five five five one two" -> 55512)
+#              while isolated numbers stay words ("I have two dogs").
+#   - digits : Always convert ("twenty five" -> 25, "six seven zero" -> 670).
+#   - words  : Never convert; keep number words spelled out.
+# Legacy booleans are also accepted: true -> digits, false -> words.
+# Default: auto
+number_digits: auto
 
 # ------------------------------------------------------------------------------
 # Keep Bluetooth Hands-Free / Prevent Headphone Switching

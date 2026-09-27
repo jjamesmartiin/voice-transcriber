@@ -73,6 +73,39 @@ class TestSettingsPersistence:
         t2.load_audio_config(file_path=str(cfg))
         assert t2.NUMBER_DIGITS is False
 
+    def test_number_mode_cycles_and_persists(self, cfg, monkeypatch):
+        monkeypatch.delenv("VT_NUMBER_DIGITS", raising=False)
+        t2.set_number_digits("auto")
+        assert t2.NUMBER_MODE == "auto"
+        assert t2.NUMBER_DIGITS is True
+
+        assert t2.cycle_number_mode() == "digits"
+        assert t2.NUMBER_MODE == "digits"
+        assert t2.NUMBER_DIGITS is True
+
+        assert t2.cycle_number_mode() == "words"
+        assert t2.NUMBER_MODE == "words"
+        assert t2.NUMBER_DIGITS is False
+
+        assert t2.cycle_number_mode() == "auto"
+        assert t2.NUMBER_MODE == "auto"
+        t2.save_audio_config()
+
+        # Clobber in-memory state, then confirm the mode round-trips from disk.
+        monkeypatch.setattr(t2, "NUMBER_MODE", "words")
+        monkeypatch.setattr(t2, "NUMBER_DIGITS", False)
+        t2.load_audio_config(file_path=str(cfg))
+        assert t2.NUMBER_MODE == "auto"
+        assert t2.NUMBER_DIGITS is True
+
+    def test_number_mode_backward_compatible_bool_config(self, cfg, monkeypatch):
+        import json
+        cfg.write_text(json.dumps({"number_digits": False}))
+        monkeypatch.delenv("VT_NUMBER_DIGITS", raising=False)
+        t2.load_audio_config(file_path=str(cfg))
+        assert t2.NUMBER_MODE == "words"
+        assert t2.NUMBER_DIGITS is False
+
     def test_middle_click_toggle_persists(self, cfg, monkeypatch):
         monkeypatch.setattr(t2, "MIDDLE_CLICK_ENABLED", True)
         t2.set_middle_click_enabled(False)

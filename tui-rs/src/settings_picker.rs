@@ -114,17 +114,19 @@ impl SettingItem {
                     ("Disabled (preserve user)".to_string(), "[OFF]", Color::DarkGray)
                 }
             }
-            SettingKind::NumberDigits => {
-                if app.number_digits {
-                    ("Digits (1, 2, 3)".to_string(), "[DIGITS]", Color::Green)
-                } else {
-                    (
-                        "Words (one, two, three)".to_string(),
-                        "[WORDS]",
-                        Color::DarkGray,
-                    )
-                }
-            }
+            SettingKind::NumberDigits => match app.number_mode.as_str() {
+                "digits" => ("All Digits (1, 2, 3)".to_string(), "[DIGITS]", Color::Green),
+                "words" => (
+                    "Words Only (one, two, three)".to_string(),
+                    "[WORDS]",
+                    Color::DarkGray,
+                ),
+                _ => (
+                    "Auto (Consecutive Numbers)".to_string(),
+                    "[AUTO]",
+                    Color::Cyan,
+                ),
+            },
             SettingKind::MiddleClick => {
                 if app.middle_click_enabled {
                     ("Enabled (hold middle click)".to_string(), "[ON]", Color::Green)
@@ -615,6 +617,7 @@ pub fn run_settings_picker(
                             trailing_space,
                             auto_punctuate,
                             number_digits,
+                            number_mode,
                             middle_click_enabled,
                         } => {
                             app.apply_config(
@@ -630,6 +633,7 @@ pub fn run_settings_picker(
                                 trailing_space,
                                 auto_punctuate,
                                 number_digits,
+                                number_mode,
                                 middle_click_enabled,
                             );
                         }
@@ -666,7 +670,12 @@ pub fn run_settings_picker(
                                     }
                                 }
                                 SettingKind::NumberDigits => {
-                                    app.number_digits = !app.number_digits;
+                                    app.number_mode = match app.number_mode.as_str() {
+                                        "auto" => "digits".to_string(),
+                                        "digits" => "words".to_string(),
+                                        _ => "auto".to_string(),
+                                    };
+                                    app.number_digits = app.number_mode != "words";
                                     if let Some(w) = writer {
                                         ipc::send_cmd(w, "toggle_numbers");
                                     }

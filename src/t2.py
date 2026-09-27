@@ -115,7 +115,8 @@ OUTPUT_MODE = "clipboard"
 AUTO_TYPE_TRAILING_SPACE = True
 AUTO_TYPE_AUTO_PUNCTUATE = True
 IS_MUTED = True
-NUMBER_DIGITS = True  # Convert spoken number words to digits ("twenty five" -> 25)
+NUMBER_MODE = "auto"  # Spoken-number formatting: "auto" | "digits" | "words"
+NUMBER_DIGITS = True  # Back-compat mirror: False only when NUMBER_MODE == "words"
 MIDDLE_CLICK_ENABLED = False  # Push-to-talk by holding middle mouse button (>= 0.25s)
 KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
@@ -468,9 +469,25 @@ stop_recording = threading.Event()
 
 import transcribe2
 
+def _normalize_number_mode(value) -> str:
+    """Coerce bool / "1"/"0" / mode string into "auto" | "digits" | "words"."""
+    try:
+        from post_processor import normalize_number_mode
+        return normalize_number_mode(value)
+    except Exception:
+        if isinstance(value, bool):
+            return "digits" if value else "words"
+        mode = str(value).strip().lower() if value is not None else "auto"
+        if mode in ("digits", "1", "true", "yes", "on"):
+            return "digits"
+        if mode in ("words", "0", "false", "no", "off"):
+            return "words"
+        return "auto"
+
+
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -512,7 +529,8 @@ def load_audio_config(file_path=None):
                 OUTPUT_MODE = "clipboard"
             AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
             COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
-            NUMBER_DIGITS = config.get('number_digits', True)
+            NUMBER_MODE = _normalize_number_mode(config.get('number_digits', config.get('number_mode', 'auto')))
+            NUMBER_DIGITS = NUMBER_MODE != "words"
             MIDDLE_CLICK_ENABLED = config.get('middle_click_enabled', False)
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
 
@@ -557,11 +575,10 @@ def load_audio_config(file_path=None):
             elif env_auto_punctuate in ["0", "false", "no"]:
                 AUTO_TYPE_AUTO_PUNCTUATE = False
 
-            env_number_digits = os.environ.get("VT_NUMBER_DIGITS", "").strip().lower()
-            if env_number_digits in ["1", "true", "yes"]:
-                NUMBER_DIGITS = True
-            elif env_number_digits in ["0", "false", "no"]:
-                NUMBER_DIGITS = False
+            env_number_digits = os.environ.get("VT_NUMBER_DIGITS", "").strip()
+            if env_number_digits:
+                NUMBER_MODE = _normalize_number_mode(env_number_digits)
+                NUMBER_DIGITS = NUMBER_MODE != "words"
 
             env_middle_click = os.environ.get("VT_MIDDLE_CLICK_ENABLED", "").strip().lower()
             if env_middle_click in ["1", "true", "yes"]:
@@ -671,8 +688,8 @@ def load_audio_config(file_path=None):
         # Apply Bluetooth hands-free policy on Linux / PipeWire
         apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
 
-        # Keep the post-processor's runtime number-toggle in sync with the loaded config
-        set_number_digits(NUMBER_DIGITS)
+        # Keep the post-processor's runtime number mode in sync with the loaded config
+        set_number_digits(NUMBER_MODE)
 
         # Keep post-processor punctuation mode in sync
         set_punctuation_mode(PUNCTUATION_MODE)
@@ -743,7 +760,7 @@ def save_audio_config(file_path=None):
             'sound_theme': SOUND_THEME,
             'copy_to_clipboard': COPY_TO_CLIPBOARD,
             'ui_theme': UI_THEME,
-            'number_digits': NUMBER_DIGITS,
+            'number_digits': NUMBER_MODE,
             'middle_click_enabled': MIDDLE_CLICK_ENABLED,
             'keep_bluetooth_handsfree': KEEP_BLUETOOTH_HANDSFREE,
             'punctuation_mode': PUNCTUATION_MODE,
@@ -889,15 +906,29 @@ def cycle_punctuation_mode() -> str:
     return next_mode
 
 
-def set_number_digits(enabled):
-    """Runtime toggle for number-word -> digit conversion; keeps post-processor in sync."""
-    global NUMBER_DIGITS
-    NUMBER_DIGITS = bool(enabled)
+def set_number_digits(value):
+    """Set number formatting mode; keeps post-processor in sync.
+
+    Accepts a mode string ("auto"/"digits"/"words") or a backwards-compatible
+    boolean (True -> "digits", False -> "words").
+    """
+    global NUMBER_DIGITS, NUMBER_MODE
+    NUMBER_MODE = _normalize_number_mode(value)
+    NUMBER_DIGITS = NUMBER_MODE != "words"
     try:
-        from post_processor import set_number_digits_enabled
-        set_number_digits_enabled(NUMBER_DIGITS)
+        from post_processor import set_number_digits_mode
+        set_number_digits_mode(NUMBER_MODE)
     except Exception:
         pass
+
+
+def cycle_number_mode() -> str:
+    """Cycle AUTO -> DIGITS -> WORDS -> AUTO; returns the new mode."""
+    global NUMBER_MODE
+    order = ("auto", "digits", "words")
+    idx = order.index(NUMBER_MODE) if NUMBER_MODE in order else 0
+    set_number_digits(order[(idx + 1) % len(order)])
+    return NUMBER_MODE
 
 
 def set_middle_click_enabled(enabled):
@@ -1464,7 +1495,7 @@ def select_settings_picker():
     """Interactive settings picker modal with live in-place toggling and fuzzy search."""
     global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE
     global MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE
-    global UI_THEME, NUMBER_DIGITS, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE
+    global UI_THEME, NUMBER_DIGITS, NUMBER_MODE, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE
     global AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, OUTPUT_MODE, PUNCTUATION_MODE
 
     from rich.console import Console
@@ -1555,10 +1586,12 @@ def select_settings_picker():
             else:
                 return "Disabled (exact text)", "[OFF]", "dim white"
         elif item_id == "number_digits":
-            if NUMBER_DIGITS:
-                return "Digits (1, 2, 3)", "[DIGITS]", "green"
+            if NUMBER_MODE == "digits":
+                return "All Digits (1, 2, 3)", "[DIGITS]", "green"
+            elif NUMBER_MODE == "words":
+                return "Words Only (one, two, three)", "[WORDS]", "dim white"
             else:
-                return "Words (one, two, three)", "[WORDS]", "dim white"
+                return "Auto (Consecutive Numbers)", "[AUTO]", "cyan"
         elif item_id == "middle_click":
             if MIDDLE_CLICK_ENABLED:
                 return "Enabled (hold middle click)", "[ON]", "green"
@@ -1688,7 +1721,7 @@ def select_settings_picker():
                 elif item_id == "trailing_space":
                     toggle_auto_type_trailing_space()
                 elif item_id == "number_digits":
-                    set_number_digits(not NUMBER_DIGITS)
+                    cycle_number_mode()
                     save_audio_config()
                 elif item_id == "middle_click":
                     set_middle_click_enabled(not MIDDLE_CLICK_ENABLED)

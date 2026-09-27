@@ -405,7 +405,7 @@ class RatatuiTui:
     def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None,
                          sound_theme=None, ui_theme=None, punctuation_mode=None,
                          trailing_space=None, auto_punctuate=None, number_digits=None,
-                         middle_click_enabled=None):
+                         number_mode=None, middle_click_enabled=None):
         msg = {"t": "cfg"}
         if backend is not None:
             self.model_backend = backend
@@ -437,6 +437,13 @@ class RatatuiTui:
         if auto_punctuate is not None:
             self.auto_punctuate = bool(auto_punctuate)
             msg["auto_punctuate"] = self.auto_punctuate
+        if number_mode is not None:
+            mode = str(number_mode).strip().lower()
+            self.number_mode = mode
+            msg["number_mode"] = mode
+            # The Rust renderer also accepts a boolean fallback; auto means on.
+            if number_digits is None:
+                number_digits = mode != "words"
         if number_digits is not None:
             self.number_digits = bool(number_digits)
             msg["number_digits"] = self.number_digits

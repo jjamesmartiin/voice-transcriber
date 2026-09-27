@@ -11,7 +11,11 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from post_processor import clean_speech_transcription
+from post_processor import (
+    clean_speech_transcription,
+    get_number_digits_mode,
+    set_number_digits_mode,
+)
 from micro_batcher import trim_trailing_silence, StreamingMicroBatcher, has_speech_activity
 
 class TestMicroBatchingEngine(unittest.TestCase):
@@ -48,8 +52,11 @@ class TestMicroBatchingEngine(unittest.TestCase):
     def test_post_processor_artifacts(self):
         """Test post processor fixes false breaks, stutters, and trailing mutterings"""
         old_env = os.environ.get("VT_ENABLE_SLM")
+        prev_number_mode = get_number_digits_mode()
         try:
             os.environ["VT_ENABLE_SLM"] = "0"
+            # This test exercises legacy full digit conversion (e.g. "two" -> "2").
+            set_number_digits_mode("digits")
             # Trailing mutterings (oops, whoops)
             self.assertEqual(clean_speech_transcription("This is important oops"), "This is important.")
             self.assertEqual(clean_speech_transcription("Hello world whoops"), "Hello world")
@@ -109,6 +116,7 @@ class TestMicroBatchingEngine(unittest.TestCase):
             self.assertEqual(clean_speech_transcription("building it right now for myself um and I'll let you know"), "building it right now for myself and I'll let you know.")
             self.assertEqual(clean_speech_transcription("how it goes.  -- this one"), "how it goes. -- this one.")
         finally:
+            set_number_digits_mode(prev_number_mode)
             if old_env is None:
                 os.environ.pop("VT_ENABLE_SLM", None)
             else:

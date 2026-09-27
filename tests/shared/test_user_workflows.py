@@ -257,14 +257,20 @@ class TestWisprFlowDictationWorkflows:
 
     def test_verbal_self_correction_retraction(self):
         """User corrects themselves mid-speech: previous clause is retracted."""
-        # 'make that'
-        assert pp.clean_speech_transcription("we will launch on monday make that tuesday", skip_slm=True) == "we will launch on tuesday."
-        # 'actually'
-        assert pp.clean_speech_transcription("the meeting is at two actually three", skip_slm=True) == "the meeting is at 3."
-        # 'I mean'
-        assert pp.clean_speech_transcription("send it to bob I mean alice", skip_slm=True) == "send it to alice."
-        # 'scratch that' at phrase end
-        assert pp.clean_speech_transcription("I think we should cancel the deploy, scratch that", skip_slm=True) == "I think we should cancel the deploy."
+        # Assertions below rely on legacy full digit conversion ("three" -> "3").
+        prev_mode = pp.get_number_digits_mode()
+        pp.set_number_digits_mode("digits")
+        try:
+            # 'make that'
+            assert pp.clean_speech_transcription("we will launch on monday make that tuesday", skip_slm=True) == "we will launch on tuesday."
+            # 'actually'
+            assert pp.clean_speech_transcription("the meeting is at two actually three", skip_slm=True) == "the meeting is at 3."
+            # 'I mean'
+            assert pp.clean_speech_transcription("send it to bob I mean alice", skip_slm=True) == "send it to alice."
+            # 'scratch that' at phrase end
+            assert pp.clean_speech_transcription("I think we should cancel the deploy, scratch that", skip_slm=True) == "I think we should cancel the deploy."
+        finally:
+            pp.set_number_digits_mode(prev_mode)
 
     def test_technical_custom_dictionary_replacements(self):
         """Technical domain terms are properly expanded and capitalized."""
