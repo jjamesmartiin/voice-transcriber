@@ -22,6 +22,8 @@ pub enum SettingKind {
     #[allow(dead_code)]
     AutoPunctuate,
     NumberDigits,
+    SerialCollapse,
+    SpellCommand,
     MiddleClick,
     SoundMute,
     OutputMode,
@@ -39,7 +41,7 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 9] = [
+pub const SETTINGS: [SettingItem; 11] = [
     SettingItem {
         kind: SettingKind::PunctuationMode,
         icon: "✨",
@@ -63,6 +65,18 @@ pub const SETTINGS: [SettingItem; 9] = [
         icon: "🔢",
         title: "Number Conversion",
         keywords: "numbers digits words spelled format numeric conversion",
+    },
+    SettingItem {
+        kind: SettingKind::SerialCollapse,
+        icon: "🔤",
+        title: "Serial/Codes",
+        keywords: "serial code alphanumeric nato phonetic spelled collapse spacing identifier model vin license plate",
+    },
+    SettingItem {
+        kind: SettingKind::SpellCommand,
+        icon: "✍️",
+        title: "Spell Command",
+        keywords: "spell spelled verbal command letters c a t acronym dictation",
     },
     SettingItem {
         kind: SettingKind::MiddleClick,
@@ -127,6 +141,20 @@ impl SettingItem {
                     Color::Cyan,
                 ),
             },
+            SettingKind::SerialCollapse => {
+                if app.serial_collapse {
+                    ("Collapsed (ABC123)".to_string(), "[COLLAPSE]", Color::Cyan)
+                } else {
+                    ("Spaced (A B C 1 2 3)".to_string(), "[SPACED]", Color::DarkGray)
+                }
+            }
+            SettingKind::SpellCommand => {
+                if app.spell_command {
+                    ("Enabled (say 'spell C A T')".to_string(), "[ON]", Color::Green)
+                } else {
+                    ("Disabled".to_string(), "[OFF]", Color::DarkGray)
+                }
+            }
             SettingKind::MiddleClick => {
                 if app.middle_click_enabled {
                     ("Enabled (hold middle click)".to_string(), "[ON]", Color::Green)
@@ -618,6 +646,8 @@ pub fn run_settings_picker(
                             auto_punctuate,
                             number_digits,
                             number_mode,
+                            serial_collapse,
+                            spell_command,
                             middle_click_enabled,
                         } => {
                             app.apply_config(
@@ -634,6 +664,8 @@ pub fn run_settings_picker(
                                 auto_punctuate,
                                 number_digits,
                                 number_mode,
+                                serial_collapse,
+                                spell_command,
                                 middle_click_enabled,
                             );
                         }
@@ -678,6 +710,18 @@ pub fn run_settings_picker(
                                     app.number_digits = app.number_mode != "words";
                                     if let Some(w) = writer {
                                         ipc::send_cmd(w, "toggle_numbers");
+                                    }
+                                }
+                                SettingKind::SerialCollapse => {
+                                    app.serial_collapse = !app.serial_collapse;
+                                    if let Some(w) = writer {
+                                        ipc::send_cmd(w, "toggle_serial_collapse");
+                                    }
+                                }
+                                SettingKind::SpellCommand => {
+                                    app.spell_command = !app.spell_command;
+                                    if let Some(w) = writer {
+                                        ipc::send_cmd(w, "toggle_spell_command");
                                     }
                                 }
                                 SettingKind::MiddleClick => {

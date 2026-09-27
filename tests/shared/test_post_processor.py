@@ -314,3 +314,378 @@ def test_post_processor_latency_benchmark(benchmark_reporter):
             status="PASS",
         )
 
+
+
+# ---------------------------------------------------------------------------
+# Zero synonyms ("o" / "oh"), literal digit strings and phone number groups
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def serial_settings():
+    """Isolate serial-collapse / spell-command + their env vars per test."""
+    saved_env = {
+        k: os.environ.get(k) for k in ("VT_SERIAL_COLLAPSE", "VT_SPELL_COMMAND")
+    }
+    for k in saved_env:
+        os.environ.pop(k, None)
+    saved = (pp.get_serial_collapse(), pp.get_spell_command())
+    try:
+        yield pp
+    finally:
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        pp.set_serial_collapse(saved[0])
+        pp.set_spell_command(saved[1])
+
+
+@pytest.mark.parametrize("text,expected", [
+    # "oh" already worked; "o" / "O" are now synonyms for zero inside digit runs.
+    ("seven oh two", "702"),
+    ("seven o two", "702"),
+    ("seven O two", "702"),
+    ("seven zero two", "702"),
+    ("one eight o o", "1800"),
+    ("one eight oh oh", "1800"),
+    ("double o seven", "007"),
+    ("double O seven", "007"),
+])
+def test_o_and_oh_are_zero_in_digit_strings(number_mode, text, expected):
+    pp.set_number_digits_mode("auto")
+    assert pp.convert_number_words_to_digits(text) == expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    # Literal digits emitted by ASR with spaces between them must collapse too.
+    ("7 o 2", "702"),
+    ("7 O 2", "702"),
+    ("7 oh 2", "702"),
+    ("7 0 2", "702"),
+    ("7 0 2 5 5 5 1 2 3 4", "7025551234"),
+    ("call 5 5 5 1 2 1 2", "call 5551212"),
+])
+def test_literal_spaced_digits_collapse(number_mode, text, expected):
+    pp.set_number_digits_mode("auto")
+    assert pp.convert_number_words_to_digits(text) == expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("call 702 555 1234", "call 7025551234"),
+    ("call 1 800 555 1234", "call 18005551234"),
+    ("call 555 1212", "call 5551212"),
+])
+def test_phone_number_groups_collapse(number_mode, text, expected):
+    pp.set_number_digits_mode("auto")
+    assert pp.convert_number_words_to_digits(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "in 2020 1200 people lived there",
+    "page 100 200 is fine",
+])
+def test_phone_group_does_not_over_collapse(number_mode, text):
+    pp.set_number_digits_mode("auto")
+    assert pp.convert_number_words_to_digits(text) == text
+
+
+def test_standalone_o_and_oh_are_never_zero(number_mode):
+    """The letter 'O' / interjection 'oh' must survive on its own."""
+    for mode in ("auto", "digits"):
+        pp.set_number_digits_mode(mode)
+        assert pp.convert_number_words_to_digits("the letter O is round") == "the letter O is round"
+        assert pp.convert_number_words_to_digits("O Canada") == "O Canada"
+        assert pp.convert_number_words_to_digits("type O blood") == "type O blood"
+        assert pp.convert_number_words_to_digits("oh") == "oh"
+
+
+# ---------------------------------------------------------------------------
+# Serial numbers, model codes, NATO phonetics & the verbal spell command
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text,expected", [
+    # Trigger-noun anchored identifiers.
+    ("serial number A B C 1 2 3", "serial number ABC123"),
+    ("model X K 9 4 J", "model XK94J"),
+    ("part number 4 5 B 9 0", "part number 45B90"),
+    ("license plate 7 S A M 1 2 3", "license plate 7SAM123"),
+    ("VIN 1 H G C R 2", "VIN 1HGCR2"),
+    ("code F 1 5 0", "code F150"),
+    ("serial 7 O 2 A B C", "serial 7O2ABC"),
+    # Untriggered alphanumeric chains.
+    ("A B C 1 2 3", "ABC123"),
+    ("X K 9 4 J", "XK94J"),
+    ("4 5 B 9 0", "45B90"),
+    ("W P A 2", "WPA2"),
+    ("K G B", "KGB"),
+    ("F B I", "FBI"),
+])
+def test_serial_numbers_and_codes_collapse(serial_settings, text, expected):
+    assert pp.process_serial_numbers(text) == expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    # NATO phonetic dictation.
+    ("Alpha Bravo Charlie 1 2 3", "ABC123"),
+    ("code Alpha Bravo Charlie 1 2 3", "code ABC123"),
+    ("Sierra Tango 4 2", "ST42"),
+    ("Delta Kilo 9", "DK9"),
+    ("Hotel 4", "H4"),
+    ("Kilo 9", "K9"),
+])
+def test_nato_phonetic_collapse(serial_settings, text, expected):
+    assert pp.process_serial_numbers(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    # Natural English must be left completely alone.
+    "I have a dog",
+    "I stayed at a hotel in India in November",
+    "the letter O is round",
+    "O Canada",
+    "hear me, O Lord",
+    "type O blood",
+    "call Mike",
+    "drinking whiskey",
+    "playing golf",
+])
+def test_serial_detection_ignores_natural_english(serial_settings, text):
+    assert pp.process_serial_numbers(text) == text
+
+
+def test_serial_collapse_setting_controls_spacing(serial_settings):
+    pp.set_serial_collapse(True)
+    assert pp.process_serial_numbers("A B C 1 2 3") == "ABC123"
+
+    pp.set_serial_collapse(False)
+    # Single letters/digits are already spaced; NATO words now resolve to spaced letters.
+    assert pp.process_serial_numbers("A B C 1 2 3") == "A B C 1 2 3"
+    assert pp.process_serial_numbers("Alpha Bravo Charlie 1 2 3") == "A B C 1 2 3"
+    assert pp.process_serial_numbers("serial number X K 9 4 J") == "serial number X K 9 4 J"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("spell c a t", "CAT"),
+    ("spell out d o g", "DOG"),
+    ("spelled c a t", "CAT"),
+    ("spell Charlie Alpha Tango", "CAT"),
+    ("the word is spelled c a t", "the word is spelled CAT"),
+    # The letter "o" stays a letter in a spell command; only "zero"/"oh" are digits.
+    ("spell d o g", "DOG"),
+    ("spell d zero g", "D0G"),
+])
+def test_spell_command(serial_settings, text, expected):
+    pp.set_spell_command(True)
+    assert pp.process_spell_commands(text) == expected
+
+
+def test_spell_command_disabled_leaves_phrase(serial_settings):
+    pp.set_spell_command(False)
+    assert pp.process_spell_commands("spell c a t") == "spell c a t"
+
+
+def test_spell_command_ignores_natural_sentence(serial_settings):
+    pp.set_spell_command(True)
+    assert pp.process_spell_commands("how do you spell accommodation") == \
+        "how do you spell accommodation"
+
+
+def test_spell_command_uncollapsed_setting(serial_settings):
+    pp.set_spell_command(True)
+    pp.set_serial_collapse(False)
+    assert pp.process_spell_commands("spell c a t") == "C A T"
+
+
+def test_serial_settings_env_var_override(serial_settings):
+    pp.set_serial_collapse(True)
+    os.environ["VT_SERIAL_COLLAPSE"] = "0"
+    assert pp.get_serial_collapse() is False
+    os.environ["VT_SERIAL_COLLAPSE"] = "1"
+    assert pp.get_serial_collapse() is True
+
+    pp.set_spell_command(True)
+    os.environ["VT_SPELL_COMMAND"] = "0"
+    assert pp.get_spell_command() is False
+    os.environ["VT_SPELL_COMMAND"] = "1"
+    assert pp.get_spell_command() is True
+
+
+def test_full_pipeline_o_synonym_and_codes(serial_settings, number_mode):
+    """End-to-end: 'o' as zero plus a collapsed serial number."""
+    pp.set_number_digits_mode("auto")
+    assert pp.clean_speech_transcription("seven o two", skip_slm=True) == "702"
+    assert pp.clean_speech_transcription("call 7 0 2 5 5 5 1 2 3 4", skip_slm=True) == \
+        "call 7025551234"
+    assert "ABC123" in pp.clean_speech_transcription("serial number A B C 1 2 3", skip_slm=True)
+    assert pp.clean_speech_transcription("spell c a t", skip_slm=True) == "CAT"
+
+
+# ---------------------------------------------------------------------------
+# Digits -> words: ordinals and small standalone cardinals (auto/words modes)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text,expected", [
+    ("the 5th item", "the fifth item"),
+    ("I got 1st place", "I got first place"),
+    ("he came in 2nd", "he came in second"),
+    ("she finished 3rd", "she finished third"),
+    ("the 4th of July", "the fourth of July"),
+    ("my 21st birthday", "my twenty first birthday"),
+    ("he came in 23rd", "he came in twenty third"),
+    ("the 100th day", "the one hundredth day"),
+    ("the 1000th subscriber", "the one thousandth subscriber"),
+    ("ranked 12th", "ranked twelfth"),
+])
+def test_ordinal_digits_become_words(text, expected):
+    assert pp.expand_digits_to_words(text, mode="auto") == expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("I have 2 dogs", "I have two dogs"),
+    ("there are 12 left", "there are twelve left"),
+    ("I need 3 reasons", "I need three reasons"),
+    ("wait 5 seconds", "wait five seconds"),
+    ("he ate 0 cookies", "he ate zero cookies"),
+    ("give me 20 dollars", "give me twenty dollars"),
+])
+def test_small_standalone_cardinals_become_words(text, expected):
+    assert pp.expand_digits_to_words(text, mode="auto") == expected
+
+
+@pytest.mark.parametrize("text", [
+    # Chains, decimals, times, fractions, ranges, currency and identifiers are untouched.
+    "call 7025551234",
+    "the value is 3.14",
+    "meet at 5:30",
+    "add 1/2 cup",
+    "open 24/7",
+    "it costs $5 total",
+    "that is #2 on the list",
+    "in 2020 there were 1200 people",
+    "ios 18 is out",
+    "version 2 shipped",
+    "chapter 7 was good",
+    "route 66 is long",
+    "the 5 pm meeting",
+    "it is 9 am now",
+    "there is 15% left",
+])
+def test_digit_expansion_leaves_identifiers_and_units_alone(text):
+    assert pp.expand_digits_to_words(text, mode="auto") == text
+
+
+def test_digits_mode_is_a_hard_opt_out_for_expansion():
+    assert pp.expand_digits_to_words("the 5th item", mode="digits") == "the 5th item"
+    assert pp.expand_digits_to_words("I have 2 dogs", mode="digits") == "I have 2 dogs"
+
+
+@pytest.mark.parametrize("n,expected", [
+    (0, "zero"), (1, "one"), (9, "nine"), (10, "ten"), (13, "thirteen"),
+    (20, "twenty"), (21, "twenty one"), (30, "thirty"), (42, "forty two"),
+    (100, "one hundred"), (105, "one hundred five"), (999, "nine hundred ninety nine"),
+    (1000, "one thousand"), (1985, "one thousand nine hundred eighty five"),
+    (1_000_000, "one million"), (2_000_042, "two million forty two"),
+])
+def test_int_to_cardinal_words(n, expected):
+    assert pp._int_to_cardinal_words(n) == expected
+
+
+@pytest.mark.parametrize("n,expected", [
+    (0, "zeroth"), (1, "first"), (2, "second"), (3, "third"), (5, "fifth"),
+    (8, "eighth"), (9, "ninth"), (11, "eleventh"), (12, "twelfth"),
+    (20, "twentieth"), (21, "twenty first"), (23, "twenty third"),
+    (100, "one hundredth"), (1000, "one thousandth"), (1_000_000, "one millionth"),
+])
+def test_int_to_ordinal_words(n, expected):
+    assert pp._int_to_ordinal_words(n) == expected
+
+
+def test_full_pipeline_auto_mode_prefers_words(number_mode):
+    """Auto mode: only digit chains become digits; ordinals/small counts stay words."""
+    pp.set_number_digits_mode("auto")
+    # Chains still collapse.
+    assert "5551212" in pp.clean_speech_transcription("call five five five one two one two", skip_slm=True)
+    # Ordinals and small counts read as words.
+    assert pp.clean_speech_transcription("the 5th item", skip_slm=True) == "the fifth item."
+    assert pp.clean_speech_transcription("I have 2 dogs", skip_slm=True) == "I have two dogs."
+
+
+def test_full_pipeline_digits_mode_keeps_numerals(number_mode):
+    pp.set_number_digits_mode("digits")
+    assert pp.clean_speech_transcription("the 5th item", skip_slm=True) == "the 5th item."
+    assert pp.clean_speech_transcription("I have 2 dogs", skip_slm=True) == "I have 2 dogs."
+
+
+# ---------------------------------------------------------------------------
+# "oh" as an interjection vs. as a leading zero (regression)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text,expected", [
+    # "oh" is an interjection here; "one" is a pronoun. Must survive verbatim.
+    ("oh one of them", "oh one of them."),
+    ("oh one of those", "oh one of those."),
+    ("oh one of those is broken", "oh one of those is broken."),
+    ("oh one of the servers", "oh one of the servers."),
+    ("oh one thing", "oh one thing."),
+    ("oh five of them", "oh five of them."),
+    ("oh three people came", "oh three people came."),
+    ("Oh, one of them", "Oh, one of them."),
+])
+def test_oh_interjection_before_one_of(number_mode, text, expected):
+    for mode in ("auto", "digits", "words"):
+        pp.set_number_digits_mode(mode)
+        assert pp.clean_speech_transcription(text, skip_slm=True) == expected, mode
+
+
+@pytest.mark.parametrize("text,expected", [
+    # A real "oh" zero inside / at the head of a digit chain still converts.
+    ("seven oh two", "702"),
+    ("double oh seven", "007"),
+    ("oh seven", "07"),
+    ("oh one two", "012"),
+    ("oh one", "01"),
+    ("the code is oh seven", "the code is 07."),
+    ("oh five five five one two three four", "05551234"),
+])
+def test_oh_still_zero_in_digit_chains(number_mode, text, expected):
+    pp.set_number_digits_mode("auto")
+    assert pp.clean_speech_transcription(text, skip_slm=True) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "oh one of them",
+    "oh one of those",
+    "oh five of them",
+])
+def test_oh_interjection_never_reaches_digits_mode_either(number_mode, text):
+    pp.set_number_digits_mode("digits")
+    out = pp.clean_speech_transcription(text, skip_slm=True)
+    assert out.startswith("oh "), out
+    assert "01" not in out and "05" not in out
+
+
+def test_leading_zeros_are_never_spelled_out(number_mode):
+    """A leading zero marks a code/number, not a count ('07' must not become 'seven')."""
+    pp.set_number_digits_mode("auto")
+    assert pp.expand_digits_to_words("07", mode="auto") == "07"
+    assert pp.expand_digits_to_words("01", mode="auto") == "01"
+    assert pp.expand_digits_to_words("007", mode="auto") == "007"
+    assert pp.expand_digits_to_words("the code is 07", mode="auto") == "the code is 07"
+    # A bare zero is still a count.
+    assert pp.expand_digits_to_words("he ate 0 cookies", mode="auto") == "he ate zero cookies"
+
+
+def test_digit_string_guards_unit(number_mode):
+    """Unit-level: the two guards live in _expand_digit_string."""
+    pp.set_number_digits_mode("auto")
+    for text, expected in [
+        ("oh one of them", "oh one of them"),
+        ("oh one of those", "oh one of those"),
+        ("oh five of them", "oh five of them"),
+        ("one thing", "one thing"),
+    ]:
+        assert pp._DIGIT_STRING_REGEX.sub(pp._expand_digit_string, text) == expected, text
+    # Unambiguous chains are untouched by the guards.
+    assert pp._DIGIT_STRING_REGEX.sub(pp._expand_digit_string, "seven oh two") == "702"
+    assert pp._DIGIT_STRING_REGEX.sub(pp._expand_digit_string, "oh seven") == "07"

@@ -498,6 +498,8 @@ pub fn run_theme_picker(
                             auto_punctuate,
                             number_digits,
                             number_mode,
+                            serial_collapse,
+                            spell_command,
                             middle_click_enabled,
                         } => {
                             app.apply_config(
@@ -514,6 +516,8 @@ pub fn run_theme_picker(
                                 auto_punctuate,
                                 number_digits,
                                 number_mode,
+                                serial_collapse,
+                                spell_command,
                                 middle_click_enabled,
                             );
                         }

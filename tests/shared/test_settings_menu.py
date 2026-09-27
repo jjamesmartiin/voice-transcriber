@@ -24,6 +24,8 @@ def cfg(tmp_path, monkeypatch):
     # Env overrides in load_audio_config would mask the file value; clear them.
     for var in (
         "VT_NUMBER_DIGITS",
+        "VT_SERIAL_COLLAPSE",
+        "VT_SPELL_COMMAND",
         "VT_MIDDLE_CLICK_ENABLED",
         "VT_PUNCTUATION_MODE",
         "VT_AUTO_TYPE_TRAILING_SPACE",
@@ -105,6 +107,33 @@ class TestSettingsPersistence:
         t2.load_audio_config(file_path=str(cfg))
         assert t2.NUMBER_MODE == "words"
         assert t2.NUMBER_DIGITS is False
+
+    def test_serial_collapse_toggle_persists(self, cfg, monkeypatch):
+        monkeypatch.setattr(t2, "SERIAL_COLLAPSE", True)
+        assert t2.toggle_serial_collapse() is False
+        t2.save_audio_config()
+
+        monkeypatch.setattr(t2, "SERIAL_COLLAPSE", True)
+        t2.load_audio_config(file_path=str(cfg))
+        assert t2.SERIAL_COLLAPSE is False
+
+    def test_spell_command_toggle_persists(self, cfg, monkeypatch):
+        monkeypatch.setattr(t2, "SPELL_COMMAND", True)
+        assert t2.toggle_spell_command() is False
+        t2.save_audio_config()
+
+        monkeypatch.setattr(t2, "SPELL_COMMAND", True)
+        t2.load_audio_config(file_path=str(cfg))
+        assert t2.SPELL_COMMAND is False
+
+    def test_serial_and_spell_env_overrides(self, cfg, monkeypatch):
+        monkeypatch.setattr(t2, "SERIAL_COLLAPSE", True)
+        monkeypatch.setattr(t2, "SPELL_COMMAND", True)
+        monkeypatch.setenv("VT_SERIAL_COLLAPSE", "0")
+        monkeypatch.setenv("VT_SPELL_COMMAND", "0")
+        t2.load_audio_config(file_path=str(cfg))
+        assert t2.SERIAL_COLLAPSE is False
+        assert t2.SPELL_COMMAND is False
 
     def test_middle_click_toggle_persists(self, cfg, monkeypatch):
         monkeypatch.setattr(t2, "MIDDLE_CLICK_ENABLED", True)

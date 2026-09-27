@@ -117,6 +117,8 @@ AUTO_TYPE_AUTO_PUNCTUATE = True
 IS_MUTED = True
 NUMBER_MODE = "auto"  # Spoken-number formatting: "auto" | "digits" | "words"
 NUMBER_DIGITS = True  # Back-compat mirror: False only when NUMBER_MODE == "words"
+SERIAL_COLLAPSE = True  # Serial numbers / codes / NATO strings collapse to one token ("A B C 1 2 3" -> "ABC123")
+SPELL_COMMAND = True  # Verbal "spell C A T" -> "CAT" command processing
 MIDDLE_CLICK_ENABLED = False  # Push-to-talk by holding middle mouse button (>= 0.25s)
 KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
@@ -485,9 +487,20 @@ def _normalize_number_mode(value) -> str:
         return "auto"
 
 
+def _normalize_bool(value, default: bool = False) -> bool:
+    """Coerce common truthy/falsey config spellings into a bool."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in ("1", "true", "yes", "on", "enabled", "enable")
+
+
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -495,6 +508,7 @@ def load_audio_config(file_path=None):
         # picks up any new config file created since import)
         CONFIG_FILE = get_config_file()
     try:
+        config = {}
         if CONFIG_FILE.exists():
             with open(CONFIG_FILE, 'r') as f:
                 content = f.read()
@@ -531,6 +545,8 @@ def load_audio_config(file_path=None):
             COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
             NUMBER_MODE = _normalize_number_mode(config.get('number_digits', config.get('number_mode', 'auto')))
             NUMBER_DIGITS = NUMBER_MODE != "words"
+            SERIAL_COLLAPSE = _normalize_bool(config.get('serial_collapse', True), default=True)
+            SPELL_COMMAND = _normalize_bool(config.get('spell_command', True), default=True)
             MIDDLE_CLICK_ENABLED = config.get('middle_click_enabled', False)
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
 
@@ -574,11 +590,6 @@ def load_audio_config(file_path=None):
                 AUTO_TYPE_AUTO_PUNCTUATE = True
             elif env_auto_punctuate in ["0", "false", "no"]:
                 AUTO_TYPE_AUTO_PUNCTUATE = False
-
-            env_number_digits = os.environ.get("VT_NUMBER_DIGITS", "").strip()
-            if env_number_digits:
-                NUMBER_MODE = _normalize_number_mode(env_number_digits)
-                NUMBER_DIGITS = NUMBER_MODE != "words"
 
             env_middle_click = os.environ.get("VT_MIDDLE_CLICK_ENABLED", "").strip().lower()
             if env_middle_click in ["1", "true", "yes"]:
@@ -688,8 +699,31 @@ def load_audio_config(file_path=None):
         # Apply Bluetooth hands-free policy on Linux / PipeWire
         apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
 
+        # Environment overrides always win, even when no config file exists yet
+        # (a fresh install with only VT_* vars exported).
+        env_number_digits = os.environ.get("VT_NUMBER_DIGITS", "").strip()
+        if env_number_digits:
+            NUMBER_MODE = _normalize_number_mode(env_number_digits)
+            NUMBER_DIGITS = NUMBER_MODE != "words"
+
+        env_serial_collapse = os.environ.get("VT_SERIAL_COLLAPSE", "").strip().lower()
+        if env_serial_collapse in ["1", "true", "yes", "on", "collapsed", "collapse"]:
+            SERIAL_COLLAPSE = True
+        elif env_serial_collapse in ["0", "false", "no", "off", "spaced", "space"]:
+            SERIAL_COLLAPSE = False
+
+        env_spell_command = os.environ.get("VT_SPELL_COMMAND", "").strip().lower()
+        if env_spell_command in ["1", "true", "yes", "on"]:
+            SPELL_COMMAND = True
+        elif env_spell_command in ["0", "false", "no", "off"]:
+            SPELL_COMMAND = False
+
         # Keep the post-processor's runtime number mode in sync with the loaded config
         set_number_digits(NUMBER_MODE)
+
+        # Keep serial/NATO collapsing and the verbal spell command in sync
+        set_serial_collapse(SERIAL_COLLAPSE)
+        set_spell_command(SPELL_COMMAND)
 
         # Keep post-processor punctuation mode in sync
         set_punctuation_mode(PUNCTUATION_MODE)
@@ -708,7 +742,7 @@ def load_audio_config(file_path=None):
 
 def save_audio_config(file_path=None):
     """Save audio device configuration to local file preserving existing keys and format"""
-    global CONFIG_FILE, AUTO_TYPE, OUTPUT_MODE, COPY_TO_CLIPBOARD, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE
+    global CONFIG_FILE, AUTO_TYPE, OUTPUT_MODE, COPY_TO_CLIPBOARD, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, SERIAL_COLLAPSE, SPELL_COMMAND
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     elif CONFIG_FILE is None:
@@ -761,6 +795,8 @@ def save_audio_config(file_path=None):
             'copy_to_clipboard': COPY_TO_CLIPBOARD,
             'ui_theme': UI_THEME,
             'number_digits': NUMBER_MODE,
+            'serial_collapse': SERIAL_COLLAPSE,
+            'spell_command': SPELL_COMMAND,
             'middle_click_enabled': MIDDLE_CLICK_ENABLED,
             'keep_bluetooth_handsfree': KEEP_BLUETOOTH_HANDSFREE,
             'punctuation_mode': PUNCTUATION_MODE,
@@ -920,6 +956,46 @@ def set_number_digits(value):
         set_number_digits_mode(NUMBER_MODE)
     except Exception:
         pass
+
+
+def set_serial_collapse(enabled):
+    """Set whether serial numbers / codes / NATO strings collapse into one token."""
+    global SERIAL_COLLAPSE
+    if isinstance(enabled, str):
+        SERIAL_COLLAPSE = enabled.strip().lower() in ("1", "true", "yes", "on", "collapsed", "collapse")
+    else:
+        SERIAL_COLLAPSE = bool(enabled)
+    try:
+        from post_processor import set_serial_collapse as post_set_serial_collapse
+        post_set_serial_collapse(SERIAL_COLLAPSE)
+    except Exception:
+        pass
+    return SERIAL_COLLAPSE
+
+
+def toggle_serial_collapse() -> bool:
+    """Flip serial collapsing on/off; returns the new state."""
+    return set_serial_collapse(not SERIAL_COLLAPSE)
+
+
+def set_spell_command(enabled):
+    """Enable/disable the verbal 'spell' command."""
+    global SPELL_COMMAND
+    if isinstance(enabled, str):
+        SPELL_COMMAND = enabled.strip().lower() in ("1", "true", "yes", "on")
+    else:
+        SPELL_COMMAND = bool(enabled)
+    try:
+        from post_processor import set_spell_command as post_set_spell_command
+        post_set_spell_command(SPELL_COMMAND)
+    except Exception:
+        pass
+    return SPELL_COMMAND
+
+
+def toggle_spell_command() -> bool:
+    """Flip the verbal spell command on/off; returns the new state."""
+    return set_spell_command(not SPELL_COMMAND)
 
 
 def cycle_number_mode() -> str:
@@ -1535,6 +1611,18 @@ def select_settings_picker():
             "keywords": "numbers digits words spelled format numeric conversion",
         },
         {
+            "id": "serial_collapse",
+            "icon": "🔤 ",
+            "title": "Serial/Codes",
+            "keywords": "serial code alphanumeric nato phonetic spelled collapse spacing identifier model vin license plate",
+        },
+        {
+            "id": "spell_command",
+            "icon": "✍️ ",
+            "title": "Spell Command",
+            "keywords": "spell spelled verbal command letters c a t acronym dictation",
+        },
+        {
             "id": "middle_click",
             "icon": "🖱️ ",
             "title": "Mouse Hotkey",
@@ -1592,6 +1680,16 @@ def select_settings_picker():
                 return "Words Only (one, two, three)", "[WORDS]", "dim white"
             else:
                 return "Auto (Consecutive Numbers)", "[AUTO]", "cyan"
+        elif item_id == "serial_collapse":
+            if SERIAL_COLLAPSE:
+                return "Collapsed (ABC123)", "[COLLAPSE]", "cyan"
+            else:
+                return "Spaced (A B C 1 2 3)", "[SPACED]", "dim white"
+        elif item_id == "spell_command":
+            if SPELL_COMMAND:
+                return "Enabled (say 'spell C A T')", "[ON]", "green"
+            else:
+                return "Disabled", "[OFF]", "dim white"
         elif item_id == "middle_click":
             if MIDDLE_CLICK_ENABLED:
                 return "Enabled (hold middle click)", "[ON]", "green"
@@ -1722,6 +1820,12 @@ def select_settings_picker():
                     toggle_auto_type_trailing_space()
                 elif item_id == "number_digits":
                     cycle_number_mode()
+                    save_audio_config()
+                elif item_id == "serial_collapse":
+                    toggle_serial_collapse()
+                    save_audio_config()
+                elif item_id == "spell_command":
+                    toggle_spell_command()
                     save_audio_config()
                 elif item_id == "middle_click":
                     set_middle_click_enabled(not MIDDLE_CLICK_ENABLED)

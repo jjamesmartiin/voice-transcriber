@@ -30,9 +30,18 @@ copy_to_clipboard = true
 #   - "lowercase_no_punctuation" : Strips all punctuation and lowercases all words
 punctuation_mode = "full"
 
-# Convert spoken number words to digits. Options: auto (consecutive numbers
-# only), digits (always), words (never). Default: auto
+# Convert spoken number words to digits. Options: auto (consecutive digit
+# chains only; ordinals and small isolated counts read as words, e.g.
+# "the 5th item" -> "the fifth item", "I have 2 dogs" -> "I have two dogs"),
+# digits (always), words (never). Default: auto
 number_digits = "auto"
+
+# Serial numbers, codes, and NATO phonetic strings collapse to one token
+# (true: "A B C 1 2 3" -> ABC123, false: keep "A B C 1 2 3")
+serial_collapse = true
+
+# Verbal "spell" command: "spell C A T" -> CAT
+spell_command = true
 
 # Enable optional Small Language Model (SLM) grammar polish pass
 # (default false; opt-in and requires a local vLLM endpoint)

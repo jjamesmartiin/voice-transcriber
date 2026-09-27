@@ -111,12 +111,38 @@ wait_for_model_on_startup: true
 # Available Options:
 #   - auto   : Only runs of 2+ consecutive spoken digits become digits, so phone
 #              numbers / serial numbers convert ("five five five one two" -> 55512)
-#              while isolated numbers stay words ("I have two dogs").
-#   - digits : Always convert ("twenty five" -> 25, "six seven zero" -> 670).
-#   - words  : Never convert; keep number words spelled out.
+#              while ordinals and small isolated counts read as words
+#              ("the 5th item" -> "the fifth item", "I have 2 dogs" -> "I have two dogs").
+#   - digits : Always convert ("twenty five" -> 25, "six seven zero" -> 670, "fifth" -> "5th").
+#   - words  : Never convert number words; ordinal/small digits read as words.
 # Legacy booleans are also accepted: true -> digits, false -> words.
 # Default: auto
 number_digits: auto
+
+# ------------------------------------------------------------------------------
+# Serial Numbers, Codes & NATO Phonetic Strings
+# Detects alphanumeric identifiers, model/part/serial numbers, and NATO phonetic
+# dictation, then writes them as a single token. Toggleable in settings [S].
+# Available Options:
+#   - true  : Collapse into one token ("A B C 1 2 3" -> ABC123, "Alpha Bravo 4" -> AB4)
+#   - false : Keep single space separators ("A B C 1 2 3", "Alpha Bravo 4" -> A B 4)
+# Recognized trigger nouns: serial (number), model (number), part (number), code,
+# license (plate), vin (number), tracking (number).
+# Example: "serial number X K 9 4 J" -> "serial number XK94J"
+# Default: true
+serial_collapse: true
+
+# ------------------------------------------------------------------------------
+# Verbal Spell Command
+# Enables a spoken "spell" / "spelled" command that joins dictated letters,
+# digits and NATO words. Toggleable in settings [S].
+# Available Options:
+#   - true  : "spell C A T" -> CAT, "the word is spelled c a t" -> "the word is spelled CAT"
+#   - false : Leave "spell ..." phrases untouched
+# Requires 2+ tokens (or a single NATO word) so "how do you spell accommodation" is untouched.
+# Output follows the serial_collapse setting (collapsed by default).
+# Default: true
+spell_command: true
 
 # ------------------------------------------------------------------------------
 # Keep Bluetooth Hands-Free / Prevent Headphone Switching

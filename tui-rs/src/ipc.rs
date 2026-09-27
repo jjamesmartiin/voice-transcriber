@@ -85,6 +85,10 @@ pub enum Wire {
         #[serde(default)]
         number_mode: Option<String>,
         #[serde(default)]
+        serial_collapse: Option<bool>,
+        #[serde(default)]
+        spell_command: Option<bool>,
+        #[serde(default)]
         middle_click_enabled: Option<bool>,
     },
     #[serde(rename = "tx")]

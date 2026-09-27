@@ -74,6 +74,10 @@ class RatatuiTui:
         self.output_mode = "clipboard"
         self.sound_theme = "proximity"
         self.ui_theme = os.environ.get("VT_UI_THEME", "auto") or "auto"
+        self.number_mode = "auto"
+        self.number_digits = True
+        self.serial_collapse = True
+        self.spell_command = True
         self.transcription_count = 0
         self.vu_level = 0.0
 
@@ -86,6 +90,8 @@ class RatatuiTui:
         self.on_toggle_trailing_space = None
         self.on_toggle_auto_punctuate = None
         self.on_toggle_numbers = None
+        self.on_toggle_serial_collapse = None
+        self.on_toggle_spell_command = None
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
         self.on_set_theme = None
@@ -262,6 +268,10 @@ class RatatuiTui:
                 self.on_toggle_autotype()
         elif cmd == "toggle_numbers" and self.on_toggle_numbers:
             self.on_toggle_numbers()
+        elif cmd == "toggle_serial_collapse" and getattr(self, "on_toggle_serial_collapse", None):
+            self.on_toggle_serial_collapse()
+        elif cmd == "toggle_spell_command" and getattr(self, "on_toggle_spell_command", None):
+            self.on_toggle_spell_command()
         elif cmd == "toggle_middle_click" and self.on_toggle_middle_click:
             self.on_toggle_middle_click()
         elif cmd == "toggle_trailing_space" and getattr(self, "on_toggle_trailing_space", None):
@@ -405,7 +415,8 @@ class RatatuiTui:
     def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None,
                          sound_theme=None, ui_theme=None, punctuation_mode=None,
                          trailing_space=None, auto_punctuate=None, number_digits=None,
-                         number_mode=None, middle_click_enabled=None):
+                         number_mode=None, serial_collapse=None, spell_command=None,
+                         middle_click_enabled=None):
         msg = {"t": "cfg"}
         if backend is not None:
             self.model_backend = backend
@@ -447,6 +458,12 @@ class RatatuiTui:
         if number_digits is not None:
             self.number_digits = bool(number_digits)
             msg["number_digits"] = self.number_digits
+        if serial_collapse is not None:
+            self.serial_collapse = bool(serial_collapse)
+            msg["serial_collapse"] = self.serial_collapse
+        if spell_command is not None:
+            self.spell_command = bool(spell_command)
+            msg["spell_command"] = self.spell_command
         if middle_click_enabled is not None:
             self.middle_click_enabled = bool(middle_click_enabled)
             msg["middle_click_enabled"] = self.middle_click_enabled

@@ -187,6 +187,8 @@ class SimpleVoiceTranscriber:
             auto_punctuate=getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True),
             number_digits=getattr(t2, 'NUMBER_DIGITS', True),
             number_mode=getattr(t2, 'NUMBER_MODE', 'auto'),
+            serial_collapse=getattr(t2, 'SERIAL_COLLAPSE', True),
+            spell_command=getattr(t2, 'SPELL_COMMAND', True),
             middle_click_enabled=getattr(t2, 'MIDDLE_CLICK_ENABLED', False),
         )
         if hasattr(self, 'visual_notification') and self.visual_notification:
@@ -202,6 +204,8 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_trailing_space = self._on_tui_toggle_trailing_space
         self.tui.on_toggle_auto_punctuate = self._on_tui_toggle_auto_punctuate
         self.tui.on_toggle_numbers = self._on_tui_toggle_numbers
+        self.tui.on_toggle_serial_collapse = self._on_tui_toggle_serial_collapse
+        self.tui.on_toggle_spell_command = self._on_tui_toggle_spell_command
         self.tui.on_toggle_middle_click = self._on_tui_toggle_middle_click
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
         self.tui.on_open_preset_picker = self.open_preset_picker
@@ -356,6 +360,22 @@ class SimpleVoiceTranscriber:
             "words": "WORDS ONLY",
         }.get(mode, mode.upper())
         self.tui.print_event("🔢 Number Conversion", f"Number formatting is now {status}", level="info")
+
+    def _on_tui_toggle_serial_collapse(self):
+        import t2
+        enabled = t2.toggle_serial_collapse()
+        t2.save_audio_config()
+        self._sync_tui_state()
+        status = "COLLAPSED (ABC123)" if enabled else "SPACED (A B C 1 2 3)"
+        self.tui.print_event("🔤 Serial/Codes", f"Serial number & code formatting is now {status}", level="info")
+
+    def _on_tui_toggle_spell_command(self):
+        import t2
+        enabled = t2.toggle_spell_command()
+        t2.save_audio_config()
+        self._sync_tui_state()
+        status = "ENABLED (say 'spell C A T')" if enabled else "DISABLED"
+        self.tui.print_event("✍️ Spell Command", f"Verbal spell command is now {status}", level="info")
 
     def _on_tui_toggle_middle_click(self):
         import t2

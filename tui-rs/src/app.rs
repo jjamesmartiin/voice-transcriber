@@ -173,6 +173,8 @@ pub struct App {
     pub auto_punctuate: bool,
     pub number_digits: bool,
     pub number_mode: String,
+    pub serial_collapse: bool,
+    pub spell_command: bool,
     pub middle_click_enabled: bool,
     pub punctuation_mode: String,
     #[allow(dead_code)]
@@ -222,6 +224,8 @@ impl App {
             auto_punctuate: true,
             number_digits: true,
             number_mode: "auto".to_string(),
+            serial_collapse: true,
+            spell_command: true,
             middle_click_enabled: false,
             punctuation_mode: "full".to_string(),
             sound_theme: "proximity".to_string(),
@@ -342,6 +346,8 @@ impl App {
         auto_punctuate: Option<bool>,
         number_digits: Option<bool>,
         number_mode: Option<String>,
+        serial_collapse: Option<bool>,
+        spell_command: Option<bool>,
         middle_click_enabled: Option<bool>,
     ) {
         if let Some(m) = mic {
@@ -389,6 +395,12 @@ impl App {
         }
         if let Some(mc) = middle_click_enabled {
             self.middle_click_enabled = mc;
+        }
+        if let Some(sc) = serial_collapse {
+            self.serial_collapse = sc;
+        }
+        if let Some(s) = spell_command {
+            self.spell_command = s;
         }
     }
 }

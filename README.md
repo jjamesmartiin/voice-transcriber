@@ -250,7 +250,9 @@ Supported options:
 - `copy_to_clipboard`: `true` or `false`.
 - `auto_type_trailing_space`: append a space after auto-typed text.
 - `auto_type_auto_punctuate`: enforce terminal punctuation on auto-typed text.
-- `number_digits`: `auto` (default: only consecutive spoken digits such as phone/serial numbers become digits, isolated numbers stay words), `digits` (always convert), or `words` (never convert). Legacy `true`/`false` are accepted as aliases for `digits`/`words`.
+- `number_digits`: `auto` (default: only consecutive spoken digit chains such as phone/serial numbers become digits, while ordinals and small isolated counts read as words — `"the 5th item"` → `"the fifth item"`, `"I have 2 dogs"` → `"I have two dogs"`), `digits` (always convert), or `words` (never convert). Legacy `true`/`false` are accepted as aliases for `digits`/`words`.
+- `serial_collapse`: `true` (default) writes serial numbers, model/part codes and NATO phonetic dictation as a single token (`"A B C 1 2 3"` → `ABC123`, `"Alpha Bravo 4"` → `AB4`); `false` keeps single-space separators.
+- `spell_command`: `true` (default) enables the verbal spell command (`"spell C A T"` → `CAT`); `false` leaves `"spell ..."` phrases untouched.
 - `keep_bluetooth_handsfree`: `true` keeps Bluetooth devices in hands-free mode so media does not pause when recording ends.
 - `punctuation_mode`: `full`, `no_terminal_period`, `no_punctuation`, or `lowercase_no_punctuation` (legacy alias `semi-formal` → `no_terminal_period`).
 - `enable_slm`: `true` to enable the optional local vLLM grammar-polish pass (default `false`).

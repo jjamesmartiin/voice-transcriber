@@ -645,13 +645,24 @@ _ORDINAL_VALUE = {k: i for i, k in enumerate(["first", "second", "third", "fourt
 _ORDINAL_VALUE.update({k: v for k, v in [("twentieth", 20), ("thirtieth", 30), ("fortieth", 40), ("fiftieth", 50), ("sixtieth", 60), ("seventieth", 70), ("eightieth", 80), ("ninetieth", 90), ("hundredth", 100), ("thousandth", 1000), ("millionth", 1_000_000), ("billionth", 1_000_000_000)]})
 
 _DIGIT_WORDS = {
-    "zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "zero": "0", "oh": "0", "o": "0", "one": "1", "two": "2", "three": "3", "four": "4",
     "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
 }
 _DIGIT_WORD_ALT = "|".join(_DIGIT_WORDS)
-_DIGIT_TOKEN = rf"(?:(?:double|triple)\s+)?(?:\b(?:{_DIGIT_WORD_ALT})\b)"
-# Two or more consecutive digit words: "six seven zero" / "double oh seven" / "one two three"
+_DIGIT_TOKEN = rf"(?:(?:double|triple)\s+)?(?:\b(?:{_DIGIT_WORD_ALT})\b|\d)"
+# Two or more consecutive digit words / digits: "six seven zero" / "double oh seven" / "7 o 2" / "7 0 2"
 _DIGIT_STRING_REGEX = re.compile(rf"\b(?:{_DIGIT_TOKEN})(?:\s+(?:{_DIGIT_TOKEN}))+\b", re.IGNORECASE)
+
+# Standard phone number groupings (e.g. "702 555 1234" -> "7025551234", "555 1212" -> "5551212")
+_PHONE_NUMBER_GROUP_10_11 = re.compile(r"\b(?:(1)\s+)?(\d{3})\s+(\d{3})\s+(\d{4})\b")
+_PHONE_NUMBER_GROUP_7 = re.compile(r"\b(\d{3})\s+(\d{4})\b")
+
+# Cheap single-scan gate: several passes only matter when digits exist at all.
+_ANY_DIGIT_REGEX = re.compile(r"\d")
+
+def _collapse_phone_10_11(m: re.Match) -> str:
+    cc = m.group(1) or ""
+    return f"{cc}{m.group(2)}{m.group(3)}{m.group(4)}"
 
 class _TrieNode:
     __slots__ = ("children", "is_end")
@@ -688,7 +699,7 @@ def _build_trie_regex(words: list[str]) -> str:
     return _node_to_regex(root)
 
 _NUMBER_WORD_LIST = [
-    "zero", "oh", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+    "zero", "oh", "o", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
     "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
     "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion",
     "trillion", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
@@ -708,7 +719,7 @@ _ALL_NUMBER_WORDS_SET = frozenset(
     list(_NUMBER_TENS.keys()) +
     list(_NUMBER_SCALES.keys()) +
     list(_ORDINAL_TO_CARDINAL.keys()) +
-    ["oh", "point", "percent", "o'clock", "am", "pm", "double", "triple", "a.m.", "p.m."]
+    ["oh", "o", "point", "percent", "o'clock", "am", "pm", "double", "triple", "a.m.", "p.m."]
 )
 
 # Contexts where a standalone "one" is a pronoun/idiom, not a number
@@ -825,8 +836,32 @@ def _parse_year(phrase_lower: str):
 
 
 def _expand_digit_string(m):
-    """Convert a matched digit-word string (e.g. 'double oh seven') into digits."""
+    """Convert a matched digit-word string (e.g. 'double oh seven', '7 o 2') into digits.
+
+    Two guards keep natural speech out of the digit path:
+
+    * A run that ends in ``one`` followed by a pronoun context is not a digit
+      string at all: "oh one of them" / "oh one of those" / "one thing".
+    * A two-token run that *starts* with the interjection "oh"/"o" and
+      continues into prose is read as an interjection, not a leading zero:
+      "oh five of them" stays words. Real chains that begin with "oh"
+      (phone numbers like "oh five five five one two three four") are longer,
+      and a standalone "oh seven" at the end of an utterance still makes "07".
+    """
     parts = m.group(0).replace("-", " ").split()
+    lowered = [p.lower() for p in parts]
+
+    # Guard 1: trailing "one" acting as a pronoun ("one of them", "one of those").
+    if lowered[-1] == "one":
+        nxt = re.match(r"\s*([A-Za-z]+)", m.string[m.end():])
+        if nxt and nxt.group(1).lower() in _ONE_AFTER_PROTECT:
+            return m.group(0)
+
+    # Guard 2: leading "oh"/"o" + a single digit token, followed by more prose.
+    if len(lowered) == 2 and lowered[0] in ("oh", "o"):
+        if re.match(r"\s*[A-Za-z0-9]", m.string[m.end():]):
+            return m.group(0)
+
     out = []
     i = 0
     while i < len(parts):
@@ -835,24 +870,29 @@ def _expand_digit_string(m):
             mult = 2 if p == "double" else 3
             i += 1
             if i < len(parts):
-                out.append(_DIGIT_WORDS.get(parts[i].lower(), "") * mult)
+                next_p = parts[i].lower()
+                val = next_p if next_p.isdigit() else _DIGIT_WORDS.get(next_p, "")
+                out.append(val * mult)
         else:
-            out.append(_DIGIT_WORDS.get(p, ""))
+            if p.isdigit():
+                out.append(p)
+            else:
+                out.append(_DIGIT_WORDS.get(p, ""))
         i += 1
     return "".join(out)
 
 
 def _is_pure_digit_string(tokens):
-    """True if every token is a digit word (or 'double X'/'triple X')."""
+    """True if every token is a digit word (or 'double X'/'triple X' or literal digit)."""
     i = 0
     while i < len(tokens):
         t = tokens[i].lower()
         if t in ("double", "triple"):
-            if i + 1 < len(tokens) and tokens[i + 1].lower() in _DIGIT_WORDS:
+            if i + 1 < len(tokens) and (tokens[i + 1].lower() in _DIGIT_WORDS or tokens[i + 1].isdigit()):
                 i += 2
                 continue
             return False
-        if t in _DIGIT_WORDS:
+        if t in _DIGIT_WORDS or t.isdigit():
             i += 1
             continue
         return False
@@ -910,6 +950,10 @@ def _convert_number_phrase(m):
         if before in _ONE_BEFORE_PROTECT or after in _ONE_AFTER_PROTECT:
             return m.group(0)
         return "1"
+
+    # Protect ambiguous standalone "o" or "oh" ("the letter O", "O Canada", "O Lord"...)
+    if len(lower_tokens) == 1 and lower_tokens[0] in ("o", "oh"):
+        return m.group(0)
 
     # Digit strings / phone numbers (2+ consecutive digit words): "six seven zero" -> "670"
     if len(lower_tokens) >= 2 and _is_pure_digit_string(lower_tokens):
@@ -1054,7 +1098,7 @@ def set_number_digits_enabled(enabled) -> None:
     set_number_digits_mode(enabled)
 
 
-def convert_number_words_to_digits(text: str, text_lower: str | None = None) -> str:
+def convert_number_words_to_digits(text: str, text_lower: str | None = None, mode: str | None = None) -> str:
     """Convert spoken number words in text to digits according to the active mode.
 
     - ``"words"``: return text unchanged.
@@ -1063,8 +1107,12 @@ def convert_number_words_to_digits(text: str, text_lower: str | None = None) -> 
       "bring one of them over here" / "I have two dogs" stay spelled out.
     - ``"digits"``: full conversion of cardinals, ordinals, years, decimals,
       percents, times and digit strings.
+
+    ``mode`` may be supplied by a caller that already resolved it (avoids a
+    second environment lookup per utterance).
     """
-    mode = _effective_number_mode()
+    if mode is None:
+        mode = _effective_number_mode()
     if mode == "words":
         return text
     if not text:
@@ -1073,17 +1121,485 @@ def convert_number_words_to_digits(text: str, text_lower: str | None = None) -> 
     if mode == "auto":
         # Smart mode: only consecutive spoken digits (phone/serial numbers).
         if _DIGIT_STRING_REGEX.search(text):
-            return _DIGIT_STRING_REGEX.sub(_expand_digit_string, text)
+            text = _DIGIT_STRING_REGEX.sub(_expand_digit_string, text)
+        # Grouped literal digits ("702 555 1234") only exist when digits are present.
+        if _ANY_DIGIT_REGEX.search(text):
+            if _PHONE_NUMBER_GROUP_10_11.search(text):
+                text = _PHONE_NUMBER_GROUP_10_11.sub(_collapse_phone_10_11, text)
+            if _PHONE_NUMBER_GROUP_7.search(text):
+                text = _PHONE_NUMBER_GROUP_7.sub(r"\1\2", text)
         return text
 
     if text_lower is None:
         text_lower = text.lower()
     if not _has_number_words(text_lower):
+        if _ANY_DIGIT_REGEX.search(text):
+            if _PHONE_NUMBER_GROUP_10_11.search(text):
+                text = _PHONE_NUMBER_GROUP_10_11.sub(_collapse_phone_10_11, text)
+            if _PHONE_NUMBER_GROUP_7.search(text):
+                text = _PHONE_NUMBER_GROUP_7.sub(r"\1\2", text)
         return text
     converted = _NUMBER_PHRASE_REGEX.sub(_convert_number_phrase, text)
     if _DIGIT_STRING_REGEX.search(converted):
         converted = _DIGIT_STRING_REGEX.sub(_expand_digit_string, converted)
+    if _ANY_DIGIT_REGEX.search(converted):
+        if _PHONE_NUMBER_GROUP_10_11.search(converted):
+            converted = _PHONE_NUMBER_GROUP_10_11.sub(_collapse_phone_10_11, converted)
+        if _PHONE_NUMBER_GROUP_7.search(converted):
+            converted = _PHONE_NUMBER_GROUP_7.sub(r"\1\2", converted)
     return converted
+
+
+# ---------------------------------------------------------------------------
+# Digits -> Words (ordinals + small standalone cardinals)
+# ---------------------------------------------------------------------------
+# In "auto" (default) and "words" modes, isolated numerals that ASR emits as
+# digits are read back as words, matching how people actually speak:
+#   "the 5th item"      -> "the fifth item"
+#   "I have 2 dogs"     -> "I have two dogs"
+#   "there are 12 left" -> "there are twelve left"
+# Digit *chains* (phone/serial numbers) are collapsed earlier and are never
+# expanded, so "7025551234" survives untouched. "digits" mode is a hard opt-out.
+_ONES_WORD = (
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+    "seventeen", "eighteen", "nineteen",
+)
+_TENS_WORD = {
+    20: "twenty", 30: "thirty", 40: "forty", 50: "fifty",
+    60: "sixty", 70: "seventy", 80: "eighty", 90: "ninety",
+}
+_SCALE_WORDS = (
+    (1_000_000_000_000, "trillion"), (1_000_000_000, "billion"),
+    (1_000_000, "million"), (1_000, "thousand"),
+)
+_LAST_WORD_ORDINAL = {
+    "zero": "zeroth", "one": "first", "two": "second", "three": "third",
+    "four": "fourth", "five": "fifth", "six": "sixth", "seven": "seventh",
+    "eight": "eighth", "nine": "ninth", "ten": "tenth", "eleven": "eleventh",
+    "twelve": "twelfth", "thirteen": "thirteenth", "fourteen": "fourteenth",
+    "fifteen": "fifteenth", "sixteen": "sixteenth", "seventeen": "seventeenth",
+    "eighteen": "eighteenth", "nineteen": "nineteenth", "twenty": "twentieth",
+    "thirty": "thirtieth", "forty": "fortieth", "fifty": "fiftieth",
+    "sixty": "sixtieth", "seventy": "seventieth", "eighty": "eightieth",
+    "ninety": "ninetieth", "hundred": "hundredth", "thousand": "thousandth",
+    "million": "millionth", "billion": "billionth", "trillion": "trillionth",
+}
+
+# Ordinal written as digits (1st / 2nd / 23rd / 100th).
+_ORDINAL_DIGIT_REGEX = re.compile(r"\b(\d{1,12})(?:st|nd|rd|th)\b", re.IGNORECASE)
+
+# "small" = 0-20; larger isolated numerals (years, versions, quantities) stay digits.
+_SMALL_CARDINAL_MAX = 20
+_STANDALONE_CARDINAL_REGEX = re.compile(
+    r"(?<![\d.,:/\-#$€£])\b(\d{1,2})\b(?!\.\d)(?!:\d)(?!/\d)(?!-\d)"
+)
+
+# Preceding words that mean the digits are an identifier, not a count.
+_CARDINAL_BEFORE_GUARD = frozenset({
+    "version", "ver", "v", "ios", "iphone", "ipad", "ipod", "android", "windows",
+    "macos", "covid", "sars", "h264", "h265", "mp3", "mp4",
+    "chapter", "ch", "page", "pg", "section", "sec", "figure", "fig", "table",
+    "route", "rt", "highway", "hwy", "interstate", "exit", "gate", "room", "suite",
+    "floor", "level", "stage", "phase", "step", "model", "part", "code", "item",
+    "order", "invoice", "ticket", "port", "pin", "line", "no", "number", "unit",
+    "apt", "zip", "area", "dial", "ext", "episode", "season", "track", "disk",
+    "volume", "vol", "act", "scene", "grade", "rank", "slot", "bay", "berth",
+    "flight", "train", "bus", "terminal", "lane", "apartment", "building", "block",
+    "lot", "ps", "xbox", "series", "gen", "mark", "type", "class", "category",
+    "tier", "round", "week", "sensor", "bank", "account", "speed",
+    "usb", "hdmi", "pcie", "sata", "nvme", "displayport", "thunderbolt", "ethernet",
+    "pixel", "megapixel", "protocol", "frame", "wave", "layer", "phase", "draft",
+})
+
+# Following tokens where digits are conventional (times, units, symbols).
+_CARDINAL_AFTER_GUARD = frozenset({
+    "pm", "am", "a.m.", "p.m.", "percent", "%", "°", "o'clock", "oclock",
+    "kg", "km", "cm", "mm", "lbs", "lb", "oz", "gb", "mb", "kb", "tb",
+    "ms", "ft", "fahrenheit", "celsius", "kelvin",
+})
+
+
+def _int_to_cardinal_words(n: int):
+    """Render an integer 0..999,999,999,999 as English words (None if out of range)."""
+    if n < 0:
+        return None
+    if n < 20:
+        return _ONES_WORD[n]
+    if n < 100:
+        tens, rest = divmod(n, 10)
+        return _TENS_WORD[tens * 10] + (f" {_ONES_WORD[rest]}" if rest else "")
+    if n < 1000:
+        hundreds, rest = divmod(n, 100)
+        return _ONES_WORD[hundreds] + " hundred" + (f" {_int_to_cardinal_words(rest)}" if rest else "")
+    for scale, name in _SCALE_WORDS:
+        if n >= scale:
+            head_n, rest = divmod(n, scale)
+            head = _int_to_cardinal_words(head_n)
+            if head is None:
+                return None
+            return head + f" {name}" + (f" {_int_to_cardinal_words(rest)}" if rest else "")
+    return None
+
+
+def _int_to_ordinal_words(n: int):
+    """Render an integer as an English ordinal (1 -> 'first', 23 -> 'twenty third')."""
+    cardinal = _int_to_cardinal_words(n)
+    if cardinal is None:
+        return None
+    head, sep, last = cardinal.rpartition(" ")
+    ordinal_last = _LAST_WORD_ORDINAL.get(last)
+    if ordinal_last is None:
+        return None
+    return f"{head}{sep}{ordinal_last}"
+
+
+def _prev_word_before(text: str, pos: int) -> str:
+    before = text[:pos].rstrip()
+    m = re.search(r"([\w#]+)$", before)
+    return m.group(1).lower() if m else ""
+
+
+def _next_token_after(text: str, pos: int) -> str:
+    m = re.match(r"\s*([%$€£°]|\w+)", text[pos:])
+    return m.group(1).lower() if m else ""
+
+
+def _ordinal_digit_repl(m: re.Match) -> str:
+    words = _int_to_ordinal_words(int(m.group(1)))
+    return words if words else m.group(0)
+
+
+def _small_cardinal_repl(m: re.Match) -> str:
+    n = int(m.group(1))
+    if n > _SMALL_CARDINAL_MAX:
+        return m.group(0)
+    # Leading zeros mean a code/number, not a count: "07", "01", "007".
+    raw = m.group(1)
+    if len(raw) > 1 and raw[0] == "0":
+        return m.group(0)
+    if _prev_word_before(m.string, m.start()) in _CARDINAL_BEFORE_GUARD:
+        return m.group(0)
+    if _next_token_after(m.string, m.end()) in _CARDINAL_AFTER_GUARD:
+        return m.group(0)
+    words = _int_to_cardinal_words(n)
+    return words if words else m.group(0)
+
+
+def expand_digits_to_words(text: str, mode: str | None = None) -> str:
+    """Spell out ordinal digits and small standalone cardinals.
+
+    Active in ``auto`` (default) and ``words`` modes; a no-op in ``digits`` mode.
+    Digit chains (phone/serial numbers) are collapsed before this runs and are
+    never expanded.
+    """
+    if not text:
+        return text
+    if (mode or _effective_number_mode()) == "digits":
+        return text
+    # Both passes below require digits; skip two regex scans on digit-free prose.
+    if not _ANY_DIGIT_REGEX.search(text):
+        return text
+    if _ORDINAL_DIGIT_REGEX.search(text):
+        text = _ORDINAL_DIGIT_REGEX.sub(_ordinal_digit_repl, text)
+    if _STANDALONE_CARDINAL_REGEX.search(text):
+        text = _STANDALONE_CARDINAL_REGEX.sub(_small_cardinal_repl, text)
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Serial Number, NATO Phonetic & Spell Command Processing
+# ---------------------------------------------------------------------------
+
+_serial_collapse: bool = True
+_spell_command: bool = True
+
+
+def get_serial_collapse() -> bool:
+    """Return whether serial numbers and alphanumeric codes collapse without spaces."""
+    env = os.environ.get("VT_SERIAL_COLLAPSE")
+    if env is not None and env.strip() != "":
+        return env.strip().lower() in ("1", "true", "yes", "on", "collapsed")
+    return _serial_collapse
+
+
+def set_serial_collapse(collapse) -> None:
+    """Set runtime serial number collapsing (True: 'ABC123', False: 'A B C 123')."""
+    global _serial_collapse
+    if isinstance(collapse, str):
+        _serial_collapse = collapse.strip().lower() in ("1", "true", "yes", "on", "collapsed")
+    else:
+        _serial_collapse = bool(collapse)
+
+
+def get_spell_command() -> bool:
+    """Return whether the verbal 'spell' / 'spelled' command is enabled."""
+    env = os.environ.get("VT_SPELL_COMMAND")
+    if env is not None and env.strip() != "":
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    return _spell_command
+
+
+def set_spell_command(enabled) -> None:
+    """Enable or disable verbal 'spell' command processing."""
+    global _spell_command
+    if isinstance(enabled, str):
+        _spell_command = enabled.strip().lower() in ("1", "true", "yes", "on")
+    else:
+        _spell_command = bool(enabled)
+
+
+NATO_PHONETIC = {
+    "alpha": "A", "alfa": "A",
+    "bravo": "B",
+    "charlie": "C",
+    "delta": "D",
+    "echo": "E",
+    "foxtrot": "F",
+    "golf": "G",
+    "hotel": "H",
+    "india": "I",
+    "juliet": "J", "juliett": "J",
+    "kilo": "K",
+    "lima": "L",
+    "mike": "M",
+    "november": "N",
+    "oscar": "O",
+    "papa": "P",
+    "quebec": "Q",
+    "romeo": "R",
+    "sierra": "S",
+    "tango": "T",
+    "uniform": "U",
+    "victor": "V",
+    "whiskey": "W", "whisky": "W",
+    "xray": "X", "x-ray": "X",
+    "yankee": "Y",
+    "zulu": "Z",
+}
+
+_NATO_ALT = "|".join(sorted(NATO_PHONETIC.keys(), key=len, reverse=True))
+
+_NATO_COMMON_WORDS = frozenset({
+    "hotel", "echo", "delta", "uniform", "golf", "mike", "whiskey",
+    "november", "victor", "oscar", "charlie", "tango", "india"
+})
+
+_SERIAL_TRIGGER_WORDS = (
+    r"serial(?:\s+number)?|"
+    r"model(?:\s+number)?|"
+    r"part(?:\s+number)?|"
+    r"code|"
+    r"license(?:\s+plate)?|"
+    r"vin(?:\s+number)?|"
+    r"tracking(?:\s+number)?"
+)
+
+_SERIAL_UNIT = rf"(?:\b[a-zA-Z]\b|\b\d+\b|\b(?:{_NATO_ALT})\b|\b(?:{_DIGIT_WORD_ALT})\b)"
+
+_SPELL_TOKEN = rf"(?:\b[a-zA-Z]\b|\b\d+\b|\b(?:{_NATO_ALT})\b|\b(?:{_DIGIT_WORD_ALT})\b)"
+
+_SPELL_CMD_REGEX = re.compile(
+    rf"(^|(?<=[.?!,;:–—]\s))(?:please\s+)?(?:spell|spelled)(?:\s+out)?\s+({_SPELL_TOKEN}(?:[\s-]+{_SPELL_TOKEN})*)\b",
+    re.IGNORECASE
+)
+
+_MID_SPELLED_REGEX = re.compile(
+    rf"\b(spelled(?:\s+out)?)\s+({_SPELL_TOKEN}(?:[\s-]+{_SPELL_TOKEN})*)\b",
+    re.IGNORECASE
+)
+
+_TRIGGERED_SERIAL_REGEX = re.compile(
+    rf"\b({_SERIAL_TRIGGER_WORDS})\s+({_SERIAL_UNIT}(?:[\s-]+{_SERIAL_UNIT})*)\b",
+    re.IGNORECASE
+)
+
+_UNTRIGGERED_SERIAL_REGEX = re.compile(
+    rf"\b({_SERIAL_UNIT}(?:[\s-]+{_SERIAL_UNIT})+)\b",
+    re.IGNORECASE
+)
+
+_BARE_SERIAL_OR_TRIGGER_REGEX = re.compile(
+    rf"^(?:(?:{_SERIAL_TRIGGER_WORDS})\s+)?[A-Za-z0-9_-]+$",
+    re.IGNORECASE
+)
+
+
+def _convert_spell_token(t: str) -> str:
+    tl = t.lower()
+    if tl in NATO_PHONETIC:
+        return NATO_PHONETIC[tl]
+    if len(t) == 1 and t.isalpha():
+        return t.upper()
+    if tl in ("zero", "oh"):
+        return "0"
+    if tl in _DIGIT_WORDS:
+        return _DIGIT_WORDS[tl]
+    if t.isdigit():
+        return t
+    return t.upper()
+
+
+def _format_spell_tokens(raw: str, collapse: bool) -> str:
+    toks = [w for w in re.split(r"[\s-]+", raw) if w]
+    converted = [_convert_spell_token(w) for w in toks]
+    return "".join(converted) if collapse else " ".join(converted)
+
+
+def process_spell_commands(text: str, enabled: bool | None = None, collapse: bool | None = None) -> str:
+    """Process verbal 'spell' / 'spelled' commands into formatted text."""
+    if not text or "spell" not in text.lower():
+        return text
+    if enabled is None:
+        enabled = get_spell_command()
+    if not enabled:
+        return text
+    if collapse is None:
+        collapse = get_serial_collapse()
+
+    def _repl_cmd(m):
+        prefix = m.group(1)
+        raw = m.group(2)
+        toks = [w for w in re.split(r"[\s-]+", raw) if w]
+        if len(toks) >= 2 or (len(toks) == 1 and toks[0].lower() in NATO_PHONETIC):
+            return prefix + _format_spell_tokens(raw, collapse)
+        return m.group(0)
+
+    res = _SPELL_CMD_REGEX.sub(_repl_cmd, text)
+
+    def _repl_mid(m):
+        trig = m.group(1)
+        raw = m.group(2)
+        toks = [w for w in re.split(r"[\s-]+", raw) if w]
+        if len(toks) >= 2 or (len(toks) == 1 and toks[0].lower() in NATO_PHONETIC):
+            return f"{trig} {_format_spell_tokens(raw, collapse)}"
+        return m.group(0)
+
+    return _MID_SPELLED_REGEX.sub(_repl_mid, res)
+
+
+def _convert_serial_token(t: str) -> str:
+    tl = t.lower()
+    if tl in NATO_PHONETIC:
+        return NATO_PHONETIC[tl]
+    if len(t) == 1 and t.isalpha():
+        return t.upper()
+    if tl in _DIGIT_WORDS:
+        return _DIGIT_WORDS[tl]
+    if t.isdigit():
+        return t
+    return t
+
+
+def _format_serial_tokens(raw: str, collapse: bool) -> str:
+    toks = [w for w in re.split(r"[\s-]+", raw) if w]
+    converted = [_convert_serial_token(w) for w in toks]
+    return "".join(converted) if collapse else " ".join(converted)
+
+
+def _is_valid_untriggered_serial(raw: str) -> bool:
+    toks = [w for w in re.split(r"[\s-]+", raw) if w]
+    if len(toks) < 2:
+        return False
+    lower_toks = [t.lower() for t in toks]
+
+    # Guard 2-token English phrases: 'a hotel', 'a uniform', 'a 2', 'I 2', etc.
+    if len(toks) == 2:
+        if lower_toks[0] in ("a", "an", "i") and lower_toks[1] in _NATO_COMMON_WORDS:
+            return False
+        if lower_toks[0] in ("a", "an", "i") and (lower_toks[1].isdigit() or lower_toks[1] in _DIGIT_WORDS):
+            return False
+        if lower_toks[0] in ("a", "an", "i") and lower_toks[1] in ("a", "i", "o"):
+            return False
+
+    # Avoid pure digits (already handled by digit strings / phone numbers)
+    if all(t.isdigit() or t.lower() in _DIGIT_WORDS for t in toks):
+        return False
+
+    # Case 1: Mixed letters/NATO and digits (e.g. 'XK94J', 'ABC123', 'WPA2', '45B90', 'F150', 'Hotel 4', 'Kilo 9')
+    has_digit = any(t.isdigit() or t.lower() in _DIGIT_WORDS for t in toks)
+    has_letter_or_nato = any((len(t) == 1 and t.isalpha()) or t.lower() in NATO_PHONETIC for t in toks)
+    if has_digit and has_letter_or_nato:
+        return True
+
+    # Case 2: 2+ NATO words (e.g. 'alpha bravo charlie')
+    nato_count = sum(1 for t in lower_toks if t in NATO_PHONETIC)
+    if nato_count >= 2:
+        return True
+
+    # Case 3: 2+ single letters (e.g. 'FBI', 'KGB', 'CPU', 'ABC')
+    all_single_letters = all(len(t) == 1 and t.isalpha() for t in toks)
+    if all_single_letters:
+        if len(toks) == 2 and any(t.lower() in ("a", "i") for t in toks):
+            return False
+        return True
+
+    return False
+
+
+_SERIAL_FAST_TRIGGER_WORDS = frozenset({
+    "serial", "model", "part", "code", "codes", "license", "vin", "tracking",
+    "plate", "plates",
+})
+
+_SERIAL_TOKEN_STRIP = ".,;:!?\"'()[]{}–—"
+
+
+def _has_serial_candidate(text_lower: str) -> bool:
+    """Cheap pre-scan: only run the serial regexes when a standalone single letter,
+    a NATO word, or a trigger noun is present.
+
+    Plain prose pays a single token pass (~0.5 us) instead of several large
+    alternation regex scans. Tokens that already end in a letter/digit need no
+    punctuation stripping, which keeps the common path allocation-free.
+    """
+    nato = NATO_PHONETIC
+    triggers = _SERIAL_FAST_TRIGGER_WORDS
+    for raw in text_lower.split():
+        if len(raw) == 1:
+            if raw.isalpha():
+                return True
+            continue
+        if raw in nato or raw in triggers:
+            return True
+        if raw[-1].isalnum():
+            continue
+        tok = raw.strip(_SERIAL_TOKEN_STRIP)
+        if len(tok) == 1 and tok.isalpha():
+            return True
+        if tok in nato or tok in triggers:
+            return True
+    return False
+
+
+def process_serial_numbers(text: str, collapse: bool | None = None) -> str:
+    """Detect and format serial numbers, model codes, and NATO phonetic strings."""
+    if not text or len(text) < 3:
+        return text
+    if not _has_serial_candidate(text.lower()):
+        return text
+    if collapse is None:
+        collapse = get_serial_collapse()
+
+    def _repl_trig(m):
+        trig = m.group(1)
+        raw = m.group(2)
+        toks = [w for w in re.split(r"[\s-]+", raw) if w]
+        if not toks:
+            return m.group(0)
+        formatted = _format_serial_tokens(raw, collapse)
+        return f"{trig} {formatted}"
+
+    res = _TRIGGERED_SERIAL_REGEX.sub(_repl_trig, text)
+
+    def _repl_untrig(m):
+        raw = m.group(1)
+        if _is_valid_untriggered_serial(raw):
+            return _format_serial_tokens(raw, collapse)
+        return m.group(0)
+
+    res = _UNTRIGGERED_SERIAL_REGEX.sub(_repl_untrig, res)
+    return res
 
 
 # ---------------------------------------------------------------------------
@@ -1583,7 +2099,11 @@ def clean_speech_transcription(
         cleaned = MULTI_SPACE_REGEX.sub(" ", cleaned)
 
     # 10b. Convert spoken number words to digits ("twenty five" -> "25", phone digit strings, ...)
-    cleaned = convert_number_words_to_digits(cleaned, cleaned_lower)
+    _num_mode = _effective_number_mode()
+    cleaned = convert_number_words_to_digits(cleaned, cleaned_lower, mode=_num_mode)
+
+    # 10c. Spell out ordinal digits & small standalone cardinals ("the 5th item" -> "the fifth item")
+    cleaned = expand_digits_to_words(cleaned, mode=_num_mode)
 
     # 11. Normalize standalone I and contractions
     if "i" in cleaned:
@@ -1617,6 +2137,12 @@ def clean_speech_transcription(
     if "slash" in cleaned_lower:
         cleaned = clean_spoken_paths(cleaned)
 
+    # 13g. Process verbal spell commands ("spell C A T" -> "CAT")
+    cleaned = process_spell_commands(cleaned)
+
+    # 13h. Process serial numbers, model codes, and NATO phonetic strings ("X K 9 4 J" -> "XK94J")
+    cleaned = process_serial_numbers(cleaned)
+
     cleaned = cleaned.strip()
     if not cleaned or not cleaned.strip(".,!?;: \t\n\r"):
         return ""
@@ -1625,8 +2151,10 @@ def clean_speech_transcription(
     eff_punc_mode = (punctuation_mode or _PUNCTUATION_MODE or "full").strip().lower().replace("-", "_")
     if not is_intermediate and eff_punc_mode in ("default", "full", "standard"):
         if not cleaned.endswith((".", "!", "?", ":")):
-            if len(cleaned.split(None, 3)) >= 3:
-                cleaned += "."
+            # Do not append a trailing period to bare serial numbers or codes (e.g. "ABC123", "serial number XK94J")
+            if not _BARE_SERIAL_OR_TRIGGER_REGEX.match(cleaned):
+                if len(cleaned.split(None, 3)) >= 3:
+                    cleaned += "."
 
     # 15. Apply punctuation mode formatting (if not intermediate chunk)
     if not is_intermediate:

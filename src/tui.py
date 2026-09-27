@@ -82,6 +82,8 @@ class VoiceTranscriberTUI:
         self.auto_punctuate = True
         self.number_digits = True
         self.number_mode = "auto"
+        self.serial_collapse = True
+        self.spell_command = True
         self.middle_click_enabled = False
         self.punctuation_mode = "full"
         self.copy_to_clipboard = True
@@ -172,7 +174,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
             
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, middle_click_enabled=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -198,6 +200,10 @@ class VoiceTranscriberTUI:
                 self.number_mode = str(number_mode).strip().lower()
             if number_digits is not None:
                 self.number_digits = bool(number_digits)
+            if serial_collapse is not None:
+                self.serial_collapse = bool(serial_collapse)
+            if spell_command is not None:
+                self.spell_command = bool(spell_command)
             if middle_click_enabled is not None:
                 self.middle_click_enabled = bool(middle_click_enabled)
         if self.live and self.running:
@@ -305,6 +311,12 @@ class VoiceTranscriberTUI:
             }
             num_label, num_style = num_labels[num_mode]
             prompt.append(num_label, style=num_style)
+
+            prompt.append("│ ", style="dim white")
+            if getattr(self, "serial_collapse", True):
+                prompt.append("codes: joined ", style="cyan")
+            else:
+                prompt.append("codes: spaced ", style="dim white")
 
             prompt.append("│ ", style="dim white")
             if getattr(self, "middle_click_enabled", False):
