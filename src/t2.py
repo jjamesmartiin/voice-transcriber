@@ -129,18 +129,21 @@ LANGUAGE = "en"
 WAIT_FOR_MODEL_ON_STARTUP = True
 ENABLE_SLM = False
 
-# Shipped factory defaults for every user-tunable setting. Applied by
-# reset_to_defaults() (settings modal -> "Reset to Defaults"). Microphone
-# selection and the custom dictionary are deliberately absent: a reset must
-# never lose the chosen device or the user's own vocabulary.
+# Shipped defaults for every user-tunable setting. Applied by
+# reset_to_defaults() (settings modal -> "Reset to Defaults"), and the target
+# new installs converge on. Chosen to be the most intuitive out-of-the-box
+# setup rather than an arbitrary factory state: phone-style formatting, numbers
+# as written, fast auto-type, muted until asked, middle-click PTT opt-in.
+# Microphone selection and the custom dictionary are deliberately absent: a
+# reset must never lose the chosen device or the user's own vocabulary.
 DEFAULT_SETTINGS = {
     'MODEL_BACKEND': "cohere",
     'OVERRIDE_MODE': 'auto',
-    'COPY_TO_CLIPBOARD': True,
-    'AUTO_TYPE': False,
-    'OUTPUT_MODE': "clipboard",
+    'OUTPUT_MODE': "type_fast",
+    'AUTO_TYPE': True,
+    'COPY_TO_CLIPBOARD': False,
     'AUTO_TYPE_TRAILING_SPACE': True,
-    'AUTO_TYPE_AUTO_PUNCTUATE': True,
+    'AUTO_TYPE_AUTO_PUNCTUATE': False,
     'IS_MUTED': True,
     'NUMBER_MODE': "auto",
     'NUMBER_DIGITS': True,
@@ -149,8 +152,8 @@ DEFAULT_SETTINGS = {
     'MIDDLE_CLICK_ENABLED': False,
     'KEEP_BLUETOOTH_HANDSFREE': True,
     'SOUND_THEME': "proximity",
-    'UI_THEME': "auto",
-    'PUNCTUATION_MODE': "full",
+    'UI_THEME': "red",
+    'PUNCTUATION_MODE': "no_punctuation",
     'LANGUAGE': "en",
     'WAIT_FOR_MODEL_ON_STARTUP': True,
     'ENABLE_SLM': False,

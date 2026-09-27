@@ -20,8 +20,9 @@ is_muted: true
 # Available Options:
 #   - false : Clipboard only (copies text to clipboard, no auto-typing)
 #   - true  : Auto-type (simulates keypresses into focused window)
-# Default: false
-auto_type: false
+# Default: true
+#   (Derived from output_mode; the two are kept in sync automatically.)
+auto_type: true
 
 # ------------------------------------------------------------------------------
 # Output Mode
@@ -30,8 +31,8 @@ auto_type: false
 #   - "clipboard" : Copy text to clipboard only
 #   - "type"      : Auto-type into focused window with safe 10ms key delay
 #   - "type_fast" : Optimized auto-type with 1ms key delay and Unicode quote normalization
-# Default: "clipboard"
-output_mode: "clipboard"
+# Default: "type_fast"
+output_mode: "type_fast"
 
 # ------------------------------------------------------------------------------
 # Auto-Type Trailing Space
@@ -50,8 +51,8 @@ auto_type_trailing_space: true
 # Available Options:
 #   - true  : Enforce full punctuation and terminal period on typed output
 #   - false : Preserve user-selected punctuation mode (e.g. no_punctuation / no_terminal_period)
-# Default: true
-auto_type_auto_punctuate: true
+# Default: false
+auto_type_auto_punctuate: false
 
 # ------------------------------------------------------------------------------
 # Clipboard Copy Setting
@@ -59,8 +60,9 @@ auto_type_auto_punctuate: true
 # Available Options:
 #   - true  : Automatically copy transcribed text to clipboard
 #   - false : Do not copy transcribed text to clipboard
-# Default: true
-copy_to_clipboard: true
+# Default: false
+#   (Derived from output_mode; clipboard/type outputs set this automatically.)
+copy_to_clipboard: false
 
 # ------------------------------------------------------------------------------
 # Mode Preset (Formatting & Capitalization Style)
@@ -73,8 +75,8 @@ copy_to_clipboard: true
 #   - "aesthetic_lowercase" : All lowercase (even 'i'), but internal/expressive punctuation kept (no trailing period).
 #   - "gen_z"               : Pure Gen Z mode: all lowercase, zero punctuation, zero grammar enforcement.
 # (Backwards-compatible aliases: punctuation_mode: "full" | "no_terminal_period" | "no_punctuation" | "lowercase_no_punctuation")
-# Default: "default"
-preset: "default"
+# Default: "autocorrect"
+preset: "autocorrect"
 
 # ------------------------------------------------------------------------------
 # Spoken Language Setting & Disclaimer
@@ -106,8 +108,8 @@ wait_for_model_on_startup: true
 
 # ------------------------------------------------------------------------------
 # Number Words -> Digits Conversion
-# Controls how spoken number words are transcribed. Toggleable at runtime with
-# the [n] key in the TUI or the 'Number Conversion' option in the settings menu.
+# Controls how spoken number words are transcribed. Toggleable at runtime in the
+# settings modal ('Number Conversion').
 # Available Options:
 #   - auto   : Only runs of 2+ consecutive spoken digits become digits, so phone
 #              numbers / serial numbers convert ("five five five one two" -> 55512)
@@ -157,6 +159,15 @@ spell_command: true
 keep_bluetooth_handsfree: true
 
 # ------------------------------------------------------------------------------
+# Middle-Click Push-to-Talk
+# Hold the middle mouse button (>= 0.25s) to record; a quick click passes through.
+# Available Options:
+#   - true  : Enable middle-click push-to-talk
+#   - false : Disabled (opt-in feature)
+# Default: false
+middle_click_enabled: false
+
+# ------------------------------------------------------------------------------
 # Sound Theme
 # Theme for audio feedback and completion cues.
 # Available Options:
@@ -166,6 +177,16 @@ keep_bluetooth_handsfree: true
 #   - "silent"    : Mute all sounds (same as setting is_muted: true)
 # Default: "proximity"
 sound_theme: "proximity"
+
+# ------------------------------------------------------------------------------
+# UI Color Theme
+# Accent color for the terminal UI (the ratatui frontend and the Rich fallback).
+# Available Options:
+#   - "auto"      : Follow the terminal/system accent color
+#   - "green" | "cyan" | "blue" | "magenta" | "yellow" | "red" | "white"
+# Default: "red"
+#   (Also overrideable per-session with VT_UI_THEME or ACCENT_COLOR.)
+ui_theme: "red"
 
 # ------------------------------------------------------------------------------
 # Primary Audio Input Device Name

@@ -225,6 +225,61 @@ class TestResetToDefaults:
         ):
             assert name in t2.DEFAULT_SETTINGS
 
+    def test_shipped_defaults_are_the_intended_baseline(self):
+        """The reset target is a product decision, not an incidental value."""
+        assert t2.DEFAULT_SETTINGS["OUTPUT_MODE"] == "type_fast"
+        assert t2.DEFAULT_SETTINGS["IS_MUTED"] is True  # start muted
+        assert t2.DEFAULT_SETTINGS["MIDDLE_CLICK_ENABLED"] is False  # opt-in
+        assert t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"] == "no_punctuation"
+        assert t2.DEFAULT_SETTINGS["NUMBER_MODE"] == "auto"
+        assert t2.DEFAULT_SETTINGS["UI_THEME"] == "red"
+        assert t2.DEFAULT_SETTINGS["AUTO_TYPE_AUTO_PUNCTUATE"] is False
+
+        # Derived mirrors must agree with their source of truth.
+        mode = t2.DEFAULT_SETTINGS["OUTPUT_MODE"]
+        assert t2.DEFAULT_SETTINGS["AUTO_TYPE"] == (mode in ("type", "type_fast"))
+        assert t2.DEFAULT_SETTINGS["COPY_TO_CLIPBOARD"] == (mode not in ("type", "type_fast"))
+        assert t2.DEFAULT_SETTINGS["NUMBER_DIGITS"] == (t2.DEFAULT_SETTINGS["NUMBER_MODE"] != "words")
+
+    def test_example_config_documents_the_shipped_defaults(self):
+        """A copied config.yaml.example must behave exactly like the defaults."""
+        import yaml
+
+        example = Path(__file__).resolve().parents[2] / "config/example-config/config.yaml.example"
+        documented = yaml.safe_load(example.read_text())
+
+        key_map = {
+            "is_muted": "IS_MUTED",
+            "auto_type": "AUTO_TYPE",
+            "output_mode": "OUTPUT_MODE",
+            "auto_type_trailing_space": "AUTO_TYPE_TRAILING_SPACE",
+            "auto_type_auto_punctuate": "AUTO_TYPE_AUTO_PUNCTUATE",
+            "copy_to_clipboard": "COPY_TO_CLIPBOARD",
+            "preset": "PUNCTUATION_MODE",
+            "language": "LANGUAGE",
+            "enable_slm": "ENABLE_SLM",
+            "wait_for_model_on_startup": "WAIT_FOR_MODEL_ON_STARTUP",
+            "number_digits": "NUMBER_MODE",
+            "serial_collapse": "SERIAL_COLLAPSE",
+            "spell_command": "SPELL_COMMAND",
+            "keep_bluetooth_handsfree": "KEEP_BLUETOOTH_HANDSFREE",
+            "middle_click_enabled": "MIDDLE_CLICK_ENABLED",
+            "sound_theme": "SOUND_THEME",
+            "ui_theme": "UI_THEME",
+        }
+
+        for example_key, default_key in key_map.items():
+            assert example_key in documented, f"config.yaml.example lost '{example_key}'"
+            value = documented[example_key]
+            if default_key == "PUNCTUATION_MODE":
+                value = t2.get_canonical_preset_name(value)
+            elif default_key == "NUMBER_MODE" and isinstance(value, bool):
+                value = "digits" if value else "words"
+            assert value == t2.DEFAULT_SETTINGS[default_key], (
+                f"config.yaml.example documents {example_key}={value!r} but the "
+                f"shipped default is {t2.DEFAULT_SETTINGS[default_key]!r}"
+            )
+
 
 def _make_app(monkeypatch, recording=False):
     from main import SimpleVoiceTranscriber
