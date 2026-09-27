@@ -65,7 +65,7 @@ copy_to_clipboard: true
 # ------------------------------------------------------------------------------
 # Mode Preset (Formatting & Capitalization Style)
 # Controls grammar rules, casing, and punctuation styles for output.
-# Selectable at runtime via [g] key in TUI or 'Mode Preset' in settings [S].
+# Selectable at runtime via 'Mode Preset' in the settings modal [s/S/,].
 # Available Presets:
 #   - "default"             : Standard capitalization, grammar, and full punctuation with terminal period.
 #   - "casual"              : Standard capitalization and internal commas, but omits the trailing period.
@@ -122,7 +122,7 @@ number_digits: auto
 # ------------------------------------------------------------------------------
 # Serial Numbers, Codes & NATO Phonetic Strings
 # Detects alphanumeric identifiers, model/part/serial numbers, and NATO phonetic
-# dictation, then writes them as a single token. Toggleable in settings [S].
+# dictation, then writes them as a single token. Toggleable in settings [s/S/,].
 # Available Options:
 #   - true  : Collapse into one token ("A B C 1 2 3" -> ABC123, "Alpha Bravo 4" -> AB4)
 #   - false : Keep single space separators ("A B C 1 2 3", "Alpha Bravo 4" -> A B 4)
@@ -135,7 +135,7 @@ serial_collapse: true
 # ------------------------------------------------------------------------------
 # Verbal Spell Command
 # Enables a spoken "spell" / "spelled" command that joins dictated letters,
-# digits and NATO words. Toggleable in settings [S].
+# digits and NATO words. Toggleable in settings [s/S/,].
 # Available Options:
 #   - true  : "spell C A T" -> CAT, "the word is spelled c a t" -> "the word is spelled CAT"
 #   - false : Leave "spell ..." phrases untouched

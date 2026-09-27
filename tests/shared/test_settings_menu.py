@@ -163,6 +163,69 @@ class TestSettingsPersistence:
         assert t2.UI_THEME == "dracula"
 
 
+class TestResetToDefaults:
+    """The settings modal's "Reset to Defaults" action."""
+
+    def test_reset_restores_every_setting_and_persists(self, cfg, monkeypatch):
+        monkeypatch.setattr(t2, "OUTPUT_MODE", "type_fast")
+        monkeypatch.setattr(t2, "AUTO_TYPE", True)
+        monkeypatch.setattr(t2, "UI_THEME", "magenta")
+        monkeypatch.setattr(t2, "PUNCTUATION_MODE", "gen_z")
+        monkeypatch.setattr(t2, "MIDDLE_CLICK_ENABLED", True)
+        monkeypatch.setattr(t2, "NUMBER_MODE", "words")
+        monkeypatch.setattr(t2, "SERIAL_COLLAPSE", False)
+        monkeypatch.setattr(t2, "SPELL_COMMAND", False)
+        monkeypatch.setattr(t2, "IS_MUTED", False)
+
+        returned = t2.reset_to_defaults()
+
+        assert returned == t2.DEFAULT_SETTINGS
+        for name, expected in t2.DEFAULT_SETTINGS.items():
+            assert getattr(t2, name) == expected, f"{name} not reset"
+        assert t2.NUMBER_DIGITS is True  # mirror kept in sync
+
+        # Survives a reload from the file it just wrote.
+        monkeypatch.setattr(t2, "UI_THEME", "magenta")
+        monkeypatch.setattr(t2, "PUNCTUATION_MODE", "gen_z")
+        t2.load_audio_config(file_path=str(cfg))
+        assert t2.UI_THEME == t2.DEFAULT_SETTINGS["UI_THEME"]
+        assert t2.PUNCTUATION_MODE == t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"]
+
+    def test_reset_keeps_microphone_and_unknown_keys(self, cfg, monkeypatch):
+        import json
+
+        cfg.write_text(json.dumps({
+            "input_device_index": 7,
+            "primary_device_name": "Yeti",
+            "legacy_thing": "keep me",
+        }))
+        t2.load_audio_config(file_path=str(cfg))
+        assert t2.PRIMARY_DEVICE_NAME == "Yeti"
+
+        t2.reset_to_defaults()
+
+        assert t2.INPUT_DEVICE_INDEX == 7
+        assert t2.PRIMARY_DEVICE_NAME == "Yeti"
+        written = json.loads(cfg.read_text())
+        assert written["primary_device_name"] == "Yeti"
+        assert written["legacy_thing"] == "keep me"
+        assert written["ui_theme"] == t2.DEFAULT_SETTINGS["UI_THEME"]
+
+    def test_defaults_cover_every_toggle_the_modal_exposes(self):
+        for name in (
+            "OUTPUT_MODE",
+            "AUTO_TYPE_TRAILING_SPACE",
+            "NUMBER_MODE",
+            "SERIAL_COLLAPSE",
+            "SPELL_COMMAND",
+            "MIDDLE_CLICK_ENABLED",
+            "SOUND_THEME",
+            "UI_THEME",
+            "PUNCTUATION_MODE",
+        ):
+            assert name in t2.DEFAULT_SETTINGS
+
+
 def _make_app(monkeypatch, recording=False):
     from main import SimpleVoiceTranscriber
 
@@ -213,3 +276,28 @@ class TestSettingsMenuLifecycle:
 
         app.tui.print_warning.assert_called_once()
         assert opened == []  # picker never opened
+
+    def test_reset_defaults_callback_restores_and_notifies(self, monkeypatch):
+        app = _make_app(monkeypatch)
+        calls = []
+        monkeypatch.setattr(
+            t2, "reset_to_defaults", lambda: calls.append("reset") or dict(t2.DEFAULT_SETTINGS)
+        )
+
+        app._on_tui_reset_defaults()
+
+        assert calls == ["reset"]
+        app._sync_tui_state.assert_called_once()
+        app.tui.print_event.assert_called_once()
+        app.tui.print_warning.assert_not_called()
+
+    def test_reset_defaults_blocked_while_recording(self, monkeypatch):
+        app = _make_app(monkeypatch, recording=True)
+        calls = []
+        monkeypatch.setattr(t2, "reset_to_defaults", lambda: calls.append("reset"))
+
+        app._on_tui_reset_defaults()
+
+        assert calls == []
+        app.tui.print_warning.assert_called_once()
+        app._sync_tui_state.assert_not_called()

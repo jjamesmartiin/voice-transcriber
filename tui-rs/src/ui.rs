@@ -153,7 +153,7 @@ pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Lin
             }
 
             let l2: Vec<Span<'static>> = vec![
-                Span::styled("  [Space] Rec  [S/,] Settings  [g] Preset  [t] Theme  [M] Mic  [m] Mute  [c] Mode  [s] Space  [n] Num  [q] Quit", dim()),
+                Span::styled("  [Space] Rec  [s/S/,] Settings  [M] Mic  [r] Reset  [q] Quit", dim()),
             ];
 
             vec![Line::from(l1), Line::from(l2)]

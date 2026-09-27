@@ -360,27 +360,9 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                                 Intent::ChangeDevice => {
                                     mic_picker::run_mic_picker(Some(&writer), Some(&rx), &mut app)?;
                                 }
-                                Intent::ToggleMute => ipc::send_cmd(&writer, "toggle_mute"),
-                                Intent::ToggleAutoType => {
-                                    ipc::send_cmd(&writer, "cycle_output_mode")
-                                }
-                                Intent::ToggleTrailingSpace => {
-                                    ipc::send_cmd(&writer, "toggle_trailing_space")
-                                }
-                                Intent::CyclePunctuation => {
-                                    ipc::send_cmd(&writer, "cycle_punctuation")
-                                }
-                                Intent::ToggleNumbers => ipc::send_cmd(&writer, "toggle_numbers"),
-                                Intent::ToggleMiddleClick => {
-                                    ipc::send_cmd(&writer, "toggle_middle_click")
-                                }
-                                Intent::SelectTheme => {
-                                    theme_picker::run_theme_picker(app.ui_theme, Some(&writer), Some(&rx), &mut app)?;
-                                }
                                 Intent::OpenSettingsPicker => {
                                     settings_picker::run_settings_picker(Some(&writer), Some(&rx), &mut app)?;
                                 }
-                                Intent::CycleTheme => ipc::send_cmd(&writer, "cycle_theme"),
                                 Intent::ResetTerminal => ipc::send_cmd(&writer, "reset_terminal"),
                             }
                         }
@@ -467,31 +449,8 @@ fn run_local(demo_enabled: bool, theme: Theme) -> io::Result<()> {
                             Intent::ChangeDevice => {
                                 mic_picker::run_mic_picker(None, None, &mut app)?;
                             }
-                            Intent::ToggleMute => app.is_muted = !app.is_muted,
-                            Intent::ToggleAutoType => {
-                                app.output_mode = match app.output_mode.as_str() {
-                                    "clipboard" => "type".to_string(),
-                                    "type" => "type_fast".to_string(),
-                                    _ => "clipboard".to_string(),
-                                };
-                                app.auto_type = app.output_mode == "type" || app.output_mode == "type_fast";
-                            }
-                            Intent::ToggleTrailingSpace => {
-                                app.trailing_space = !app.trailing_space;
-                            }
-                            Intent::CyclePunctuation => {
-                                app.cycle_punctuation();
-                            }
-                            Intent::ToggleNumbers => {}
-                            Intent::ToggleMiddleClick => {}
-                            Intent::SelectTheme => {
-                                theme_picker::run_theme_picker(app.ui_theme, None, None, &mut app)?;
-                            }
                             Intent::OpenSettingsPicker => {
                                 settings_picker::run_settings_picker(None, None, &mut app)?;
-                            }
-                            Intent::CycleTheme => {
-                                app.cycle_theme();
                             }
                             Intent::ResetTerminal => {}
                         }
@@ -559,15 +518,6 @@ struct Pending {
 enum Intent {
     ToggleRecord,
     ChangeDevice,
-    ToggleMute,
-    ToggleAutoType,
-    ToggleTrailingSpace,
-    ToggleNumbers,
-    ToggleMiddleClick,
-    CyclePunctuation,
-    #[allow(dead_code)]
-    CycleTheme,
-    SelectTheme,
     OpenSettingsPicker,
     ResetTerminal,
     Quit,
@@ -577,17 +527,15 @@ fn key_intent(key: KeyEvent) -> Option<Intent> {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return Some(Intent::Quit);
     }
+    // Settings are changed exclusively through the settings modal (or the
+    // global Ctrl+Alt+I hotkey): every one-off toggle shortcut was removed so
+    // there is a single place to configure the app.
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => Some(Intent::Quit),
         KeyCode::Char(' ') | KeyCode::Enter => Some(Intent::ToggleRecord),
-        KeyCode::Char('m') => Some(Intent::ToggleMute),
-        KeyCode::Char('c') => Some(Intent::ToggleAutoType),
-        KeyCode::Char('s') => Some(Intent::ToggleTrailingSpace),
-        KeyCode::Char('S') | KeyCode::Char(',') => Some(Intent::OpenSettingsPicker),
-        KeyCode::Char('p') | KeyCode::Char('P') | KeyCode::Char('g') | KeyCode::Char('G') => Some(Intent::CyclePunctuation),
-        KeyCode::Char('n') => Some(Intent::ToggleNumbers),
-        KeyCode::Char('o') | KeyCode::Char('O') => Some(Intent::ToggleMiddleClick),
-        KeyCode::Char('t') | KeyCode::Char('T') => Some(Intent::SelectTheme),
+        KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char(',') => {
+            Some(Intent::OpenSettingsPicker)
+        }
         KeyCode::Char('r') => Some(Intent::ResetTerminal),
         KeyCode::Char('M') | KeyCode::Char('i') | KeyCode::Char('I') => Some(Intent::ChangeDevice),
         _ => None,
@@ -616,12 +564,8 @@ fn print_help() {
          \n\
          KEYS:\n\
          \x20   Space / Enter     Start / stop recording\n\
-         \x20   M, i              Audio device / settings menu\n\
-         \x20   m                 Toggle sound effects\n\
-         \x20   c                 Cycle output mode (Clipboard / Type / Paste / Paste Terminal)\n\
-         \x20   n                 Toggle number-to-digits\n\
-         \x20   o                 Toggle middle click push-to-talk\n\
-         \x20   t                 Cycle UI theme\n\
+         \x20   s, S, ,           Settings & configuration modal\n\
+         \x20   M, i              Microphone picker\n\
          \x20   r                 Reset terminal & clipboard bridge\n\
          \x20   q, Esc, Ctrl+C    Quit"
     );

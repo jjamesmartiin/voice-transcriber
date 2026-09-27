@@ -332,7 +332,11 @@ class TestWisprFlowDictationWorkflows:
 # 5. Interactive TUI Keypresses & Config Persistence
 # ===========================================================================
 class TestTuiKeypressAndConfigSyncWorkflow:
-    """Verifies that pressing TUI shortcut keys updates in-memory state and saves to config."""
+    """Verifies settings changes update in-memory state and persist to config.
+
+    Direct per-setting shortcut keys were removed, so the TUI only routes the
+    settings modal; the callbacks the modal fires are what mutate + save.
+    """
 
     def test_tui_keypress_actions(self, tmp_path, monkeypatch):
         yaml_config = tmp_path / "config.yaml"
@@ -342,25 +346,34 @@ class TestTuiKeypressAndConfigSyncWorkflow:
 
         tui = VoiceTranscriberTUI()
 
-        # Wire TUI callbacks to t2 functions (mirrors SimpleVoiceTranscriber)
+        # Wire TUI callbacks to t2 functions (mirrors SimpleVoiceTranscriber;
+        # these are the callbacks the settings modal fires).
         tui.on_cycle_output_mode = lambda: (t2.cycle_output_mode(), t2.save_audio_config())
         tui.on_toggle_mute = lambda: (setattr(t2, 'IS_MUTED', not t2.IS_MUTED), t2.save_audio_config())
         tui.on_toggle_trailing_space = lambda: (t2.toggle_auto_type_trailing_space(), t2.save_audio_config())
 
-        # Press 'c' -> cycle output mode: clipboard -> type
+        # The old one-key shortcuts are inert now; only the settings keys open
+        # the modal, and nothing is mutated on its own.
+        opened = []
+        tui.on_open_settings_picker = lambda: opened.append("settings")
         tui._handle_keypress('c')
-        assert t2.OUTPUT_MODE == "type"
+        tui._handle_keypress('m')
+        tui._handle_keypress('s')
+        assert opened == ["settings"]
+        assert t2.OUTPUT_MODE == "clipboard"
+        assert t2.IS_MUTED is False
+        assert t2.AUTO_TYPE_TRAILING_SPACE is True
 
-        # Press 'c' again -> cycle: type -> type_fast
-        tui._handle_keypress('c')
+        # Cycling output mode twice: clipboard -> type -> type_fast
+        tui.on_cycle_output_mode()
+        assert t2.OUTPUT_MODE == "type"
+        tui.on_cycle_output_mode()
         assert t2.OUTPUT_MODE == "type_fast"
 
-        # Press 'm' -> toggle mute
-        tui._handle_keypress('m')
+        tui.on_toggle_mute()
         assert t2.IS_MUTED is True
 
-        # Press 's' -> toggle trailing space
-        tui._handle_keypress('s')
+        tui.on_toggle_trailing_space()
         assert t2.AUTO_TYPE_TRAILING_SPACE is False
 
         # Verify config was persisted to file

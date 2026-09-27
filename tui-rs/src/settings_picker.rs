@@ -31,6 +31,7 @@ pub enum SettingKind {
     Theme,
     Microphone,
     ResetTerminal,
+    ResetDefaults,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -41,7 +42,7 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 11] = [
+pub const SETTINGS: [SettingItem; 12] = [
     SettingItem {
         kind: SettingKind::PunctuationMode,
         icon: "✨",
@@ -108,10 +109,20 @@ pub const SETTINGS: [SettingItem; 11] = [
         title: "Reset Terminal",
         keywords: "reset terminal clipboard bridge clear state fix",
     },
+    SettingItem {
+        kind: SettingKind::ResetDefaults,
+        icon: "↩️ ",
+        title: "Reset to Defaults",
+        keywords: "reset defaults factory restore revert shipped initial config settings default everything",
+    },
 ];
 
 impl SettingItem {
-    pub fn value_and_badge(&self, app: &App, reset_done: bool) -> (String, &'static str, Color) {
+    pub fn value_and_badge(
+        &self,
+        app: &App,
+        state: &SettingsPickerState,
+    ) -> (String, &'static str, Color) {
         let c = app.effective_color().color();
         match self.kind {
             SettingKind::TrailingSpace => {
@@ -210,7 +221,7 @@ impl SettingItem {
                 (dev, "[SELECT]", Color::Yellow)
             }
             SettingKind::ResetTerminal => {
-                if reset_done {
+                if state.reset_done {
                     (
                         "Terminal & clipboard bridge reset".to_string(),
                         "[DONE]",
@@ -221,6 +232,27 @@ impl SettingItem {
                         "Reset terminal state & clipboard bridge".to_string(),
                         "[RUN]",
                         Color::Yellow,
+                    )
+                }
+            }
+            SettingKind::ResetDefaults => {
+                if state.defaults_done {
+                    (
+                        "All settings restored to shipped defaults".to_string(),
+                        "[DONE]",
+                        Color::Green,
+                    )
+                } else if state.confirm_defaults {
+                    (
+                        "Press Enter again to confirm factory reset".to_string(),
+                        "[SURE?]",
+                        Color::Red,
+                    )
+                } else {
+                    (
+                        "Restore all settings to shipped defaults".to_string(),
+                        "[RESET]",
+                        Color::Red,
                     )
                 }
             }
@@ -296,6 +328,10 @@ pub struct SettingsPickerState {
     pub selected_index: usize,
     pub filtered_indices: Vec<usize>,
     pub reset_done: bool,
+    /// True once "Reset to Defaults" ran, until the picker is closed.
+    pub defaults_done: bool,
+    /// Arming flag: the factory reset needs a second Enter/Space to commit.
+    pub confirm_defaults: bool,
 }
 
 impl SettingsPickerState {
@@ -305,6 +341,8 @@ impl SettingsPickerState {
             selected_index: 0,
             filtered_indices: (0..SETTINGS.len()).collect(),
             reset_done: false,
+            defaults_done: false,
+            confirm_defaults: false,
         }
     }
 
@@ -340,7 +378,29 @@ impl SettingsPickerState {
         }
     }
 
+    /// Gate for the destructive "Reset to Defaults" action. The first call
+    /// only arms it and returns `false`; a second consecutive call (Enter or
+    /// Space again, with no other keystroke in between) commits it.
+    pub fn confirm_reset_defaults(&mut self) -> bool {
+        if self.confirm_defaults {
+            self.confirm_defaults = false;
+            self.defaults_done = true;
+            true
+        } else {
+            self.confirm_defaults = true;
+            false
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> SettingsPickerAction {
+        // Arming the destructive factory reset survives only until the next
+        // keystroke that is not the confirming Enter/Space.
+        let is_activate = key.code == KeyCode::Enter
+            || (key.code == KeyCode::Char(' ') && self.query.is_empty());
+        if !is_activate {
+            self.confirm_defaults = false;
+        }
+
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c') => return SettingsPickerAction::Close,
@@ -519,7 +579,7 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
             let actual_idx = scroll_offset + view_i;
             let is_selected = actual_idx == state.selected_index;
             let item = &SETTINGS[opt_idx];
-            let (val_str, badge, badge_color) = item.value_and_badge(app, state.reset_done);
+            let (val_str, badge, badge_color) = item.value_and_badge(app, state);
 
             let mut line_spans = Vec::new();
             if is_selected {
@@ -801,6 +861,19 @@ pub fn run_settings_picker(
                                     let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Hide);
                                     let _ = terminal.clear();
                                 }
+                                SettingKind::ResetDefaults => {
+                                    if state.confirm_reset_defaults() {
+                                        if let Some(w) = writer {
+                                            ipc::send_cmd(w, "reset_defaults");
+                                        }
+                                        let _ = crossterm::terminal::enable_raw_mode();
+                                        let _ = crossterm::execute!(
+                                            io::stdout(),
+                                            crossterm::cursor::Hide
+                                        );
+                                        let _ = terminal.clear();
+                                    }
+                                }
                             }
                         }
                     }
@@ -867,7 +940,7 @@ mod tests {
         );
 
         // Test value and badge display
-        let (val, badge, _) = SETTINGS[0].value_and_badge(&app, false);
+        let (val, badge, _) = SETTINGS[0].value_and_badge(&app, &state);
         assert!(!val.is_empty());
         assert!(!badge.is_empty());
 
@@ -875,5 +948,38 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|f| render_settings_picker(f, &state2, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_reset_defaults_requires_confirmation() {
+        let mut state = SettingsPickerState::new();
+        state.query = "reset".to_string();
+        state.update_filter();
+        let pos = state
+            .filtered_indices
+            .iter()
+            .position(|&i| SETTINGS[i].kind == SettingKind::ResetDefaults)
+            .expect("reset-to-defaults must be findable by search");
+        state.selected_index = pos;
+
+        // First activation only arms the destructive reset.
+        let action = state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            action,
+            SettingsPickerAction::Toggle(SettingKind::ResetDefaults)
+        );
+        assert!(!state.confirm_reset_defaults());
+        assert!(state.confirm_defaults);
+        assert!(!state.defaults_done);
+
+        // The second consecutive activation commits it.
+        assert!(state.confirm_reset_defaults());
+        assert!(state.defaults_done);
+        assert!(!state.confirm_defaults);
+
+        // ...but a stray keystroke in between disarms it instead of wiping.
+        assert!(!state.confirm_reset_defaults());
+        state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert!(!state.confirm_defaults);
     }
 }

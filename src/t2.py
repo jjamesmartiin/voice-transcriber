@@ -128,6 +128,34 @@ PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "aesthetic_
 LANGUAGE = "en"
 WAIT_FOR_MODEL_ON_STARTUP = True
 ENABLE_SLM = False
+
+# Shipped factory defaults for every user-tunable setting. Applied by
+# reset_to_defaults() (settings modal -> "Reset to Defaults"). Microphone
+# selection and the custom dictionary are deliberately absent: a reset must
+# never lose the chosen device or the user's own vocabulary.
+DEFAULT_SETTINGS = {
+    'MODEL_BACKEND': "cohere",
+    'OVERRIDE_MODE': 'auto',
+    'COPY_TO_CLIPBOARD': True,
+    'AUTO_TYPE': False,
+    'OUTPUT_MODE': "clipboard",
+    'AUTO_TYPE_TRAILING_SPACE': True,
+    'AUTO_TYPE_AUTO_PUNCTUATE': True,
+    'IS_MUTED': True,
+    'NUMBER_MODE': "auto",
+    'NUMBER_DIGITS': True,
+    'SERIAL_COLLAPSE': True,
+    'SPELL_COMMAND': True,
+    'MIDDLE_CLICK_ENABLED': False,
+    'KEEP_BLUETOOTH_HANDSFREE': True,
+    'SOUND_THEME': "proximity",
+    'UI_THEME': "auto",
+    'PUNCTUATION_MODE': "full",
+    'LANGUAGE': "en",
+    'WAIT_FOR_MODEL_ON_STARTUP': True,
+    'ENABLE_SLM': False,
+}
+
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 
 _TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -822,6 +850,23 @@ def save_audio_config(file_path=None):
         logger.debug(f"Saved audio device config to {CONFIG_FILE}")
     except Exception as e:
         logger.error(f"Could not save audio config: {e}")
+
+
+def reset_to_defaults() -> dict:
+    """Restore every user-tunable setting to its shipped default and persist it.
+
+    Applies :data:`DEFAULT_SETTINGS` to the live module globals, then writes the
+    result through :func:`save_audio_config`. Microphone selection and the
+    custom dictionary are intentionally untouched, and unknown keys already
+    present in the config file are preserved.
+    """
+    global NUMBER_DIGITS
+    for name, value in DEFAULT_SETTINGS.items():
+        globals()[name] = value
+    NUMBER_DIGITS = (NUMBER_MODE != "words")
+    save_audio_config()
+    logger.info("All settings restored to shipped defaults")
+    return dict(DEFAULT_SETTINGS)
 
 
 def cycle_output_mode() -> str:
@@ -1582,6 +1627,8 @@ def select_settings_picker():
 
     console = Console()
     reset_done = False
+    defaults_done = False
+    confirm_defaults = False
     query = ""
     selected_idx = 0
 
@@ -1652,6 +1699,12 @@ def select_settings_picker():
             "title": "Reset Terminal",
             "keywords": "reset terminal clipboard bridge clear state fix",
         },
+        {
+            "id": "reset_defaults",
+            "icon": "↩️ ",
+            "title": "Reset to Defaults",
+            "keywords": "reset defaults factory restore revert shipped initial config settings default everything",
+        },
     ]
 
     def get_setting_state(item_id):
@@ -1721,6 +1774,13 @@ def select_settings_picker():
                 return "Terminal & clipboard bridge reset", "[DONE]", "green"
             else:
                 return "Reset terminal state & clipboard bridge", "[RUN]", "yellow"
+        elif item_id == "reset_defaults":
+            if defaults_done:
+                return "All settings restored to defaults", "[DONE]", "green"
+            elif confirm_defaults:
+                return "Press Enter again to confirm factory reset", "[SURE?]", "red"
+            else:
+                return "Restore all settings to shipped defaults", "[RESET]", "red"
         return "", "", "white"
 
     def filter_settings(q):
@@ -1796,6 +1856,8 @@ def select_settings_picker():
         console.print(main_panel)
 
         key = _read_key()
+        if key != 'ENTER':
+            confirm_defaults = False
         if key in ('ESC', 'CTRL_C'):
             save_audio_config()
             console.clear()
@@ -1840,6 +1902,13 @@ def select_settings_picker():
                 elif item_id == "reset_terminal":
                     reset_terminal()
                     reset_done = True
+                elif item_id == "reset_defaults":
+                    if confirm_defaults:
+                        reset_to_defaults()
+                        defaults_done = True
+                        confirm_defaults = False
+                    else:
+                        confirm_defaults = True
         elif key == 'UP':
             if matches:
                 selected_idx = (selected_idx - 1) % len(matches)

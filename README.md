@@ -78,10 +78,8 @@ See the [WSL guide](platforms/wsl/README.md) and
 | **`Space`** (tap while holding `Alt+Shift`) | **Hands-Free Latch.** Release the keys and keep speaking; tap `Alt+Shift` again when finished. |
 | **Middle-click** (hold ~0.25 s) | **Mouse Push-to-Talk.** A quick click (< 0.25 s) passes through and is ignored. |
 | **`Ctrl`** (held at release) | **Clipboard override.** Forces clipboard output for this utterance even when auto-type is enabled. |
-| **`Ctrl+Alt+I`** (or `S`, `,`, `i` in terminal) | **Settings modal.** Interactive modal (`⚙️ Settings & Configuration`) with fuzzy search, in-place toggle badges, output modes, and formatting. |
-| **`g`** (in terminal) | **Mode preset switcher.** Interactive modal (`✨ Mode Preset Switcher`) with live formatting previews for Default, Casual, Autocorrect, Aesthetic Lowercase, and Pure Gen Z modes. |
+| **`Ctrl+Alt+I`** (or `s`, `S`, `,`, `i` in terminal) | **Settings modal.** Interactive modal (`⚙️ Settings & Configuration`) with fuzzy search, in-place toggle badges, output modes, formatting, the microphone and theme sub-pickers, plus **Reset to Defaults**. |
 | **`M`** (in terminal) | **Microphone picker.** Interactive device picker modal (`🎤 Microphone Input Device`) with active and default indicators. |
-| **`t`** (in terminal) | **Theme picker.** Interactive UI accent color palette modal (`🎨 Select UI Color Theme`). |
 
 Hotkey behaviour is portable across all three platforms, including the
 hands-free latch and the middle-click hold threshold.

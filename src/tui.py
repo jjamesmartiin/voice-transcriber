@@ -324,7 +324,7 @@ class VoiceTranscriberTUI:
             else:
                 prompt.append("mouse: off ", style="dim white")
 
-            prompt.append("\n  [Space] Rec  [S/,] Settings  [g] Preset  [t] Theme  [M] Mic  [m] Mute  [c] Mode  [s] Space  [n] Num  [q] Quit", style="dim white")
+            prompt.append("\n  [Space] Rec  [s/S/,] Settings  [M] Mic  [r] Reset  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
             prompt.append("RECORDING ", style="bold white on red")
@@ -566,48 +566,11 @@ class VoiceTranscriberTUI:
                 self.on_open_mic_picker()
             elif self.on_change_device:
                 self.on_change_device()
-        elif ch in (',', 'S', 'i', 'I'):
+        elif ch in (',', 's', 'S', 'i', 'I'):
             if getattr(self, 'on_open_settings_picker', None):
                 self.on_open_settings_picker()
             elif getattr(self, 'on_change_device', None):
                 self.on_change_device()
-        elif ch == 'm':
-            if self.on_toggle_mute:
-                self.on_toggle_mute()
-        elif ch.lower() == 'c':
-            if getattr(self, 'on_cycle_output_mode', None):
-                self.on_cycle_output_mode()
-            elif self.on_toggle_autotype:
-                self.on_toggle_autotype()
-        elif ch == 's':
-            if getattr(self, 'on_toggle_trailing_space', None):
-                self.on_toggle_trailing_space()
-        elif ch in (',', 'S'):
-            if getattr(self, 'on_open_settings_picker', None):
-                self.on_open_settings_picker()
-            elif getattr(self, 'on_change_device', None):
-                self.on_change_device()
-        elif ch.lower() == 'p':
-            if getattr(self, 'on_cycle_punctuation', None):
-                self.on_cycle_punctuation()
-        elif ch.lower() == 'g':
-            if getattr(self, 'on_open_preset_picker', None):
-                self.on_open_preset_picker()
-            elif getattr(self, 'on_cycle_punctuation', None):
-                self.on_cycle_punctuation()
-        elif ch.lower() == 't':
-            if getattr(self, 'on_open_theme_picker', None):
-                self.on_open_theme_picker()
-            elif self.on_cycle_theme:
-                self.on_cycle_theme()
-            else:
-                self.cycle_ui_theme()
-        elif ch.lower() == 'n':
-            if self.on_toggle_numbers:
-                self.on_toggle_numbers()
-        elif ch.lower() == 'o':
-            if self.on_toggle_middle_click:
-                self.on_toggle_middle_click()
         elif ch.lower() == 'r':
             if self.on_reset_terminal:
                 self.on_reset_terminal()

@@ -208,6 +208,7 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_spell_command = self._on_tui_toggle_spell_command
         self.tui.on_toggle_middle_click = self._on_tui_toggle_middle_click
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
+        self.tui.on_reset_defaults = self._on_tui_reset_defaults
         self.tui.on_open_preset_picker = self.open_preset_picker
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
         self.tui.on_set_theme = self._on_tui_set_theme
@@ -394,6 +395,30 @@ class SimpleVoiceTranscriber:
         self._sync_tui_state()
         disp = t2.get_preset_display_name(new_mode)
         self.tui.print_event("✨ Mode Preset", f"Preset set to {disp}", level="info")
+
+    def _on_tui_reset_defaults(self):
+        """Restore every user-tunable setting to its shipped default."""
+        import t2
+        if getattr(self, 'recording', False):
+            self.tui.print_warning("Settings Locked", "Cannot change settings while recording is active.")
+            return
+        t2.reset_to_defaults()
+        # Re-apply the settings that are mirrored into hardware-facing objects.
+        hotkeys = getattr(self, 'hotkey_system', None)
+        if hotkeys:
+            if hasattr(hotkeys, "set_middle_click_enabled"):
+                hotkeys.set_middle_click_enabled(getattr(t2, 'MIDDLE_CLICK_ENABLED', False))
+            if hasattr(hotkeys, "set_sound_theme"):
+                hotkeys.set_sound_theme(getattr(t2, 'SOUND_THEME', 'proximity'))
+        audio_cues = getattr(self, 'audio_cues', None)
+        if audio_cues and hasattr(audio_cues, "set_sound_theme"):
+            audio_cues.set_sound_theme(getattr(t2, 'SOUND_THEME', 'proximity'))
+        self._sync_tui_state()
+        self.tui.print_event(
+            "↩️ Reset to Defaults",
+            "All settings restored to their shipped defaults. Microphone choice and dictionary kept.",
+            level="success",
+        )
 
     def open_preset_picker(self):
         """Open interactive mode preset picker modal"""

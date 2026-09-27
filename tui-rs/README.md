@@ -55,13 +55,16 @@ automatically.
 | Key | Action |
 | :-- | :-- |
 | `Space` / `Enter` | Start / stop recording |
-| `M`, `i` | Audio device / settings menu (Python takes the terminal back) |
-| `m` | Toggle sound effects |
-| `c` | Toggle auto-type vs clipboard |
-| `n` | Toggle number-to-digits |
-| `t` | Cycle UI theme |
+| `s`, `S`, `,` | Settings & configuration modal |
+| `M`, `i` | Microphone picker |
 | `r` | Reset terminal & clipboard bridge |
 | `q`, `Esc`, `Ctrl+C` | Quit |
+
+Every setting is changed from inside the settings modal rather than from
+one-key shortcuts on the main view. The modal also hosts the theme and
+microphone sub-pickers, and a **Reset to Defaults** action that restores all
+shipped defaults (press Enter twice to confirm). Your microphone choice and the
+custom dictionary are never touched by a reset.
 
 The settings menu is opened by **suspending** the TUI (`ratatui::restore()`),
 letting Python draw its own Rich menu, then resuming. Messages the engine emits
@@ -90,6 +93,7 @@ Rust → Python:
 {"t":"cmd","cmd":"toggle_record"}    # and: change_device, toggle_mute,
                                      # toggle_autotype, toggle_numbers,
                                      # cycle_theme, reset_terminal, quit
+{"t":"cmd","cmd":"reset_defaults"}  # restore shipped defaults (settings modal)
 ```
 
 Set `VT_TUI_DEBUG=/tmp/vt.log` for a trace of commands, suspend/resume, and

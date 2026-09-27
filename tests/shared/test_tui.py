@@ -113,35 +113,28 @@ def test_tui_handle_keypress():
     tui = VoiceTranscriberTUI()
     called = []
     tui.on_change_device = lambda: called.append("mic")
-    tui.on_toggle_mute = lambda: called.append("mute")
-    tui.on_toggle_autotype = lambda: called.append("clipboard")
-    tui.on_cycle_theme = lambda: called.append("theme")
-    tui.on_toggle_trailing_space = lambda: called.append("space")
-    tui.on_cycle_punctuation = lambda: called.append("punctuation")
+    tui.on_open_mic_picker = lambda: called.append("mic_picker")
+    tui.on_open_settings_picker = lambda: called.append("settings")
+    tui.on_reset_terminal = lambda: called.append("reset_terminal")
 
     tui._handle_keypress('M')
-    assert called == ["mic"]
+    assert called == ["mic_picker"]
 
-    tui._handle_keypress('m')
-    assert called == ["mic", "mute"]
+    # Every direct setting shortcut is gone: only the settings modal opens them.
+    called.clear()
+    for key in ('s', 'S', ','):
+        tui._handle_keypress(key)
+    assert called == ["settings", "settings", "settings"]
 
-    tui._handle_keypress('c')
-    assert called == ["mic", "mute", "clipboard"]
+    called.clear()
+    tui._handle_keypress('r')
+    assert called == ["reset_terminal"]
 
-    tui._handle_keypress('s')
-    assert called == ["mic", "mute", "clipboard", "space"]
-
-    tui._handle_keypress('p')
-    assert called == ["mic", "mute", "clipboard", "space", "punctuation"]
-
-    tui._handle_keypress('t')
-    assert called == ["mic", "mute", "clipboard", "space", "punctuation", "theme"]
-
-    tui.on_open_settings_picker = lambda: called.append("settings")
-    tui._handle_keypress(',')
-    assert called[-1] == "settings"
-    tui._handle_keypress('S')
-    assert called[-1] == "settings"
+    # Old one-key toggles must no longer fire anything.
+    called.clear()
+    for key in ('m', 'c', 'p', 'g', 't', 'n', 'o'):
+        tui._handle_keypress(key)
+    assert called == []
 
 
 def test_tui_event_dividing_lines_follow_theme():
@@ -200,16 +193,14 @@ def test_tui_event_dividing_lines_follow_theme():
         tui.console.print = original_print
 
 
-def test_theme_picker_key_dispatch():
+def test_theme_picker_no_longer_has_a_quick_key():
     tui = VoiceTranscriberTUI()
     called = []
     tui.on_open_theme_picker = lambda: called.append("picker")
     tui._handle_keypress('t')
-    assert called == ["picker"]
-
-    called.clear()
     tui._handle_keypress('T')
-    assert called == ["picker"]
+    # The theme is now picked from inside the settings modal.
+    assert called == []
 
     import t2
     assert hasattr(t2, 'select_theme_picker')
@@ -221,18 +212,10 @@ def test_settings_and_mic_picker_key_dispatch():
     tui.on_open_settings_picker = lambda: called.append("settings")
     tui.on_open_mic_picker = lambda: called.append("mic_picker")
 
-    # Settings triggers: S, ,, i, I
-    tui._handle_keypress('S')
-    assert called[-1] == "settings"
-
-    tui._handle_keypress(',')
-    assert called[-1] == "settings"
-
-    tui._handle_keypress('i')
-    assert called[-1] == "settings"
-
-    tui._handle_keypress('I')
-    assert called[-1] == "settings"
+    # Settings triggers: s, S, ,, i, I
+    for key in ('s', 'S', ',', 'i', 'I'):
+        tui._handle_keypress(key)
+        assert called[-1] == "settings", key
 
     # Mic trigger: M
     tui._handle_keypress('M')

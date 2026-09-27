@@ -315,6 +315,7 @@ impl App {
         }
     }
 
+    #[allow(dead_code)] // theme selection now lives in the settings modal
     pub fn cycle_theme(&mut self) -> Theme {
         self.ui_theme = self.ui_theme.next();
         self.ui_theme
