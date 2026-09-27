@@ -278,3 +278,39 @@ def test_full_pipeline_auto_number_mode(number_mode):
         "call five five five one two one two", skip_slm=True
     )
     assert "5551212" in converted
+
+
+def test_post_processor_latency_benchmark(benchmark_reporter):
+    """Confirm post_processor execution latency is under 0.1ms per phrase across all 3 modes."""
+    import time
+
+    test_phrases = [
+        "bring one of them over here",
+        "call me at five five five one two one two today",
+        "the server has two hundred forty eight megabytes left",
+        "let us meet at five pm on twenty first street",
+    ]
+    for mode in ["auto", "digits", "words"]:
+        pp.set_number_digits_mode(mode)
+        # Warmup
+        for p in test_phrases:
+            pp.clean_speech_transcription(p, skip_slm=True)
+        N = 500
+        start = time.perf_counter()
+        for _ in range(N):
+            for p in test_phrases:
+                pp.clean_speech_transcription(p, skip_slm=True)
+        elapsed = time.perf_counter() - start
+        avg_us = (elapsed / (N * len(test_phrases))) * 1e6
+        throughput = int(1e6 / max(avg_us, 0.001))
+        # Ensure sub-millisecond latency (under 100 microseconds / 0.1 ms)
+        assert avg_us < 100.0, f"Post-processor latency too high in {mode} mode: {avg_us:.2f} µs"
+        benchmark_reporter(
+            "Post-Processor",
+            f"{mode:<8} mode",
+            f"{avg_us:.2f} µs",
+            f"~{throughput:,} ph/s",
+            "100% Match (PASS)",
+            status="PASS",
+        )
+

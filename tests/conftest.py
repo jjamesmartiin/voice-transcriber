@@ -111,6 +111,44 @@ def cleanup_after_tests():
     import gc
     gc.collect()
 
+_BENCHMARK_REPORTS = []
+
+
+def record_benchmark(category: str, target: str, latency_str: str, throughput_str: str, accuracy_str: str, status: str = "PASS"):
+    """Register a benchmark metric row to be reported in the pytest terminal summary."""
+    _BENCHMARK_REPORTS.append({
+        "category": category,
+        "target": target,
+        "latency": latency_str,
+        "throughput": throughput_str,
+        "accuracy": accuracy_str,
+        "status": status,
+    })
+
+
+@pytest.fixture
+def benchmark_reporter():
+    return record_benchmark
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Print a clean latency & accuracy benchmark matrix table if any benchmarks ran."""
+    if not _BENCHMARK_REPORTS:
+        return
+
+    tr = terminalreporter
+    tr.write_sep("=", "⚡ LATENCY & ACCURACY BENCHMARK REPORT ⚡", bold=True, cyan=True)
+    header = f"{'CATEGORY':<16} {'TARGET / SCENARIO':<26} {'LATENCY':<14} {'THROUGHPUT / RTF':<22} {'ACCURACY / STATUS'}"
+    tr.write_line(header, bold=True)
+    tr.write_line("-" * (len(header) + 4))
+
+    for row in _BENCHMARK_REPORTS:
+        status_color = {"green": True} if row["status"] == "PASS" else {"red": True}
+        line = f"{row['category']:<16} {row['target']:<26} {row['latency']:<14} {row['throughput']:<22} {row['accuracy']}"
+        tr.write_line(line, **status_color)
+    tr.write_sep("=", "", cyan=True)
+
+
 def pytest_sessionfinish(session, exitstatus):
     session.config._exitstatus = exitstatus
 
