@@ -968,6 +968,89 @@ def get_preset_display_name(name: str) -> str:
     }.get(canon, "Default (Standard)")
 
 
+# ---------------------------------------------------------------------------
+# Mode preset presentations
+# ---------------------------------------------------------------------------
+# Spec: docs/mode_presets.md (enforced by tests/shared/test_mode_presets.py).
+#
+# Every preset is demonstrated with the *same* sample sentence so the
+# differences are directly comparable: capitalisation, internal punctuation and
+# the trailing period. The previews below are exactly what
+# post_processor.apply_punctuation_mode() produces for PRESET_SAMPLE, and the
+# ratatui settings modal shows the same strings.
+PRESET_SAMPLE = "Hey, how are you? I'm good."
+
+# Switcher ids <-> canonical mode ids. Keep both directions here so the
+# switcher and the settings menu can never disagree about what a preset is.
+PRESET_SWITCHER_ID_BY_CANON = {
+    "full": "default",
+    "no_terminal_period": "casual",
+    "no_punctuation": "autocorrect",
+    "aesthetic_lowercase": "aesthetic_lowercase",
+    "gen_z": "gen_z",
+}
+PRESET_CANON_BY_SWITCHER_ID = {v: k for k, v in PRESET_SWITCHER_ID_BY_CANON.items()}
+
+# (switcher id, display name, badge, description, preview, color)
+PRESET_PRESENTATIONS = (
+    (
+        "default",
+        "Default (Standard)",
+        "[DEFAULT]",
+        "Full punctuation, standard capitalization, and grammar rules",
+        "Hey, how are you? I'm good.",
+        "green",
+    ),
+    (
+        "casual",
+        "Casual (No Ending Period)",
+        "[CASUAL]",
+        "Standard capitalization and commas, but no period at the end",
+        "Hey, how are you? I'm good",
+        "yellow",
+    ),
+    (
+        "autocorrect",
+        "Autocorrect (Phone Style)",
+        "[PHONE]",
+        "Capitalizes sentence starts and 'I', but strips punctuation",
+        "Hey how are you I'm good",
+        "blue",
+    ),
+    (
+        "aesthetic_lowercase",
+        "Aesthetic Lowercase",
+        "[AESTH]",
+        "Keeps commas and questions, but all lowercase (even 'i')",
+        "hey, how are you? i'm good",
+        "magenta",
+    ),
+    (
+        "gen_z",
+        "Pure Gen Z",
+        "[GEN Z]",
+        "All lowercase, zero punctuation, zero grammar enforcement",
+        "hey how are you i'm good",
+        "cyan",
+    ),
+)
+
+
+def get_preset_presentation(mode=None):
+    """Presentation for a mode preset: ``(name, badge, "quoted preview", color)``.
+
+    The single lookup every Python surface uses, so the settings menu and the
+    preset switcher cannot drift from each other — or from the previews in
+    ``docs/mode_presets.md``.
+    """
+    canon = get_canonical_preset_name(mode if mode else PUNCTUATION_MODE)
+    want = PRESET_SWITCHER_ID_BY_CANON.get(canon, "default")
+    for pid, name, badge, _desc, preview, color in PRESET_PRESENTATIONS:
+        if pid == want:
+            return name, badge, f'"{preview}"', color
+    return "Default (Standard)", "[DEFAULT]", f'"{PRESET_SAMPLE}"', "green"
+
+
 def set_punctuation_mode(mode: str) -> None:
     """Runtime setter for punctuation formatting mode; keeps post-processor in sync."""
     global PUNCTUATION_MODE
@@ -1484,13 +1567,7 @@ def select_preset_picker(current_preset=None):
     from rich.text import Text
     from rich import box
 
-    presets = [
-        ("default", "Default (Standard)", "[DEFAULT]", "Full punctuation, standard capitalization, and grammar rules", "Hey, how are you? I think we should go.", "green"),
-        ("casual", "Casual (No Ending Period)", "[CASUAL]", "Standard capitalization and commas, but no period at the end", "Hey, how are you? I think we should go", "yellow"),
-        ("autocorrect", "Autocorrect (Phone Style)", "[PHONE]", "Capitalizes sentence starts and 'I', but strips punctuation", "Hey how are you I think we should go", "blue"),
-        ("aesthetic_lowercase", "Aesthetic Lowercase", "[AESTHETIC]", "Keeps commas and questions, but all lowercase (even 'i')", "hey, how are you? i think we should go", "magenta"),
-        ("gen_z", "Pure Gen Z", "[GEN Z]", "All lowercase, zero punctuation, zero grammar enforcement", "hey how are you i think we should go", "cyan"),
-    ]
+    presets = list(PRESET_PRESENTATIONS)
 
     active = get_canonical_preset_name(current_preset or PUNCTUATION_MODE)
     active_pid = {
@@ -1588,13 +1665,7 @@ def select_preset_picker(current_preset=None):
         elif key == "ENTER":
             if matches:
                 chosen = matches[selected_idx][1][0]
-                canon = {
-                    "default": "full",
-                    "casual": "no_terminal_period",
-                    "autocorrect": "no_punctuation",
-                    "aesthetic_lowercase": "aesthetic_lowercase",
-                    "gen_z": "gen_z",
-                }.get(chosen, "full")
+                canon = PRESET_CANON_BY_SWITCHER_ID.get(chosen, "full")
                 set_punctuation_mode(canon)
                 save_audio_config()
                 console.clear()
@@ -1713,17 +1784,10 @@ def select_settings_picker():
     def get_setting_state(item_id):
         eff_theme = UI_THEME.lower() if UI_THEME and UI_THEME.lower() in COLOR_PALETTES and UI_THEME.lower() != "auto" else "green"
         if item_id in ("preset", "punctuation_mode"):
-            canon = get_canonical_preset_name(PUNCTUATION_MODE)
-            if canon == "no_terminal_period":
-                return "Casual (No Ending Period)", "[CASUAL]", "yellow"
-            elif canon == "no_punctuation":
-                return "Autocorrect (Phone Style)", "[PHONE]", "blue"
-            elif canon == "aesthetic_lowercase":
-                return "Aesthetic Lowercase", "[AESTHETIC]", "magenta"
-            elif canon == "gen_z":
-                return "Pure Gen Z (No Caps/Punct)", "[GEN Z]", "cyan"
-            else:
-                return "Default (Standard)", "[DEFAULT]", "green"
+            # Same sample sentence the ratatui settings modal shows, so the
+            # style of each preset is visible at a glance.
+            _name, badge, preview, color = get_preset_presentation(PUNCTUATION_MODE)
+            return preview, badge, color
         elif item_id == "trailing_space":
             if AUTO_TYPE_TRAILING_SPACE:
                 return "Enabled (appends ' ')", "[ON]", "green"

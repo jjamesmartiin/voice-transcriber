@@ -14,6 +14,7 @@ use ratatui::Frame;
 
 use crate::app::App;
 use crate::ipc::{self, IpcEvent, Wire};
+use crate::textfit;
 use crate::theme_picker;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +44,15 @@ pub struct SettingItem {
 }
 
 pub const SETTINGS: [SettingItem; 12] = [
+    // NOTE: icons must be exactly one glyph whose *own* codepoint already
+    // occupies its final width in every terminal - never a `U+FE0F`
+    // variation-selector sequence and never a ZWJ sequence. Terminals that
+    // ignore the emoji-presentation rule render e.g. `✍️` (U+270D is
+    // East-Asian-Neutral) as a single narrow cell while ratatui budgets two,
+    // which shifts that whole row - including its pill and right border - one
+    // column left. `test_setting_icons_have_terminal_independent_width` pins
+    // this. A narrow glyph such as `␣` is fine: `RowLayout` pads the icon
+    // column to a fixed two cells.
     SettingItem {
         kind: SettingKind::PunctuationMode,
         icon: "✨",
@@ -57,7 +67,7 @@ pub const SETTINGS: [SettingItem; 12] = [
     },
     SettingItem {
         kind: SettingKind::TrailingSpace,
-        icon: "␣ ",
+        icon: "␣",
         title: "Trailing Space",
         keywords: "trailing space auto type whitespace append space",
     },
@@ -75,13 +85,13 @@ pub const SETTINGS: [SettingItem; 12] = [
     },
     SettingItem {
         kind: SettingKind::SpellCommand,
-        icon: "✍️",
+        icon: "🔠",
         title: "Spell Command",
         keywords: "spell spelled verbal command letters c a t acronym dictation",
     },
     SettingItem {
         kind: SettingKind::MiddleClick,
-        icon: "🖱️ ",
+        icon: "👆",
         title: "Mouse Hotkey",
         keywords: "middle click mouse hotkey push to talk button hold",
     },
@@ -99,7 +109,7 @@ pub const SETTINGS: [SettingItem; 12] = [
     },
     SettingItem {
         kind: SettingKind::Microphone,
-        icon: "🎙️",
+        icon: "🎤",
         title: "Audio Device (Mic)",
         keywords: "mic microphone audio device input hardware primary secondary",
     },
@@ -111,7 +121,7 @@ pub const SETTINGS: [SettingItem; 12] = [
     },
     SettingItem {
         kind: SettingKind::ResetDefaults,
-        icon: "↩️ ",
+        icon: "🔙",
         title: "Reset to Defaults",
         keywords: "reset defaults factory restore revert shipped initial config settings default everything",
     },
@@ -127,84 +137,129 @@ impl SettingItem {
         match self.kind {
             SettingKind::TrailingSpace => {
                 if app.trailing_space {
-                    ("Enabled (appends ' ')".to_string(), "[ON]", Color::Green)
+                    (
+                        "Appends a space after typing".to_string(),
+                        "[ON]",
+                        Color::Green,
+                    )
                 } else {
-                    ("Disabled (exact text)".to_string(), "[OFF]", Color::DarkGray)
+                    (
+                        "No space added after typing".to_string(),
+                        "[OFF]",
+                        Color::DarkGray,
+                    )
                 }
             }
             SettingKind::AutoPunctuate => {
                 if app.auto_punctuate {
-                    ("Enabled (full + period)".to_string(), "[ON]", Color::Green)
+                    ("Full punctuation + period".to_string(), "[ON]", Color::Green)
                 } else {
-                    ("Disabled (preserve user)".to_string(), "[OFF]", Color::DarkGray)
+                    ("Respect the mode preset".to_string(), "[OFF]", Color::DarkGray)
                 }
             }
             SettingKind::NumberDigits => match app.number_mode.as_str() {
-                "digits" => ("All Digits (1, 2, 3)".to_string(), "[DIGITS]", Color::Green),
+                "digits" => (
+                    "Every number becomes digits".to_string(),
+                    "[DIGITS]",
+                    Color::Green,
+                ),
                 "words" => (
-                    "Words Only (one, two, three)".to_string(),
+                    "Numbers stay as words".to_string(),
                     "[WORDS]",
                     Color::DarkGray,
                 ),
                 _ => (
-                    "Auto (Consecutive Numbers)".to_string(),
+                    "Runs of 2+ become digits".to_string(),
                     "[AUTO]",
                     Color::Cyan,
                 ),
             },
             SettingKind::SerialCollapse => {
                 if app.serial_collapse {
-                    ("Collapsed (ABC123)".to_string(), "[COLLAPSE]", Color::Cyan)
+                    (
+                        "Keeps ABC123 as one token".to_string(),
+                        "[COLLAPSE]",
+                        Color::Cyan,
+                    )
                 } else {
-                    ("Spaced (A B C 1 2 3)".to_string(), "[SPACED]", Color::DarkGray)
+                    (
+                        "Each letter typed separately".to_string(),
+                        "[SPACED]",
+                        Color::DarkGray,
+                    )
                 }
             }
             SettingKind::SpellCommand => {
                 if app.spell_command {
-                    ("Enabled (say 'spell C A T')".to_string(), "[ON]", Color::Green)
+                    (
+                        "Say 'spell C A T' for CAT".to_string(),
+                        "[ON]",
+                        Color::Green,
+                    )
                 } else {
-                    ("Disabled".to_string(), "[OFF]", Color::DarkGray)
+                    ("Spell command ignored".to_string(), "[OFF]", Color::DarkGray)
                 }
             }
             SettingKind::MiddleClick => {
                 if app.middle_click_enabled {
-                    ("Enabled (hold middle click)".to_string(), "[ON]", Color::Green)
+                    (
+                        "Hold middle click to talk".to_string(),
+                        "[ON]",
+                        Color::Green,
+                    )
                 } else {
-                    ("Disabled".to_string(), "[OFF]", Color::DarkGray)
+                    (
+                        "Middle click acts normally".to_string(),
+                        "[OFF]",
+                        Color::DarkGray,
+                    )
                 }
             }
             SettingKind::SoundMute => {
                 if !app.is_muted {
-                    ("Enabled (sound chimes on)".to_string(), "[ON]", Color::Green)
+                    ("Chimes on record & stop".to_string(), "[ON]", Color::Green)
                 } else {
-                    ("Muted (silent)".to_string(), "[MUTED]", Color::Red)
+                    ("No sound cues play".to_string(), "[MUTED]", Color::Red)
                 }
             }
             SettingKind::OutputMode => {
                 let (desc, badge) = match app.output_mode.as_str() {
-                    "type_fast" => ("Auto-Type (Fast / Optimized)", "[FAST]"),
-                    "type" => ("Auto-Type (Slow / Safe)", "[SLOW]"),
-                    "paste" => ("Clipboard + Paste (Ctrl+V)", "[PASTE]"),
-                    "paste_terminal" => ("Clipboard + Term Paste", "[TERM]"),
-                    _ => ("Clipboard Only", "[CLIP]"),
+                    "type_fast" => ("Auto-type, optimized", "[FAST]"),
+                    "type" => ("Auto-type, safe speed", "[SLOW]"),
+                    "paste" => ("Copies, you press Ctrl+V", "[PASTE]"),
+                    "paste_terminal" => ("Copies for terminal paste", "[TERM]"),
+                    _ => ("Copies to clipboard only", "[CLIP]"),
                 };
                 (desc.to_string(), badge, Color::Cyan)
             }
             SettingKind::PunctuationMode => {
+                // Previews come from docs/mode_presets.md: every preset is shown
+                // against the same sample sentence so the styles are directly
+                // comparable. `test_preset_previews_match_the_spec` and
+                // tests/shared/test_mode_presets.py keep this in step with
+                // post_processor.apply_punctuation_mode().
                 let (desc, badge, color) = match app.punctuation_mode.as_str() {
-                    "no_terminal_period" | "casual" => {
-                        ("Casual (No Ending Period)", "[CASUAL]", Color::Yellow)
-                    }
+                    "no_terminal_period" | "casual" => (
+                        "\"Hey, how are you? I'm good\"",
+                        "[CASUAL]",
+                        Color::Yellow,
+                    ),
                     "no_punctuation" | "autocorrect" => {
-                        ("Autocorrect (Phone Style)", "[PHONE]", Color::Blue)
+                        ("\"Hey how are you I'm good\"", "[PHONE]", Color::Blue)
                     }
-                    "aesthetic_lowercase" | "aesthetic" => {
-                        ("Aesthetic Lowercase", "[AESTHETIC]", Color::Magenta)
-                    }
+                    "aesthetic_lowercase" | "aesthetic" => (
+                        "\"hey, how are you? i'm good\"",
+                        "[AESTH]",
+                        Color::Magenta,
+                    ),
                     "lowercase_no_punctuation" | "gen_z" => {
-                        ("Pure Gen Z (No Caps/Punct)", "[GEN Z]", Color::Cyan)
+                        ("\"hey how are you i'm good\"", "[GEN Z]", Color::Cyan)
                     }
-                    _ => ("Default (Standard)", "[DEFAULT]", Color::Green),
+                    _ => (
+                        "\"Hey, how are you? I'm good.\"",
+                        "[DEFAULT]",
+                        Color::Green,
+                    ),
                 };
                 (desc.to_string(), badge, color)
             }
@@ -213,23 +268,21 @@ impl SettingItem {
                 (format!("{} palette", name), "[PICKER]", c)
             }
             SettingKind::Microphone => {
-                let dev = if app.active_device.len() > 30 {
-                    format!("{}...", &app.active_device[..27])
-                } else {
-                    app.active_device.clone()
-                };
-                (dev, "[SELECT]", Color::Yellow)
+                // The device name is user data and can be arbitrarily long, so
+                // it is the one value handed to the row renderer untruncated:
+                // `textfit` only clips it if it truly cannot fit.
+                (app.active_device.clone(), "[SELECT]", Color::Yellow)
             }
             SettingKind::ResetTerminal => {
                 if state.reset_done {
                     (
-                        "Terminal & clipboard bridge reset".to_string(),
+                        "Terminal & clipboard reset".to_string(),
                         "[DONE]",
                         Color::Green,
                     )
                 } else {
                     (
-                        "Reset terminal state & clipboard bridge".to_string(),
+                        "Reset terminal & clipboard state".to_string(),
                         "[RUN]",
                         Color::Yellow,
                     )
@@ -238,19 +291,19 @@ impl SettingItem {
             SettingKind::ResetDefaults => {
                 if state.defaults_done {
                     (
-                        "All settings restored to shipped defaults".to_string(),
+                        "All settings restored".to_string(),
                         "[DONE]",
                         Color::Green,
                     )
                 } else if state.confirm_defaults {
                     (
-                        "Press Enter again to confirm factory reset".to_string(),
+                        "Press Enter again to confirm".to_string(),
                         "[SURE?]",
                         Color::Red,
                     )
                 } else {
                     (
-                        "Restore all settings to shipped defaults".to_string(),
+                        "Restore all shipped defaults".to_string(),
                         "[RESET]",
                         Color::Red,
                     )
@@ -258,6 +311,118 @@ impl SettingItem {
             }
         }
     }
+}
+
+/// Fixed-width column layout shared by every settings row. Deriving the
+/// description column from the modal's inner width (instead of a magic
+/// constant) is what keeps the right edge — and therefore every status pill —
+/// on the same column for every row.
+struct RowLayout {
+    icon_w: usize,
+    title_w: usize,
+    desc_w: usize,
+    badge_w: usize,
+}
+
+impl RowLayout {
+    const TITLE_W: usize = 19;
+    const ICON_W: usize = 2;
+    const BADGE_W: usize = 10;
+    /// Minimum cells reserved for the description column.
+    const MIN_DESC_W: usize = 8;
+    /// The title column is never squeezed below this.
+    const MIN_TITLE_W: usize = 8;
+    /// Blank columns kept between the pill and the right border.
+    const MARGIN: usize = 1;
+    /// pointer(2) + icon + icon gap(1) + description gap(1) + pill + margin
+    const FIXED: usize = 2 + Self::ICON_W + 1 + 1 + Self::BADGE_W + Self::MARGIN;
+
+    fn new(total: usize) -> Self {
+        // Cells left over for the two flexible columns.
+        let flexible = total.saturating_sub(Self::FIXED);
+        // Prefer the comfortable title width, but hand columns back to the
+        // description on narrow terminals: title_w + desc_w always equals
+        // `flexible`, so a row never spills past the right border.
+        let title_w = Self::TITLE_W
+            .min(flexible.saturating_sub(Self::MIN_DESC_W))
+            .max(Self::MIN_TITLE_W.min(flexible));
+        Self {
+            icon_w: Self::ICON_W,
+            title_w,
+            desc_w: flexible.saturating_sub(title_w),
+            badge_w: Self::BADGE_W,
+        }
+    }
+
+    /// Total display width of a rendered row, right margin included.
+    #[cfg(test)]
+    fn row_width(&self) -> usize {
+        Self::FIXED + self.title_w + self.desc_w
+    }
+}
+
+/// Render one settings row. Every column is padded by display width so the
+/// status pill always lands on the same columns, whatever the icon or the
+/// description contains.
+fn setting_row(
+    item: &SettingItem,
+    val_str: &str,
+    badge: &str,
+    badge_color: Color,
+    is_selected: bool,
+    theme_color: Color,
+    layout: &RowLayout,
+) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    // Cursor / pointer column.
+    if is_selected {
+        spans.push(Span::styled(
+            "❯ ",
+            Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::raw("  "));
+    }
+
+    // Icon column, padded to a fixed display width (emoji are double width).
+    spans.push(Span::styled(
+        format!("{} ", textfit::fit(item.icon, layout.icon_w)),
+        Style::default(),
+    ));
+
+    // Title column.
+    let title_style = if is_selected {
+        Style::default().fg(theme_color).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+    };
+    spans.push(Span::styled(
+        textfit::fit(item.title, layout.title_w),
+        title_style,
+    ));
+
+    // Description column (leading gap + padded text).
+    spans.push(Span::styled(
+        format!(" {}", textfit::fit(val_str, layout.desc_w)),
+        Style::default().add_modifier(Modifier::DIM),
+    ));
+
+    // Status pill, always exactly `badge_w` cells wide.
+    let badge_str = textfit::center(badge, layout.badge_w);
+    if is_selected {
+        spans.push(Span::styled(
+            badge_str,
+            Style::default()
+                .fg(Color::Black)
+                .bg(badge_color)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::styled(badge_str, Style::default().fg(badge_color)));
+    }
+
+    Line::from(spans)
 }
 
 pub fn score_setting(query: &str, item: &SettingItem) -> Option<i32> {
@@ -569,6 +734,7 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
         };
 
         let mut list_lines: Vec<Line<'static>> = Vec::new();
+        let layout = RowLayout::new(list_area.width as usize);
         for (view_i, &opt_idx) in state
             .filtered_indices
             .iter()
@@ -581,64 +747,15 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
             let item = &SETTINGS[opt_idx];
             let (val_str, badge, badge_color) = item.value_and_badge(app, state);
 
-            let mut line_spans = Vec::new();
-            if is_selected {
-                line_spans.push(Span::styled(
-                    "❯ ",
-                    Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                line_spans.push(Span::raw("  "));
-            }
-
-    // Setting Icon (every icon is display width 2 + 1 space = 3 columns)
-            line_spans.push(Span::styled(format!("{} ", item.icon), Style::default()));
-
-            // Title (fixed 20 columns)
-            let title_str = format!("{:<20}", item.title);
-            if is_selected {
-                line_spans.push(Span::styled(
-                    title_str,
-                    Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                line_spans.push(Span::styled(
-                    title_str,
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-                ));
-            }
-
-            // Value description (space + remaining width up to badge)
-            // Layout: 2 (pointer) + 3 (icon) + 20 (title) + 1 (gap) + desc_w + 10 (badge) = list_area.width
-            let desc_w = (list_area.width as usize).saturating_sub(36);
-            let desc_disp = if val_str.len() > desc_w {
-                format!("{}...", &val_str[..desc_w.saturating_sub(3)])
-            } else {
-                val_str
-            };
-            line_spans.push(Span::styled(
-                format!(" {:<width$}", desc_disp, width = desc_w),
-                Style::default().add_modifier(Modifier::DIM),
+            list_lines.push(setting_row(
+                item,
+                &val_str,
+                badge,
+                badge_color,
+                is_selected,
+                theme_color,
+                &layout,
             ));
-
-            // Badge / action (uniform 10 columns pill)
-            let badge_str = format!("{:^10}", badge);
-            if is_selected {
-                line_spans.push(Span::styled(
-                    badge_str,
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(badge_color)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                line_spans.push(Span::styled(
-                    badge_str,
-                    Style::default().fg(badge_color),
-                ));
-            }
-
-            list_lines.push(Line::from(line_spans));
         }
         frame.render_widget(Paragraph::new(list_lines), list_area);
     }
@@ -662,6 +779,26 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
         Span::styled("Done", Style::default().add_modifier(Modifier::DIM)),
     ]);
     frame.render_widget(Paragraph::new(footer), chunks[4]);
+}
+
+/// Hand the screen over to a nested modal picker (theme / microphone).
+///
+/// The nested pickers own the alternate screen while they are up, so we step
+/// out of ours, let them run, then re-enter a *fresh* alternate screen. The
+/// `clear()` is essential: the screen we come back to is blank, while our
+/// `Terminal` still holds the last frame it drew - without it the next
+/// `draw()` diffs to nothing and the modal stays invisible (blank screen).
+fn hand_over_screen<T>(
+    terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
+    body: impl FnOnce() -> io::Result<T>,
+) -> io::Result<T> {
+    crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+    let result = body();
+    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+    crossterm::terminal::enable_raw_mode()?;
+    terminal.clear()?;
+    terminal.hide_cursor()?;
+    result
 }
 
 /// Run the interactive settings picker on the alternate screen.
@@ -817,40 +954,21 @@ pub fn run_settings_picker(
                                     }
                                 }
                                 SettingKind::Theme => {
-                                    // Open nested theme picker modal
-                                    let _ = crossterm::execute!(
-                                        io::stdout(),
-                                        crossterm::terminal::LeaveAlternateScreen
-                                    );
-                                    let _ = theme_picker::run_theme_picker(
-                                        app.ui_theme,
-                                        writer,
-                                        rx,
-                                        app,
-                                    );
-                                    let _ = crossterm::execute!(
-                                        io::stdout(),
-                                        crossterm::terminal::EnterAlternateScreen
-                                    );
-                                    crossterm::terminal::enable_raw_mode()?;
+                                    // Nested theme picker modal.
+                                    let _ = hand_over_screen(&mut terminal, || {
+                                        theme_picker::run_theme_picker(
+                                            app.ui_theme,
+                                            writer,
+                                            rx,
+                                            app,
+                                        )
+                                    });
                                 }
                                 SettingKind::Microphone => {
-                                    // Open nested mic picker modal
-                                    let _ = crossterm::execute!(
-                                        io::stdout(),
-                                        crossterm::terminal::LeaveAlternateScreen
-                                    );
-                                    let _ = crate::mic_picker::run_mic_picker(
-                                        writer,
-                                        rx,
-                                        app,
-                                    );
-                                    let _ = crossterm::execute!(
-                                        io::stdout(),
-                                        crossterm::terminal::EnterAlternateScreen
-                                    );
-                                    crossterm::terminal::enable_raw_mode()?;
-                                    let _ = terminal.clear();
+                                    // Nested microphone picker modal.
+                                    let _ = hand_over_screen(&mut terminal, || {
+                                        crate::mic_picker::run_mic_picker(writer, rx, app)
+                                    });
                                 }
                                 SettingKind::ResetTerminal => {
                                     if let Some(w) = writer {
@@ -948,6 +1066,244 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|f| render_settings_picker(f, &state2, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_setting_icons_have_terminal_independent_width() {
+        use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+        for item in SETTINGS.iter() {
+            let icon = item.icon;
+            // Strip any variation selector: a terminal that ignores the emoji
+            // presentation rule (U+FE0F) then renders the base glyph.
+            let bare: String = icon.chars().filter(|c| *c != '\u{fe0f}').collect();
+            assert!(
+                !icon.contains('\u{200d}'),
+                "'{}' uses a ZWJ sequence, whose width varies between terminals",
+                item.title
+            );
+            assert_eq!(
+                textfit::width(icon),
+                UnicodeWidthStr::width(bare.as_str()),
+                "'{}' icon {:?} only reaches its width via U+FE0F",
+                item.title,
+                icon
+            );
+            // The column is two cells and `RowLayout` pads to it, so an icon
+            // may be narrow, but it must never be wider than the column.
+            let glyph = icon.chars().next().unwrap();
+            assert!(
+                icon.chars().count() == 1,
+                "'{}' icon {:?} is more than one glyph",
+                item.title,
+                icon
+            );
+            assert!(
+                UnicodeWidthChar::width(glyph).unwrap_or(0) <= RowLayout::ICON_W,
+                "'{}' icon {:?} is wider than the icon column",
+                item.title,
+                icon
+            );
+            assert_eq!(
+                textfit::width(&textfit::fit(icon, RowLayout::ICON_W)),
+                RowLayout::ICON_W,
+                "'{}' icon {:?} does not fill the icon column",
+                item.title,
+                icon
+            );
+        }
+    }
+
+    /// Every title, description and pill must fit its column in the modal, so
+    /// nothing is ever shown as `...`. The popup is 72 cells wide inside an
+    /// 80-column terminal, i.e. a 70-cell list. Narrower terminals fall back to
+    /// clipping by design; this pins the full-size layout.
+    #[test]
+    fn test_no_label_is_truncated() {
+        let layout = RowLayout::new(70);
+        let mut app = App::new("1.1.1", Theme::Cyan);
+
+        let idle = SettingsPickerState::new();
+        let reset_done = {
+            let mut s = SettingsPickerState::new();
+            s.reset_done = true;
+            s
+        };
+        let reset_armed = {
+            let mut s = SettingsPickerState::new();
+            s.confirm_defaults = true;
+            s
+        };
+        let reset_committed = {
+            let mut s = SettingsPickerState::new();
+            s.defaults_done = true;
+            s
+        };
+
+        let mut clipped: Vec<String> = Vec::new();
+        let mut check = |app: &App, state: &SettingsPickerState, kind: SettingKind| {
+            let item = SETTINGS.iter().find(|i| i.kind == kind).unwrap();
+            let (desc, badge, _) = item.value_and_badge(app, state);
+            // The microphone row shows user data (a device name), which can be
+            // longer than any column by nature.
+            if kind != SettingKind::Microphone && textfit::width(&desc) > layout.desc_w {
+                clipped.push(format!("{:?} ({} > {})", desc, textfit::width(&desc), layout.desc_w));
+            }
+            assert!(
+                textfit::width(item.title) <= layout.title_w,
+                "title {:?} does not fit the title column",
+                item.title
+            );
+            assert!(
+                textfit::width(badge) <= layout.badge_w,
+                "pill {badge:?} is wider than the badge column"
+            );
+        };
+
+        for flag in [true, false] {
+            app.trailing_space = flag;
+            check(&app, &idle, SettingKind::TrailingSpace);
+            app.serial_collapse = flag;
+            check(&app, &idle, SettingKind::SerialCollapse);
+            app.spell_command = flag;
+            check(&app, &idle, SettingKind::SpellCommand);
+            app.middle_click_enabled = flag;
+            check(&app, &idle, SettingKind::MiddleClick);
+            app.is_muted = flag;
+            check(&app, &idle, SettingKind::SoundMute);
+        }
+        for mode in ["auto", "digits", "words"] {
+            app.number_mode = mode.to_string();
+            check(&app, &idle, SettingKind::NumberDigits);
+        }
+        for mode in ["clipboard", "type", "type_fast", "paste", "paste_terminal"] {
+            app.output_mode = mode.to_string();
+            check(&app, &idle, SettingKind::OutputMode);
+        }
+        for mode in [
+            "default",
+            "casual",
+            "autocorrect",
+            "aesthetic",
+            "gen_z",
+            "full",
+            "no_terminal_period",
+            "no_punctuation",
+            "aesthetic_lowercase",
+            "lowercase_no_punctuation",
+        ] {
+            app.punctuation_mode = mode.to_string();
+            check(&app, &idle, SettingKind::PunctuationMode);
+        }
+        for theme in [
+            Theme::Auto,
+            Theme::Green,
+            Theme::Cyan,
+            Theme::Blue,
+            Theme::Magenta,
+            Theme::Yellow,
+            Theme::Red,
+            Theme::White,
+        ] {
+            app.ui_theme = theme;
+            check(&app, &idle, SettingKind::Theme);
+        }
+        for state in [&idle, &reset_done] {
+            check(&app, state, SettingKind::ResetTerminal);
+        }
+        for state in [&idle, &reset_armed, &reset_committed] {
+            check(&app, state, SettingKind::ResetDefaults);
+        }
+
+        assert!(clipped.is_empty(), "labels would be clipped: {clipped:?}");
+    }
+
+    #[test]
+    fn test_preset_previews_match_the_spec() {
+        // Spec: docs/mode_presets.md, enforced end-to-end by
+        // tests/shared/test_mode_presets.py (which greps these exact strings).
+        let app = App::new("1.1.1", Theme::Cyan);
+        let state = SettingsPickerState::new();
+        let item = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::PunctuationMode)
+            .unwrap();
+        let expected = [
+            (
+                "full",
+                "\"Hey, how are you? I'm good.\"",
+                "[DEFAULT]",
+            ),
+            ("no_terminal_period", "\"Hey, how are you? I'm good\"", "[CASUAL]"),
+            ("no_punctuation", "\"Hey how are you I'm good\"", "[PHONE]"),
+            (
+                "aesthetic_lowercase",
+                "\"hey, how are you? i'm good\"",
+                "[AESTH]",
+            ),
+            ("gen_z", "\"hey how are you i'm good\"", "[GEN Z]"),
+        ];
+
+        let mut app = app;
+        let mut previews: Vec<String> = Vec::new();
+        for (mode, desc, badge) in expected {
+            app.punctuation_mode = mode.to_string();
+            let (got_desc, got_badge, _) = item.value_and_badge(&app, &state);
+            assert_eq!(got_desc, desc, "preview for preset {mode}");
+            assert_eq!(got_badge, badge, "badge for preset {mode}");
+            previews.push(got_desc);
+        }
+
+        // ...and the presets must stay tellable apart from each other.
+        let unique: std::collections::HashSet<&String> = previews.iter().collect();
+        assert_eq!(
+            unique.len(),
+            previews.len(),
+            "two presets show the same preview: {previews:?}"
+        );
+    }
+
+    #[test]
+    fn test_setting_rows_share_one_right_edge() {
+        let app = App::new("1.1.1", Theme::Cyan);
+
+        // Exercise the pills that only appear in particular states.
+        let mut armed = SettingsPickerState::new();
+        armed.confirm_defaults = true;
+        let mut done = SettingsPickerState::new();
+        done.reset_done = true;
+        done.defaults_done = true;
+
+        for state in [
+            SettingsPickerState::new(),
+            armed,
+            done,
+        ] {
+            for total in [34usize, 44, 64, 70, 76, 96, 130] {
+                let layout = RowLayout::new(total);
+                assert_eq!(
+                    layout.row_width(),
+                    total,
+                    "settings row overflows a {total}-column list"
+                );
+                // The right margin is left blank, so the rendered row stops
+                // exactly one column short of the border on every line.
+                let expected = layout.row_width() - RowLayout::MARGIN;
+                for item in SETTINGS.iter() {
+                    let (val, badge, color) = item.value_and_badge(&app, &state);
+                    for is_selected in [true, false] {
+                        let line =
+                            setting_row(item, &val, badge, color, is_selected, Color::Cyan, &layout);
+                        assert_eq!(
+                            line.width(),
+                            expected,
+                            "'{}' row is ragged at width {total}",
+                            item.title
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

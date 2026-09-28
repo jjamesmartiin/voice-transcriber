@@ -1655,6 +1655,11 @@ def apply_punctuation_mode(text: str, mode: str | None = None) -> str:
       - autocorrect: phone-style capitalization (sentence starts, capital 'I'), with punctuation stripped.
       - aesthetic_lowercase: all lowercase (even 'i'), but internal/expressive punctuation kept (no trailing period).
       - gen_z (pure_gen_z): all lowercase, zero punctuation, zero grammar enforcement.
+
+    The behaviour above, the sentence used to demonstrate it, and the difference
+    matrix between the presets are specified in ``docs/mode_presets.md`` and
+    locked down by ``tests/shared/test_mode_presets.py``. Update those together
+    with any change here.
     """
     if not text:
         return text

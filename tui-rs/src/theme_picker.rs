@@ -14,6 +14,7 @@ use ratatui::Frame;
 
 use crate::app::{App, Theme};
 use crate::ipc::{self, IpcEvent, Wire};
+use crate::textfit;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ThemeOption {
@@ -274,6 +275,100 @@ impl PickerState {
     }
 }
 
+/// Fixed-width columns for one theme row, derived from the modal's inner width
+/// so every row (and every badge) ends on the same column.
+struct ThemeRowLayout {
+    name_w: usize,
+    desc_w: usize,
+}
+
+impl ThemeRowLayout {
+    const NAME_W: usize = 8;
+    const BADGE_W: usize = 10;
+    const MARGIN: usize = 1;
+    /// pointer(2) + bullet(2) + gap(1) + pill + right margin
+    const FIXED: usize = 2 + 2 + 1 + Self::BADGE_W + Self::MARGIN;
+
+    fn new(total: usize) -> Self {
+        // Cells left over for the name + description columns.
+        let flexible = total.saturating_sub(Self::FIXED);
+        let name_w = Self::NAME_W.min(flexible);
+        Self {
+            name_w,
+            desc_w: flexible - name_w,
+        }
+    }
+
+    /// Full display width of a row, margin included.
+    #[cfg(test)]
+    fn row_width(&self) -> usize {
+        Self::FIXED + self.name_w + self.desc_w
+    }
+}
+
+/// Render one theme row. Columns are padded by display width so the action
+/// pill lands on the same columns on every line.
+fn theme_row(
+    opt: &ThemeOption,
+    is_selected: bool,
+    is_current: bool,
+    layout: &ThemeRowLayout,
+) -> Line<'static> {
+    let opt_color = opt.theme.color();
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    // Pointer column.
+    if is_selected {
+        spans.push(Span::styled(
+            "❯ ",
+            Style::default().fg(opt_color).add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::raw("  "));
+    }
+
+    // Swatch bullet in that theme's color.
+    spans.push(Span::styled("● ", Style::default().fg(opt_color)));
+
+    // Name column.
+    let name_style = if is_selected {
+        Style::default().fg(opt_color).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    spans.push(Span::styled(
+        textfit::fit(opt.name, layout.name_w),
+        name_style,
+    ));
+
+    // Description column (leading gap + padded text).
+    spans.push(Span::styled(
+        format!(" {}", textfit::fit(opt.desc, layout.desc_w)),
+        Style::default().add_modifier(Modifier::DIM),
+    ));
+
+    // Action pill, always exactly `BADGE_W` cells wide (blank when the row is
+    // neither selected nor active) so the right edge stays straight.
+    if is_selected {
+        spans.push(Span::styled(
+            textfit::center("↵ Select", ThemeRowLayout::BADGE_W),
+            Style::default()
+                .fg(Color::Black)
+                .bg(opt_color)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else if is_current {
+        spans.push(Span::styled(
+            textfit::center("[Active]", ThemeRowLayout::BADGE_W),
+            Style::default().fg(opt_color).add_modifier(Modifier::DIM),
+        ));
+    } else {
+        spans.push(Span::raw(" ".repeat(ThemeRowLayout::BADGE_W)));
+    }
+
+    Line::from(spans)
+}
+
 pub fn render_picker(frame: &mut Frame, state: &PickerState) {
     let area = frame.area();
 
@@ -365,6 +460,7 @@ pub fn render_picker(frame: &mut Frame, state: &PickerState) {
         };
 
         let mut list_lines: Vec<Line<'static>> = Vec::new();
+        let layout = ThemeRowLayout::new(list_area.width as usize);
         for (view_i, &opt_idx) in state
             .filtered_indices
             .iter()
@@ -375,62 +471,9 @@ pub fn render_picker(frame: &mut Frame, state: &PickerState) {
             let actual_idx = scroll_offset + view_i;
             let is_selected = actual_idx == state.selected_index;
             let opt = &THEME_OPTIONS[opt_idx];
-            let opt_color = opt.theme.color();
             let is_current = opt.theme == state.current_theme;
 
-            let mut line_spans = Vec::new();
-            if is_selected {
-                line_spans.push(Span::styled(
-                    "❯ ",
-                    Style::default().fg(opt_color).add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                line_spans.push(Span::raw("  "));
-            }
-
-            // Bullet in that theme's color
-            line_spans.push(Span::styled("● ", Style::default().fg(opt_color)));
-
-            // Name
-            let name_str = format!("{:<8}", opt.name);
-            if is_selected {
-                line_spans.push(Span::styled(
-                    name_str,
-                    Style::default().fg(opt_color).add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                line_spans.push(Span::styled(name_str, Style::default().fg(Color::White)));
-            }
-
-            // Description
-            let desc_w = (list_area.width as usize).saturating_sub(26);
-            let desc_str = if opt.desc.len() > desc_w {
-                format!("{}...", &opt.desc[..desc_w.saturating_sub(3)])
-            } else {
-                opt.desc.to_string()
-            };
-            line_spans.push(Span::styled(
-                format!(" {:<width$}", desc_str, width = desc_w),
-                Style::default().add_modifier(Modifier::DIM),
-            ));
-
-            // Selection badge
-            if is_selected {
-                line_spans.push(Span::styled(
-                    " ↵ Select ",
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(opt_color)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            } else if is_current {
-                line_spans.push(Span::styled(
-                    " [Active] ",
-                    Style::default().fg(opt_color).add_modifier(Modifier::DIM),
-                ));
-            }
-
-            list_lines.push(Line::from(line_spans));
+            list_lines.push(theme_row(opt, is_selected, is_current, &layout));
         }
         frame.render_widget(Paragraph::new(list_lines), list_area);
     }
@@ -616,5 +659,31 @@ mod tests {
         // Test Esc
         let action_esc = state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert_eq!(action_esc, PickerAction::Cancel);
+    }
+
+    #[test]
+    fn test_theme_rows_share_one_right_edge() {
+        for total in [30usize, 50, 64, 80, 120] {
+            let layout = ThemeRowLayout::new(total);
+            assert_eq!(
+                layout.row_width(),
+                total,
+                "theme row overflows a {total}-column list"
+            );
+            let expected = layout.row_width() - ThemeRowLayout::MARGIN;
+            for opt in THEME_OPTIONS.iter() {
+                for is_selected in [true, false] {
+                    for is_current in [true, false] {
+                        let line = theme_row(opt, is_selected, is_current, &layout);
+                        assert_eq!(
+                            line.width(),
+                            expected,
+                            "'{}' theme row is ragged at width {total}",
+                            opt.name
+                        );
+                    }
+                }
+            }
+        }
     }
 }

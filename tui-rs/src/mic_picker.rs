@@ -14,6 +14,7 @@ use ratatui::Frame;
 
 use crate::app::App;
 use crate::ipc::{self, AudioDeviceInfo, IpcEvent, Wire};
+use crate::textfit;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MicPickerAction {
@@ -220,6 +221,107 @@ pub fn vu_bar_spans(level: f32, bar_len: usize) -> Vec<Span<'static>> {
     spans
 }
 
+/// Width of the VU meter (bracket, bars, percent), as produced by
+/// [`vu_bar_spans`] when called with `bar_len = VU_W - 7`.
+pub const VU_W: usize = 18;
+
+/// Fixed-width columns for one device row, derived from the modal's inner width
+/// so every row ends on the same column.
+struct MicRowLayout {
+    name_w: usize,
+}
+
+impl MicRowLayout {
+    const BADGE_W: usize = 10;
+    const MARGIN: usize = 1;
+    /// pointer(2) + icon(2) + icon gap(1) + name gap(1) + vu + vu gap(1) + pill + margin
+    const FIXED: usize = 2 + 2 + 1 + 1 + VU_W + 1 + Self::BADGE_W + Self::MARGIN;
+
+    fn new(total: usize) -> Self {
+        // The name is the only flexible column; it absorbs whatever is left so
+        // a row never spills past the right border.
+        Self {
+            name_w: total.saturating_sub(Self::FIXED),
+        }
+    }
+
+    /// Full display width of a row, margin included.
+    #[cfg(test)]
+    fn row_width(&self) -> usize {
+        Self::FIXED + self.name_w
+    }
+}
+
+/// Render one audio-device row. Names are clipped/padded by display width so
+/// the VU meter and the pill always start on the same columns.
+fn mic_row(
+    dev: &AudioDeviceInfo,
+    is_selected: bool,
+    is_active: bool,
+    vu_level: f32,
+    theme_color: Color,
+    layout: &MicRowLayout,
+) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    // Pointer column.
+    if is_selected {
+        spans.push(Span::styled(
+            "❯ ",
+            Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::raw("  "));
+    }
+
+    // Icon column (the mic glyph is double width).
+    spans.push(Span::styled(format!("{} ", textfit::fit("🎤", 2)), Style::default()));
+
+    // Name column + gap.
+    let title = dev.display_name.as_deref().unwrap_or(&dev.name);
+    let name_style = if is_selected {
+        Style::default().fg(theme_color).add_modifier(Modifier::BOLD)
+    } else if is_active {
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    spans.push(Span::styled(
+        format!("{} ", textfit::fit(title, layout.name_w)),
+        name_style,
+    ));
+
+    // Live VU meter for the highlighted / active device.
+    spans.extend(vu_bar_spans(vu_level, VU_W - 7));
+    spans.push(Span::raw(" "));
+
+    // Flatly sized action pill.
+    if is_active {
+        spans.push(Span::styled(
+            textfit::center("[ACTIVE]", MicRowLayout::BADGE_W),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else if is_selected {
+        spans.push(Span::styled(
+            textfit::center("↵ SELECT", MicRowLayout::BADGE_W),
+            Style::default()
+                .fg(Color::Black)
+                .bg(theme_color)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::styled(
+            " ".repeat(MicRowLayout::BADGE_W),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    Line::from(spans)
+}
+
 pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
     let area = frame.area();
     let theme_color = app.effective_color().color();
@@ -319,6 +421,7 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
         };
 
         let mut list_lines: Vec<Line<'static>> = Vec::new();
+        let layout = MicRowLayout::new(list_area.width as usize);
         for (view_i, &opt_idx) in state
             .filtered_indices
             .iter()
@@ -332,83 +435,21 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
             let is_active = dev.name.to_lowercase() == app.active_device.to_lowercase()
                 || (dev.is_active && app.active_device.is_empty());
 
-            let mut line_spans = Vec::new();
-            if is_selected {
-                line_spans.push(Span::styled(
-                    "❯ ",
-                    Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                line_spans.push(Span::raw("  "));
-            }
-
-            // Mic Icon (display width 2 + 1 space = 3 columns)
-            line_spans.push(Span::styled("🎤 ", Style::default()));
-
-            // Name column
-            // Total list_area.width = 2 (pointer) + 3 (icon) + name_w + 1 (gap) + 18 (vu) + 1 (gap) + 10 (badge)
-            let fixed_w = 2 + 3 + 1 + 18 + 1 + 10;
-            let name_w = (list_area.width as usize).saturating_sub(fixed_w).max(16);
-            let title = dev.display_name.as_deref().unwrap_or(&dev.name);
-            let name_disp = if title.chars().count() > name_w {
-                let head: String = title.chars().take(name_w.saturating_sub(3)).collect();
-                format!("{head}...")
-            } else {
-                title.to_string()
-            };
-
-            if is_selected {
-                line_spans.push(Span::styled(
-                    format!("{:<width$} ", name_disp, width = name_w),
-                    Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
-                ));
-            } else if is_active {
-                line_spans.push(Span::styled(
-                    format!("{:<width$} ", name_disp, width = name_w),
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                line_spans.push(Span::styled(
-                    format!("{:<width$} ", name_disp, width = name_w),
-                    Style::default().fg(Color::Gray),
-                ));
-            }
-
-            // Live horizontal VU meter bar graph
-            // Show real-time VU level for currently highlighted device or active device
+            // Only the highlighted / active device shows a live level.
             let vu_level = if is_selected || is_active {
                 app.vu_level
             } else {
                 0.0
             };
-            line_spans.extend(vu_bar_spans(vu_level, 12));
-            line_spans.push(Span::raw(" "));
 
-            // Badge / action (uniform 10 columns pill)
-            if is_active {
-                line_spans.push(Span::styled(
-                    format!("{:^10}", "[ACTIVE]"),
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            } else if is_selected {
-                line_spans.push(Span::styled(
-                    format!("{:^10}", "↵ SELECT"),
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(theme_color)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                line_spans.push(Span::styled(
-                    format!("{:^10}", ""),
-                    Style::default().fg(Color::DarkGray),
-                ));
-            }
-
-            list_lines.push(Line::from(line_spans));
+            list_lines.push(mic_row(
+                dev,
+                is_selected,
+                is_active,
+                vu_level,
+                theme_color,
+                &layout,
+            ));
         }
         frame.render_widget(Paragraph::new(list_lines), list_area);
     }
@@ -615,5 +656,47 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|f| render_mic_picker(f, &state, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_mic_rows_share_one_right_edge() {
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        app.audio_devices.push(AudioDeviceInfo {
+            index: 9,
+            name: "Ünïcødé ÜSB Mic With A Very Long Name".to_string(),
+            display_name: Some("Ünïcødé ÜSB Mic With A Very Long Name".to_string()),
+            channels: 1,
+            is_default: false,
+            is_active: false,
+        });
+
+        for total in [56usize, 74, 80, 96, 130] {
+            let layout = MicRowLayout::new(total);
+            assert_eq!(
+                layout.row_width(),
+                total,
+                "mic row overflows a {total}-column list"
+            );
+            let expected = layout.row_width() - MicRowLayout::MARGIN;
+            for (i, dev) in app.audio_devices.iter().enumerate() {
+                for is_selected in [true, false] {
+                    for is_active in [true, false] {
+                        let line = mic_row(
+                            dev,
+                            is_selected,
+                            is_active,
+                            app.vu_level,
+                            Color::Cyan,
+                            &layout,
+                        );
+                        assert_eq!(
+                            line.width(),
+                            expected,
+                            "device {i} row is ragged at width {total}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
