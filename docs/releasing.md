@@ -3,12 +3,12 @@
 Runbook for cutting a release of voice-transcriber on GitHub
 (`github.com/jjamesmartiin/voice-transcriber`).
 
-> **The one thing that bites:** CI builds and attaches the AppImage **only**.
-> The ~2.8 GB of model weights are **not** uploaded by CI and must be attached
-> by hand, every release. If you skip that step the release still works — but
-> only because the app silently falls back to a *hardcoded older tag*
-> (see [The `/latest` fallback trap](#the-latest-fallback-trap)). Do not rely
-> on that. Upload the weights.
+> **The one thing that used to bite:** CI builds and attaches the AppImage
+> **only**, and can never attach the ~2.8 GB of weights (a GitHub-hosted runner
+> has no `dist/model/`). That used to mean uploading the weights by hand on
+> *every* release. It no longer does: weights are addressed by **model
+> revision**, not by app release, so a new version re-uses the existing bundle
+> and uploads nothing. See [Where the weights live](#where-the-weights-live).
 
 ---
 
@@ -31,18 +31,12 @@ git push github main --tags        # remote 'github' == git@github.com:jjamesmar
 #    attaches vt.AppImage). Watch it, or just poll the release object:
 nix develop --command gh release view v1.2.0
 
-# 5. ATTACH THE MODEL WEIGHTS — the step CI does not do.
-nix develop --command gh release upload v1.2.0 \
-  dist/model/cohere-transcribe-499888924f5f1313b48ab0686c8f3a94178a4709.part1.xz \
-  dist/model/cohere-transcribe-499888924f5f1313b48ab0686c8f3a94178a4709.part2.xz \
-  dist/model/cohere-transcribe-499888924f5f1313b48ab0686c8f3a94178a4709.SHA256SUMS \
-  --clobber
+# 5. NOTHING TO DO FOR THE WEIGHTS. They live in a revision-keyed model
+#    bundle and are re-published only when REVISION changes — see
+#    "Where the weights live".
 
-# 6. Verify all four assets are present (see "Verifying a release").
+# 6. Verify the release carries exactly one asset (see "Verifying a release").
 ```
-
-`--clobber` makes step 5 safe to re-run if the upload drops part-way through a
-~1.5 GB part.
 
 ---
 
@@ -86,8 +80,10 @@ matrix. It does not publish anything.
 
 **Consequences:**
 
-- There is **no automated model upload**, by design and by omission. The
-  workflow's `files:` glob simply does not include them.
+- There is **no automated model upload**, by design and by omission — and none
+  is needed. The workflow's `files:` glob does not include the weights, and the
+  weights do not belong on a version tag at all; they live in their own bundle
+  tag that changes only when `REVISION` does.
 - CI *could not* build them even if the glob were widened: the GitHub-hosted
   runner has no Hugging Face cache and no `dist/model/`. Only the maintainer's
   machine does. (Widening the glob without also providing the files would make
@@ -109,6 +105,12 @@ cohere-transcribe-<revision>.SHA256SUMS     # "<sha256>  <filename>" per part
 
 with `<revision> = 499888924f5f1313b48ab0686c8f3a94178a4709` (the
 `CohereLabs/cohere-transcribe-03-2026` HF revision).
+
+Those assets are attached to a **model bundle tag**, not to an app release:
+
+```
+model-cohere-<revision[:12]>               # e.g. model-cohere-499888924f5f
+```
 
 Two parts by default, so each stays under GitHub's **2 GiB per-file** release
 limit after xz compression.
@@ -133,45 +135,81 @@ cd dist/model && sha256sum -c cohere-transcribe-499888924f5f1313b48ab0686c8f3a94
 
 ### Regenerating them (only when the model revision changes)
 
-`scripts/prepare_model_release.py` does the whole job: it tars the flat model
-files plus the Apache-2.0 `LICENSE`/`NOTICE`, splits the tar into raw byte-range
-parts (a tar concatenates cleanly across any byte boundary), xz-compresses each
-part, writes `SHA256SUMS`, then **verifies** by reassembling, extracting, and
-re-hashing `model.safetensors` against the known HF blob hash.
+Usually you do not call this directly — `scripts/publish_model_bundle.sh --build`
+runs it for you and then publishes. Its job: tar the flat model files plus the
+Apache-2.0 `LICENSE`/`NOTICE`, split the tar into raw byte-range parts (a tar
+concatenates cleanly across any byte boundary), xz-compress each part, write
+`SHA256SUMS`, then **verify** by reassembling, extracting, and re-hashing
+`model.safetensors` against the known HF blob hash.
 
 ```bash
 # Auto-locates the snapshot in ~/.cache/huggingface/hub
-python3 scripts/prepare_model_release.py --out dist/model
+nix develop --command python scripts/prepare_model_release.py --out dist/model
 
 # Or point it at an explicit flat dir (e.g. an existing models/cohere)
-python3 scripts/prepare_model_release.py --model-dir models/cohere --out dist/model
+nix develop --command python scripts/prepare_model_release.py \
+  --model-dir models/cohere --out dist/model
 ```
 
 Useful flags: `--parts N`, `--xz-level N` (default 6; 9 gains almost nothing on
-weights), `--skip-verify` (don't).
+weights), `--skip-verify` (don't). They pass straight through
+`publish_model_bundle.sh --build`, so `-- --parts 3` works there too.
 
 It refuses to finish if verification fails, so a green run is a publishable run.
 Redistribution is legitimate because the model is Apache-2.0; the LICENSE +
 NOTICE are bundled into the tar by the script and the license text lives at
 `config/licenses/Cohere-Apache-2.0.txt` (git-tracked).
 
-**If you bump `REVISION`**, update it in *both* `scripts/prepare_model_release.py`
-and `src/model_download.py` (`REVISION`, and `SAFETENSORS_SHA256`), plus the
-asset filename references in this document.
+**Bumping the revision is a one-file change.** `REVISION` and
+`SAFETENSORS_SHA256` live only in `src/model_download.py`.
+`scripts/prepare_model_release.py` and `src/transcribe_cohere.py` import them
+(previously all three held their own copy, which could drift silently), and
+`tests/shared/test_model_download.py::test_model_revision_lives_only_in_model_download`
+fails if either reintroduces one. Update the asset filename references in this
+document as well, since those are prose.
 
 ---
 
-## Uploading the weights
+## Publishing a new model revision
 
-`gh` is in the dev shell (there is no `python`/`gh` on the host PATH):
+**Only when `REVISION` changes.** Weights are keyed by model revision, so a new
+app version is not a reason to run this — drop as many versions as you like and
+upload nothing.
+
+One command does the whole job — package *and* publish:
 
 ```bash
-nix develop --command gh release upload v1.2.0 \
-  dist/model/cohere-transcribe-499888924f5f1313b48ab0686c8f3a94178a4709.part1.xz \
-  dist/model/cohere-transcribe-499888924f5f1313b48ab0686c8f3a94178a4709.part2.xz \
-  dist/model/cohere-transcribe-499888924f5f1313b48ab0686c8f3a94178a4709.SHA256SUMS \
-  --clobber
+# 1. Show the plan without touching anything or running xz.
+nix develop --command ./scripts/publish_model_bundle.sh --build --dry-run
+
+# 2. Do it. Packaging is CPU-heavy; the upload is ~2.9 GB and happens once per
+#    revision, not once per release.
+nix develop --command ./scripts/publish_model_bundle.sh --build
 ```
+
+Re-running is cheap and safe: the upload is **idempotent** (already-published
+parts are skipped by comparing remote digests), so a dropped upload is fixed by
+simply re-running. That is also how you answer "do I need to publish anything?"
+— run it and watch for `already published`.
+
+Omit `--build` to publish assets already sitting in `dist/model/`. Extra flags
+go to the packaging step, e.g.
+`./scripts/publish_model_bundle.sh --build -- --parts 3`.
+
+The script reads `REPO_SLUG`, `MODEL_BUNDLE_TAG` and `REVISION` straight out of
+`src/model_download.py`, so it cannot disagree with what the client requests. It
+verifies the local parts against `SHA256SUMS` first, creates the bundle release
+as a **prerelease** (keeping it out of `/releases/latest`, which is where the
+AppImage is found), then:
+
+1. uploads each part and re-reads its remote digest to confirm it landed,
+2. **only then** uploads `SHA256SUMS`.
+
+That order is the whole point. `SHA256SUMS` is what makes a bundle
+*discoverable*: publishing it before the parts advertises weights that are not
+there, which is exactly how a mid-upload bundle used to hijack the client. If
+any part fails to verify, the script aborts **without** publishing the manifest,
+so a half-uploaded bundle stays invisible instead of becoming a broken one.
 
 Practical notes:
 
@@ -179,11 +217,13 @@ Practical notes:
   `~/.config/gh/hosts.yml` — that file has no token, which makes it look like
   you are logged out when you are not. Required scope is `repo`.
   Check with `nix develop --command gh auth status`.
-- Passing `dist/model/*.xz` as a shell glob works too; listing names explicitly
-  is safer against a stale third part lingering in the directory.
-- This is a multi-gigabyte upload. On a slow link, run it somewhere with real
-  bandwidth, and re-run with `--clobber` if it drops. `gh` does not resume a
-  part; a dropped part is simply not registered and gets uploaded again.
+- This is a multi-gigabyte upload, but only the first time a revision is
+  published. On a slow link, run it somewhere with real bandwidth. `gh` does not
+  resume a part; a dropped part is simply not registered and gets uploaded
+  again.
+- Do **not** hand-upload assets to an app release tag with
+  `gh release upload`. Weights on a version tag are never read by the client and
+  only create a second, unused home for them.
 - If `nix run nixpkgs#gh` fails with `Truncated tar archive detected`, the
   cached `nixpkgs-unstable` channel tarball is corrupt. Clear it
   (`rm -rf ~/.cache/nix/tarball-cache*`) or just use the dev shell, which
@@ -197,19 +237,32 @@ Practical notes:
 nix develop --command gh release view v1.2.0
 ```
 
-Expect exactly **four** assets:
+Expect exactly **one** asset:
 
 | Asset | ~Size |
 | :--- | :--- |
 | `vt.AppImage` | ~1.18 GB |
-| `cohere-transcribe-….part1.xz` | 1 458 806 112 |
-| `cohere-transcribe-….part2.xz` | 1 456 452 916 |
-| `cohere-transcribe-….SHA256SUMS` | 268 |
 
-A release with only `vt.AppImage` means step 5 was skipped.
+An app release carrying weight assets means someone hand-uploaded them; they are
+dead weight, because the client resolves weights from the bundle tag, never from
+a version tag.
+
+Check the bundle, which is what first-run users actually download:
+
+```bash
+TAG=$(nix develop --command python -c 'import sys; sys.path.insert(0,"src");
+import model_download as m; print(m.MODEL_BUNDLE_TAG)')
+nix develop --command gh release view "$TAG"
+```
+
+Expect `part1.xz`, `part2.xz` and `SHA256SUMS` — and **not** `vt.AppImage`.
 
 End-to-end check that the *client* path works — i.e. what a first-run user gets.
-This exercises the real download/verify/install code:
+This exercises the real download/verify/install code.
+
+> **Warning: this pulls the full ~2.9 GB of weights.** Run it on a good
+> connection — not on a metered or tethered link. It is not part of routine
+> release verification.
 
 ```bash
 # Force a clean install into a throwaway dir and confirm it round-trips.
@@ -225,33 +278,45 @@ a tag other than the default.
 
 ---
 
-## The `/latest` fallback trap
+## Where the weights live
 
 In `src/model_download.py`:
 
 ```python
-DEFAULT_RELEASE_BASE  = "https://github.com/jjamesmartiin/voice-transcriber/releases/latest/download"
-FALLBACK_RELEASE_BASE = "https://github.com/jjamesmartiin/voice-transcriber/releases/download/v1.1.0"
+REPO_SLUG            = "jjamesmartiin/voice-transcriber"
+MODEL_BUNDLE_TAG     = f"model-cohere-{REVISION[:12]}"
+DEFAULT_RELEASE_BASE = f"https://github.com/{REPO_SLUG}/releases/download/{MODEL_BUNDLE_TAG}"
+LEGACY_RELEASE_BASE  = f"https://github.com/{REPO_SLUG}/releases/download/v1.1.0"
 ```
 
-On first run the client tries `latest`, and on a 404 fast-fails to
-`FALLBACK_RELEASE_BASE`. So:
+The client never consults `/releases/latest`. That tag belongs to the AppImage,
+and resolving weights through it is what previously let a mid-upload bundle
+shadow a complete one. The bundle URL is instead **derived from `REVISION`**:
 
-- If a release is published **without** weights, `latest` 404s and the client
-  quietly installs the weights from the **hardcoded `v1.1.0` pin**. Users are
-  served old-but-valid weights, and the release looks fine. This is a silent
-  failure, not a loud one — which is exactly why the upload step is easy to
-  forget.
-- `FALLBACK_RELEASE_BASE` is a hand-maintained pin. It must always point at a
-  tag whose assets actually exist. Bumping it is optional busywork *if* you
-  reliably upload to every new release; it is your safety net if you don't.
+- **A new app release uploads nothing.** Same `REVISION` → same tag → same
+  assets. Publishing weights is a once-per-revision job, not a per-version one.
+- **Bumping `REVISION` renames the tag**, which is what forces a fresh publish
+  when — and only when — the weights actually change.
+- Weights can never silently come from the wrong revision: the manifest name
+  embeds the revision (`cohere-transcribe-<rev>.SHA256SUMS`), so a tag holding a
+  *different* revision 404s on the manifest and is skipped.
 
-History, for context: `v1.1.1` shipped AppImage-only and has been serving
-weights from the `v1.1.0` fallback since 2026-09-26.
+Candidate order is `[requested base, DEFAULT_RELEASE_BASE, LEGACY_RELEASE_BASE]`,
+deduplicated. Before committing to a candidate the client **HEAD-checks every
+part named in the manifest** — because `SHA256SUMS` is uploaded *before* the
+parts it lists, so a bundle that is mid-upload or was abandoned is skipped
+rather than breaking the install. That check is what makes the scheme
+tolerant of upload order, but `scripts/publish_model_bundle.sh` still publishes
+in the correct order and refuses to publish a manifest for missing parts.
 
-**A future improvement** would be a `workflow_dispatch` job on a self-hosted
-runner that has `dist/model/`, so the upload stops being manual. Nothing like
-that exists yet.
+`LEGACY_RELEASE_BASE` (`v1.1.0`) exists only because revision `49988892…`'s
+bundle was published before bundle tags existed; it is byte-identical to what
+`model-cohere-499888924f5f` would hold (same SHA-256 per part, verified). It is
+safe as a fallback for the reason above. **Delete that constant once a bundle
+tag has been published for the then-current revision.**
+
+History: `v1.1.1` shipped AppImage-only and serves weights from the `v1.1.0`
+tag. From v1.2.0 onward no app release carries weights at all.
 
 ---
 
@@ -278,7 +343,7 @@ Environment knobs:
 | :--- | :--- |
 | `VT_MODEL_DIR` | Explicit install dir; overrides all other targets |
 | `VT_AUTO_DOWNLOAD_MODEL` | `0`/`false`/`no`/`off` disables auto-download |
-| `VT_MODEL_RELEASE_BASE` | Override the asset base URL (default: `latest`) |
+| `VT_MODEL_RELEASE_BASE` | Override the asset base URL (default: the revision-derived `model-cohere-<rev12>` bundle tag) |
 | `XDG_DATA_HOME` | Relocates the per-user fallback (useful in tests) |
 
 Manual check of an existing install:

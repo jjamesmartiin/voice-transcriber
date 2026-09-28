@@ -429,10 +429,16 @@ model) and needs no Python install on the target machine. See
 > last `nix build`, which may predate recent frontend changes. Re-run `nix build .`
 > (and re-launch) after pulling to pick up a rebuilt `vt-tui`.
 
-> **Cutting a release?** See [`docs/releasing.md`](docs/releasing.md). The
-> AppImage is built and attached by CI, but the model weights (~2.8 GB) are
-> **not** — they are attached by hand, every release. Missing that step fails
-> silently, so follow the checklist.
+> **Cutting a release?** See [`docs/releasing.md`](docs/releasing.md). CI builds
+> and attaches the AppImage. The model weights are published **separately**, to
+> a revision-keyed bundle tag, and only when the model revision actually
+> changes — never per release. A new version reuses the existing bundle, so
+uploding one requires no upload at all:
+>
+> ```bash
+> nix develop --command ./scripts/publish_model_bundle.sh --dry-run  # show the plan
+> nix develop --command ./scripts/publish_model_bundle.sh --build    # ~2.9 GB, once per revision
+> ```
 
 ---
 

@@ -19,12 +19,17 @@ release or touching `.github/workflows/release.yml`.
 Start recording, change settings and read results back through the control API:
 
 ```bash
-python src/main.py status --json     # never needs a running instance
-python src/main.py help --json       # machine-readable verb catalogue
+python src/main.py help --json       # machine-readable verb catalogue (works offline)
 python src/main.py start             # with an instance running
 python src/main.py stop
 python src/main.py wait --json       # includes last_transcription
 ```
+
+> `help` is the only verb answered locally. Every other verb — including
+> `status` — is a pure UNIX-socket client (`send_command`, `src/control.py:388-400`)
+> and returns `ok: false, "no running Voice Transcriber at <sock>"` when no engine
+> is up. There is no offline fallback: verified with per-user state present but
+> no engine. Start an instance first (or set `VT_CONTROL_SOCKET`).
 
 `help --json` is the source of truth for the verb surface (24 verbs, with
 `choices` / `required` / `toggles` per verb). It is served locally from
@@ -62,12 +67,14 @@ nix build .#vt-tui --no-link --print-out-paths
 
 ## Gotchas that have actually bitten
 
-- **CI does not publish the model weights.** `release.yml` attaches only
-  `./*.AppImage`; the ~2.8 GB of Cohere weights are uploaded by hand from
-  `dist/model/` after the release object exists. A release without them is not
-  visibly broken — the client 404s on `releases/latest/download` and silently
-  falls back to the hardcoded `FALLBACK_RELEASE_BASE` tag in
-  `src/model_download.py`. See `docs/releasing.md`.
+- **Weights are keyed by model revision, not by app release.** `release.yml`
+  attaches only `./*.AppImage`; the ~2.8 GB of Cohere weights live on a
+  revision-derived bundle tag (`model-cohere-<rev12>`, from `REVISION` in
+  `src/model_download.py`) and are re-published **only when `REVISION`
+  changes** — never per release. Publish with `scripts/publish_model_bundle.sh`,
+  which reads its constants out of the module (so it cannot drift from the
+  client) and uploads parts first, `SHA256SUMS` last. Do not hand-upload weights
+  to a version tag: the client never reads them there. See `docs/releasing.md`.
 
 - **Nix flakes only see git-tracked files.** A new file in `src/` that is left
   untracked is **excluded** from `nix build` / `nix run` even though the working
