@@ -270,8 +270,10 @@ cannot start before Phase 1's transport decision.
 3. **Is the fork long-lived alongside the Python engine, or a replacement?**
    Differentially testing against Python is only possible while Python exists —
    which argues for keeping both alive through Phases 0–6.
-4. **Distribution:** `jpackage` per-platform installers, or a bundled runtime
-   image? This determines the model-bundle integration (bundled vs. downloaded).
+4. ~~**Distribution**~~ — **settled: both, with the model bundled-first.**
+   `jpackage --type app-image` plus the launcher and model-lookup order in §12.
+   Publish the lite artifact; build the fat one on demand. Because resolution is
+   bundled-first, this is a packaging flag and not a code fork.
 5. **GPU:** CPU-only first is strongly recommended; the Python engine is CPU-only,
    so GPU parity is not required for v1.
 
@@ -288,3 +290,70 @@ cannot start before Phase 1's transport decision.
 
 If step 3 yields the wrong text at the end of week 2, escalate the go/no-go
 decision immediately rather than spending the remaining time-box optimistically.
+
+---
+
+## 12. Distribution: one launcher, no Python, no installer ceremony
+
+Stated goal: download one thing, double-click a launcher, and it runs. No Python,
+no `pip`, no Nix on the user's machine.
+
+**The launcher is a `.bat`/`.sh` over `java -jar`. The model is a sibling
+directory, not an entry inside the jar.** Two hard limits force that, and both are
+already facts of this repo:
+
+| Limit | Consequence |
+| :--- | :--- |
+| GitHub allows **2 GiB per release asset** — which is exactly why the weights ship as two ~1.36 GiB parts (`docs/releasing.md`) | A single fat artifact containing the model **cannot be published** as one GitHub file. It must be split like the weights, or hosted where big files are allowed (S3 / Hugging Face / your own site). |
+| A jar is a ZIP. A multi-GB entry means ZIP64, and a 3.9 GB blob the JVM must decompress before inference starts. | `java -jar` is fine for code. It is **not** a payload format for weights. |
+
+### Layout (both flavours)
+
+```
+VoiceTranscriber/
+  run.bat / run.sh      runtime/bin/java -jar app/vt.jar     <- the launcher
+  runtime/              jlink'd JRE, ~60-80 MB
+  app/vt.jar            code + ONNX Runtime natives, ~50-100 MB
+  model/cohere/         the weights, 3.9 GB   (fat only; absent in lite)
+```
+
+Built with `jpackage --type app-image` (`--main-jar`, `--runtime-image`, and
+`--add-modules` for the JDK modules the app actually uses). Linux wraps the same
+folder in an **AppImage** — the tooling already exists in this repo. Windows can
+additionally offer a self-extracting `.exe` for true single-file, which is a
+delivery nicety and does **not** change the hosting constraint above.
+
+### One code path, two artifacts
+
+Resolve the model **bundled-first**, mirroring the order `cohere_models_dir()`
+already uses in `src/model_download.py`:
+
+```
+$VT_MODEL_DIR  ->  ./model/cohere beside the launcher  ->  per-user data dir  ->  download
+```
+
+The Python engine already does exactly this (the frozen `_MEIPASS` check), so
+"ships with the model" versus "downloads on first run" is a **packaging flag, not
+a code fork**: one jar, one code path, two artifacts. Keep it that way — the
+moment the fat build needs its own code path, this stops being cheap.
+
+### Sizes
+
+| Artifact | Contents | Size |
+| :--- | :--- | ---: |
+| **Lite** (published) | runtime + jar; model fetched on first run | ~120-180 MB |
+| **Fat** (built on demand) | + `model/cohere/` | ~4.0 GB extracted, ~2.9 GB if shipped as the existing `.partN.xz` |
+
+### What this settles
+
+- **Lite stays inside GitHub's 2 GiB limit as-is**, reusing the bundle that
+  `scripts/publish_model_bundle.sh` already publishes. No re-upload, nothing new
+  to host, and the first-run download path is the one already proven.
+- **Fat is never uploaded.** It is built locally, where `dist/model/` already
+  exists — `platforms/windows/build_offline.py` is the precedent for exactly this
+  (it copies `models/` into `dist/VoiceTranscriber/`), and the Java build should
+  follow that shape rather than invent one.
+- **Still open:** if a fat artifact is ever *distributed*, its host must accept
+  >2 GiB, or the artifact must be split like the weights already are. Decide this
+  only if users ask for a downloadable offline build; until then it is a local
+  build and the question is moot.
