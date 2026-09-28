@@ -31,11 +31,16 @@ import sys
 import tarfile
 import tempfile
 
-REPO_ID = "CohereLabs/cohere-transcribe-03-2026"
-REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
-
-# model.safetensors sha256 == its HF blob id (content-addressed cache)
-SAFETENSORS_SHA256 = "987bd3e141c7bfdb5a78f5db11397ee7737308357e6cc0a3f36a4979b158137a"
+# Single source of truth for what this package contains: importing rather than
+# re-declaring means the builder and the installer cannot disagree about the
+# revision, which would otherwise drift silently on a model bump.
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "src"))
+from model_download import (  # noqa: E402
+    REPO_ID,
+    REVISION,
+    SAFETENSORS_SHA256,
+)
 
 # Files from the HF snapshot that transformers needs for a local offline load.
 REQUIRED_FILES = [

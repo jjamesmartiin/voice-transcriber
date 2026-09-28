@@ -133,13 +133,15 @@ def test_ensure_local_cohere_fallback_candidate_chain(monkeypatch, tmp_path):
     # Mock download execution so it doesn't try real network download
     monkeypatch.setattr(model_download, "_http_get", lambda url, dest, desc: 100)
     monkeypatch.setattr(model_download, "_sha256_file", lambda p: "digest1")
+    # Presence of the parts is confirmed by HEAD; stub it so the test stays offline.
+    monkeypatch.setattr(model_download, "_asset_exists", lambda url: True)
 
     # With empty local dir
     assert model_download.is_local_model_complete(str(tmp_path)) is False
 
     # Force candidates to check primary and fallback
     monkeypatch.setattr(model_download, "DEFAULT_RELEASE_BASE", "https://example.com/latest")
-    monkeypatch.setattr(model_download, "FALLBACK_RELEASE_BASE", "https://example.com/v1.1.0")
+    monkeypatch.setattr(model_download, "LEGACY_RELEASE_BASE", "https://example.com/v1.1.0")
 
     # Run ensure_local_cohere up to fetch manifest phase
     # (it will attempt cand 1, fail, then attempt cand 2)
@@ -150,3 +152,113 @@ def test_ensure_local_cohere_fallback_candidate_chain(monkeypatch, tmp_path):
 
     assert "https://example.com/latest" in attempts
     assert "https://example.com/v1.1.0" in attempts
+
+
+def test_model_bundle_tag_is_revision_derived():
+    """Weights are keyed by *model revision*, not app version.
+
+    That is what makes a new app release upload nothing: the tag only changes
+    when REVISION does.
+    """
+    assert model_download.MODEL_BUNDLE_TAG == (
+        f"model-cohere-{model_download.REVISION[:12]}")
+    assert model_download.DEFAULT_RELEASE_BASE == (
+        "https://github.com/jjamesmartiin/voice-transcriber"
+        f"/releases/download/{model_download.MODEL_BUNDLE_TAG}")
+
+
+def test_candidates_never_consult_the_app_latest_release():
+    """`/releases/latest` is the AppImage's tag, not a weights pointer.
+
+    Resolving weights through it is what allowed a half-published bundle to
+    shadow a complete one.
+    """
+    cands = model_download._release_candidates(model_download.DEFAULT_RELEASE_BASE)
+    assert not any("/releases/latest" in c for c in cands)
+    assert cands[0] == model_download.DEFAULT_RELEASE_BASE
+    assert cands[-1] == model_download.LEGACY_RELEASE_BASE
+    assert len(cands) == len(set(cands))
+
+
+def test_candidates_dedupe_an_explicit_override():
+    """An explicit override wins, but the canonical bundle is still a fallback
+    and no URL is repeated."""
+    cands = model_download._release_candidates(model_download.LEGACY_RELEASE_BASE)
+    assert cands[0] == model_download.LEGACY_RELEASE_BASE.rstrip("/")
+    assert cands[1] == model_download.DEFAULT_RELEASE_BASE.rstrip("/")
+    assert len(cands) == len(set(cands)) == 2
+
+
+def test_model_revision_lives_only_in_model_download():
+    """The model revision is declared exactly once and imported everywhere.
+
+    Drift here is silent and nasty: the installer would fetch release assets for
+    one revision while the loader asked the backend for another. Checked at the
+    source level so the model-free shared tier never has to import
+    torch/transformers to assert it.
+    """
+    rev = model_download.REVISION
+    sha = model_download.SAFETENSORS_SHA256
+    for rel in ("src/transcribe_cohere.py", "scripts/prepare_model_release.py"):
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert rev not in text, (
+            f"{rel} duplicates REVISION — import it from model_download instead")
+        assert sha not in text, (
+            f"{rel} duplicates SAFETENSORS_SHA256 — import it instead")
+    own = (REPO_ROOT / "src" / "model_download.py").read_text(encoding="utf-8")
+    assert rev in own and sha in own, (
+        "src/model_download.py is the declared home of the revision")
+
+
+def test_publish_script_reads_constants_from_this_module():
+    """The publisher must not hardcode the bundle tag.
+
+    It resolves REPO_SLUG / MODEL_BUNDLE_TAG / REVISION by importing this
+    module, so the two can never disagree about where the weights live.
+    """
+    script = REPO_ROOT / "scripts" / "publish_model_bundle.sh"
+    assert script.exists(), "publisher script is missing"
+    assert os.access(script, os.X_OK), "publisher script is not executable"
+    text = script.read_text(encoding="utf-8")
+    # Prose may name the scheme (`model-cohere-<rev12>`), but the *resolved*
+    # values must come from the import, never be pasted in.
+    assert model_download.MODEL_BUNDLE_TAG not in text, (
+        "publisher hardcodes the resolved bundle tag instead of importing it")
+    assert model_download.REVISION not in text, (
+        "publisher hardcodes REVISION instead of importing it")
+    assert "import model_download" in text
+
+
+def test_manifest_listing_missing_parts_is_skipped(monkeypatch, tmp_path):
+    """Regression: a manifest whose parts are absent must never be chosen.
+
+    SHA256SUMS is uploaded before the parts it lists, so a mid-upload bundle
+    used to win the candidate race and hard-fail the install instead of
+    letting a complete candidate serve.
+    """
+    broken = "https://example.com/releases/download/model-cohere-broken"
+    good = "https://example.com/releases/download/model-cohere-good"
+
+    def fake_fetch(cand, prefix):
+        return ({"cohere-transcribe-rev.part1.xz": "d1",
+                 "cohere-transcribe-rev.part2.xz": "d2"}, f"{cand}/SUMS")
+
+    downloaded = []
+    monkeypatch.setattr(model_download, "_fetch_part_manifest", fake_fetch)
+    monkeypatch.setattr(model_download, "DEFAULT_RELEASE_BASE", broken)
+    monkeypatch.setattr(model_download, "LEGACY_RELEASE_BASE", good)
+    # `broken` publishes part1 but not part2.
+    monkeypatch.setattr(
+        model_download, "_asset_exists",
+        lambda url: not (url.startswith(broken) and url.endswith("part2.xz")))
+    monkeypatch.setattr(model_download, "_http_get",
+                        lambda url, dest, desc: downloaded.append(url) or 100)
+    monkeypatch.setattr(model_download, "_sha256_file", lambda p: "d1")
+
+    try:
+        model_download.ensure_local_cohere(dest=str(tmp_path), base_url=broken)
+    except Exception:
+        pass  # the fake parts never decompress; the candidate choice is the point
+
+    assert downloaded, "expected the complete candidate to be used"
+    assert all(u.startswith(good) for u in downloaded), downloaded

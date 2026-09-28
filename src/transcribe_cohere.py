@@ -20,13 +20,16 @@ except ImportError:
         return text
 
 try:
-    from model_download import cohere_models_dir, ensure_local_cohere
+    from model_download import cohere_models_dir, ensure_local_cohere, REVISION
 except Exception:
     cohere_models_dir = None
     ensure_local_cohere = None
+    REVISION = None
 
 MODEL_ID = "CohereLabs/cohere-transcribe-03-2026"
-MODEL_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
+# Single source of truth: the installer fetches the release assets for the same
+# revision this loader asks for, so both must come from model_download.REVISION.
+MODEL_REVISION = REVISION
 
 SUPPORTED_LANGUAGES = [
     "en", "fr", "de", "es", "it", "pt", "nl", "pl", "el", "ar", "ja", "zh", "vi", "ko"

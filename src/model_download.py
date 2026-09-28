@@ -20,8 +20,9 @@ Pure stdlib: urllib for download, lzma for decompression, tarfile for extract.
 Env knobs:
   VT_MODEL_DIR            explicit model install directory (overrides both)
   VT_AUTO_DOWNLOAD_MODEL  "0"/"false" disables automatic download
-  VT_MODEL_RELEASE_BASE   base URL of the release assets (default: GitHub
-                          "latest" release of jjamesmartiin/voice-transcriber)
+  VT_MODEL_RELEASE_BASE   base URL of the release assets (default: the
+                          revision-keyed model bundle tag in
+                          jjamesmartiin/voice-transcriber)
   XDG_DATA_HOME           (standard) relocates the per-user fallback for testing
 """
 import hashlib
@@ -41,11 +42,26 @@ REPO_ID = "CohereLabs/cohere-transcribe-03-2026"
 REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 SAFETENSORS_SHA256 = "987bd3e141c7bfdb5a78f5db11397ee7737308357e6cc0a3f36a4979b158137a"
 
-DEFAULT_RELEASE_BASE = (
-    "https://github.com/jjamesmartiin/voice-transcriber/releases/latest/download"
-)
-FALLBACK_RELEASE_BASE = (
-    "https://github.com/jjamesmartiin/voice-transcriber/releases/download/v1.1.0"
+# Single source of truth for the publishing target: scripts/publish_model_bundle.sh
+# reads these back out of this module so it cannot drift from the client.
+REPO_SLUG = "jjamesmartiin/voice-transcriber"
+_REPO_URL = f"https://github.com/{REPO_SLUG}"
+
+# Weights are addressed by *model revision*, never by app release. REVISION is
+# compiled into the binary and already names the asset files, so every app
+# version resolves to the same bundle: publishing weights is a once-per-revision
+# job, not a once-per-version one. Bumping REVISION renames the tag, which is
+# what forces a fresh publish when (and only when) the weights actually change.
+MODEL_BUNDLE_TAG = f"model-cohere-{REVISION[:12]}"
+DEFAULT_RELEASE_BASE = f"{_REPO_URL}/releases/download/{MODEL_BUNDLE_TAG}"
+# Revision 49988892…'s bundle was published as v1.1.0 before this scheme existed
+# and is byte-identical to what the bundle tag would hold, so it is still served
+# from there. Safe as a fallback because the manifest name embeds the revision:
+# a tag holding a *different* revision 404s on `cohere-transcribe-<rev>.SHA256SUMS`
+# and is skipped, so a stale tag can never serve mismatched weights. Drop this
+# entry once a bundle tag has been published for the then-current revision.
+LEGACY_RELEASE_BASE = (
+    f"{_REPO_URL}/releases/download/v1.1.0"
 )
 
 # Minimal set whose presence means "a local copy exists and can be loaded".
@@ -166,6 +182,50 @@ def _release_base():
     return os.environ.get("VT_MODEL_RELEASE_BASE", DEFAULT_RELEASE_BASE).rstrip("/")
 
 
+def _release_candidates(primary):
+    """Base URLs to try, most-preferred first, without duplicates.
+
+    `primary` is whatever the caller asked for (an explicit base_url, the
+    VT_MODEL_RELEASE_BASE override, or the revision-derived bundle tag). The
+    canonical bundle and the legacy pin are appended as fallbacks so a
+    partially-published or relocated bundle degrades instead of failing.
+    """
+    out = []
+    for cand in (primary, DEFAULT_RELEASE_BASE, LEGACY_RELEASE_BASE):
+        c = (cand or "").rstrip("/")
+        if c and c not in out:
+            out.append(c)
+    return out
+
+
+def _asset_exists(url):
+    """HEAD `url` to confirm a release asset is really there.
+
+    The manifest is published before the parts it lists, so presence of
+    SHA256SUMS says nothing about presence of the weights. Uses HEAD so the
+    check costs two tiny requests rather than two gigabytes.
+    """
+    req = urllib.request.Request(
+        url, method="HEAD", headers={"User-Agent": "vt-model-installer/1.0"})
+    for attempt in (1, 2):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return 200 <= getattr(resp, "status", 200) < 300
+        except urllib.error.HTTPError as e:
+            # Some CDNs refuse HEAD outright; only a definite 404/410 means "absent".
+            if e.code in (403, 405, 501):
+                return True
+            if e.code in (404, 410):
+                return False
+            last = e
+        except (urllib.error.URLError, OSError, socket.timeout) as e:
+            last = e
+        if attempt == 1:
+            time.sleep(1)
+    print(f"Could not HEAD {url} ({last}); treating the asset as absent.", flush=True)
+    return False
+
+
 def is_local_model_complete(directory=None):
     """True when a loadable local copy already exists (offline-ready)."""
     directory = directory or cohere_models_dir()
@@ -282,25 +342,40 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
 
     prefix = f"cohere-transcribe-{revision}"
     primary_base = (base_url or _release_base()).rstrip("/")
-    candidates = [primary_base]
-    if FALLBACK_RELEASE_BASE not in candidates:
-        candidates.append(FALLBACK_RELEASE_BASE)
+    candidates = _release_candidates(primary_base)
 
     manifest = None
     resolved_url = None
+    failures = []
     for cand in candidates:
         try:
             cand_manifest, cand_resolved = _fetch_part_manifest(cand, prefix)
-            if cand_manifest:
-                manifest = cand_manifest
-                resolved_url = cand_resolved
-                base_url = cand
-                break
-        except Exception:
+        except Exception as e:
+            failures.append(f"{cand}: {e}")
             continue
+        if not cand_manifest:
+            failures.append(
+                f"{cand}: no {prefix}.partN.xz entries in its SHA256SUMS")
+            continue
+        # A manifest is uploaded before the parts it lists, so a bundle that is
+        # mid-upload or was abandoned must never shadow a complete one. Confirm
+        # every part is actually fetchable before committing to this candidate.
+        missing = [n for n in sorted(cand_manifest)
+                   if not _asset_exists(f"{cand}/{n}")]
+        if missing:
+            failures.append(
+                f"{cand}: SHA256SUMS lists assets that are not present: "
+                f"{', '.join(missing)}")
+            continue
+        manifest = cand_manifest
+        resolved_url = cand_resolved
+        base_url = cand
+        break
 
     if not manifest:
         print(f"Could not fetch model manifest from release assets ({candidates}).")
+        for f in failures:
+            print(f"  - {f}")
         return None
     print(f"Downloading Cohere model parts from {base_url} (Apache-2.0 release asset)...")
 
