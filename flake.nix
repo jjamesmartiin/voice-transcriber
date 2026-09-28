@@ -273,6 +273,9 @@
               hyperfine
               flamegraph
               perf
+              # Release tooling: `nix develop --command gh release upload ...`
+              # (see docs/releasing.md). Not a runtime dependency.
+              gh
             ]);
 
             shellHook = ''

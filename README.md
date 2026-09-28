@@ -422,6 +422,11 @@ model) and needs no Python install on the target machine. See
 > last `nix build`, which may predate recent frontend changes. Re-run `nix build .`
 > (and re-launch) after pulling to pick up a rebuilt `vt-tui`.
 
+> **Cutting a release?** See [`docs/releasing.md`](docs/releasing.md). The
+> AppImage is built and attached by CI, but the model weights (~2.8 GB) are
+> **not** — they are attached by hand, every release. Missing that step fails
+> silently, so follow the checklist.
+
 ---
 
 ## Configuration

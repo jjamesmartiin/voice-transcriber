@@ -11,7 +11,8 @@ core (`src/`) behind a Hardware/OS Abstraction Layer, three hosts: **Linux**,
 
 `README.md` is the user-facing guide. `docs/architecture.md` covers internals.
 `docs/control_api.md` is the programmatic interface — read it before scripting
-the app.
+the app. `docs/releasing.md` is the release runbook — read it before cutting a
+release or touching `.github/workflows/release.yml`.
 
 ## Driving the app (do this instead of faking hotkeys)
 
@@ -54,6 +55,13 @@ nix build .#vt-tui --no-link --print-out-paths
 ```
 
 ## Gotchas that have actually bitten
+
+- **CI does not publish the model weights.** `release.yml` attaches only
+  `./*.AppImage`; the ~2.8 GB of Cohere weights are uploaded by hand from
+  `dist/model/` after the release object exists. A release without them is not
+  visibly broken — the client 404s on `releases/latest/download` and silently
+  falls back to the hardcoded `FALLBACK_RELEASE_BASE` tag in
+  `src/model_download.py`. See `docs/releasing.md`.
 
 - **Nix flakes only see git-tracked files.** A new file in `src/` that is left
   untracked is **excluded** from `nix build` / `nix run` even though the working
