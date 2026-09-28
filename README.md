@@ -188,6 +188,18 @@ One command per tier, from the repo root:
 scripts forward extra args to pytest, e.g. `.\test.ps1 shared -k tui -v`. The
 launchers also work: `run.bat test` (or `powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 test`).
 
+### Mouse-mode coverage
+
+Middle-click push-to-talk is pinned by
+`tests/shared/test_mouse_mode_contract.py`, which runs in all three CI jobs and
+drives each backend through its own event seam (skipping cleanly where a native
+listener is unavailable). Windows-specific toggling lives in
+`tests/windows/test_middle_click_hotkey.py`; the PowerShell host bridge is
+pinned structurally in `tests/wsl/test_mouse_mode.py` (the WSL CI runner has no
+`powershell.exe`). The Linux-only extras — tap-passthrough, left+right → Enter,
+and suppressed X11 middle-click paste — live in
+`tests/linux/test_middle_click_hotkey.py`.
+
 The **end-to-end** tier needs the downloaded ASR model and (for the loopback
 suite) a real speaker + mic, so it is intentionally **not** part of CI. See
 [`docs/agent_testing_workflow.md`](docs/agent_testing_workflow.md) for the
