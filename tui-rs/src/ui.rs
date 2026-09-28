@@ -153,7 +153,7 @@ pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Lin
             }
 
             let l2: Vec<Span<'static>> = vec![
-                Span::styled("  [Space] Rec  [s/S/,] Settings  [M] Mic  [r] Reset  [q] Quit", dim()),
+                Span::styled("  [Space] Rec (tap again = stop, hands-free)  [s/S/,] Settings  [r] Reset  [q] Quit", dim()),
             ];
 
             vec![Line::from(l1), Line::from(l2)]
@@ -181,7 +181,7 @@ pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Lin
             l1.push(Span::styled(format!("mic: {} ", truncate(&app.active_device, 18)), cyan()));
 
             let l2: Vec<Span<'static>> = vec![
-                Span::styled("  Release Alt+Shift or Middle Click to finish · Space while holding = hands-free", dim()),
+                Span::styled("  [Space] Stop · release Alt+Shift / Middle-Click if you used push-to-talk", dim()),
             ];
 
             vec![Line::from(l1), Line::from(l2)]

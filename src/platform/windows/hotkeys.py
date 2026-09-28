@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 class WindowsHotkeyManager(BaseHotkeyManager):
-    """Windows push-to-talk hotkeys using ``pynput`` (+ ``keyboard`` for menu)."""
+    """Windows push-to-talk hotkeys using ``pynput``."""
 
-    def __init__(self, callback_start, callback_stop, callback_config=None):
-        super().__init__(callback_start, callback_stop, callback_config)
+    def __init__(self, callback_start, callback_stop):
+        super().__init__(callback_start, callback_stop)
         self.listener = None
         self.mouse_listener = None
         self.pressed_keys = set()
@@ -90,10 +90,6 @@ class WindowsHotkeyManager(BaseHotkeyManager):
                 on_release=self._on_release,
             )
             self.listener.start()
-            try:
-                kb_lib.on_press(self._on_config_press, suppress=False)
-            except Exception as e:
-                logger.debug(f"Could not hook config keypresses: {e}")
 
             if self._pynput_mouse:
                 try:
@@ -183,26 +179,6 @@ class WindowsHotkeyManager(BaseHotkeyManager):
                         self.callback_start()
         except Exception as e:
             logger.error(f"Error in middle click timeout handler: {e}")
-
-    def _on_config_press(self, e):
-        """Handle Ctrl+Alt+I for the config menu using the keyboard library."""
-        try:
-            key_name = e.name
-        except AttributeError:
-            return
-        kb_lib = self._kb_lib
-        if key_name == "i" and (
-            kb_lib.is_pressed("ctrl")
-            or kb_lib.is_pressed("left ctrl")
-            or kb_lib.is_pressed("right ctrl")
-        ) and (
-            kb_lib.is_pressed("alt")
-            or kb_lib.is_pressed("left alt")
-            or kb_lib.is_pressed("right alt")
-        ):
-            logger.info("⚙️  Config hotkey (Ctrl+Alt+I) activated")
-            if self.callback_config:
-                self.callback_config()
 
     def _on_press(self, key):
         try:

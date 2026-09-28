@@ -248,9 +248,8 @@ class TestWSLHotkeyManagerIPC:
 
         cb_start = MagicMock()
         cb_stop = MagicMock()
-        cb_config = MagicMock()
 
-        manager = WSLHotkeyManager(cb_start, cb_stop, cb_config)
+        manager = WSLHotkeyManager(cb_start, cb_stop)
         return manager, mock_proc
 
     def test_outbound_commands(self, monkeypatch):
@@ -283,12 +282,10 @@ class TestWSLHotkeyManagerIPC:
         WSLHotkeyManager = hal.load_backend("wsl", "hotkeys").WSLHotkeyManager
         cb_start = MagicMock()
         cb_stop = MagicMock()
-        cb_config = MagicMock()
 
         manager = WSLHotkeyManager.__new__(WSLHotkeyManager)
         manager.callback_start = cb_start
         manager.callback_stop = cb_stop
-        manager.callback_config = cb_config
         manager.running = True
         manager.hotkey_active = False
 
@@ -304,7 +301,7 @@ class TestWSLHotkeyManagerIPC:
 
         manager.process = MagicMock()
         manager.process.poll.return_value = None
-        manager.process.stdout = FakeStdout(["HOTKEY_DOWN", "HOTKEY_UP", "CONFIG_DOWN"])
+        manager.process.stdout = FakeStdout(["HOTKEY_DOWN", "HOTKEY_UP"])
 
         manager._reader_loop()
 
@@ -312,7 +309,6 @@ class TestWSLHotkeyManagerIPC:
         time.sleep(0.05)
         cb_start.assert_called_once()
         cb_stop.assert_called_once_with(copy_to_clipboard=True)
-        cb_config.assert_called_once()
 
 
 # ===========================================================================

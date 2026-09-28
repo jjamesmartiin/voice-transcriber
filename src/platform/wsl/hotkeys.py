@@ -19,10 +19,24 @@ logger = logging.getLogger(__name__)
 
 
 class WSLHotkeyManager(BaseHotkeyManager):
-    """Zero-setup Windows global hotkey bridge for NixOS WSL."""
+    """Zero-setup Windows global hotkey bridge for NixOS WSL.
 
-    def __init__(self, callback_start, callback_stop, callback_config=None):
-        super().__init__(callback_start, callback_stop, callback_config)
+    The host-side PowerShell helper polls ``GetAsyncKeyState`` and streams
+    line events over stdout; this class maps them onto the shared callback
+    contract. Event vocabulary:
+
+    ``HOTKEY_DOWN``  record trigger engaged (Alt+Shift, or held middle click)
+    ``LATCH_DOWN``   Space tapped mid-hold -- hands-free latch engaged
+    ``LATCH_HOLD``   keys released while latched -- recording stays open
+    ``HOTKEY_UP``    recording should stop
+
+    The host decides when a release should be *swallowed* by the latch (it also
+    owns the start chime, so it must not re-chime when the finishing press
+    arrives); this side simply mirrors the state.
+    """
+
+    def __init__(self, callback_start, callback_stop):
+        super().__init__(callback_start, callback_stop)
         self.process = None
         self.reader_thread = None
         # Non-empty so ``main.py`` knows hotkeys are active.
@@ -101,20 +115,30 @@ class WSLHotkeyManager(BaseHotkeyManager):
                 event = line.strip()
                 if event == "HOTKEY_DOWN":
                     self.hotkey_active = True
-                    threading.Thread(target=self.callback_start, daemon=True).start()
+                    if self.callback_start:
+                        threading.Thread(
+                            target=self.callback_start, daemon=True
+                        ).start()
                 elif event == "HOTKEY_UP":
                     self.hotkey_active = False
+                    self.latch_release = False
                     if self.callback_stop:
                         threading.Thread(
                             target=self.callback_stop,
                             kwargs={"copy_to_clipboard": True},
                             daemon=True,
                         ).start()
-                elif event == "CONFIG_DOWN":
-                    if self.callback_config:
-                        threading.Thread(
-                            target=self.callback_config, daemon=True
-                        ).start()
+                elif event == "LATCH_DOWN":
+                    # Space tapped while the trigger was held. The host bridge
+                    # owns the suppression (it withholds the HOTKEY_UP when the
+                    # keys come up); we mirror the flag for parity with the
+                    # Linux/Windows backends.
+                    self.latch_release = True
+                elif event == "LATCH_HOLD":
+                    # Trigger released mid-latch: nothing is held any more, but
+                    # the recording stays open until the next trigger press.
+                    self.hotkey_active = False
+                    self.latch_release = False
             except Exception as e:
                 logger.error(f"Error in WSL hotkey reader: {e}")
                 break

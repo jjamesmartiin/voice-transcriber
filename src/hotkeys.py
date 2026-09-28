@@ -53,7 +53,7 @@ def set_global_middle_click_enabled(enabled: bool):
             logger.debug(f"set_global_middle_click_enabled failed: {e}")
 
 
-def create_global_hotkeys(callback_start, callback_stop, callback_config=None):
+def create_global_hotkeys(callback_start, callback_stop):
     """Create the platform-appropriate global hotkey manager via the HAL.
 
     Kept for backwards compatibility; prefer ``hal.create_hotkey_manager``.
@@ -62,7 +62,6 @@ def create_global_hotkeys(callback_start, callback_stop, callback_config=None):
     _current_hotkey_instance = hal.create_hotkey_manager(
         callback_start=callback_start,
         callback_stop=callback_stop,
-        callback_config=callback_config,
     )
     return _current_hotkey_instance
 

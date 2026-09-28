@@ -30,7 +30,11 @@ use app::{Action, App, Level, OutStatus, RunState, Theme};
 use demo::Script;
 use ipc::{IpcEvent, Wire};
 
-const VERSION: &str = "0.1.0";
+/// App version shown in the banner. Must match the Python default in
+/// ``src/tui.py`` (pinned by tests/shared/test_version_consistency.py): this
+/// used to be a stale 0.1.0, so the default frontend reported the wrong
+/// version to users.
+const VERSION: &str = "1.2.0";
 const TICK: Duration = Duration::from_millis(100);
 
 fn safe_restore() {
@@ -358,9 +362,6 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                                     app.should_quit = true;
                                 }
                                 Intent::ToggleRecord => ipc::send_cmd(&writer, "toggle_record"),
-                                Intent::ChangeDevice => {
-                                    mic_picker::run_mic_picker(Some(&writer), Some(&rx), &mut app)?;
-                                }
                                 Intent::OpenSettingsPicker => {
                                     settings_picker::run_settings_picker(Some(&writer), Some(&rx), &mut app)?;
                                 }
@@ -447,9 +448,6 @@ fn run_local(demo_enabled: bool, theme: Theme) -> io::Result<()> {
                                     });
                                 }
                             }
-                            Intent::ChangeDevice => {
-                                mic_picker::run_mic_picker(None, None, &mut app)?;
-                            }
                             Intent::OpenSettingsPicker => {
                                 settings_picker::run_settings_picker(None, None, &mut app)?;
                             }
@@ -518,7 +516,6 @@ struct Pending {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Intent {
     ToggleRecord,
-    ChangeDevice,
     OpenSettingsPicker,
     ResetTerminal,
     Quit,
@@ -528,9 +525,10 @@ fn key_intent(key: KeyEvent) -> Option<Intent> {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return Some(Intent::Quit);
     }
-    // Settings are changed exclusively through the settings modal (or the
-    // global Ctrl+Alt+I hotkey): every one-off toggle shortcut was removed so
-    // there is a single place to configure the app.
+    // The settings modal is the single configuration entry point. There is no
+    // global hotkey for it and no one-off toggle shortcuts: `s`/`S`/`,` opens
+    // the modal, and every other setting (microphone, theme, presets) is
+    // changed from inside it.
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => Some(Intent::Quit),
         KeyCode::Char(' ') | KeyCode::Enter => Some(Intent::ToggleRecord),
@@ -538,7 +536,6 @@ fn key_intent(key: KeyEvent) -> Option<Intent> {
             Some(Intent::OpenSettingsPicker)
         }
         KeyCode::Char('r') => Some(Intent::ResetTerminal),
-        KeyCode::Char('M') | KeyCode::Char('i') | KeyCode::Char('I') => Some(Intent::ChangeDevice),
         _ => None,
     }
 }
@@ -564,9 +561,9 @@ fn print_help() {
          \x20   -h, --help        Print this help\n\
          \n\
          KEYS:\n\
-         \x20   Space / Enter     Start / stop recording\n\
-         \x20   s, S, ,           Settings & configuration modal\n\
-         \x20   M, i              Microphone picker\n\
+         \x20   Space / Enter     Start / stop recording (tap again to stop — hands-free)\n\
+         \x20   s, S, ,           Settings & configuration modal (the only config entry point)\n\
+         \x20                     Microphone, theme and presets are sub-pickers inside it\n\
          \x20   r                 Reset terminal & clipboard bridge\n\
          \x20   q, Esc, Ctrl+C    Quit"
     );

@@ -19,7 +19,7 @@ public class WinInterop {
     public const int VK_SHIFT = 0x10;
     public const int VK_CONTROL = 0x11;
     public const int VK_MENU = 0x12; // ALT key
-    public const int VK_KEY_I = 0x49; // 'I' key
+    public const int VK_SPACE = 0x20;
 
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const byte VK_V = 0x56;
@@ -95,15 +95,12 @@ public class WinInterop {
         return alt && shift;
     }
 
-    public static bool IsMButtonPressed() {
-        return (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
+    public static bool IsSpacePressed() {
+        return (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
     }
 
-    public static bool IsCtrlAltIPressed() {
-        bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-        bool alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-        bool keyI = (GetAsyncKeyState(VK_KEY_I) & 0x8000) != 0;
-        return ctrl && alt && keyI;
+    public static bool IsMButtonPressed() {
+        return (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
     }
 
     public static void SendCtrlV() {
@@ -168,7 +165,12 @@ Add-Type -TypeDefinition $csharpCode -ReferencedAssemblies "System.Windows.Forms
 [WinInterop]::StartStdinListener()
 
 $wasHotkeyDown = $false
-$wasConfigDown = $false
+$wasSpaceDown = $false
+# Hands-free latch state, mirroring BaseHotkeyManager.latch_release on
+# Linux/Windows. Space tapped while the record trigger is held means "let go of
+# the keys and keep recording"; the next trigger press finishes the dictation.
+$latched = $false
+$recording = $false
 $mButtonDownTime = [DateTime]::MinValue
 $mButtonActive = $false
 
@@ -191,24 +193,42 @@ while ($true) {
     $isHotkeyDown = $isAltShiftDown -or $mButtonActive
     if ($isHotkeyDown -and -not $wasHotkeyDown) {
         $wasHotkeyDown = $true
-        [WinInterop]::PlayStartSound()
-        [Console]::WriteLine("HOTKEY_DOWN")
+        if ($recording) {
+            # Already recording hands-free: this press concludes the dictation.
+            # Deliberately no start chime and no HOTKEY_DOWN.
+            $recording = $false
+            $latched = $false
+            [Console]::WriteLine("HOTKEY_UP")
+        } else {
+            $recording = $true
+            $latched = $false
+            [WinInterop]::PlayStartSound()
+            [Console]::WriteLine("HOTKEY_DOWN")
+        }
         [Console]::Out.Flush()
     } elseif (-not $isHotkeyDown -and $wasHotkeyDown) {
         $wasHotkeyDown = $false
-        [Console]::WriteLine("HOTKEY_UP")
-        [Console]::Out.Flush()
+        if ($recording) {
+            if ($latched) {
+                # Hands-free: the keys are up but the recording stays open.
+                $latched = $false
+                [Console]::WriteLine("LATCH_HOLD")
+            } else {
+                $recording = $false
+                [Console]::WriteLine("HOTKEY_UP")
+            }
+            [Console]::Out.Flush()
+        }
     }
 
-    # Check Ctrl+Alt+I (Config Trigger)
-    $isConfigDown = [WinInterop]::IsCtrlAltIPressed()
-    if ($isConfigDown -and -not $wasConfigDown) {
-        $wasConfigDown = $true
-        [Console]::WriteLine("CONFIG_DOWN")
+    # Space tapped while the trigger is held = engage the hands-free latch.
+    $isSpaceDown = [WinInterop]::IsSpacePressed()
+    if ($isSpaceDown -and -not $wasSpaceDown -and $wasHotkeyDown -and -not $latched) {
+        $latched = $true
+        [Console]::WriteLine("LATCH_DOWN")
         [Console]::Out.Flush()
-    } elseif (-not $isConfigDown -and $wasConfigDown) {
-        $wasConfigDown = $false
     }
+    $wasSpaceDown = $isSpaceDown
 
     [System.Threading.Thread]::Sleep(10)
 }

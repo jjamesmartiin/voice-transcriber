@@ -117,11 +117,7 @@ def test_tui_handle_keypress():
     tui.on_open_settings_picker = lambda: called.append("settings")
     tui.on_reset_terminal = lambda: called.append("reset_terminal")
 
-    tui._handle_keypress('M')
-    assert called == ["mic_picker"]
-
-    # Every direct setting shortcut is gone: only the settings modal opens them.
-    called.clear()
+    # Settings is the single configuration entry point: s / S / , open it.
     for key in ('s', 'S', ','):
         tui._handle_keypress(key)
     assert called == ["settings", "settings", "settings"]
@@ -130,9 +126,12 @@ def test_tui_handle_keypress():
     tui._handle_keypress('r')
     assert called == ["reset_terminal"]
 
-    # Old one-key toggles must no longer fire anything.
+    # The one-off toggles are gone, and so is every non-settings picker key:
+    # the microphone/theme pickers are reached from inside the settings modal.
+    # `i` and `M` were removed outright (they meant different things in the
+    # ratatui and Rich frontends), and there is no global config hotkey.
     called.clear()
-    for key in ('m', 'c', 'p', 'g', 't', 'n', 'o'):
+    for key in ('M', 'i', 'I', 'm', 'c', 'p', 'g', 't', 'n', 'o'):
         tui._handle_keypress(key)
     assert called == []
 
@@ -212,14 +211,17 @@ def test_settings_and_mic_picker_key_dispatch():
     tui.on_open_settings_picker = lambda: called.append("settings")
     tui.on_open_mic_picker = lambda: called.append("mic_picker")
 
-    # Settings triggers: s, S, ,, i, I
-    for key in ('s', 'S', ',', 'i', 'I'):
+    # Settings is the only configuration entry point: s, S, ,.
+    for key in ('s', 'S', ','):
         tui._handle_keypress(key)
         assert called[-1] == "settings", key
 
-    # Mic trigger: M
-    tui._handle_keypress('M')
-    assert called[-1] == "mic_picker"
+    # `i`/`I` were removed outright, and `M` no longer opens the mic picker
+    # directly -- the microphone lives inside the settings modal now.
+    called.clear()
+    for key in ('i', 'I', 'M'):
+        tui._handle_keypress(key)
+    assert called == []
 
     import t2
     assert hasattr(t2, 'select_settings_picker')

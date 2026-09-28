@@ -54,21 +54,23 @@ class BaseAudioCuePlayer:
 class BaseHotkeyManager:
     """Unified global push-to-talk hotkey manager.
 
-    Concrete backends drive the ``callback_start`` / ``callback_stop`` /
-    ``callback_config`` callbacks in response to the Alt+Shift hotkey (and the
-    Space hands-free latch) and are responsible for typing text into the active
-    window when asked.
+    Concrete backends drive the ``callback_start`` / ``callback_stop``
+    callbacks in response to the Alt+Shift hotkey (and the Space hands-free
+    latch) and are responsible for typing text into the active window when
+    asked.
+
+    Configuration is deliberately *not* a global hotkey: settings are opened
+    from the terminal frontend (``s`` / ``S`` / ``,``) or through the control
+    API in :mod:`control`.
     """
 
     def __init__(
         self,
         callback_start=None,
         callback_stop=None,
-        callback_config=None,
     ) -> None:
         self.callback_start = callback_start
         self.callback_stop = callback_stop
-        self.callback_config = callback_config
 
         self.running = False
         self.hotkey_active = False

@@ -54,7 +54,7 @@ def detect_system_theme_color():
 
 
 class VoiceTranscriberTUI:
-    def __init__(self, app_version="1.1.1", ui_theme="auto"):
+    def __init__(self, app_version="1.2.0", ui_theme="auto"):
         self.app_version = app_version
         self.console = Console()
         self.lock = threading.Lock()
@@ -324,7 +324,7 @@ class VoiceTranscriberTUI:
             else:
                 prompt.append("mouse: off ", style="dim white")
 
-            prompt.append("\n  [Space] Rec  [s/S/,] Settings  [M] Mic  [r] Reset  [q] Quit", style="dim white")
+            prompt.append("\n  [Space] Rec (tap again = stop, hands-free)  [s/S/,] Settings  [r] Reset  [q] Quit", style="dim white")
 
         elif self.state == "RECORDING":
             prompt.append("RECORDING ", style="bold white on red")
@@ -351,7 +351,7 @@ class VoiceTranscriberTUI:
 
             prompt.append(f" ({int(self.vu_level*100)}%) ", style="dim cyan")
             prompt.append("│ ", style="dim white")
-            prompt.append("Release Alt+Shift or Middle Click to finish · Space while holding = hands-free", style="dim white")
+            prompt.append("[Space] Stop · release Alt+Shift / Middle-Click if you used push-to-talk", style="dim white")
 
         elif self.state == "PROCESSING":
             prompt.append(f"{spinner} PROCESSING AUDIO [{self.elapsed_time:04.1f}s] ", style="bold yellow")
@@ -557,20 +557,19 @@ class VoiceTranscriberTUI:
                 break
 
     def _handle_keypress(self, ch):
-        """Route terminal keypresses to callbacks"""
+        """Route terminal keypresses to callbacks.
+
+        The settings modal is the single configuration entry point: ``s``,
+        ``S`` and ``,`` open it, and the microphone, theme and preset pickers
+        are reached from inside it. ``Space`` / ``Enter`` toggles recording
+        (tap to start, tap again to stop — hands-free/hands-latched).
+        """
         if ch in [' ', '\r', '\n']:
             if self.on_toggle_record:
                 self.on_toggle_record()
-        elif ch == 'M':
-            if getattr(self, 'on_open_mic_picker', None):
-                self.on_open_mic_picker()
-            elif self.on_change_device:
-                self.on_change_device()
-        elif ch in (',', 's', 'S', 'i', 'I'):
+        elif ch in (',', 's', 'S'):
             if getattr(self, 'on_open_settings_picker', None):
                 self.on_open_settings_picker()
-            elif getattr(self, 'on_change_device', None):
-                self.on_change_device()
         elif ch.lower() == 'r':
             if self.on_reset_terminal:
                 self.on_reset_terminal()

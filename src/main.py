@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import core modules
 import hal
+import control
 from tui import VoiceTranscriberTUI
 
 # Import transcription functionality
@@ -139,6 +140,17 @@ class SimpleVoiceTranscriber:
         # tests) shares the same non-blocking behavior.
         self._start_model_load_watcher()
 
+        # Out-of-process control API (see control.py). Started here -- after
+        # every attribute a control verb touches exists, but BEFORE the
+        # model-ready join below, so the socket comes up in ~1s instead of
+        # waiting out a slow first-run model load. Best-effort: a bind conflict
+        # or a platform without AF_UNIX must never stop the app.
+        self.control_server = control.ControlServer(self)
+        if self.control_server.start():
+            logger.debug("Control API listening on %s", self.control_server.socket_path)
+        else:
+            logger.debug("Control API unavailable (no AF_UNIX or socket bind failed)")
+
         # If configured to wait on startup (default True), ensure the model is
         # 100% loaded and warmed up BEFORE initializing hotkeys so the user's very
         # first keypress transcribes instantly without waiting.
@@ -197,7 +209,6 @@ class SimpleVoiceTranscriber:
     def _wire_tui_callbacks(self):
         """Wire direct terminal keyboard shortcuts from TUI"""
         self.tui.on_toggle_record = self._on_tui_toggle_record
-        self.tui.on_change_device = self.change_input_device
         self.tui.on_toggle_mute = self._on_tui_toggle_mute
         self.tui.on_toggle_autotype = self._on_tui_cycle_output_mode
         self.tui.on_cycle_output_mode = self._on_tui_cycle_output_mode
@@ -589,6 +600,8 @@ class SimpleVoiceTranscriber:
 
     def cleanup(self):
         """Clean up all resources."""
+        if getattr(self, 'control_server', None):
+            self.control_server.stop()
         if hasattr(self, 'tui') and self.tui:
             self.tui.stop()
         if hasattr(self, 'visual_notification'):
@@ -603,7 +616,6 @@ class SimpleVoiceTranscriber:
                 platform=self.platform,
                 callback_start=self.start_recording,
                 callback_stop=self.stop_recording,
-                callback_config=self.change_input_device,
             )
             
             if self.hotkey_system.devices:
@@ -903,14 +915,248 @@ class SimpleVoiceTranscriber:
     def offer_device_change(self):
         """Show non-blocking notice for audio device change/retry"""
         if hasattr(self, 'tui') and self.tui:
-            self.tui.print_warning("No Speech Detected", "No audio detected in recording. Press [M] to change input devices or [Space] to try again.")
+            self.tui.print_warning("No Speech Detected", "No audio detected in recording. Press [s] for Settings to pick another input device, or [Space] to try again.")
             self.tui.update_state("READY")
         else:
             logger.info("Ready for next recording")
 
-    def change_input_device(self):
-        """Open settings & configuration menu via hotkey or TUI shortcut"""
-        self.open_settings_picker()
+    # ------------------------------------------------------------------
+    # Control API (see src/control.py)
+    # ------------------------------------------------------------------
+    def _control_status(self, verb: str = "status", **extra) -> dict:
+        """Snapshot returned by control-API ``status``-style replies."""
+        return {
+            "ok": True,
+            "cmd": verb,
+            "state": getattr(self.tui, "state", "UNKNOWN"),
+            "recording": bool(getattr(self, "recording", False)),
+            "device": get_active_device_name(include_model=False),
+            "model": getattr(t2, "MODEL_BACKEND", "cohere"),
+            "muted": bool(getattr(t2, "IS_MUTED", False)),
+            "output_mode": getattr(t2, "OUTPUT_MODE", "clipboard"),
+            "number_mode": getattr(t2, "NUMBER_MODE", "auto"),
+            "punctuation_mode": getattr(t2, "PUNCTUATION_MODE", "full"),
+            "ui_theme": getattr(t2, "UI_THEME", "auto"),
+            "middle_click": bool(getattr(t2, "MIDDLE_CLICK_ENABLED", False)),
+            "last_transcription": getattr(self, "last_transcription", ""),
+            **extra,
+        }
+
+    @staticmethod
+    def _control_on_off(value):
+        """Parse on/off/true/false into True/False, or None meaning "toggle"."""
+        if value is None:
+            return None
+        text = str(value).strip().lower()
+        if text in ("on", "true", "1", "yes", "enable", "enabled"):
+            return True
+        if text in ("off", "false", "0", "no", "disable", "disabled"):
+            return False
+        if text in ("toggle", "flip", ""):
+            return None
+        raise ValueError(f"expected on/off, got {value!r}")
+
+    def _control_settle(self, timeout: float = 1.0) -> None:
+        """Wait briefly for the UI state to agree with ``self.recording``.
+
+        ``stop_recording`` returns as soon as transcription is *scheduled*, so
+        without this a ``stop`` reply would still claim ``RECORDING``. Returns
+        as soon as the two agree, so the common case costs nothing.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if bool(self.recording) == (getattr(self.tui, "state", None) == "RECORDING"):
+                return
+            time.sleep(0.02)
+
+    def handle_control(self, cmd, request):
+        """Dispatch one control-API request.
+
+        The programmatic equivalent of the terminal UI, so external programs --
+        and tests -- can drive a real running engine. Transport and the verb
+        list live in :mod:`control`.
+        """
+        verb = control.normalize_verb(cmd)
+
+        raw_value = request.get("value")
+        for key in ("name", "mode"):
+            if raw_value is None:
+                raw_value = request.get(key)
+        value = None if raw_value is None else str(raw_value).strip()
+
+        def need_value():
+            if not value:
+                raise ValueError(f"{verb} needs a value")
+
+        if verb == "help":
+            return {"ok": True, "cmd": verb, "verbs": dict(control.VERBS)}
+
+        if verb == "ping":
+            return {"ok": True, "cmd": verb, "pid": os.getpid()}
+
+        if verb in ("status", "state"):
+            return self._control_status(verb)
+
+        if verb == "wait":
+            # Block until the engine stops being busy, so callers never have to
+            # poll. Note this also covers the initial model load, which reports
+            # as PROCESSING while the weights are read in.
+            try:
+                timeout = float(value) if value else 30.0
+            except ValueError:
+                raise ValueError(f"wait expects seconds, got {value!r}")
+            deadline = time.monotonic() + max(0.0, timeout)
+            while time.monotonic() < deadline:
+                if getattr(self.tui, "state", None) != "PROCESSING":
+                    break
+                time.sleep(0.05)
+            return self._control_status(verb, timed_out=time.monotonic() >= deadline)
+
+        # -- recording -----------------------------------------------------
+        if verb in ("start", "start-recording"):
+            self.start_recording()
+            self._control_settle()
+            return self._control_status(verb)
+
+        if verb in ("stop", "stop-recording"):
+            self.stop_recording(copy_to_clipboard=bool(request.get("copy", True)))
+            self._control_settle()
+            return self._control_status(verb)
+
+        if verb in ("toggle", "toggle-recording"):
+            self._on_tui_toggle_record()
+            self._control_settle()
+            return self._control_status(verb)
+
+        # -- modal pickers (the settings modal is the config hub) ----------
+        if verb in ("settings", "open-settings"):
+            self.open_settings_picker()
+            return self._control_status(verb)
+
+        if verb in ("mic", "open-mic", "microphone"):
+            self.open_mic_picker()
+            return self._control_status(verb)
+
+        # -- microphone ----------------------------------------------------
+        if verb in ("mics", "list-mics", "devices"):
+            return {
+                "ok": True,
+                "cmd": verb,
+                "devices": [d.get("name") for d in t2.get_input_devices() if d.get("name")],
+            }
+
+        if verb in ("set-mic", "set-microphone"):
+            need_value()
+            wanted = value.lower()
+            for dev in t2.get_input_devices():
+                name = str(dev.get("name", ""))
+                if wanted in name.lower():
+                    t2.PRIMARY_DEVICE_NAME = name
+                    t2.INPUT_DEVICE_INDEX = dev.get("index")
+                    t2.set_default_input_device(dev.get("index"))
+                    t2.save_audio_config()
+                    self._sync_tui_state()
+                    return self._control_status(verb, device=name)
+            raise ValueError(f"no input device matching {value!r}")
+
+        # -- appearance / formatting ---------------------------------------
+        if verb == "theme":
+            if value:
+                self._on_tui_set_theme(value)
+                return self._control_status(verb, theme=value)
+            self.open_theme_picker()
+            return self._control_status(verb)
+
+        if verb in ("output", "output-mode"):
+            need_value()
+            mode = t2.set_output_mode(value)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb, output_mode=mode)
+
+        if verb in ("numbers", "number-digits"):
+            need_value()
+            t2.set_number_digits(value)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb)
+
+        if verb in ("punctuation", "preset", "punctuation-mode"):
+            need_value()
+            t2.set_punctuation_mode(value)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb)
+
+        if verb == "trailing-space":
+            state = self._control_on_off(value)
+            toggle = t2.get_auto_type_trailing_space()
+            t2.set_auto_type_trailing_space(toggle if state is None else state)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb, trailing_space=t2.get_auto_type_trailing_space())
+
+        if verb == "auto-punctuate":
+            state = self._control_on_off(value)
+            toggle = t2.get_auto_type_auto_punctuate()
+            t2.set_auto_type_auto_punctuate(toggle if state is None else state)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb, auto_punctuate=t2.get_auto_type_auto_punctuate())
+
+        if verb == "serial":
+            state = self._control_on_off(value)
+            t2.set_serial_collapse(
+                (not t2.SERIAL_COLLAPSE) if state is None else state
+            )
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb, serial_collapse=t2.SERIAL_COLLAPSE)
+
+        if verb == "spell":
+            state = self._control_on_off(value)
+            t2.set_spell_command(
+                (not t2.SPELL_COMMAND) if state is None else state
+            )
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb, spell_command=t2.SPELL_COMMAND)
+
+        # -- toggles -------------------------------------------------------
+        if verb == "middle-click":
+            state = self._control_on_off(value)
+            t2.set_middle_click_enabled(
+                (not t2.MIDDLE_CLICK_ENABLED) if state is None else state
+            )
+            t2.save_audio_config()
+            if self.hotkey_system and hasattr(self.hotkey_system, "set_middle_click_enabled"):
+                self.hotkey_system.set_middle_click_enabled(t2.MIDDLE_CLICK_ENABLED)
+            self._sync_tui_state()
+            return self._control_status(verb, middle_click=bool(t2.MIDDLE_CLICK_ENABLED))
+
+        if verb == "mute":
+            state = self._control_on_off(value)
+            t2.IS_MUTED = (not t2.IS_MUTED) if state is None else state
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb)
+
+        # -- lifecycle -----------------------------------------------------
+        if verb in ("reset-defaults", "reset"):
+            self._on_tui_reset_defaults()
+            return self._control_status(verb)
+
+        if verb == "reset-terminal":
+            self._on_tui_reset_terminal()
+            return self._control_status(verb)
+
+        if verb == "quit":
+            # Let this reply reach the client before tearing the process down;
+            # the request is being served on a worker thread.
+            threading.Timer(0.25, self._on_tui_quit).start()
+            return {"ok": True, "cmd": verb, "message": "shutting down"}
+
+        raise ValueError(f"unknown control verb {verb!r} (try 'help')")
 
     def run(self):
         """Run the voice transcriber with Live TUI"""
@@ -953,6 +1199,15 @@ class SimpleVoiceTranscriber:
                 self.hotkey_system.stop()
 
 if __name__ == "__main__":
+    # `python src/main.py <verb>` drives an already-running instance instead of
+    # launching a second one. A leading `-` means "not a control verb", so
+    # bare/flagged launches keep behaving exactly as before.
+    _argv = sys.argv[1:]
+    if _argv and not _argv[0].startswith("-"):
+        _control_exit = control.run_cli(_argv)
+        if _control_exit is not None:
+            sys.exit(_control_exit)
+
     def check_permissions():
         """Check if user has proper permissions for input device access"""
         from hotkeys import is_running_in_wsl

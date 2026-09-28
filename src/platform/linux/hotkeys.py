@@ -23,12 +23,13 @@ class LinuxHotkeyManager(BaseHotkeyManager):
     """Wayland/X11-compatible global hotkeys via evdev + uinput.
 
     Hold ``Alt+Shift`` to record (push-to-talk), tap ``Space`` while holding to
-    latch hands-free, and press ``Ctrl+Alt+I`` to open the settings menu.
-    ``Ctrl`` held at activation switches the output mode to clipboard.
+    latch hands-free. ``Ctrl`` held at activation switches the output mode to
+    clipboard. Settings are opened from the terminal frontend, not from a
+    global hotkey.
     """
 
-    def __init__(self, callback_start, callback_stop, callback_config=None):
-        super().__init__(callback_start, callback_stop, callback_config)
+    def __init__(self, callback_start, callback_stop):
+        super().__init__(callback_start, callback_stop)
         self.devices = []
         self.virtual_keyboard = None
         self.key_states = {}
@@ -41,9 +42,8 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         # KEY_SPACE (pressed during an Alt+Shift hold = hands-free latch)
         self.SPACE_KEY = [57]
 
-        # Key codes for the config hotkey (Ctrl+Alt+I)
+        # Modifier key codes (Ctrl is also the clipboard override at release).
         self.CTRL_KEYS = [29, 97]  # KEY_LEFTCTRL, KEY_RIGHTCTRL
-        self.KEY_I = [23]  # KEY_I
 
         # Middle mouse button code (BTN_MIDDLE = 274) and hold delay (quarter second)
         self.MIDDLE_MOUSE_KEYS = [274]
@@ -406,13 +406,6 @@ class LinuxHotkeyManager(BaseHotkeyManager):
     def is_hotkey_pressed(self):
         """Check if any push-to-talk trigger is currently pressed."""
         return self.is_alt_shift_pressed() or (self.middle_click_active and self.is_middle_click_pressed())
-
-    def is_config_hotkey_pressed(self):
-        """Check if the config hotkey (Ctrl+Alt+I) is currently pressed."""
-        alt_pressed = self.is_key_pressed(self.ALT_KEYS)
-        ctrl_pressed = self.is_key_pressed(self.CTRL_KEYS)
-        i_pressed = self.is_key_pressed(self.KEY_I)
-        return alt_pressed and ctrl_pressed and i_pressed
 
     def is_ctrl_pressed(self):
         """Check if Ctrl is currently pressed."""
@@ -854,14 +847,6 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                         self.device_key_states[fd] = {}
                     self.device_key_states[fd][key_code] = (key_state == 1)
                 self.key_states[key_code] = (key_state == 1)
-
-            # Config hotkey (Ctrl + Alt + I)
-            if key_state == 1 and self.is_config_hotkey_pressed() and self.callback_config:
-                logger.debug("⚙️ Config hotkey activated")
-                self.callback_config()
-                self.key_states.clear()
-                self.device_key_states.clear()
-                return
 
             # Space pressed while the hotkey is held = hold the recording hands-free.
             if key_state == 1 and key_code in self.SPACE_KEY and self.hotkey_active:

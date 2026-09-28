@@ -71,7 +71,7 @@ def _mock_bridge(monkeypatch):
     )
 
     WSLHotkeyManager = hal.load_backend("wsl", "hotkeys").WSLHotkeyManager
-    manager = WSLHotkeyManager(MagicMock(), MagicMock(), MagicMock())
+    manager = WSLHotkeyManager(MagicMock(), MagicMock())
     return manager, mock_proc
 
 
@@ -100,7 +100,6 @@ class TestWSLMouseModeIPC:
         manager = WSLHotkeyManager.__new__(WSLHotkeyManager)
         manager.callback_start = cb_start
         manager.callback_stop = cb_stop
-        manager.callback_config = MagicMock()
         manager.running = True
         manager.hotkey_active = False
 

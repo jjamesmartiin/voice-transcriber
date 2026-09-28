@@ -204,6 +204,50 @@ class TestHandsFreeLatchWorkflow:
         finally:
             manager.cleanup()
 
+    def test_space_latch_workflow_wsl(self):
+        """Same workflow, driven through the Windows-host bridge events.
+
+        The host withholds the HOTKEY_UP while latched (emitting LATCH_HOLD
+        instead), so the recording stays open until the next trigger press.
+        See tests/wsl/test_latch_bridge.py for the PowerShell half, which
+        cannot run on CI.
+        """
+        WSLHotkeyManager = hal.load_backend("wsl", "hotkeys").WSLHotkeyManager
+        cb_start = MagicMock()
+        cb_stop = MagicMock()
+        manager = WSLHotkeyManager.__new__(WSLHotkeyManager)
+        manager.callback_start = cb_start
+        manager.callback_stop = cb_stop
+        manager.hotkey_active = False
+        manager.latch_release = False
+        manager.running = True
+
+        class FakeStdout:
+            def __init__(self, events):
+                self.events = [e + "\n" for e in events]
+
+            def readline(self):
+                return self.events.pop(0) if self.events else ""
+
+        manager.process = MagicMock()
+        manager.process.poll.return_value = None
+        manager.process.stdout = FakeStdout(
+            [
+                "HOTKEY_DOWN",  # 1. hold Alt+Shift -> start recording
+                "LATCH_DOWN",  # 2. tap Space      -> latch hands-free
+                "LATCH_HOLD",  # 3. release keys   -> keep recording
+                "HOTKEY_UP",  # 4. tap again      -> finish
+            ]
+        )
+
+        manager._reader_loop()
+        time.sleep(0.05)
+
+        cb_start.assert_called_once()
+        cb_stop.assert_called_once_with(copy_to_clipboard=True)
+        assert manager.hotkey_active is False
+        assert manager.latch_release is False
+
 
 # ===========================================================================
 # 3. Middle-Click Push-to-Talk & Quick Click Cancellation

@@ -129,7 +129,6 @@ def create_hotkey_manager(
     platform: str | None = None,
     callback_start=None,
     callback_stop=None,
-    callback_config=None,
 ):
     """Return the :class:`~platform.base.BaseHotkeyManager` for ``platform``.
 
@@ -148,7 +147,6 @@ def create_hotkey_manager(
     return _Cls(
         callback_start=callback_start,
         callback_stop=callback_stop,
-        callback_config=callback_config,
     )
 
 
