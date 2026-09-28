@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -53,6 +53,10 @@ def test_linux_device_filtering():
         assert manager._is_keyboard_device(mouse) is False
         assert manager._is_mouse_device(mouse) is True
         assert manager._is_monitored_device(mouse) is True
+
+        # A two-button pointer (no middle click) still qualifies for the chord
+        two_button = FakeDevice("Two Button Mouse", [272, 273])
+        assert manager._is_mouse_device(two_button) is True
 
         # Keyboard/remapper with BTN_MIDDLE (e.g. kanata / kmonad / laptop trackpoint keyboard)
         kanata = FakeDevice("kanata", [56, 100, 42, 54, 57, 28, 30, 274])
@@ -236,6 +240,195 @@ def test_middle_click_toggle_disabled():
 
         manager.handle_key_event(FakeEvdevEvent(274, 0))
         assert cb_stop.call_count == 1
+    finally:
+        manager.cleanup()
+
+
+class FakeForwarder:
+    """Stand-in for the uinput virtual mouse owned by a grabbed device."""
+
+    def __init__(self):
+        self.events = []
+        self.syns = 0
+
+    def emit(self, event, value, syn=True):
+        self.events.append((event, value, syn))
+
+    def syn(self):
+        self.syns += 1
+
+
+def _chord_manager():
+    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    manager.set_middle_click_enabled(True)
+    manager.virtual_keyboard = MagicMock()
+    manager.uinput = MagicMock()
+    # Marker tuple so the emit calls are easy to assert against.
+    manager.uinput.KEY_ENTER = ("KEY_ENTER", 28)
+    return manager
+
+
+def test_linux_left_right_chord_sends_enter_and_swallows_clicks():
+    """Left+right within the window -> Enter, and neither click leaks through."""
+    manager = _chord_manager()
+    fwd = FakeForwarder()
+    try:
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 1), fwd)
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_RIGHT, 1), fwd)
+
+        assert manager.virtual_keyboard.emit.call_args_list == [
+            call(manager.uinput.KEY_ENTER, 1),
+            call(manager.uinput.KEY_ENTER, 0),
+        ]
+        assert fwd.events == []
+        assert manager._chord_swallow is True
+
+        # Both releases are swallowed too, then the swallow state clears.
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 0), fwd)
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_RIGHT, 0), fwd)
+        assert fwd.events == []
+        assert manager._chord_swallow is False
+    finally:
+        manager.cleanup()
+
+
+def test_linux_right_then_left_chord_is_symmetric():
+    manager = _chord_manager()
+    fwd = FakeForwarder()
+    try:
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_RIGHT, 1), fwd)
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 1), fwd)
+        assert manager.virtual_keyboard.emit.call_count == 2
+        assert fwd.events == []
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 0), fwd)
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_RIGHT, 0), fwd)
+        assert fwd.events == []
+    finally:
+        manager.cleanup()
+
+
+def test_linux_single_click_passes_through_after_window():
+    """A lone left click is buffered briefly, then replayed verbatim."""
+    manager = _chord_manager()
+    fwd = FakeForwarder()
+    try:
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 1), fwd)
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 0), fwd)
+        assert fwd.events == []  # still inside the decision window
+
+        manager._expire_pending_mouse_chord(force=True)
+        assert fwd.events == [
+            ((manager.EV_KEY, manager.BTN_LEFT), 1, True),
+            ((manager.EV_KEY, manager.BTN_LEFT), 0, True),
+        ]
+        assert manager.virtual_keyboard.emit.call_count == 0
+    finally:
+        manager.cleanup()
+
+
+def test_linux_clicks_outside_window_do_not_chord():
+    """Once the first window elapses, a later second button is not a chord."""
+    manager = _chord_manager()
+    fwd = FakeForwarder()
+    try:
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 1), fwd)
+        manager._expire_pending_mouse_chord(force=True)  # left press leaks through
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 0), fwd)
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_RIGHT, 1), fwd)
+        manager._expire_pending_mouse_chord(force=True)  # right press leaks through
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_RIGHT, 0), fwd)
+
+        assert manager.virtual_keyboard.emit.call_count == 0
+        codes = [event[0][1] for event in fwd.events]
+        assert codes == [
+            manager.BTN_LEFT,
+            manager.BTN_LEFT,
+            manager.BTN_RIGHT,
+            manager.BTN_RIGHT,
+        ]
+    finally:
+        manager.cleanup()
+
+
+def test_linux_grabbed_middle_hold_records_and_is_eaten():
+    """A middle press held past the tap window becomes a recording (no paste)."""
+    cb_start = MagicMock()
+    cb_stop = MagicMock()
+    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    manager = LinuxHotkeyManager(cb_start, cb_stop)
+    manager.set_middle_click_enabled(True)
+    manager.virtual_keyboard = MagicMock()
+    manager.uinput = MagicMock()
+    manager.uinput.KEY_ENTER = ("KEY_ENTER", 28)
+    fwd = FakeForwarder()
+    try:
+        manager._handle_grabbed_event(None, fwd, FakeEvdevEvent(274, 1))
+        assert fwd.events == []  # buffered during the tap window
+        assert manager.key_states.get(274) is True
+
+        # Tap window elapses while still held -> promote to push-to-talk.
+        manager._expire_pending_middle_click(force=True)
+        assert fwd.events == []
+        assert manager.middle_click_active is True
+        assert manager.hotkey_active is True
+        assert cb_start.call_count == 1
+
+        # Release is swallowed and stops the recording.
+        manager._handle_grabbed_event(None, fwd, FakeEvdevEvent(274, 0))
+        assert fwd.events == []
+        assert manager.middle_click_active is False
+        assert cb_stop.call_count == 1
+        assert manager.virtual_keyboard.emit.call_count == 0
+    finally:
+        manager.cleanup()
+
+
+def test_linux_grabbed_middle_quick_tap_passes_through():
+    """Press+release inside the tap window replays as a normal middle click."""
+    cb_start = MagicMock()
+    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    manager = LinuxHotkeyManager(cb_start, MagicMock())
+    manager.set_middle_click_enabled(True)
+    manager.virtual_keyboard = MagicMock()
+    manager.uinput = MagicMock()
+    fwd = FakeForwarder()
+    try:
+        manager._handle_grabbed_event(None, fwd, FakeEvdevEvent(274, 1))
+        manager._handle_grabbed_event(None, fwd, FakeEvdevEvent(274, 0))
+        assert fwd.events == [
+            ((manager.EV_KEY, 274), 1, True),
+            ((manager.EV_KEY, 274), 0, True),
+        ]
+        assert cb_start.call_count == 0
+        assert manager.middle_click_active is False
+    finally:
+        manager.cleanup()
+
+
+def test_linux_grabbed_middle_click_forwarded_when_disabled():
+    """If mouse mode is off, a grabbed middle click is still replayed normally."""
+    manager = _chord_manager()
+    fwd = FakeForwarder()
+    try:
+        manager.middle_click_enabled = False
+        manager._handle_grabbed_event(None, fwd, FakeEvdevEvent(274, 1))
+        manager._handle_grabbed_event(None, fwd, FakeEvdevEvent(274, 0))
+        assert ((manager.EV_KEY, 274), 1, False) in fwd.events
+        assert ((manager.EV_KEY, 274), 0, False) in fwd.events
+    finally:
+        manager.cleanup()
+
+
+def test_linux_grabbed_motion_and_sync_are_forwarded():
+    """Movement/scroll frames are replayed so the cursor keeps working."""
+    manager = _chord_manager()
+    fwd = FakeForwarder()
+    try:
+        manager._forward_event(fwd, FakeEvdevEvent(0, 5, ev_type=manager.EV_REL))
+        manager._forward_event(fwd, FakeEvdevEvent(0, 0, ev_type=manager.EV_SYN))
+        assert fwd.events == [((manager.EV_REL, 0), 5, False)]
+        assert fwd.syns == 1
     finally:
         manager.cleanup()
 

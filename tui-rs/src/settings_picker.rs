@@ -203,7 +203,7 @@ impl SettingItem {
             SettingKind::MiddleClick => {
                 if app.middle_click_enabled {
                     (
-                        "Hold middle click to talk".to_string(),
+                        "Hold middle click · L+R = Enter".to_string(),
                         "[ON]",
                         Color::Green,
                     )

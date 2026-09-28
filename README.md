@@ -76,13 +76,23 @@ See the [WSL guide](platforms/wsl/README.md) and
 | :--- | :--- |
 | **`Alt+Shift`** (hold) | **Push-to-Talk.** Hold while speaking; release to transcribe and paste/type into the active window. |
 | **`Space`** (tap while holding `Alt+Shift`) | **Hands-Free Latch.** Release the keys and keep speaking; tap `Alt+Shift` again when finished. |
-| **Middle-click** (hold ~0.25 s) | **Mouse Push-to-Talk.** A quick click (< 0.25 s) passes through and is ignored. |
+| **Middle-click** | **Mouse Push-to-Talk.** A tap under ~100 ms passes through as a normal middle click; holding past ~100 ms is swallowed (no primary-selection paste) and starts recording, release stops it. |
+| **Left+right click** (within ~50 ms) | **Enter.** While mouse mode is on, a near-simultaneous left+right click is swallowed and replayed as one `Enter` keystroke. |
 | **`Ctrl`** (held at release) | **Clipboard override.** Forces clipboard output for this utterance even when auto-type is enabled. |
 | **`Ctrl+Alt+I`** (or `s`, `S`, `,`, `i` in terminal) | **Settings modal.** Interactive modal (`⚙️ Settings & Configuration`) with fuzzy search, in-place toggle badges, output modes, formatting, the microphone and theme sub-pickers, plus **Reset to Defaults**. |
 | **`M`** (in terminal) | **Microphone picker.** Interactive device picker modal (`🎤 Microphone Input Device`) with active and default indicators. |
 
 Hotkey behaviour is portable across all three platforms, including the
 hands-free latch and the middle-click hold threshold.
+
+The left+right → `Enter` chord is Linux-only: it needs `EVIOCGRAB` plus a
+virtual mouse to suppress the underlying clicks. The backend mirrors each
+grabbed mouse through `uinput`, so clicks gain at most a ~50 ms decision delay
+and are otherwise replayed untouched — except middle click, where a sub-100 ms
+tap is replayed normally and a longer hold is consumed for push-to-talk.
+Absolute pointers (touchpads/tablets) are left alone so gesture support is
+preserved. If grabbing or `uinput` is unavailable, the chord is skipped and
+the mouse behaves normally.
 
 ---
 

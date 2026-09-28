@@ -160,7 +160,9 @@ keep_bluetooth_handsfree: true
 
 # ------------------------------------------------------------------------------
 # Middle-Click Push-to-Talk
-# Hold the middle mouse button (>= 0.25s) to record; a quick click passes through.
+# Tap the middle mouse button (< ~100ms) for a normal middle click; hold it
+# (> ~100ms) to record. While enabled on Linux the hold is consumed (no
+# primary-selection paste), and a left+right click within ~50ms is sent as Enter.
 # Available Options:
 #   - true  : Enable middle-click push-to-talk
 #   - false : Disabled (opt-in feature)
