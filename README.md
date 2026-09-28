@@ -270,6 +270,11 @@ sub-pickers reached from inside the settings modal:
 
 ## Architecture
 
+> **Planning a port to another language?** Read
+> [`docs/java-fork-plan.md`](docs/java-fork-plan.md). It maps what is reusable
+> as-is (the `vt-tui` protocol, the control API, the revision-keyed weights
+> bundle) and why the ASR re-host, not the port, is the critical path.
+
 Voice Transcriber unifies all supported platforms over a single shared core
 engine using a Hardware/OS Abstraction Layer (HAL):
 
