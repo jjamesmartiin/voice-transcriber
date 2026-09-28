@@ -11,6 +11,7 @@ type`` and so on. These tests pin the parts that must not drift:
 """
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -107,6 +108,18 @@ class TestDispatch:
 # ---------------------------------------------------------------------------
 # Transport
 # ---------------------------------------------------------------------------
+#: ``socket.AF_UNIX`` is absent from stock CPython on Windows: AF_UNIX is an OS
+#: feature (Windows 10 1803+) that CPython never exposed (bpo-33408). On such an
+#: interpreter the whole control transport is unavailable, so these tests skip
+#: instead of failing. The degradation path itself is pinned on every platform
+#: by :class:`TestUnsupportedTransport` below.
+requires_af_unix = pytest.mark.skipif(
+    not control.socket_supported(),
+    reason="socket.AF_UNIX is unavailable on this interpreter (stock CPython on Windows)",
+)
+
+
+@requires_af_unix
 class TestSocketTransport:
     def test_start_is_idempotent_and_creates_the_socket(self, tmp_path):
         server = _server(tmp_path)
@@ -121,8 +134,7 @@ class TestSocketTransport:
     def test_round_trip_over_a_real_socket(self, tmp_path):
         engine = _FakeEngine()
         server = _server(tmp_path, engine)
-        if not server.start():
-            pytest.skip("AF_UNIX sockets unavailable on this host")
+        assert server.start() is True
         try:
             response = control.send_command("status", socket_path=server.socket_path)
             assert response == {"ok": True, "cmd": "status"}
@@ -134,8 +146,7 @@ class TestSocketTransport:
         """The engine socket is not single-client (unlike the TUI socket)."""
         engine = _FakeEngine()
         server = _server(tmp_path, engine)
-        if not server.start():
-            pytest.skip("AF_UNIX sockets unavailable on this host")
+        assert server.start() is True
         try:
             for _ in range(5):
                 assert control.send_command("ping", socket_path=server.socket_path)["ok"]
@@ -146,8 +157,7 @@ class TestSocketTransport:
     def test_raw_line_client_is_supported(self, tmp_path):
         """No JSON, no library: connect, write a verb, read a reply."""
         server = _server(tmp_path)
-        if not server.start():
-            pytest.skip("AF_UNIX sockets unavailable on this host")
+        assert server.start() is True
         try:
             import socket as socketlib
 
@@ -166,6 +176,37 @@ class TestSocketTransport:
         response = control.send_command("toggle", socket_path=missing)
         assert response["ok"] is False
         assert "no running Voice Transcriber" in response["error"]
+
+
+class TestUnsupportedTransport:
+    """The no-AF_UNIX path is a supported degradation, not a crash.
+
+    Stock CPython on Windows never exposes ``socket.AF_UNIX`` (bpo-33408), so
+    native Windows always takes this path: the engine must not bind, and every
+    verb must fail cleanly and visibly rather than raising into the app.
+    """
+
+    @pytest.fixture
+    def no_af_unix(self, monkeypatch):
+        monkeypatch.setattr(control, "socket_supported", lambda: False)
+
+    def test_socket_supported_asks_the_interpreter(self):
+        assert control.socket_supported() == hasattr(socket, "AF_UNIX")
+
+    def test_server_start_refuses_without_raising(self, no_af_unix, tmp_path):
+        server = _server(tmp_path)
+        assert server.start() is False
+        assert server.started is False
+
+    def test_send_command_returns_a_clean_error(self, no_af_unix, tmp_path):
+        response = control.send_command("toggle", socket_path=str(tmp_path / "x.sock"))
+        assert response["ok"] is False
+        assert "AF_UNIX" in response["error"]
+
+    def test_cli_exits_one_with_a_human_message(self, no_af_unix, tmp_path, capsys):
+        code = control.run_cli(["status", "--socket", str(tmp_path / "x.sock")])
+        assert code == 1
+        assert "AF_UNIX" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +233,7 @@ class TestCli:
         assert code == 1  # recognised verb; it just found no engine
         assert "Unknown control verb" not in capsys.readouterr().err
 
+    @requires_af_unix
     def test_client_exits_one_when_no_engine_is_listening(self, tmp_path, capsys):
         code = control.run_cli(
             ["status", "--socket", str(tmp_path / "absent.sock")]
@@ -199,10 +241,10 @@ class TestCli:
         assert code == 1
         assert "no running Voice Transcriber" in capsys.readouterr().err
 
+    @requires_af_unix
     def test_json_flag_prints_the_raw_reply(self, tmp_path, capsys):
         server = _server(tmp_path)
-        if not server.start():
-            pytest.skip("AF_UNIX sockets unavailable on this host")
+        assert server.start() is True
         try:
             code = control.run_cli(
                 ["status", "--json", "--socket", server.socket_path]
@@ -213,10 +255,10 @@ class TestCli:
         finally:
             server.stop()
 
+    @requires_af_unix
     def test_socket_path_can_come_from_the_environment(self, tmp_path, monkeypatch):
         server = _server(tmp_path)
-        if not server.start():
-            pytest.skip("AF_UNIX sockets unavailable on this host")
+        assert server.start() is True
         try:
             monkeypatch.setenv(control.CONTROL_SOCKET_ENV, server.socket_path)
             assert control.default_socket_path() == server.socket_path

@@ -207,6 +207,13 @@ Running `python src/main.py` with no verb still launches the app. Add `--json`
 for machine-readable output, or `--socket PATH` to target a specific instance.
 Under Nix the same verbs pass through the wrapper: `nix run . -- status`.
 
+> **Not available on native Windows.** Stock CPython on Windows never exposes
+> `socket.AF_UNIX`, so the engine does not bind the control socket there and
+> every verb fails with `✗ AF_UNIX sockets are unavailable on this platform`. Use
+> the terminal keys instead. **WSL works**, because the app runs on a Linux
+> interpreter there. See
+> [`docs/control_api.md`](docs/control_api.md#transport).
+
 | | |
 | :--- | :--- |
 | **Socket** | `$XDG_RUNTIME_DIR/vt-control-<uid>.sock` — override with `VT_CONTROL_SOCKET` |

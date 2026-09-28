@@ -59,11 +59,29 @@ as "not a control verb" so future flags stay safe.
 | **Socket** | `$XDG_RUNTIME_DIR/vt-control-<uid>.sock` |
 | **Override** | `VT_CONTROL_SOCKET=/path/to.sock` |
 | **Fallback dir** | `tempfile.gettempdir()` when `XDG_RUNTIME_DIR` is unset |
-| **Windows** | `AF_UNIX` on Windows 10 1803+; the `<uid>` token becomes `%USERNAME%` |
+| **Windows** | **Unavailable** — see the note below. The `<uid>` token would be `%USERNAME%` |
 | **Framing** | One newline-delimited JSON request, one newline-delimited JSON reply, per connection |
 | **Concurrency** | Many clients; each connection is served on its own daemon thread |
 | **Request limit** | 1 MiB, then the connection is dropped |
 | **Timeouts** | 5 s read/write per connection |
+
+> **Native Windows: the control API is unavailable.** Windows 10 1803+ supports
+> `AF_UNIX` at the OS level, but **stock CPython never exposes
+> `socket.AF_UNIX`** ([bpo-33408](https://bugs.python.org/issue33408); the
+> upstream PR is still unmerged), and `control.socket_supported()` is exactly
+> `hasattr(socket, "AF_UNIX")`. On native Windows the engine therefore does not
+> bind the socket — `src/main.py` records that at **debug** level only — and
+> every verb fails with:
+>
+> ```
+> ✗ AF_UNIX sockets are unavailable on this platform
+> ```
+>
+> The ratatui frontend is disabled for the same reason
+> (`tui_ratatui.tui_available()`), so native Windows falls back to the Rich TUI
+> and must be driven with terminal keys. **WSL is unaffected**: the app runs on a
+> Linux interpreter there, which has `AF_UNIX`. Tracked in
+> [`TODO.md`](../TODO.md).
 
 The socket is created by the engine at startup and removed on clean shutdown. It
 is bound after every attribute a verb can touch exists, so commands work from the
