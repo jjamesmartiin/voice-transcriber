@@ -163,6 +163,31 @@ class TestSettingsPersistence:
         assert t2.UI_THEME == "dracula"
 
 
+def _fake_sd_with_mic_at(index):
+    """A sounddevice stand-in whose only input device sits at ``index``.
+
+    ``load_audio_config`` validates a saved ``input_device_index`` against the
+    real device list and discards it when it does not exist, so a test that
+    asserts a saved index survives a reload must not depend on the host's
+    audio hardware (CI runners have none).
+    """
+    devices = [
+        {"name": f"fake-output-{i}", "max_input_channels": 0} for i in range(index)
+    ] + [{"name": "Yeti", "max_input_channels": 1}]
+
+    class _FakeSD:
+        default = MagicMock()
+
+        def query_devices(self, idx=None, kind=None):
+            if idx is None:
+                return devices
+            if not isinstance(idx, int) or not 0 <= idx < len(devices):
+                raise ValueError(f"Invalid device index: {idx}")
+            return devices[idx]
+
+    return _FakeSD()
+
+
 class TestResetToDefaults:
     """The settings modal's "Reset to Defaults" action."""
 
@@ -193,6 +218,8 @@ class TestResetToDefaults:
 
     def test_reset_keeps_microphone_and_unknown_keys(self, cfg, monkeypatch):
         import json
+
+        monkeypatch.setattr(t2, "sd", _fake_sd_with_mic_at(7))
 
         cfg.write_text(json.dumps({
             "input_device_index": 7,
