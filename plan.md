@@ -202,7 +202,7 @@ nix develop --command python tests/test_live_speaker_mic_loopback.py all
    - Tap `Alt+Shift` to stop.
    - **Verify:** Long passage is transcribed with proper punctuation and formatting.
 4. **Settings & TUI Test:**
-   - Press `Ctrl+Alt+I`.
+   - Press `s` in the terminal.
    - Cycle through settings (devices, models, number conversion, formatting levels).
    - Exit with `c`.
    - **Verify:** Settings persist to `config/config.yaml` and TUI updates smoothly.

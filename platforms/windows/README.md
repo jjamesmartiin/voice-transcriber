@@ -6,6 +6,11 @@ Run Voice Transcriber natively on Windows with global hotkeys, Windows audio cue
 
 ## Quick Start
 
+There are **two ways to run Voice Transcriber on Windows**: from source (below),
+or from the prebuilt self-contained EXE (see
+[Building a Standalone Offline EXE](#building-a-standalone-offline-exe)). Running
+from source needs Python and a one-time `setup.bat`; the EXE needs neither.
+
 ### 1. Prerequisites
 - Python 3.10+ installed on Windows (from https://www.python.org/downloads/ with "Add python.exe to PATH" checked).
 - PowerShell 5.1+ or PowerShell 7+ (or Command Prompt).
@@ -55,12 +60,25 @@ $env:PYTHONPATH = "src"
 
 - **Alt + Shift (hold)**: Push-to-Talk — hold while speaking, release to transcribe and paste/type to the active window.
 - **Space (tap while holding Alt + Shift)**: Hands-free recording — release keys and keep talking; tap `Alt + Shift` when finished to transcribe.
-- **Middle-click (hold ~0.25 s)**: Mouse Push-to-Talk. A quick click passes through and is ignored.
+- **Middle-click (hold ~0.25 s)**: Mouse Push-to-Talk. Releasing before the hold delay leaves it a normal middle click.
 - **Ctrl (held at release)**: Force clipboard output for this utterance even when auto-type is enabled.
-- **Ctrl + Alt + I** (or `S`, `,`, `i` in the terminal): Open the interactive Settings modal (`⚙️ Settings & Configuration`) with real-time fuzzy filter, in-place toggle badges, and sub-pickers.
-- **g** (in the terminal): Open the interactive Mode Preset switcher (`✨ Mode Preset Switcher`) for Default, Casual, Autocorrect, Aesthetic Lowercase, and Pure Gen Z modes.
-- **M** (in the terminal): Open the interactive Microphone device picker (`🎤 Microphone Input Device`).
-- **t** (in the terminal): Open the interactive UI Color Theme picker (`🎨 Select UI Color Theme`).
+- **Space** / **Enter** (in the terminal): Start/stop recording — hands-free once started; tap again to stop.
+- **s**, **S**, or **,** (in the terminal): Open the interactive Settings modal (`⚙️ Settings & Configuration`) with real-time fuzzy filter, in-place toggle badges, and sub-pickers.
+- **r** (in the terminal): Reset the terminal and clipboard bridge.
+- **q** / **Esc** / **Ctrl+C** (in the terminal): Quit.
+
+The Settings modal is the **single entry point** for configuration. There is no
+global hotkey for it — a system-wide settings shortcut would fire while you were
+typing in another application — so opening it is a terminal action. The
+microphone device picker, the mode preset switcher and the UI color theme picker
+all live inside it as sub-pickers; the one-off `g` / `t` / `M` shortcuts are gone.
+
+To change settings from outside the terminal, use the control API:
+```cmd
+.venv\Scripts\python.exe src\main.py status
+.venv\Scripts\python.exe src\main.py mute
+```
+See [Control API](../README.md#control-api).
 
 ---
 

@@ -54,9 +54,8 @@ automatically.
 
 | Key | Action |
 | :-- | :-- |
-| `Space` / `Enter` | Start / stop recording |
-| `s`, `S`, `,` | Settings & configuration modal |
-| `M`, `i` | Microphone picker |
+| `Space` / `Enter` | Start / stop recording (tap again to stop — hands-free) |
+| `s`, `S`, `,` | Settings & configuration modal — the only configuration entry point |
 | `r` | Reset terminal & clipboard bridge |
 | `q`, `Esc`, `Ctrl+C` | Quit |
 
@@ -65,6 +64,9 @@ one-key shortcuts on the main view. The modal also hosts the theme and
 microphone sub-pickers, and a **Reset to Defaults** action that restores all
 shipped defaults (press Enter twice to confirm). Your microphone choice and the
 custom dictionary are never touched by a reset.
+
+There is no global hotkey for settings; from outside the terminal use the
+control API (`python src/main.py status`, `toggle`, `output type_fast`, …).
 
 The settings menu is opened by **suspending** the TUI (`ratatui::restore()`),
 letting Python draw its own Rich menu, then resuming. Messages the engine emits
@@ -90,9 +92,9 @@ Python → Rust:
 Rust → Python:
 
 ```
-{"t":"cmd","cmd":"toggle_record"}    # and: change_device, toggle_mute,
-                                     # toggle_autotype, toggle_numbers,
-                                     # cycle_theme, reset_terminal, quit
+{"t":"cmd","cmd":"toggle_record"}    # and: toggle_mute, toggle_autotype,
+                                     # toggle_numbers, cycle_theme,
+                                     # reset_terminal, quit
 {"t":"cmd","cmd":"reset_defaults"}  # restore shipped defaults (settings modal)
 ```
 

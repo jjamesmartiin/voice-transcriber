@@ -84,7 +84,7 @@ This guide covers common issues and resolutions for **Voice Transcriber (VT)** o
   pkill wl-copy
   pkill wl-paste
   ```
-  Or press **`r`** in the interactive configuration menu (`Ctrl+Alt+I`).
+  Or press **`r`** in the interactive settings modal (open it with **`s`** in the terminal).
 
 ---
 

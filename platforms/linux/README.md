@@ -41,9 +41,15 @@ python3 src/main.py
 
 - `Alt+Shift` (hold): Push-to-Talk — record while held; transcribe and paste/type on release.
 - `Space` (tap while holding `Alt+Shift`): Hands-free latch mode. Release the keys and continue speaking; tap `Alt+Shift` again to stop.
-- Middle-click (hold ~0.25 s): Mouse Push-to-Talk. A quick click passes through and is ignored.
+- Middle-click (hold ~0.25 s): Mouse Push-to-Talk. A tap under ~100 ms is replayed as a normal middle click; a longer hold is swallowed (no primary-selection paste) and starts recording.
 - `Ctrl` (held at release): Force clipboard output for this utterance even when auto-type is enabled.
-- `Ctrl+Alt+I` (or `i` in the terminal): Open the interactive settings menu.
+- `Space` or `Enter` (in the terminal): Start/stop recording. Tap to start, tap again to stop, so you never hold a key while dictating.
+- `s`, `S`, or `,` (in the terminal): Open the interactive settings modal — the only configuration entry point. The microphone, theme and mode-preset pickers live inside it.
+- `r` (in the terminal): Reset the terminal and clipboard bridge.
+- `q`, `Esc`, or `Ctrl+C` (in the terminal): Quit.
+
+There is no global hotkey for settings; use the [Control API](../README.md#control-api)
+to drive it from outside the terminal.
 
 ## Verification
 

@@ -5,7 +5,7 @@
 Voice Transcriber is a voice transcription tool with:
 - **Entry point**: `src/main.py` → `src/t2.py`
 - **Model backend**:
-  - Cohere Transcribe (`src/transcribe_cohere.py`) - high accuracy (~2.79% WER), ~2GB
+  - Cohere Transcribe (`src/transcribe_cohere.py`) - high accuracy (~2.79% WER), ~4GB weights (3.9GB `model.safetensors`)
 - **Audio capture**: sounddevice, soundfile, numpy
 - **Hotkeys**: pynput + keyboard (Windows)
 - **Notifications**: Tkinter overlay / Rich TUI
@@ -21,7 +21,7 @@ Build a **single self-contained EXE** that:
 ## Requirements
 
 - Single one-file EXE (PyInstaller `--onefile`) or directory bundle (`--onedir`)
-- Estimated size: **2-3GB** (Python + PyTorch + deps + Cohere weights)
+- Estimated size: **~6GB** (Python + PyTorch + deps + the 3.9GB Cohere weights)
 - Works on Windows 10+
 
 ---

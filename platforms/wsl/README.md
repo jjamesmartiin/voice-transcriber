@@ -103,7 +103,13 @@ nix run .
 - `Space` (tap while holding `Alt+Shift`): Hands-free latch mode.
 - Middle-click (hold ~0.25 s): Mouse Push-to-Talk, forwarded to the host bridge.
 - `Ctrl` (held at release): Force clipboard output instead of auto-type.
-- `Ctrl+Alt+I` (or `i` in the terminal): Interactive settings menu.
+- `Space` or `Enter` (in the terminal): Start/stop recording. Tap to start, tap again to stop (hands-free).
+- `s`, `S`, or `,` (in the terminal): Interactive settings menu — the only configuration entry point. The microphone, theme and mode-preset pickers live inside it.
+- `r` (in the terminal): Reset the terminal and clipboard bridge.
+- `q`, `Esc`, or `Ctrl+C` (in the terminal): Quit.
+
+There is no global hotkey for settings; use the [Control API](../README.md#control-api)
+to drive it from outside the terminal.
 
 ---
 
