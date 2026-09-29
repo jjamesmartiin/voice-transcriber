@@ -437,8 +437,8 @@ model) and needs no Python install on the target machine. See
 > **Cutting a release?** See [`docs/releasing.md`](docs/releasing.md). CI builds
 > and attaches the AppImage. The model weights are published **separately**, to
 > a revision-keyed bundle tag, and only when the model revision actually
-> changes — never per release. A new version reuses the existing bundle, so
-uploding one requires no upload at all:
+> changes — never per release. A new version reuses the existing bundle and
+> uploads nothing; only a `REVISION` bump needs the publish step:
 >
 > ```bash
 > nix develop --command ./scripts/publish_model_bundle.sh --dry-run  # show the plan
