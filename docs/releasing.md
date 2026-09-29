@@ -286,7 +286,6 @@ In `src/model_download.py`:
 REPO_SLUG            = "jjamesmartiin/voice-transcriber"
 MODEL_BUNDLE_TAG     = f"model-cohere-{REVISION[:12]}"
 DEFAULT_RELEASE_BASE = f"https://github.com/{REPO_SLUG}/releases/download/{MODEL_BUNDLE_TAG}"
-LEGACY_RELEASE_BASE  = f"https://github.com/{REPO_SLUG}/releases/download/v1.1.0"
 ```
 
 The client never consults `/releases/latest`. That tag belongs to the AppImage,
@@ -301,22 +300,25 @@ shadow a complete one. The bundle URL is instead **derived from `REVISION`**:
   embeds the revision (`cohere-transcribe-<rev>.SHA256SUMS`), so a tag holding a
   *different* revision 404s on the manifest and is skipped.
 
-Candidate order is `[requested base, DEFAULT_RELEASE_BASE, LEGACY_RELEASE_BASE]`,
-deduplicated. Before committing to a candidate the client **HEAD-checks every
-part named in the manifest** — because `SHA256SUMS` is uploaded *before* the
-parts it lists, so a bundle that is mid-upload or was abandoned is skipped
-rather than breaking the install. That check is what makes the scheme
-tolerant of upload order, but `scripts/publish_model_bundle.sh` still publishes
-in the correct order and refuses to publish a manifest for missing parts.
+Candidate order is `[requested base, DEFAULT_RELEASE_BASE]`, deduplicated — an
+explicit override or `VT_MODEL_RELEASE_BASE` is tried first, with the canonical
+bundle still appended as a fallback. Before committing to a candidate the client
+**HEAD-checks every part named in the manifest**, because a manifest can name
+parts that are absent (an aborted or hand-managed publish). That check means a
+bundle that is mid-upload or was abandoned is skipped rather than breaking the
+install; `scripts/publish_model_bundle.sh` also publishes in the correct order —
+parts first, manifest last — and refuses to publish a manifest for missing
+parts.
 
-`LEGACY_RELEASE_BASE` (`v1.1.0`) exists only because revision `49988892…`'s
-bundle was published before bundle tags existed; it is byte-identical to what
-`model-cohere-499888924f5f` would hold (same SHA-256 per part, verified). It is
-safe as a fallback for the reason above. **Delete that constant once a bundle
-tag has been published for the then-current revision.**
+`LEGACY_RELEASE_BASE` (a hard-coded `v1.1.0` fallback) was removed once
+`model-cohere-499888924f5f` was published. The `v1.1.0` assets themselves stay:
+already-shipped clients (`v1.1.1`, `v1.2.0`) still resolve weights through that
+tag, so do not delete them.
 
 History: `v1.1.1` shipped AppImage-only and serves weights from the `v1.1.0`
-tag. From v1.2.0 onward no app release carries weights at all.
+tag. `v1.2.0` (cut just before the revision-keyed scheme) tries
+`/releases/latest` and then falls back to `v1.1.0`. From the revision-keyed
+bundle onward, no app release carries weights at all.
 
 ---
 

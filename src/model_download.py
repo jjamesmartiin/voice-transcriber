@@ -54,15 +54,6 @@ _REPO_URL = f"https://github.com/{REPO_SLUG}"
 # what forces a fresh publish when (and only when) the weights actually change.
 MODEL_BUNDLE_TAG = f"model-cohere-{REVISION[:12]}"
 DEFAULT_RELEASE_BASE = f"{_REPO_URL}/releases/download/{MODEL_BUNDLE_TAG}"
-# Revision 49988892…'s bundle was published as v1.1.0 before this scheme existed
-# and is byte-identical to what the bundle tag would hold, so it is still served
-# from there. Safe as a fallback because the manifest name embeds the revision:
-# a tag holding a *different* revision 404s on `cohere-transcribe-<rev>.SHA256SUMS`
-# and is skipped, so a stale tag can never serve mismatched weights. Drop this
-# entry once a bundle tag has been published for the then-current revision.
-LEGACY_RELEASE_BASE = (
-    f"{_REPO_URL}/releases/download/v1.1.0"
-)
 
 # Minimal set whose presence means "a local copy exists and can be loaded".
 _REQUIRED_LOCAL = [
@@ -187,11 +178,11 @@ def _release_candidates(primary):
 
     `primary` is whatever the caller asked for (an explicit base_url, the
     VT_MODEL_RELEASE_BASE override, or the revision-derived bundle tag). The
-    canonical bundle and the legacy pin are appended as fallbacks so a
-    partially-published or relocated bundle degrades instead of failing.
+    canonical bundle is appended as a fallback so an explicit or relocated base
+    degrades to the real one instead of failing.
     """
     out = []
-    for cand in (primary, DEFAULT_RELEASE_BASE, LEGACY_RELEASE_BASE):
+    for cand in (primary, DEFAULT_RELEASE_BASE):
         c = (cand or "").rstrip("/")
         if c and c not in out:
             out.append(c)

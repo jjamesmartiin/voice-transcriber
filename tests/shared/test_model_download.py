@@ -120,13 +120,15 @@ def test_fetch_part_manifest_fast_fails_on_404(monkeypatch):
 
 def test_ensure_local_cohere_fallback_candidate_chain(monkeypatch, tmp_path):
     attempts = []
+    broken = "https://example.com/broken"
+    bundle = "https://example.com/bundle"
 
     def fake_fetch(cand, prefix):
         attempts.append(cand)
-        if "latest" in cand:
-            # First candidate simulates missing manifest (HTTP 404)
+        if cand.startswith(broken):
+            # First candidate simulates a missing manifest (HTTP 404)
             raise RuntimeError("404 Not Found")
-        # Second candidate (v1.1.0) succeeds with manifest
+        # The canonical bundle succeeds with the manifest.
         return ({"cohere-transcribe-rev.part1.xz": "digest1"}, f"{cand}/resolved")
 
     monkeypatch.setattr(model_download, "_fetch_part_manifest", fake_fetch)
@@ -139,19 +141,18 @@ def test_ensure_local_cohere_fallback_candidate_chain(monkeypatch, tmp_path):
     # With empty local dir
     assert model_download.is_local_model_complete(str(tmp_path)) is False
 
-    # Force candidates to check primary and fallback
-    monkeypatch.setattr(model_download, "DEFAULT_RELEASE_BASE", "https://example.com/latest")
-    monkeypatch.setattr(model_download, "LEGACY_RELEASE_BASE", "https://example.com/v1.1.0")
+    # An explicit base is tried first; the canonical bundle is the fallback.
+    monkeypatch.setattr(model_download, "DEFAULT_RELEASE_BASE", bundle)
 
     # Run ensure_local_cohere up to fetch manifest phase
     # (it will attempt cand 1, fail, then attempt cand 2)
     try:
-        model_download.ensure_local_cohere(dest=str(tmp_path), base_url="https://example.com/latest")
+        model_download.ensure_local_cohere(dest=str(tmp_path), base_url=broken)
     except Exception:
         pass
 
-    assert "https://example.com/latest" in attempts
-    assert "https://example.com/v1.1.0" in attempts
+    assert broken in attempts
+    assert bundle in attempts
 
 
 def test_model_bundle_tag_is_revision_derived():
@@ -175,16 +176,15 @@ def test_candidates_never_consult_the_app_latest_release():
     """
     cands = model_download._release_candidates(model_download.DEFAULT_RELEASE_BASE)
     assert not any("/releases/latest" in c for c in cands)
-    assert cands[0] == model_download.DEFAULT_RELEASE_BASE
-    assert cands[-1] == model_download.LEGACY_RELEASE_BASE
-    assert len(cands) == len(set(cands))
+    assert cands == [model_download.DEFAULT_RELEASE_BASE]
 
 
 def test_candidates_dedupe_an_explicit_override():
     """An explicit override wins, but the canonical bundle is still a fallback
     and no URL is repeated."""
-    cands = model_download._release_candidates(model_download.LEGACY_RELEASE_BASE)
-    assert cands[0] == model_download.LEGACY_RELEASE_BASE.rstrip("/")
+    override = "https://example.com/custom"
+    cands = model_download._release_candidates(override)
+    assert cands[0] == override
     assert cands[1] == model_download.DEFAULT_RELEASE_BASE.rstrip("/")
     assert len(cands) == len(set(cands)) == 2
 
@@ -232,9 +232,9 @@ def test_publish_script_reads_constants_from_this_module():
 def test_manifest_listing_missing_parts_is_skipped(monkeypatch, tmp_path):
     """Regression: a manifest whose parts are absent must never be chosen.
 
-    SHA256SUMS is uploaded before the parts it lists, so a mid-upload bundle
-    used to win the candidate race and hard-fail the install instead of
-    letting a complete candidate serve.
+    A manifest can name parts that are absent (an aborted or hand-managed
+    publish), and a mid-upload bundle used to win the candidate race and
+    hard-fail the install instead of letting a complete candidate serve.
     """
     broken = "https://example.com/releases/download/model-cohere-broken"
     good = "https://example.com/releases/download/model-cohere-good"
@@ -245,8 +245,7 @@ def test_manifest_listing_missing_parts_is_skipped(monkeypatch, tmp_path):
 
     downloaded = []
     monkeypatch.setattr(model_download, "_fetch_part_manifest", fake_fetch)
-    monkeypatch.setattr(model_download, "DEFAULT_RELEASE_BASE", broken)
-    monkeypatch.setattr(model_download, "LEGACY_RELEASE_BASE", good)
+    monkeypatch.setattr(model_download, "DEFAULT_RELEASE_BASE", good)
     # `broken` publishes part1 but not part2.
     monkeypatch.setattr(
         model_download, "_asset_exists",
