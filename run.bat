@@ -5,6 +5,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0platforms\windows\
 if errorlevel 1 (
     echo.
     echo [!] The launcher exited with an error - see the messages above.
-    echo     Log (if enabled): %LOCALAPPDATA%\vt\vt.log
+    echo     Log [if enabled]: %LOCALAPPDATA%\vt\vt.log
     pause
 )

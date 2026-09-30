@@ -10,7 +10,9 @@ of the app so that import-time messages from heavy modules are captured too.
 
 Knobs:
   VT_LOG_FILE     explicit log path (overrides the default location)
-  VT_LOG_LEVEL    root log level name, default ``WARNING`` (e.g. ``INFO``)
+  VT_LOG_LEVEL    root log level name (any case) or number, default ``WARNING``.
+                  An unrecognised value falls back to the default and says so,
+                  rather than raising (see ``_coerce_level``)
   VT_LOG_DISABLE  truthy ("1"/"true"/"yes"/"on") disables the file handler
 """
 from __future__ import annotations
@@ -21,6 +23,34 @@ from pathlib import Path
 
 DEFAULT_LEVEL = "WARNING"
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
+
+# logging's own level names, spelled out rather than read from
+# logging._nameToLevel (private) or logging.getLevelNamesMapping() (3.11+, and
+# this project supports Python 3.10+).
+LEVEL_NAMES = (
+    "CRITICAL", "FATAL", "ERROR", "WARN", "WARNING", "INFO", "DEBUG", "NOTSET",
+)
+
+
+def _coerce_level(value) -> str | int | None:
+    """Normalise a log level into something ``logging`` accepts, else ``None``.
+
+    ``logging.basicConfig`` raises ``ValueError`` for an unknown level name and
+    this runs at import time in ``main.py``, so a typo'd ``VT_LOG_LEVEL`` used to
+    take the whole app down before it started (verified on Windows:
+    ``VT_LOG_LEVEL=info`` produced ``ValueError: Unknown level: 'info'``).
+    """
+    if isinstance(value, int):
+        return value
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return None
+    upper = text.upper()
+    if upper in LEVEL_NAMES:
+        return upper
+    if text.lstrip("+-").isdigit():  # e.g. VT_LOG_LEVEL=10 == DEBUG
+        return int(text)
+    return None
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -52,7 +82,8 @@ def configure_logging(level: str | int | None = None, log_file=None, console: bo
     handler is disabled or could not be created. Never raises for a bad/unwritable
     location: logging must not be able to take the app down.
     """
-    resolved_level = level if level is not None else os.environ.get("VT_LOG_LEVEL", DEFAULT_LEVEL)
+    raw_level = level if level is not None else os.environ.get("VT_LOG_LEVEL", "")
+    resolved_level = _coerce_level(raw_level)
     formatter = logging.Formatter(LOG_FORMAT)
     handlers: list[logging.Handler] = []
 
@@ -74,5 +105,15 @@ def configure_logging(level: str | int | None = None, log_file=None, console: bo
             log_path = None
 
     # force=True replaces any handlers basicConfig may already have installed.
-    logging.basicConfig(level=resolved_level, handlers=handlers, force=True)
+    logging.basicConfig(
+        level=DEFAULT_LEVEL if resolved_level is None else resolved_level,
+        handlers=handlers,
+        force=True,
+    )
+
+    if resolved_level is None and str(raw_level).strip():
+        # After basicConfig, so the notice lands in the file as well.
+        logging.getLogger(__name__).warning(
+            "Ignoring unrecognised VT_LOG_LEVEL=%r; using %s", raw_level, DEFAULT_LEVEL)
+
     return log_path

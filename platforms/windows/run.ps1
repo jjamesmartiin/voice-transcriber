@@ -237,6 +237,11 @@ if ($Mode -ne "verify" -and $Mode -ne "clean") {
 
 $env:PIP_DISABLE_PIP_VERSION_WARNING = "1"
 $env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"
+# Windows' locale code page (cp1252/cp437) cannot encode the ✓/✕ that
+# model_download.py prints, so a redirected/piped `run.bat verify` died with
+# UnicodeEncodeError instead of reporting. Scoped to the report/download modes:
+# the app's own console output keeps Windows' console-API handling.
+if ($Mode -eq "verify" -or $Mode -eq "fetch") { $env:PYTHONIOENCODING = "utf-8" }
 $env:VT_PLATFORM = "windows"
 
 if (-not $env:VT_MODEL_BACKEND) {
@@ -423,8 +428,16 @@ if u.find_spec("sounddevice") is not None:
 
 sys.exit(1 if missing_runtime else 0)
 '@
-    & $pythonExe -c $checkScript
+    # Windows PowerShell 5.1 (what run.bat invokes) strips the embedded double
+    # quotes when a multi-line here-string is passed to a native command, so
+    # `-c $checkScript` arrived as invalid source ("'(' was never closed") and
+    # verify reported missing dependencies on every Windows machine. A file
+    # round-trips unchanged; a UTF-8 BOM is legal in a Python source file.
+    $checkFile = Join-Path ([System.IO.Path]::GetTempPath()) "vt-verify-$PID.py"
+    Set-Content -LiteralPath $checkFile -Value $checkScript -Encoding UTF8
+    & $pythonExe $checkFile
     $depsReady = ($LASTEXITCODE -eq 0)
+    Remove-Item -LiteralPath $checkFile -Force -ErrorAction SilentlyContinue
 
     Write-Host ""
     $modelVerify = Join-Path $SrcDir "model_download.py"
@@ -496,3 +509,7 @@ if ($Mode -eq "build") {
 # 6. Run application
 Write-Host "Starting Voice Transcriber (Backend: $env:VT_MODEL_BACKEND)..." -ForegroundColor Green
 & $pythonExe (Join-Path $SrcDir "main.py")
+# Without this the script terminates "normally" and powershell.exe reports 0,
+# so run.bat's `if errorlevel 1` could never see a crashed app (verified on
+# Windows 11 / PowerShell 5.1: app exit 3 -> launcher exit 0).
+exit $LASTEXITCODE

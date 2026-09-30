@@ -30,6 +30,18 @@ def restore_root_logger():
         root.setLevel(saved_level)
 
 
+@pytest.fixture(autouse=True)
+def clean_logging_env(monkeypatch):
+    """No ambient VT_LOG_* may leak into these cases.
+
+    tests/conftest.py points VT_LOG_FILE at a temp file for the whole suite, and
+    a developer may have exported any of these (they are documented knobs), so
+    every case below states the level/path it needs.
+    """
+    for var in ("VT_LOG_FILE", "VT_LOG_LEVEL", "VT_LOG_DISABLE"):
+        monkeypatch.delenv(var, raising=False)
+
+
 class TestDefaultLogPath:
     def test_explicit_override_wins(self, monkeypatch, tmp_path):
         target = tmp_path / "custom.log"
@@ -73,3 +85,27 @@ class TestConfigureLogging:
         monkeypatch.setenv("VT_LOG_LEVEL", "INFO")
         logging_setup.configure_logging(log_file=tmp_path / "vt.log", console=False)
         assert logging.getLogger().level == logging.INFO
+
+    @pytest.mark.parametrize("value,expected", [
+        ("info", logging.INFO),
+        ("Info", logging.INFO),
+        ("debug", logging.DEBUG),
+        ("warn", logging.WARNING),
+        ("10", logging.DEBUG),
+    ])
+    def test_level_accepts_any_case_and_numbers(self, monkeypatch, tmp_path, value, expected):
+        monkeypatch.setenv("VT_LOG_LEVEL", value)
+        logging_setup.configure_logging(log_file=tmp_path / "vt.log", console=False)
+        assert logging.getLogger().level == expected
+
+    @pytest.mark.parametrize("value", ["bogus", "", "  ", "verbose", "INFOO"])
+    def test_unusable_level_falls_back_instead_of_raising(self, monkeypatch, tmp_path, value):
+        """A typo'd VT_LOG_LEVEL must not be able to stop the app starting.
+
+        logging.basicConfig raises ValueError for an unknown name, and
+        configure_logging() runs at import time in main.py.
+        """
+        monkeypatch.setenv("VT_LOG_LEVEL", value)
+        target = tmp_path / "vt.log"
+        assert logging_setup.configure_logging(log_file=target, console=False) == target
+        assert logging.getLogger().level == logging.WARNING

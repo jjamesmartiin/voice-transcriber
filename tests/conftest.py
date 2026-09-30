@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import tempfile
 import signal
 import pytest
 import numpy as np
@@ -21,6 +22,15 @@ except Exception:
 src_dir = Path(__file__).parent.parent / "src"
 if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
+
+# src/main.py configures logging the moment it is imported, and several test
+# modules import it - which would create and write the developer's real per-user
+# log (~/.local/share/vt/vt.log, %LOCALAPPDATA%\\vt\\vt.log on Windows) on every
+# test run. VT_LOG_FILE wins over that default location, so point it at a temp
+# file for the session. Tests that exercise the default path unset it for
+# themselves (tests/shared/test_logging_setup.py).
+_TEST_LOG_FILE = Path(tempfile.gettempdir()) / f"vt-tests-{os.getpid()}.log"
+os.environ.setdefault("VT_LOG_FILE", str(_TEST_LOG_FILE))
 
 class PowerCpuMonitor:
     """Utility class to measure CPU utilization and ACPI battery power consumption."""
