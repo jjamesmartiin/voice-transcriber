@@ -1,0 +1,12 @@
+# Voice Transcriber - Windows dev & test tooling.
+#
+# This file is NOT needed to run the app. It exists so a fresh clone is
+# test-ready: ``setup.bat`` installs it after requirements.txt, which makes
+# ``.\test.ps1`` (pytest) and ``run.bat build`` (PyInstaller) work with no
+# manual ``pip install`` step. The launchers also self-heal: ``run.ps1 test``
+# and ``run.ps1 build`` install this file on demand if the tool is missing.
+#
+# Versions are pinned to match the tooling the CI/dev environments are
+# verified against (see .github/workflows/ci.yml and flake.nix).
+pytest==9.0.2
+pyinstaller==6.22.3

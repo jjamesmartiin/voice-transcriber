@@ -15,6 +15,9 @@ from source needs Python and a one-time `setup.bat`; the EXE needs neither.
 - Python 3.10+ installed on Windows (from https://www.python.org/downloads/ with "Add python.exe to PATH" checked).
 - PowerShell 5.1+ or PowerShell 7+ (or Command Prompt).
 
+> If Python is missing, `setup.bat` offers to install Python 3.13 for you with
+> `winget` (included with Windows 10/11) before it continues.
+
 ### 2. One-Click Setup & Launch (Recommended)
 From the repository root, you can simply run the batch launchers (by double-clicking them in File Explorer, or running from Command Prompt / PowerShell):
 ```cmd
@@ -26,6 +29,60 @@ run.bat
 ```
 
 > **Note:** The `.bat` launchers automatically bypass PowerShell's script execution policy (`-ExecutionPolicy Bypass`), so you will not run into digital signature or `PSSecurityException` errors on downloaded scripts.
+
+> **Only need to run the app?** `run.bat` is the one command: it creates
+> `.venv`, installs dependencies if they are missing, downloads the model on
+> first use if there is no complete local copy, and launches. Plain `run.bat`
+> never installs or runs the test tooling.
+
+### 2a. Launcher flags & modes
+
+`run.bat` accepts flags (before the mode) and a mode. Everything after the mode
+is forwarded to it, e.g. `run.bat test shared -k tui -v`.
+
+```cmd
+run.bat                     :: launch the app (installs deps + model if needed)
+run.bat verify              :: report Python / deps / model / GPU / mic status
+run.bat fetch               :: download + verify the model (~2.8 GB), then exit
+run.bat --no-install        :: skip venv creation and every pip install, run anyway
+run.bat --no-model          :: do not auto-download the model
+run.bat --model-dir D:\vt\models\cohere   :: load weights from another location
+run.bat --venv C:\py\vt-venv               :: use a venv outside the repo
+run.bat test                :: run the shared + Windows test tiers
+run.bat test shared -k tui  :: one tier (all|shared|windows|platform|e2e|model)
+run.bat build               :: build the standalone EXE
+run.bat clean               :: remove .venv / build / dist / caches
+run.bat clean --models --yes:: ...plus the downloaded weights, no prompt
+run.bat help                :: show all flags and modes (same as run.bat --help)
+```
+
+`setup.bat` takes one flag (plus help):
+
+```cmd
+setup.bat --no-dev          :: skip installing pytest / PyInstaller (faster setup)
+setup.bat --help            :: show usage
+```
+
+**Skipping / relocating dependencies.** `--no-install` is the escape hatch for a
+slow or unwanted install: it never touches `pip`, uses the repo venv if present
+(otherwise the host Python), and just tries to run. To have the launcher accept
+artifacts you already have, put them where it looks:
+
+- **Model weights** — `run.bat verify` reports whether a complete model is
+  present. Drop a complete set into `<repo>\models\cohere`, or point elsewhere
+  with `run.bat --model-dir <path>` (equivalently, set `VT_MODEL_DIR`). A
+  complete directory is used as-is; nothing is re-downloaded.
+- **Dev tooling** — if pytest / PyInstaller are already in the venv, `test` and
+  `build` use them and install nothing.
+
+**First run downloads ~2.8 GB.** `run.bat fetch` does that step on its own (with
+progress) so it is not a surprise during launch; `run.bat verify` says whether
+the weights are already in place.
+
+**When something goes wrong.** Output is also written to a per-user log at
+`%LOCALAPPDATA%\vt\vt.log` — override the path with `VT_LOG_FILE`, raise the
+detail with `VT_LOG_LEVEL=INFO`. A `run.bat` started by double-click keeps its
+window open on error so the message is readable.
 
 ### 3. Setup via PowerShell
 If you prefer running via PowerShell directly, pass `-ExecutionPolicy Bypass` (since Windows blocks downloaded `.ps1` scripts by default):
@@ -117,6 +174,11 @@ powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 test
 > install. The end-to-end tier (`tests/e2e/`) needs the model weights and is run
 > separately with `.\test.ps1 e2e`.
 
+> **pytest is installed by `setup.bat`** (via
+> `platforms\windows\requirements-dev.txt`), so `.\test.ps1` works on a fresh
+> clone with no manual `pip install`. If you skipped setup and only ran
+> `run.bat`, the launcher installs the test tooling on demand.
+
 ---
 
 ## Building a Standalone Offline EXE
@@ -134,6 +196,9 @@ or directly with Python:
 python platforms\windows\build_offline.py
 ```
 This produces an offline distribution in `dist/` that requires no Python installation on the target Windows machine.
+
+> PyInstaller is installed by `setup.bat`; if it is missing, `run.bat build`
+> installs it from `platforms\windows\requirements-dev.txt` before building.
 
 ---
 
@@ -168,3 +233,17 @@ ERROR: Could not install packages due to an OSError: [WinError 206] The filename
   ```powershell
   New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
   ```
+
+### 3. The Window Closes Immediately (App Fails to Start)
+**Symptom:** Double-clicking `run.bat` flashes a console and nothing else happens, or the app quits right after starting.
+**Cause:** The launcher exits non-zero before or during launch (missing Python, a pip failure, or a startup crash). A double-clicked `run.bat` now keeps its window open on error, but the full detail is in the log.
+**Fix:**
+- Read the log: `%LOCALAPPDATA%\vt\vt.log` (override with `VT_LOG_FILE`, add detail with `VT_LOG_LEVEL=INFO`).
+- Run `run.bat verify` for a status report, or run it from an already-open Command Prompt so the output stays visible.
+
+### 4. Model Download Is Slow, or You Want to Skip It
+**Symptom:** The first launch seems to hang while the ~2.8 GB Cohere model downloads.
+**Fix:**
+- `run.bat fetch` downloads and verifies the model on its own, with progress, then exits.
+- `run.bat verify` reports whether a complete model is already present. Drop one into `<repo>\models\cohere` or pass `run.bat --model-dir <path>`; a complete directory is used as-is.
+- `run.bat --no-model` launches without downloading one (useful only if a model is already installed).

@@ -10,6 +10,27 @@ function Write-Success { param([string]$m) Write-Host "[OK] $m" -ForegroundColor
 function Write-Warn { param([string]$m) Write-Host "[WARN] $m" -ForegroundColor Yellow }
 function Write-Err { param([string]$m) Write-Host "[ERROR] $m" -ForegroundColor Red }
 
+# Flags:
+#   --no-dev   Skip installing the dev/test tooling (pytest, PyInstaller).
+#   -h/--help  Show help and exit.
+$NoDev = $false
+foreach ($a in $args) {
+    if ($a -eq "--no-dev") {
+        $NoDev = $true
+    } elseif ($a -eq "-h" -or $a -eq "--help") {
+        Write-Host @"
+Voice Transcriber - Windows setup
+
+Usage: setup.bat [--no-dev]
+
+  --no-dev   Skip installing pytest / PyInstaller (the dev/test tooling).
+             The app itself is still fully installed. Add the tools later
+             with:  run.bat test   (or)   run.bat build
+"@
+        exit 0
+    }
+}
+
 Write-Host @"
 ======================================================
        Voice Transcriber - Windows Setup
@@ -66,37 +87,66 @@ function Ensure-LongPathsSupport {
 
 $longPathsEnabled = Ensure-LongPathsSupport
 
+# Resolve a Python 3.10+ interpreter. Sets $script:hostPythonCmd / Args.
+function Resolve-HostPython {
+    $script:hostPythonCmd = $null
+    $script:hostPythonArgs = @()
+    $candidates = @(
+        [pscustomobject]@{ Cmd = "python"; Args = @() },
+        [pscustomobject]@{ Cmd = "py";     Args = @("-3") }
+    )
+    foreach ($c in $candidates) {
+        if (-not (Get-Command $c.Cmd -ErrorAction SilentlyContinue)) { continue }
+        try {
+            $cargs = @($c.Args)
+            $v = & $c.Cmd @cargs --version 2>&1
+            if ($v -match "Python (\d+)\.(\d+)" -and ([int]$matches[1] -gt 3 -or ([int]$matches[1] -eq 3 -and [int]$matches[2] -ge 10))) {
+                $script:hostPythonCmd = $c.Cmd
+                $script:hostPythonArgs = $cargs
+                $script:hostPythonVersion = "$v"
+                return $true
+            }
+        } catch {}
+    }
+    return $false
+}
+
+# winget updates the *registry* PATH; re-read it so the new Python is visible.
+function Update-SessionPath {
+    try {
+        $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
+        $user = [Environment]::GetEnvironmentVariable("Path", "User")
+        if ($machine -or $user) { $env:Path = "$machine;$user" }
+    } catch {}
+}
+
 # Step 1: Detect Python
 Write-Step "1. Checking host Python installation..."
-$hostPythonCmd = $null
-$hostPythonArgs = @()
-
-if (Get-Command python -ErrorAction SilentlyContinue) {
-    try {
-        $v = & python --version 2>&1
-        if ($v -match "Python (\d+)\.(\d+)" -and ([int]$matches[1] -gt 3 -or ([int]$matches[1] -eq 3 -and [int]$matches[2] -ge 10))) {
-            $hostPythonCmd = "python"
-            Write-Success "Found Python in PATH: $v"
+$hostPythonVersion = $null
+if (Resolve-HostPython) {
+    Write-Success "Found Python: $hostPythonVersion"
+} else {
+    Write-Warn "Python 3.10+ was not found on your system."
+    $ready = $false
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "Python 3.13 can be installed automatically with winget." -ForegroundColor Cyan
+        $answer = Read-Host "Install Python 3.13 now? [y/N]"
+        if ($answer -match '^(y|yes)$') {
+            & winget install -e --id Python.Python.3.13 --accept-package-agreements --accept-source-agreements
+            Update-SessionPath
+            $ready = Resolve-HostPython
         }
-    } catch {}
-}
+    } else {
+        Write-Host "winget is unavailable, so Python cannot be installed automatically." -ForegroundColor Yellow
+    }
 
-if (-not $hostPythonCmd -and (Get-Command py -ErrorAction SilentlyContinue)) {
-    try {
-        $v = & py -3 --version 2>&1
-        if ($v -match "Python (\d+)\.(\d+)" -and ([int]$matches[1] -gt 3 -or ([int]$matches[1] -eq 3 -and [int]$matches[2] -ge 10))) {
-            $hostPythonCmd = "py"
-            $hostPythonArgs = @("-3")
-            Write-Success "Found Python via py launcher: $v"
-        }
-    } catch {}
-}
-
-if (-not $hostPythonCmd) {
-    Write-Err "Python 3.10+ was not found on your system."
-    Write-Host "Please install Python 3.10+ from https://www.python.org/downloads/" -ForegroundColor Yellow
-    Write-Host "IMPORTANT: Check 'Add python.exe to PATH' during installation!" -ForegroundColor Yellow
-    exit 1
+    if (-not $ready) {
+        Write-Err "Python 3.10+ is required."
+        Write-Host "Install it from https://www.python.org/downloads/ (tick 'Add python.exe to PATH')," -ForegroundColor Yellow
+        Write-Host "or run: winget install -e --id Python.Python.3.13" -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Success "Python installed via winget: $hostPythonVersion"
 }
 
 # Step 2: Virtual Environment
@@ -159,8 +209,31 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Success "Dependency installation complete."
 
-# Step 5: Verify Critical Modules
-Write-Step "5. Verifying installed packages..."
+# Step 5: Install dev/test tooling (pytest for .\test.ps1, PyInstaller for run.bat build)
+if ($NoDev) {
+    Write-Step "5. Skipping dev & test tooling (--no-dev)"
+    Write-Host "pytest / PyInstaller were not installed. The app is ready to run." -ForegroundColor Yellow
+    Write-Host "Add them later with:  run.bat test   (or)   run.bat build" -ForegroundColor Yellow
+} else {
+    Write-Step "5. Installing dev & test tooling (pytest, PyInstaller)..."
+    $DevReqFile = Join-Path $ScriptDir "requirements-dev.txt"
+    if (Test-Path $DevReqFile) {
+        Write-Host "Running: python -m pip install -r $DevReqFile"
+        & $pythonExe -m pip install -r $DevReqFile
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "Dev tooling install returned exit code $LASTEXITCODE."
+            Write-Host "The app will still run, but .\test.ps1 (pytest) and run.bat build (PyInstaller) may not work until this succeeds." -ForegroundColor Yellow
+        } else {
+            Write-Success "pytest and PyInstaller installed - .\test.ps1 and run.bat build are ready."
+        }
+    } else {
+        Write-Warn "requirements-dev.txt not found at $DevReqFile; skipping dev tooling."
+        Write-Host "Install later with: python -m pip install pytest pyinstaller" -ForegroundColor Yellow
+    }
+}
+
+# Step 6: Verify Critical Modules
+Write-Step "6. Verifying installed packages..."
 $verifyScript = "import sounddevice, soundfile, scipy, numpy, pynput, keyboard, pyperclip, rich, yaml, psutil; print('All core modules verified successfully!')"
 $verifyOutput = & $pythonExe -c $verifyScript 2>&1
 
@@ -179,4 +252,10 @@ You can now run Voice Transcriber using any of:
   - Batch launcher: run.bat (or double-click run.bat)
   - PowerShell:     powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1
   - Python venv:    .\.venv\Scripts\python.exe src\main.py
+
+Run the tests with:  .\test.ps1
+Build the EXE with:  run.bat build
+
+First launch downloads the ~2.8 GB Cohere model into models\cohere (one time).
+Make sure Windows Settings > Privacy & security > Microphone allows desktop apps.
 "@ -ForegroundColor Green

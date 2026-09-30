@@ -116,6 +116,15 @@ powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1
 >    dependencies) then `run.bat`. Needs Python 3.10+ and installs ~1.5 GB of
 >    dependencies. `run.bat` also bootstraps the venv on first launch if you skip
 >    `setup.bat`. This is the path the commands above use, and what you develop against.
+>    `run.bat` is the single command to just *use* the app (it never installs the
+>    test tooling); `run.bat verify` reports Python/deps/model/GPU status without
+>    installing anything, `run.bat fetch` pre-downloads the model, `run.bat clean`
+>    removes generated state, `run.bat --no-install` skips venv creation and
+>    every pip install and runs with what is already present, and
+>    `run.bat --model-dir <path>` loads weights from elsewhere. `setup.bat --no-dev`
+>    skips installing pytest/PyInstaller. Python itself can be auto-installed by
+>    `setup.bat` via winget if missing. See the
+>    [Windows guide](platforms/windows/README.md#2a-launcher-flags--modes).
 > 2. **From the prebuilt EXE** — `dist\VoiceTranscriber\VoiceTranscriber.exe`.
 >    Needs no Python at all and no setup step; just run it. See
 >    [Building Distributables](#building-distributables).
@@ -345,6 +354,9 @@ One command per tier, from the repo root:
 `./test.sh` auto-detects Linux vs WSL and runs the matching platform tier. Both
 scripts forward extra args to pytest, e.g. `.\test.ps1 shared -k tui -v`. The
 launchers also work: `run.bat test` (or `powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 test`).
+On Windows, `setup.bat` installs pytest (from `platforms\windows\requirements-dev.txt`),
+so the test tiers run on a fresh clone without a manual `pip install`; the
+`run.bat test` / `test.ps1` paths also install it on demand if it is missing.
 
 ### Mouse-mode coverage
 

@@ -13,6 +13,12 @@ import sys
 # Ensure local source directory is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Configure logging before importing the app modules so that their import-time
+# messages are captured as well. Writes a per-user log file in addition to the
+# console (see src/logging_setup.py); LOG_FILE is None if the file is disabled.
+import logging_setup
+LOG_FILE = logging_setup.configure_logging()
+
 # Import core modules
 import hal
 import control
@@ -28,7 +34,6 @@ from t2 import (
     reset_terminal, get_active_device_name, IS_MUTED
 )
 
-logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -1199,6 +1204,9 @@ class SimpleVoiceTranscriber:
                 self.hotkey_system.stop()
 
 if __name__ == "__main__":
+    if LOG_FILE:
+        logger.info("Log file: %s", LOG_FILE)
+
     # `python src/main.py <verb>` drives an already-running instance instead of
     # launching a second one. A leading `-` means "not a control verb", so
     # bare/flagged launches keep behaving exactly as before.

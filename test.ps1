@@ -1,39 +1,18 @@
 # Run the voice-transcriber test tiers on Windows.
 #
-# Usage (from the repo root):
+# Thin shim: the real logic (pytest install-on-demand, tier -> directory
+# mapping, flags) lives in platforms/windows/run.ps1, so there is a single
+# place to change. Kept so the documented `.\test.ps1 [tier] [pytest args]`
+# entry point keeps working from the repo root.
+#
 #   .\test.ps1              # shared + Windows suite
 #   .\test.ps1 shared       # cross-platform, model-free
 #   .\test.ps1 windows      # Windows-specific
 #   .\test.ps1 e2e          # model/audio end-to-end (local only; needs the model)
-#   .\test.ps1 shared -k tui -v     # extra args are forwarded to pytest
-param(
-    [Parameter(Position = 0)][string]$Category = "all",
-    [Parameter(ValueFromRemainingArguments = $true)][string[]]$ExtraArgs
-)
-
+#   .\test.ps1 shared -k tui -v
+#
+# For flags (e.g. --no-install) call the launcher directly: run.bat test ...
 $ErrorActionPreference = "Stop"
-$RepoRoot = $PSScriptRoot
-
-$python = Join-Path $RepoRoot ".venv\Scripts\python.exe"
-if (-not (Test-Path $python)) {
-    $python = "python"
-}
-
-switch ($Category.ToLower()) {
-    "all"      { $targets = @("tests\shared", "tests\windows") }
-    "shared"   { $targets = @("tests\shared") }
-    "windows"  { $targets = @("tests\windows") }
-    "platform" { $targets = @("tests\windows") }
-    "e2e"      { $targets = @("tests\e2e") }
-    "model"    { $targets = @("tests\e2e") }
-    default {
-        Write-Host "Unknown category: $Category" -ForegroundColor Red
-        Write-Host "Expected: all | shared | windows | e2e" -ForegroundColor Yellow
-        exit 2
-    }
-}
-
-$env:PYTHONPATH = Join-Path $RepoRoot "src"
-Write-Host "▶ Running [$Category] tests on Windows: $($targets -join ', ')" -ForegroundColor Cyan
-& $python -m pytest @targets @ExtraArgs
+$launcher = Join-Path $PSScriptRoot "platforms\windows\run.ps1"
+& $launcher test @args
 exit $LASTEXITCODE
