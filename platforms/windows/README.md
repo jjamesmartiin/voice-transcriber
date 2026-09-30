@@ -42,6 +42,7 @@ is forwarded to it, e.g. `run.bat test shared -k tui -v`.
 
 ```cmd
 run.bat                     :: launch the app (installs deps + model if needed)
+run.bat doctor              :: run system diagnostics (audio devices, permissions, GPU, model)
 run.bat verify              :: report Python / deps / model / GPU / mic status
 run.bat fetch               :: download + verify the model (~2.8 GB), then exit
 run.bat --no-install        :: skip venv creation and every pip install, run anyway

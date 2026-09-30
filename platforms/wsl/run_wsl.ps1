@@ -88,4 +88,9 @@ Write-Step "Starting Voice Transcriber inside NixOS WSL..."
 Write-Host "  WSLg PulseAudio Socket: /mnt/wslg/runtime-dir/pulse/native" -ForegroundColor Cyan
 Write-Host "  Using Nix Flake for dependency management" -ForegroundColor Cyan
 
-wsl -d NixOS -- bash -c "export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native; cd '$wslPath' && nix run ."
+$argStr = ""
+if ($args.Count -gt 0) {
+    $argStr = "-- " + (($args | ForEach-Object { "'$_'" }) -join ' ')
+}
+
+wsl -d NixOS -- bash -c "export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native; cd '$wslPath' && nix run . $argStr"

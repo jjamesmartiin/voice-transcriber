@@ -60,6 +60,7 @@ _hal = _load_hal()
 LINUX = _hal.LINUX
 WSL = _hal.WSL
 WINDOWS = _hal.WINDOWS
+MACOS = _hal.MACOS
 VALID_PLATFORMS = _hal.VALID_PLATFORMS
 
 detect_platform = _hal.detect_platform
@@ -85,6 +86,7 @@ __all__ = [
     "LINUX",
     "WSL",
     "WINDOWS",
+    "MACOS",
     "VALID_PLATFORMS",
     "detect_platform",
     "get_clipboard_sink",

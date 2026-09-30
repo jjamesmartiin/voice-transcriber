@@ -20,7 +20,7 @@ import hal  # noqa: E402
 
 
 class TestDetectPlatform:
-    @pytest.mark.parametrize("value", [hal.LINUX, hal.WSL, hal.WINDOWS])
+    @pytest.mark.parametrize("value", [hal.LINUX, hal.WSL, hal.WINDOWS, hal.MACOS])
     def test_env_override_wins(self, monkeypatch, value):
         monkeypatch.setenv("VT_PLATFORM", value)
         assert hal.detect_platform() == value
@@ -42,6 +42,7 @@ class TestFactories:
             (hal.LINUX, "LinuxClipboardSink"),
             (hal.WINDOWS, "WindowsClipboardSink"),
             (hal.WSL, "WSLClipboardSink"),
+            (hal.MACOS, "MacOSClipboardSink"),
         ],
     )
     def test_clipboard_factory(self, platform, sink_name):
@@ -53,6 +54,7 @@ class TestFactories:
             (hal.LINUX, "LinuxAudioCuePlayer"),
             (hal.WINDOWS, "WindowsAudioCuePlayer"),
             (hal.WSL, "WSLAudioCuePlayer"),
+            (hal.MACOS, "MacOSAudioCuePlayer"),
         ],
     )
     def test_audio_cue_factory(self, platform, player_name):
@@ -64,6 +66,7 @@ class TestFactories:
             (hal.LINUX, "LinuxHotkeyManager"),
             (hal.WINDOWS, "WindowsHotkeyManager"),
             (hal.WSL, "WSLHotkeyManager"),
+            (hal.MACOS, "MacOSHotkeyManager"),
         ],
     )
     def test_hotkey_factory(self, platform, manager_name):
@@ -72,6 +75,20 @@ class TestFactories:
             assert type(manager).__name__ == manager_name
         finally:
             manager.cleanup()
+
+    @pytest.mark.parametrize(
+        "platform,notification_name",
+        [
+            (hal.LINUX, "VisualNotification"),
+            (hal.WINDOWS, "WindowsVisualNotification"),
+            (hal.WSL, "VisualNotification"),
+            (hal.MACOS, "MacOSVisualNotification"),
+        ],
+    )
+    def test_visual_notification_factory(self, monkeypatch, platform, notification_name):
+        monkeypatch.setenv("VT_PLATFORM", platform)
+        notifier = hal.get_visual_notification()
+        assert type(notifier).__name__ == notification_name
 
 
 class TestImportSafety:
@@ -90,6 +107,10 @@ class TestImportSafety:
             (hal.WSL, "hotkeys"),
             (hal.WSL, "clipboard"),
             (hal.WSL, "audio_cues"),
+            (hal.MACOS, "hotkeys"),
+            (hal.MACOS, "clipboard"),
+            (hal.MACOS, "audio_cues"),
+            (hal.MACOS, "notifications"),
         ],
     )
     def test_backend_module_imports(self, platform, module):
@@ -106,6 +127,8 @@ class TestHotkeysShimBackwardCompatibility:
         assert hotkeys.WaylandGlobalHotkeys is not None
         assert hotkeys.WSLGlobalHotkeys is not None
         assert hotkeys.WindowsGlobalHotkeys is not None
+        assert hotkeys.MacOSGlobalHotkeys is not None
+        assert hotkeys.MacOSHotkeyManager is not None
 
     def test_is_running_in_wsl_tracks_hal(self, monkeypatch):
         import hotkeys

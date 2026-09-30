@@ -44,6 +44,7 @@ function Show-Usage {
     Write-Host ""
     Write-Host "Modes:"
     Write-Host "  (default)        Launch the app (installs deps + model if needed)"
+    Write-Host "  doctor           Run system diagnostics (audio devices, permissions, GPU, model)"
     Write-Host "  verify           Check Python / deps / model; install nothing"
     Write-Host "  fetch            Download + verify the model, then exit"
     Write-Host "  test [pytest..]  Run a test tier: all|shared|windows|e2e"
@@ -51,6 +52,7 @@ function Show-Usage {
     Write-Host "  clean            Remove .venv / build / dist / caches"
     Write-Host "                   (clean --models --yes also deletes the weights)"
     Write-Host "  help             Show this help"
+    Write-Host "  <verb>           Run a control API verb (start, stop, toggle, status, doctor, etc.)"
     Write-Host ""
     Write-Host "Flags (before the mode):"
     Write-Host "  --no-install     Skip venv creation and all pip installs"
@@ -114,18 +116,13 @@ if ($i -lt $args.Count) {
     $ModeArgs = @($args[$i..($args.Count - 1)])
 }
 
-$validModes = @("run", "verify", "fetch", "test", "build", "clean", "help")
+$specialModes = @("run", "verify", "fetch", "test", "build", "clean", "help")
 if ($Mode -like "-*") {
     Write-Host "[ERROR] Unknown flag: $Mode" -ForegroundColor Red
     Show-Usage
     exit 2
 }
-if ($validModes -notcontains $Mode) {
-    Write-Host "[ERROR] Unknown mode: $Mode" -ForegroundColor Red
-    Show-Usage
-    exit 2
-}
-if ($Mode -eq "help") {
+if ($Mode -eq "help" -and $ModeArgs.Count -eq 0) {
     Show-Usage
     exit 0
 }
@@ -506,9 +503,15 @@ if ($Mode -eq "build") {
     exit $LASTEXITCODE
 }
 
-# 6. Run application
-Write-Host "Starting Voice Transcriber (Backend: $env:VT_MODEL_BACKEND)..." -ForegroundColor Green
-& $pythonExe (Join-Path $SrcDir "main.py")
+# 6. Run application / command
+$appArgs = @()
+if ($Mode -ne "run") { $appArgs += $Mode }
+if ($ModeArgs.Count -gt 0) { $appArgs += $ModeArgs }
+
+if ($Mode -eq "run") {
+    Write-Host "Starting Voice Transcriber (Backend: $env:VT_MODEL_BACKEND)..." -ForegroundColor Green
+}
+& $pythonExe (Join-Path $SrcDir "main.py") @appArgs
 # Without this the script terminates "normally" and powershell.exe reports 0,
 # so run.bat's `if errorlevel 1` could never see a crashed app (verified on
 # Windows 11 / PowerShell 5.1: app exit 3 -> launcher exit 0).

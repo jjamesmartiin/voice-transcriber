@@ -21,20 +21,27 @@ Voice Transcriber runs on Linux under both Wayland and X11.
 
 ## Running
 
-### With Nix (Recommended)
-From repo root:
+### ⚡ 1-Command Launcher (Recommended)
+From the repo root:
 ```bash
-nix run .
+./run.sh
+```
+`./run.sh` automatically checks if Nix is available (using `nix run .`), or bootstraps a local `.venv` virtual environment if running outside Nix.
+
+### One-Time Setup (Non-Nix)
+```bash
+./setup.sh
+```
+Checks system dependencies (`portaudio`, `wl-clipboard`/`xclip`, `ydotool`/`xdotool`), creates `.venv`, installs requirements, and tests permissions.
+
+### System Diagnostics (Doctor)
+```bash
+./run.sh doctor
 ```
 
-### With Python directly
+### With Nix directly
 ```bash
-./platforms/linux/run.sh
-```
-Or:
-```bash
-export PYTHONPATH=src
-python3 src/main.py
+nix run .
 ```
 
 ## Hotkeys

@@ -996,6 +996,11 @@ class SimpleVoiceTranscriber:
         if verb == "help":
             return {"ok": True, "cmd": verb, "verbs": dict(control.VERBS)}
 
+        if verb in ("doctor", "check"):
+            import doctor
+
+            return doctor.run_doctor(json_format=True)
+
         if verb == "ping":
             return {"ok": True, "cmd": verb, "pid": os.getpid()}
 
@@ -1203,7 +1208,55 @@ class SimpleVoiceTranscriber:
             if self.hotkey_system:
                 self.hotkey_system.stop()
 
-if __name__ == "__main__":
+def check_permissions():
+    """Check if user has proper permissions for input device access"""
+    from hotkeys import is_running_in_wsl
+    if is_running_in_wsl() or sys.platform.startswith("win") or sys.platform == "darwin" or hal.detect_platform() in (hal.WINDOWS, hal.MACOS):
+        return True
+        
+    import grp
+    import pwd
+    
+    # Check if running as root
+    if os.geteuid() == 0:
+        logger.debug("Running as root - full input device access available")
+        return True
+    
+    # Check if user is in input group
+    try:
+        current_user = pwd.getpwuid(os.getuid()).pw_name
+        
+        # Get current groups using os.getgroups() which reflects actual active groups
+        current_gids = os.getgroups()
+        
+        # Get input group info
+        input_group = grp.getgrnam('input')
+        
+        # Check if user is in input group (by GID)
+        if input_group.gr_gid in current_gids:
+            logger.debug("User is in input group - input device access available")
+            return True
+        else:
+            # Get group names for display
+            group_names = []
+            for gid in current_gids:
+                try:
+                    group_names.append(grp.getgrgid(gid).gr_name)
+                except:
+                    group_names.append(str(gid))
+            
+            logger.error(f"User {current_user} is NOT in the 'input' group.")
+            logger.error(f"Current groups: {', '.join(group_names)}")
+            logger.error(f"Run: sudo usermod -aG input {current_user}")
+            logger.error("Then LOG OUT and LOG BACK IN for changes to take effect.")
+            return False
+    except Exception as e:
+        logger.error(f"Error checking permissions: {e}")
+        return False
+
+
+def cli():
+    """Main CLI entry point for Voice Transcriber."""
     if LOG_FILE:
         logger.info("Log file: %s", LOG_FILE)
 
@@ -1216,54 +1269,12 @@ if __name__ == "__main__":
         if _control_exit is not None:
             sys.exit(_control_exit)
 
-    def check_permissions():
-        """Check if user has proper permissions for input device access"""
-        from hotkeys import is_running_in_wsl
-        if is_running_in_wsl() or sys.platform.startswith("win") or hal.detect_platform() == hal.WINDOWS:
-            return True
-            
-        import grp
-        import pwd
-        
-        # Check if running as root
-        if os.geteuid() == 0:
-            logger.debug("Running as root - full input device access available")
-            return True
-        
-        # Check if user is in input group
-        try:
-            current_user = pwd.getpwuid(os.getuid()).pw_name
-            
-            # Get current groups using os.getgroups() which reflects actual active groups
-            current_gids = os.getgroups()
-            
-            # Get input group info
-            input_group = grp.getgrnam('input')
-            
-            # Check if user is in input group (by GID)
-            if input_group.gr_gid in current_gids:
-                logger.debug("User is in input group - input device access available")
-                return True
-            else:
-                # Get group names for display
-                group_names = []
-                for gid in current_gids:
-                    try:
-                        group_names.append(grp.getgrgid(gid).gr_name)
-                    except:
-                        group_names.append(str(gid))
-                
-                logger.error(f"User {current_user} is NOT in the 'input' group.")
-                logger.error(f"Current groups: {', '.join(group_names)}")
-                logger.error(f"Run: sudo usermod -aG input {current_user}")
-                logger.error("Then LOG OUT and LOG BACK IN for changes to take effect.")
-                return False
-        except Exception as e:
-            logger.error(f"Error checking permissions: {e}")
-            return False
-
     if check_permissions():
         app = SimpleVoiceTranscriber()
-        app.run()
+        sys.exit(0 if app.run() else 1)
     else:
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    cli()

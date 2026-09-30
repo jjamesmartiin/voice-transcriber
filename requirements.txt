@@ -1,0 +1,23 @@
+# Voice Transcriber - Core dependencies
+accelerate
+datasets
+huggingface-hub
+librosa
+numpy
+protobuf
+psutil
+pyyaml
+rich
+scipy
+sentencepiece
+sounddevice
+soundfile
+torch
+transformers
+
+# Platform-conditional dependencies
+evdev; sys_platform == 'linux'
+python-uinput; sys_platform == 'linux'
+pyperclip; sys_platform != 'linux'
+pynput; sys_platform != 'linux'
+keyboard; sys_platform == 'win32'

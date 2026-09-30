@@ -48,8 +48,9 @@ if __name__ == "platform":  # pragma: no cover - depends on import order
 LINUX = "linux"
 WSL = "wsl"
 WINDOWS = "windows"
+MACOS = "macos"
 
-VALID_PLATFORMS = (LINUX, WSL, WINDOWS)
+VALID_PLATFORMS = (LINUX, WSL, WINDOWS, MACOS)
 
 
 def _detect_wsl() -> bool:
@@ -70,11 +71,12 @@ def _detect_wsl() -> bool:
 
 
 def detect_platform() -> str:
-    """Return the active target platform: ``linux`` | ``wsl`` | ``windows``.
+    """Return the active target platform: ``linux`` | ``wsl`` | ``windows`` | ``macos``.
 
     ``VT_PLATFORM`` (set by tests / CI / launchers) always wins. When unset we
-    auto-detect the host: native Windows by ``sys.platform``, WSL by the same
-    heuristics as ``hotkeys.is_running_in_wsl``, otherwise native Linux.
+    auto-detect the host: macOS by ``sys.platform == "darwin"``, native Windows
+    by ``sys.platform``, WSL by the same heuristics as
+    ``hotkeys.is_running_in_wsl``, otherwise native Linux.
 
     An unknown ``VT_PLATFORM`` value is a hard error: silently guessing across
     platforms is exactly the class of bug the HAL exists to eliminate.
@@ -87,6 +89,8 @@ def detect_platform() -> str:
             )
         return override
 
+    if sys.platform == "darwin":
+        return MACOS
     if sys.platform.startswith("win"):
         return WINDOWS
     if _detect_wsl():
@@ -106,6 +110,8 @@ def get_clipboard_sink(platform: str | None = None):
         from .windows.clipboard import WindowsClipboardSink as _Cls
     elif platform == WSL:
         from .wsl.clipboard import WSLClipboardSink as _Cls
+    elif platform == MACOS:
+        from .macos.clipboard import MacOSClipboardSink as _Cls
     else:
         raise ValueError(f"Unknown platform: {platform!r}")
     return _Cls()
@@ -120,6 +126,8 @@ def get_audio_cue_player(platform: str | None = None):
         from .windows.audio_cues import WindowsAudioCuePlayer as _Cls
     elif platform == WSL:
         from .wsl.audio_cues import WSLAudioCuePlayer as _Cls
+    elif platform == MACOS:
+        from .macos.audio_cues import MacOSAudioCuePlayer as _Cls
     else:
         raise ValueError(f"Unknown platform: {platform!r}")
     return _Cls()
@@ -142,6 +150,8 @@ def create_hotkey_manager(
         from .windows.hotkeys import WindowsHotkeyManager as _Cls
     elif platform == WSL:
         from .wsl.hotkeys import WSLHotkeyManager as _Cls
+    elif platform == MACOS:
+        from .macos.hotkeys import MacOSHotkeyManager as _Cls
     else:
         raise ValueError(f"Unknown platform: {platform!r}")
     return _Cls(
@@ -153,14 +163,19 @@ def create_hotkey_manager(
 def get_visual_notification(*, app_name: str = "Voice Transcriber", tui=None):
     """Return a platform-appropriate visual notification backend.
 
-    Windows uses the native Tkinter/winsound overlay; Linux and WSL use the
-    generic TUI-aware notification object from :mod:`notifications`.
+    Windows uses the native Tkinter/winsound overlay; macOS uses native user
+    notifications via osascript; Linux and WSL use the generic TUI-aware
+    notification object from :mod:`notifications`.
     """
     platform = detect_platform()
     if platform == WINDOWS:
         from .windows.notifications import WindowsVisualNotification
 
         return WindowsVisualNotification(app_name=app_name, tui=tui)
+    elif platform == MACOS:
+        from .macos.notifications import MacOSVisualNotification
+
+        return MacOSVisualNotification(app_name=app_name, tui=tui)
     from notifications import VisualNotification
 
     return VisualNotification(app_name=app_name, tui=tui)
@@ -170,6 +185,7 @@ __all__ = [
     "LINUX",
     "WSL",
     "WINDOWS",
+    "MACOS",
     "VALID_PLATFORMS",
     "detect_platform",
     "get_clipboard_sink",

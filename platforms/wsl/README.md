@@ -49,11 +49,11 @@ If the Windows Virtual Machine Platform feature is not yet active:
    *(If prompted, reboot your PC to finalize Windows hypervisor features).*
 
 ### Step 2: Register NixOS-WSL (If not already installed)
-To register NixOS in WSL2:
-```powershell
-# From the repository root:
-powershell -ExecutionPolicy Bypass -File platforms\wsl\setup_wsl.ps1
+To register NixOS in WSL2, simply double-click or run:
+```cmd
+setup_wsl.bat
 ```
+*(Or via PowerShell: `powershell -ExecutionPolicy Bypass -File platforms\wsl\setup_wsl.ps1`)*
 
 ---
 
@@ -79,11 +79,12 @@ Ensure Windows privacy settings allow WSL to access your microphone:
 
 ## 3. Running the App
 
-### Option A: Launch from Windows (Recommended)
-From Windows PowerShell in the repository root:
-```powershell
-powershell -ExecutionPolicy Bypass -File platforms\wsl\run_wsl.ps1
+### Option A: Launch from Windows (1-Click)
+Double-click or run from the repo root:
+```cmd
+run_wsl.bat
 ```
+*(Or in PowerShell: `powershell -ExecutionPolicy Bypass -File platforms\wsl\run_wsl.ps1`)*
 
 ### Option B: Launch from inside WSL
 Inside your NixOS WSL terminal:

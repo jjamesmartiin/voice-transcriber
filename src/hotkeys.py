@@ -78,6 +78,8 @@ def __getattr__(name):
         return hal.load_backend("wsl", "hotkeys").WSLHotkeyManager
     if name in ("WindowsGlobalHotkeys", "WindowsHotkeyManager"):
         return hal.load_backend("windows", "hotkeys").WindowsHotkeyManager
+    if name in ("MacOSGlobalHotkeys", "MacOSHotkeyManager"):
+        return hal.load_backend("macos", "hotkeys").MacOSHotkeyManager
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -89,4 +91,6 @@ __all__ = [
     "WaylandGlobalHotkeys",
     "WSLGlobalHotkeys",
     "WindowsGlobalHotkeys",
+    "MacOSGlobalHotkeys",
+    "MacOSHotkeyManager",
 ]

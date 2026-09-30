@@ -5,7 +5,7 @@
 
   outputs = { self, nixpkgs } @ inputs:
     let
-      supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
+      supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forEachSupportedSystem = f: inputs.nixpkgs.lib.genAttrs supportedSystems (system: f {
         inherit system;
         pkgs = import inputs.nixpkgs { inherit system; };
@@ -16,22 +16,17 @@
     {
       packages = forEachSupportedSystem ({ system, pkgs }:
         let
+          isLinux = pkgs.stdenv.isLinux;
+
           # Custom python with package overrides
           python = pkgs.python3.override {
             self = python;
           };
 
-          # Runtime dependencies
-          runtimeDeps = with pkgs; [
-            lame
+          # Linux-only runtime dependencies
+          linuxRuntimeDeps = with pkgs; [
             xclip
-            libnotify
             alsa-utils
-            bashInteractive
-            ncurses
-            readline
-            mpg123
-            # GUI tools
             zenity
             # X11/GUI deps
             libx11
@@ -48,10 +43,19 @@
             glib
             fontconfig
             freetype
-
             # wayland
             wl-clipboard
           ];
+
+          # Runtime dependencies
+          runtimeDeps = with pkgs; [
+            lame
+            libnotify
+            bashInteractive
+            ncurses
+            readline
+            mpg123
+          ] ++ (pkgs.lib.optionals isLinux linuxRuntimeDeps);
 
           # Python environment
           pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
@@ -63,9 +67,7 @@
             scipy
             gtts
             tkinter
-            evdev
             pynput
-            python-uinput
             torch
             transformers
             huggingface-hub
@@ -75,7 +77,8 @@
             librosa
             datasets
             psutil
-          ]);
+            pyyaml
+          ] ++ (pkgs.lib.optionals isLinux [ evdev python-uinput ]));
 
           # ratatui frontend (Rust), built from the tui-rs/ crate.
           vt-tui = pkgs.rustPlatform.buildRustPackage {
@@ -144,6 +147,8 @@
 
       apps = forEachSupportedSystem ({ system, pkgs }:
         let
+          isLinux = pkgs.stdenv.isLinux;
+
           # Reusing definitions (simplification for brevity, though ideally shared)
           python = pkgs.python3.override {
             self = python;
@@ -158,9 +163,7 @@
             scipy
             gtts
             tkinter
-            evdev
             pynput
-            python-uinput
             torch
             transformers
             huggingface-hub
@@ -171,17 +174,12 @@
             datasets
             pytest
             psutil
-          ]);
+            pyyaml
+          ] ++ (pkgs.lib.optionals isLinux [ evdev python-uinput ]));
 
-          runtimeDeps = with pkgs; [
-            lame
+          linuxRuntimeDeps = with pkgs; [
             xclip
-            libnotify
             alsa-utils
-            bashInteractive
-            ncurses
-            readline
-            mpg123
             zenity
             libx11
             libxext
@@ -197,10 +195,17 @@
             glib
             fontconfig
             freetype
-
-            # wayland
             wl-clipboard
           ];
+
+          runtimeDeps = with pkgs; [
+            lame
+            libnotify
+            bashInteractive
+            ncurses
+            readline
+            mpg123
+          ] ++ (pkgs.lib.optionals isLinux linuxRuntimeDeps);
 
           vt_pkg = self.packages.${system}.default;
         in
@@ -218,7 +223,11 @@
               export OPENBLAS_NUM_THREADS=1
               export MKL_NUM_THREADS=1
               TIER=tests/linux
-              if [ -n "''${WSL_DISTRO_NAME:-}" ] || [ -e /mnt/wslg ]; then TIER=tests/wsl; fi
+              if [ -n "''${WSL_DISTRO_NAME:-}" ] || [ -e /mnt/wslg ]; then
+                TIER=tests/wsl
+              elif [ "$(uname)" = "Darwin" ]; then
+                TIER=tests/macos
+              fi
               ${pythonEnv}/bin/python -m pytest tests/shared "$TIER" "$@"
               exit_code=$?
               if [ $exit_code -eq 139 ] || [ $exit_code -eq 136 ]; then
@@ -231,19 +240,15 @@
 
       devShells = forEachSupportedSystem ({ system, pkgs }:
         let
+          isLinux = pkgs.stdenv.isLinux;
+
           python = pkgs.python3.override {
             self = python;
           };
 
-          runtimeDeps = with pkgs; [
-            lame
+          linuxRuntimeDeps = with pkgs; [
             xclip
-            libnotify
             alsa-utils
-            bashInteractive
-            ncurses
-            readline
-            mpg123
             zenity
             libx11
             libxext
@@ -263,6 +268,15 @@
             wl-clipboard
           ];
 
+          runtimeDeps = with pkgs; [
+            lame
+            libnotify
+            bashInteractive
+            ncurses
+            readline
+            mpg123
+          ] ++ (pkgs.lib.optionals isLinux linuxRuntimeDeps);
+
           pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
             sounddevice
             soundfile
@@ -272,9 +286,7 @@
             scipy
             gtts
             tkinter
-            evdev
             pynput
-            python-uinput
             torch
             transformers
             huggingface-hub
@@ -284,27 +296,25 @@
             librosa
             datasets
             pip
-            pytest # Added for testing
+            pytest
             psutil
-          ]);
+            pyyaml
+          ] ++ (pkgs.lib.optionals isLinux [ evdev python-uinput ]));
         in
         {
           default = pkgs.mkShell {
             buildInputs = [ pythonEnv ] ++ runtimeDeps ++ (with pkgs; [
               hyperfine
               flamegraph
-              perf
-              # Release tooling: `nix develop --command gh release upload ...`
-              # (see docs/releasing.md). Not a runtime dependency.
               gh
-            ]);
+            ] ++ (pkgs.lib.optionals isLinux [ perf ]));
 
             shellHook = ''
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
               export PS1='\[\033[1;32m\][VT-dev:\w]\$\[\033[0m\] '
-              echo "🎙️ VT Development Environment Ready!"
+              echo "⚡ VT Development Environment Ready!"
               echo "To run the app: python src/main.py"
-              echo "To run tests: python -m pytest tests/shared tests/linux"
+              echo "To run tests: python -m pytest tests/shared"
             '';
           };
         });

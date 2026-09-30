@@ -13,8 +13,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
-# Detect WSL vs native Linux for the platform tier.
-if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -e /mnt/wslg ] || grep -qi microsoft /proc/version 2>/dev/null; then
+# Detect WSL vs macOS vs native Linux for the platform tier.
+if [ "$(uname)" = "Darwin" ]; then
+    PLATFORM_TIER="tests/macos"
+    PLATFORM_NAME="macOS"
+elif [ -n "${WSL_DISTRO_NAME:-}" ] || [ -e /mnt/wslg ] || grep -qi microsoft /proc/version 2>/dev/null; then
     PLATFORM_TIER="tests/wsl"
     PLATFORM_NAME="WSL"
 else
@@ -45,4 +48,10 @@ case "$CATEGORY" in
 esac
 
 echo "▶ Running [$CATEGORY] tests on $PLATFORM_NAME: $TARGETS"
-exec nix develop --command python -m pytest $TARGETS "$@"
+if command -v nix >/dev/null 2>&1 && [ "${VT_USE_VENV:-0}" != "1" ]; then
+    exec nix develop --command python -m pytest $TARGETS "$@"
+elif [ -f .venv/bin/pytest ]; then
+    exec .venv/bin/pytest $TARGETS "$@"
+else
+    exec python3 -m pytest $TARGETS "$@"
+fi

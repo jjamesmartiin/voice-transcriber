@@ -190,6 +190,10 @@ VERBS: dict[str, dict] = {
         "summary": "Return this verb catalogue",
         "returns": ["verbs"],
     },
+    "doctor": {
+        "summary": "Run system diagnostics (audio devices, permissions, GPU/MPS, model weights)",
+        "aliases": ["check"],
+    },
     "quit": {
         "summary": "Shut the engine down",
     },
@@ -518,6 +522,12 @@ def run_cli(argv=None, stream=None) -> int | None:
             build_parser().print_help(stream)
             _print_verbs(stream)
         return 0
+
+    if verb in ("doctor", "check"):
+        import doctor
+
+        res = doctor.run_doctor(json_format=bool(args.json), stream=stream or sys.stdout)
+        return 0 if res.get("ok") else 1
 
     if verb not in VERBS:
         print(f"Unknown control verb: {verb!r}", file=sys.stderr)

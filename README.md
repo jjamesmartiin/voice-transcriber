@@ -1,9 +1,9 @@
 # Voice Transcriber
 
 A modular, low-latency voice transcription engine with global push-to-talk
-hotkeys and real-time text injection. One shared core engine, three supported
-host environments: **Linux (Wayland/X11)**, **Windows (native)**, and
-**Windows via WSL2 (NixOS)**.
+hotkeys and real-time text injection. One shared core engine, four supported
+host environments: **Linux (Wayland/X11)**, **Windows (native)**,
+**Windows via WSL2 (NixOS)**, and **macOS (Darwin)**.
 
 ---
 
@@ -11,12 +11,13 @@ host environments: **Linux (Wayland/X11)**, **Windows (native)**, and
 
 | Platform | Status | Hotkeys | Output injection | Audio capture | Guide | Quick run |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Linux (Wayland / X11)** | Supported | `evdev` + `uinput` | `wl-copy`/`xclip` (copy) · `ydotool`/`xdotool` (type) | PulseAudio / PipeWire | [Linux guide](platforms/linux/README.md) | `nix run .` or `./platforms/linux/run.sh` |
-| **Windows (native)** | Supported | `pynput` + `keyboard` | Win32 `SendInput` (Unicode/emoji) | WASAPI / DirectSound | [Windows guide](platforms/windows/README.md) | `setup.bat` → `run.bat` |
-| **Windows (WSL2 / NixOS)** | Supported | Windows-host bridge (PowerShell ⇄ socket IPC) | Host-side synthetic paste (`clip.exe` + `Ctrl+V`) | WSLg PulseAudio (`RDPSource`) | [WSL guide](platforms/wsl/README.md) | `powershell -File platforms\wsl\run_wsl.ps1` |
+| **Linux (Wayland / X11)** | Supported | `evdev` + `uinput` | `wl-copy`/`xclip` (copy) · `ydotool`/`xdotool` (type) | PulseAudio / PipeWire | [Linux guide](platforms/linux/README.md) | `./run.sh` or `nix run .` |
+| **Windows (native)** | Supported | `pynput` + `keyboard` | Win32 `SendInput` (Unicode/emoji) | WASAPI / DirectSound | [Windows guide](platforms/windows/README.md) | Double-click `run.bat` |
+| **Windows (WSL2 / NixOS)** | Supported | Windows-host bridge (PowerShell ⇄ socket IPC) | Host-side synthetic paste (`clip.exe` + `Ctrl+V`) | WSLg PulseAudio (`RDPSource`) | [WSL guide](platforms/wsl/README.md) | Double-click `run_wsl.bat` |
+| **macOS (Apple Silicon / Intel)** | Supported | `pynput` (Accessibility) | `pbcopy` (copy) · AppleScript / Quartz (type) | CoreAudio | [macOS guide](platforms/macos/README.md) | `./run.sh` or `nix run .` |
 
-All three share the same engine, ASR backend, post-processor, and config format.
-Only the four HAL backends differ: **hotkeys**, **clipboard/typing**,
+All four share the same engine, ASR backend, post-processor, and config format.
+Only the HAL backends differ: **hotkeys**, **clipboard/typing**,
 **audio cues**, and **notifications** (`src/platform/<os>/`).
 
 ---
@@ -78,76 +79,68 @@ for the platform you are targeting.
 | **Disk** | ~4 GB+ for the Nix store, plus ~4 GB for the model weights. |
 | **Bridge** | Windows `powershell.exe` reachable from inside WSL — the global-hotkey bridge is a PowerShell process on the host. |
 
+### macOS (Darwin)
+
+| Requirement | Detail |
+| :--- | :--- |
+| **Architecture** | Apple Silicon (`aarch64-darwin`) or Intel (`x86_64-darwin`). |
+| **Running from source** | Python 3.10+ and PortAudio (`brew install portaudio`). |
+| **Nix** | Nix with flakes enabled (`nix run .`). |
+| **Audio server** | macOS CoreAudio default input microphone. |
+| **Accessibility permissions** | Required for global hotkeys and synthetic typing: *System Settings → Privacy & Security → Accessibility* (enable your Terminal / app). |
+| **Microphone permissions** | Allow microphone access when prompted on first recording. |
+| **Hardware Acceleration** | Apple Silicon MPS (Metal Performance Shaders) supported automatically. |
+
 ---
 
 ## Quick Start
 
-### Linux (Wayland / X11)
+### Quick Start by Platform
+
+#### 🐧 Linux (Wayland / X11)
 ```bash
-# Recommended: Nix flake (provides PyTorch, PortAudio, wl-clipboard, evdev, uinput)
-nix run .
+# 1-command launch (auto-detects Nix or creates local .venv on first run):
+./run.sh
 
-# Or Python directly (requires the deps in flake.nix + membership in the 'input' group)
-./platforms/linux/run.sh
+# Or explicit one-time setup:
+./setup.sh
 ```
-One-time setup: `sudo usermod -a -G input $USER` (then re-login) so global
-hotkeys work without root. See the [Linux guide](platforms/linux/README.md).
+> **Note:** If you are not yet in the `input` group for global hotkeys, run `sudo usermod -aG input $USER` and log back in. Run `./run.sh doctor` to test permissions and audio devices anytime.
 
-### Windows (native)
-From the repo root:
+#### 🪟 Windows (Native)
+From File Explorer or Command Prompt in the repo root:
 ```cmd
-# Recommended (runs without PowerShell execution policy restrictions):
-setup.bat   # (One-time) creates .venv and installs dependencies
-run.bat     # Launches the application
+run.bat       :: Double-click or run from CMD (auto-sets up .venv and starts)
 ```
-Or via PowerShell (downloaded scripts require `-ExecutionPolicy Bypass`):
-```powershell
-# One-time setup:
-powershell -ExecutionPolicy Bypass -File .\platforms\windows\setup.ps1
+> Optional: Run `setup.bat` for explicit environment setup, or `run.bat doctor` to verify audio and permissions.
 
-# Launch:
-powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1
+#### 🐧 Windows via WSL2 (NixOS-WSL)
+From File Explorer or Command Prompt in the repo root:
+```cmd
+run_wsl.bat   :: 1-click launcher for NixOS in WSL2
 ```
-*(Tip: Or run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` once in your PowerShell session.)*
+> (One-time setup if not yet imported: `setup_wsl.bat`)
 
-> **There are two supported ways to run on Windows.**
->
-> 1. **From source** — `setup.bat` (one-time, creates `.venv` and installs
->    dependencies) then `run.bat`. Needs Python 3.10+ and installs ~1.5 GB of
->    dependencies. `run.bat` also bootstraps the venv on first launch if you skip
->    `setup.bat`. This is the path the commands above use, and what you develop against.
->    `run.bat` is the single command to just *use* the app (it never installs the
->    test tooling); `run.bat verify` reports Python/deps/model/GPU status without
->    installing anything, `run.bat fetch` pre-downloads the model, `run.bat clean`
->    removes generated state, `run.bat --no-install` skips venv creation and
->    every pip install and runs with what is already present, and
->    `run.bat --model-dir <path>` loads weights from elsewhere. `setup.bat --no-dev`
->    skips installing pytest/PyInstaller. Python itself can be auto-installed by
->    `setup.bat` via winget if missing. See the
->    [Windows guide](platforms/windows/README.md#2a-launcher-flags--modes).
-> 2. **From the prebuilt EXE** — `dist\VoiceTranscriber\VoiceTranscriber.exe`.
->    Needs no Python at all and no setup step; just run it. See
->    [Building Distributables](#building-distributables).
->
-> The EXE is **not** committed to this repository (`dist/` is gitignored), so a
-> fresh clone only gives you option 1 until you build it once with `run.bat build`.
-
-> **Note on path length (`[WinError 206]`):** Windows has a 260-character path limit by default. If extracting from a zip, place the repository in a short path (e.g. `C:\voice-transcriber`) rather than deeply nested download folders, or enable `LongPathsEnabled`. See [Windows Troubleshooting](platforms/windows/README.md#troubleshooting).
-
-Requires Python 3.10+ **only for source runs**. See the [Windows guide](platforms/windows/README.md).
-
-### Windows via WSL2 (NixOS)
-From Windows PowerShell in the repo root:
-```powershell
-# One-time: enable VM Platform + WSL, then register NixOS
-powershell -ExecutionPolicy Bypass -File platforms\wsl\setup_wsl.ps1
-
-# Run
-powershell -ExecutionPolicy Bypass -File platforms\wsl\run_wsl.ps1
+#### 🍎 macOS (Apple Silicon / Intel)
+```bash
+# 1-command launch (auto-detects environment, checks brew portaudio, and runs):
+./run.sh
 ```
-Or from inside the NixOS WSL shell: `nix run .`.
-See the [WSL guide](platforms/wsl/README.md) and
-[WSL troubleshooting](platforms/wsl/TROUBLESHOOTING.md).
+> **Permissions note:** When prompted or in *System Settings → Privacy & Security*, allow **Accessibility** and **Microphone** access for your terminal app. Run `./run.sh doctor` to verify status.
+
+---
+
+## 🩺 System Self-Check (Doctor)
+
+Voice Transcriber includes a built-in diagnostic tool to verify microphones, system permissions, hardware acceleration (CUDA/MPS/CPU), and model weight cache status:
+
+```bash
+# Linux / macOS:
+./run.sh doctor
+
+# Windows:
+run.bat doctor
+```
 
 ---
 
@@ -237,7 +230,7 @@ Under Nix the same verbs pass through the wrapper: `nix run . -- status`.
 | **Devices** | `mics`, `set-mic` |
 | **Settings** | `output`, `numbers`, `punctuation`, `theme`, `trailing-space`, `auto-punctuate`, `serial`, `spell`, `middle-click`, `mute` |
 | **Modals** | `settings`, `mic` (interactive — take over the terminal) |
-| **Lifecycle** | `reset-defaults`, `reset-terminal`, `ping`, `help`, `quit` |
+| **Lifecycle** | `reset-defaults`, `reset-terminal`, `ping`, `doctor`, `help`, `quit` |
 
 Hand-typed clients work too, because a bare verb is accepted:
 
@@ -309,14 +302,14 @@ Voice Transcriber Architecture
 │  src/hal.py (Loader) │              │  src/platform/ (HAL) │
 └───────────┬──────────┘              └──────────┬───────────┘
             │                                    │
-    ┌───────┴───────────────┬────────────────────┴───────┐
-    ▼                       ▼                            ▼
-Linux (evdev/uinput,     Windows (pynput,            WSL (PowerShell bridge,
- wl-copy/xclip/ydotool)   pyperclip, user32)          clip.exe interop)
+    ┌───────┴───────────────┬────────────────────┼─────────────┴──────────┐
+    ▼                       ▼                    ▼                        ▼
+Linux (evdev/uinput,     Windows (pynput,     WSL (PowerShell bridge,  macOS (pynput, pbcopy,
+ wl-copy/xclip/ydotool)   pyperclip, user32)   clip.exe interop)        osascript, afplay)
 ```
 
 Platform detection lives in `src/platform/__init__.py`; override it with
-`VT_PLATFORM=linux|windows|wsl` (an unknown value is a hard error by design).
+`VT_PLATFORM=linux|windows|wsl|macos` (an unknown value is a hard error by design).
 
 ---
 

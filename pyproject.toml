@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-transcriber"
+version = "1.2.0"
+description = "Real-time voice dictation with streaming VAD, Cohere ASR backend, and English post-processor"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "James Martin"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = [
+    "accelerate",
+    "datasets",
+    "huggingface-hub",
+    "librosa",
+    "numpy",
+    "protobuf",
+    "psutil",
+    "pyyaml",
+    "rich",
+    "scipy",
+    "sentencepiece",
+    "sounddevice",
+    "soundfile",
+    "torch",
+    "transformers",
+    "evdev; sys_platform == 'linux'",
+    "python-uinput; sys_platform == 'linux'",
+    "pyperclip; sys_platform != 'linux'",
+    "pynput; sys_platform != 'linux'",
+    "keyboard; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-timeout",
+    "pytest-mock",
+    "ruff",
+]
+gui = [
+    "gtts",
+    "tkinter",
+]
+
+[project.scripts]
+vt = "main:cli"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
