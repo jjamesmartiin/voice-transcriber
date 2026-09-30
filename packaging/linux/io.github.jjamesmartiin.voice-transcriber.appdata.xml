@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata, installed to share/metainfo/ by flake.nix. Keep the file
+  name as <id>.appdata.xml: appdir-lint.sh (the AppImage catalogue's checker)
+  looks for usr/share/metainfo/*appdata.xml, and catalogue entries take their
+  description from this file's <summary>.
+-->
+<component type="desktop-application">
+  <id>io.github.jjamesmartiin.voice-transcriber</id>
+  <name>Voice Transcriber</name>
+  <summary>Push-to-talk dictation that types into any window</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.jjamesmartiin">
+    <name>James Martin</name>
+  </developer>
+  <description>
+    <p>
+      Voice Transcriber turns speech into text anywhere: hold the push-to-talk
+      hotkey, speak, and release. The transcription is typed into the window you
+      are working in, or copied to the clipboard.
+    </p>
+    <p>
+      Speech recognition runs locally with the Cohere Transcribe model, so
+      dictation keeps working offline; the weights are downloaded on first use.
+    </p>
+  </description>
+  <launchable type="desktop-id">vt.desktop</launchable>
+  <url type="homepage">https://github.com/jjamesmartiin/voice-transcriber</url>
+  <url type="bugtracker">https://github.com/jjamesmartiin/voice-transcriber/issues</url>
+  <categories>
+    <category>Utility</category>
+    <category>Accessibility</category>
+  </categories>
+  <keywords>
+    <keyword>dictation</keyword>
+    <keyword>speech-to-text</keyword>
+    <keyword>voice</keyword>
+  </keywords>
+  <provides>
+    <binary>vt</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.2.0" date="2026-09-29"/>
+  </releases>
+</component>

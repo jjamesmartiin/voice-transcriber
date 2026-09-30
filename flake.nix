@@ -99,7 +99,28 @@
             installPhase = ''
               mkdir -p $out/share/vt
               cp -r src/* $out/share/vt/
-              
+
+              # Desktop entry + icon for the AppImage. nix-appimage's
+              # extra-files.sh looks for share/applications/*.desktop whose Exec=
+              # basename matches the bundled program (vt) and, from that entry's
+              # Icon= key, copies the matching share/icons/hicolor file in as the
+              # AppDir's .DirIcon. Without this the AppImage contains no .desktop,
+              # no icon and no .DirIcon, and AppImage/appdir-lint.sh fails with
+              # "FATAL: .DirIcon is missing".
+              mkdir -p $out/share/applications
+              cp packaging/linux/vt.desktop $out/share/applications/vt.desktop
+              mkdir -p $out/share/icons
+              cp -r packaging/linux/icons/hicolor $out/share/icons/
+
+              # AppStream metadata (share/metainfo/*appdata.xml). extra-files.sh
+              # only injects the .desktop file and the icons into the AppDir, so
+              # this does not yet clear appdir-lint.sh's "no appdata file"
+              # warning - it is what anything inspecting the bundle (and distro
+              # packaging) reads, and it is where the catalogue takes its
+              # description from once the bundler copies it too.
+              mkdir -p $out/share/metainfo
+              cp packaging/linux/*.appdata.xml $out/share/metainfo/
+
               mkdir -p $out/bin
               cat > $out/bin/vt << EOF
               #!${pkgs.bash}/bin/bash

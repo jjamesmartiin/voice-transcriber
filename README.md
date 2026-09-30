@@ -591,5 +591,5 @@ The LLM can directly emit the clean YAML entry:
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE). The bundled Cohere Transcribe model
-is distributed under Apache-2.0 as well (see `config/licenses/`).
+MIT License. See [LICENSE](LICENSE). The bundled Cohere Transcribe model is
+distributed under Apache-2.0 (see `config/licenses/`).

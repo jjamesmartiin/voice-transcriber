@@ -43,13 +43,15 @@ nix develop --command gh release view v1.2.0
 ## Version bump
 
 The version string is duplicated and **not** derived from the git tag. Bump all
-three before tagging, or the AppImage/UI will report a stale version:
+four before tagging, or the AppImage/UI/catalogue metadata will report a stale
+version:
 
 | File | What |
 | :--- | :--- |
 | `flake.nix` | `version = "1.2.0";` in the flake `outputs` let-block |
 | `flake.nix` | `version = "1.2.0";` in the `pkgs.stdenv.mkDerivation` attrs |
 | `src/tui.py` | `def __init__(self, app_version="1.2.0", ...)` |
+| `packaging/linux/*.appdata.xml` | `<release version="1.2.0" date="YYYY-MM-DD"/>` |
 
 `tui-rs/Cargo.toml` tracks the Rust frontend (`vt-tui`) version independently
 and is not the app version.
@@ -74,6 +76,16 @@ grep -rn '[0-9]\+\.[0-9]\+\.[0-9]\+' flake.nix src/tui.py | grep -v '^\s*#'
 
 It uses no secrets. Its header comment states the weights are deliberately not
 fetched in CI.
+
+The AppImage is only accepted by the AppImage catalogue because `.#default`
+installs a `.desktop` entry and icons from `packaging/linux/`. nix-appimage's
+`extra-files.sh` looks for `share/applications/*.desktop` whose `Exec=` basename
+matches the bundled program (`vt`), copies the `Icon=` file in from
+`share/icons/hicolor/`, and derives the AppDir's `.DirIcon` from it. When any of
+that is missing it gives up silently and `appdir-lint.sh` then fails the whole
+AppImage with `FATAL: .DirIcon is missing` (see
+<https://github.com/AppImage/appimage.github.io/pull/8908>).
+`tests/linux/test_appimage_packaging.py` pins the pieces.
 
 `.github/workflows/ci.yml` is separate (push/PR only) and runs the three-OS test
 matrix. It does not publish anything.

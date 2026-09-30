@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Voice Transcriber
+GenericName=Voice Dictation
+Comment=Hold a hotkey to dictate; speech is transcribed locally and typed into the focused window
+Exec=vt
+Icon=vt
+Terminal=true
+Categories=Utility;Accessibility;
+Keywords=dictation;speech-to-text;transcription;voice;microphone;
+StartupNotify=false
