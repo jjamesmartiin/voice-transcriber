@@ -263,3 +263,13 @@ ERROR: Could not install packages due to an OSError: [WinError 206] The filename
 - `setup.bat` acquires the model on its own: it checks `models\`, assembles a split bundle if one is present, and only downloads as a last resort.
 - `test.bat verify` reports whether a complete model is already present. Drop one into `<repo>\models\cohere` (or a split bundle into `models\`), or pass `run.bat --model-dir <path>`.
 - `run.bat --no-model` launches without downloading one (useful only if a model is already installed).
+
+### 5. Microphone Captures Silence While in Discord or Communication Apps
+**Symptom:** Voice Transcriber records silence when Discord, a game, or a browser call is open.  
+**Cause:** Windows allows apps to claim "Exclusive Mode" on audio devices, blocking other apps from capturing audio simultaneously.  
+**Fix:**
+1. Press `Win + R`, type `mmsys.cpl` and press Enter to open Sound Control Panel.
+2. Go to the **Recording** tab, right-click your microphone, and select **Properties**.
+3. Go to the **Advanced** tab.
+4. **Uncheck** *"Allow applications to take exclusive control of this device"*.
+5. Click **Apply** and **OK**. Both Discord and Voice Transcriber can now share the microphone stream.

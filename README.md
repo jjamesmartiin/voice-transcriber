@@ -46,7 +46,7 @@ for the platform you are targeting.
 | **Architecture** | `x86_64-linux` or `aarch64-linux` (both are flake outputs). |
 | **Nix (recommended)** | Nix with flakes enabled. `nix run .` supplies Python, PyTorch, PortAudio, `wl-clipboard`, `evdev`, and `uinput` — nothing else to install. |
 | **Python (alternative)** | Python 3.10+ with the dependencies from `flake.nix` / `platforms/windows/requirements.txt`. |
-| **Audio server** | PipeWire or PulseAudio running, with your intended microphone as the default source (use `wpctl set-default <id>` if sharing a headset with Discord / WebRTC). |
+| **Audio server** | PipeWire or PulseAudio running, with your microphone as the default source. |
 | **`input` group** | Required for global hotkeys without root: `sudo usermod -a -G input $USER`, then re-login. |
 | **evdev + uinput** | Read access to `/dev/input/event*` and the `uinput` kernel module. Powers push-to-talk, the mouse chord, and synthetic keystrokes. |
 | **Clipboard sink** | Wayland: `wl-clipboard`. X11: `xclip` to copy. |

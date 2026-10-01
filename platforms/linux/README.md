@@ -15,17 +15,9 @@ Voice Transcriber runs on Linux under both Wayland and X11.
    users.users.<username>.extraGroups = [ "input" ];
    ```
 
-2. **Audio Stack (PipeWire / PulseAudio)**:
-   - PipeWire or PulseAudio running, with your intended microphone configured as the default source.
-   - **Shared Microphones & Discord / WebRTC Calls:**
-     Keep Voice Transcriber set to `default` or `pipewire` in the microphone picker. Direct ALSA hardware devices (`hw:X,Y`) lock the physical sound card exclusively to one program; if Discord, a browser, or an audio recorder opens the hardware device, direct ALSA capture will fail with `EBUSY` or record silence.
-   - **Multiple Microphones (Headset vs. Desk Mic):**
-     If Discord explicitly selects your headset mic while PipeWire's system default is set to a different microphone (like a desk USB mic), Voice Transcriber will capture from the desk mic instead of the headset. To route your headset mic to both:
-     ```bash
-     wpctl status               # Look under "Sources:" for your headset microphone ID
-     wpctl set-default <ID>     # e.g. wpctl set-default 101
-     ```
-     Or select it in your desktop sound settings (**GNOME Settings → Sound → Input**). PipeWire will then fan out the headset audio to Discord and Voice Transcriber simultaneously.
+2. **Audio Stack**:
+   - PipeWire or PulseAudio running.
+   - Microphone configured as default source.
 
 ## Running
 
@@ -94,3 +86,39 @@ The live speaker→microphone acoustic suite needs real audio hardware:
 ```bash
 nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
 ```
+
+---
+
+## Troubleshooting
+
+### 1. Microphone Captures Silence While in Discord, Browser, or WebRTC Calls
+**Symptom:** Voice Transcriber records silence or reports "No audio recorded", even though Discord or your browser call hears you fine.  
+**Causes & Fixes:**
+- **Multiple Microphones (e.g. Headset vs. Desk USB Mic):** Discord explicitly selected your headset mic, while PipeWire/GNOME's system default was set to another input. Voice Transcriber listens to the system `default` input.
+  - To route your headset mic to both:
+    ```bash
+    wpctl status               # Look under "Sources:" for your headset microphone ID
+    wpctl set-default <ID>     # e.g. wpctl set-default 101
+    ```
+    Or change it in desktop settings (**GNOME Settings → Sound → Input**). PipeWire will fan out audio to both apps simultaneously.
+- **Direct ALSA Hardware Device (`hw:X,Y`):** Raw ALSA hardware devices enforce exclusive single-app access. If Discord or PipeWire opens `hw:X,Y`, Voice Transcriber will fail with `EBUSY`.
+  - In Voice Transcriber's settings (`s`), always select **`default`** or **`pipewire`** instead of raw `hw:X,Y` devices.
+
+### 2. Global Hotkeys Not Detected
+**Symptom:** Pressing `Alt+Shift` or the middle mouse button does nothing.  
+**Fix:**
+- Ensure your user is in the `input` group:
+  ```bash
+  sudo usermod -a -G input $USER
+  ```
+  Then log out and log back in.
+- Run diagnostics to check device permissions:
+  ```bash
+  ./run.sh doctor
+  ```
+
+### 3. Keystrokes Not Appearing in Wayland Applications
+**Symptom:** The notification shows "COMPLETED", but no text is typed into the focused window.  
+**Fix:**
+- Ensure `/dev/uinput` is writable (verified by `./run.sh doctor`).
+- If using an application that rejects synthetic keystrokes, switch to clipboard mode (`./run.sh output clipboard`), which pastes via `wl-copy`.

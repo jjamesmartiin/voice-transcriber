@@ -155,3 +155,19 @@ Tested on NixOS WSL2 with sample audio (3.80s speech, 16000Hz 1ch PCM):
 - **Instant Response**: Warm latency is **~377 ms**, producing near-instantaneous transcription after releasing the hotkey.
 - **Ultra-low RTF (0.099x)**: The pipeline transcribes over **10 seconds of speech per second**.
 - **Microphone Passthrough**: Captured through the WSLg PulseAudio UNIX socket (`RDPSource` 16000Hz PCM) with zero perceived latency.
+
+---
+
+## 5. Troubleshooting
+
+### 1. Microphone Not Capturing in WSL
+**Symptom:** Voice Transcriber in WSL2 captures silence or cannot find an input audio device.  
+**Causes & Fixes:**
+- **Windows Host Privacy Settings:** On the Windows host, open **Settings → Privacy & security → Microphone**. Ensure **Microphone access** and **Let desktop apps access your microphone** are both toggled **ON**.
+- **WSLg PulseAudio Socket:** WSLg routes the Windows default microphone into WSL as `RDPSource`. Ensure the socket exists at `/mnt/wslg/PulseServer`.
+- **Diagnostics:** Run `./run.sh doctor` inside WSL to verify audio device enumeration and permissions.
+
+### 2. Windows Global Hotkeys Not Triggering
+**Symptom:** Pressing `Alt+Shift` inside a Windows application does not trigger recording in WSL.  
+**Fix:**
+- Ensure the background bridge is running. Launch via `run_wsl.bat` on the Windows host, which spawns `src/voice_transcriber/platform/wsl/wsl_win_hotkeys.ps1` to listen for global hotkeys and forward them across the WSL boundary.
