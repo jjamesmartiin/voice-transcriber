@@ -85,17 +85,22 @@ def get_data_dir():
     else:
         data_dir = Path.home() / 'AppData' / 'Local' / 'vt'
     
-    data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     return data_dir
 
 def get_temp_dir():
     """Get temporary directory for audio files"""
     if 'XDG_RUNTIME_DIR' in os.environ:
         temp_dir = Path(os.environ['XDG_RUNTIME_DIR']) / 'vt'
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        return temp_dir
-    else:
-        return Path(tempfile.gettempdir())
+        try:
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            return temp_dir
+        except OSError:
+            pass
+    return Path(tempfile.gettempdir())
 
 # Audio configuration
 CHANNELS = 1
