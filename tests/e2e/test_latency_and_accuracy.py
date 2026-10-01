@@ -105,6 +105,9 @@ def test_asr_inference_latency_and_accuracy(benchmark_reporter):
     """End-to-end ASR inference latency (RTF) and transcription accuracy (WER) against ground truth."""
     import transcribe2
 
+    # Warm up model so disk loading isn't counted against inference latency
+    transcribe2.get_model()
+
     test_dir = Path(__file__).resolve().parent.parent / "test_transcribe"
     samples = [
         {"name": "Sample 1 (Literature)", "file": test_dir / "1.mp3", "gt_file": test_dir / "1.md"},
