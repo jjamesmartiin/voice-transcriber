@@ -15,9 +15,17 @@ Voice Transcriber runs on Linux under both Wayland and X11.
    users.users.<username>.extraGroups = [ "input" ];
    ```
 
-2. **Audio Stack**:
-   - PipeWire or PulseAudio running.
-   - Microphone configured as default source.
+2. **Audio Stack (PipeWire / PulseAudio)**:
+   - PipeWire or PulseAudio running, with your intended microphone configured as the default source.
+   - **Shared Microphones & Discord / WebRTC Calls:**
+     Keep Voice Transcriber set to `default` or `pipewire` in the microphone picker. Direct ALSA hardware devices (`hw:X,Y`) lock the physical sound card exclusively to one program; if Discord, a browser, or an audio recorder opens the hardware device, direct ALSA capture will fail with `EBUSY` or record silence.
+   - **Multiple Microphones (Headset vs. Desk Mic):**
+     If Discord explicitly selects your headset mic while PipeWire's system default is set to a different microphone (like a desk USB mic), Voice Transcriber will capture from the desk mic instead of the headset. To route your headset mic to both:
+     ```bash
+     wpctl status               # Look under "Sources:" for your headset microphone ID
+     wpctl set-default <ID>     # e.g. wpctl set-default 101
+     ```
+     Or select it in your desktop sound settings (**GNOME Settings → Sound → Input**). PipeWire will then fan out the headset audio to Discord and Voice Transcriber simultaneously.
 
 ## Running
 
