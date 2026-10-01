@@ -21,22 +21,14 @@
 - [ ] **Rich TUI crashes on a non-UTF-8 Windows console.** Observed while smoke-testing the model-free EXE under this shell: `tui.print_header()` emits `❯`, and Rich's `legacy_windows_render` fails to encode it in `cp1252` (`UnicodeEncodeError`), so `_safe_tui_start` dies. Worse, the fallback path is itself unguarded — the first `self.tui.start()` is wrapped in try/except, but the Rich fallback's `self.tui.start()` is not, so the process exits 1 instead of showing anything. Only observed with piped output / a non-UTF-8 codepage; confirm on a stock `cmd.exe` (cp437/cp1252) versus Windows Terminal (UTF-8), then either force `Console(legacy_windows=False)`/`PYTHONUTF8` or guard the fallback and print a plain-text error.
 - [x] **Split `setup.sh`/`run.sh` per Unix OS.** Done: one root dispatcher per verb (`setup.sh`, `run.sh`, `test.sh`, `build.sh`, `clean.sh`) detects the toolchain (`nix` | `linux` | `macos`) and execs `platforms/<toolchain>/<verb>.sh`. The verb body lives once in `tools/vt_dev.py` (stdlib-only); the Nix platform uses the flake. Windows mirrors this with `platforms/windows/<verb>.ps1` (bootstrap only) delegating to the same runner. Structural pins: `tests/shared/test_posix_tooling.py`, `tests/windows/test_setup_tooling.py`.
 - [ ] **WSL bridge repo-root fix needs a real host.** `platforms/wsl/run_wsl_bridge.ps1` used `$ProjectRoot = $PSScriptRoot` (`platforms\wsl`), so `src\wsl_bridge_host.py` and the in-WSL `src/wsl_bridge.py` resolved nowhere. It now uses the shared `Get-RepoRoot`. Cannot be verified without a Windows+WSL host (see the WSL note above); confirm `run_wsl_bridge.bat` still launches the backend after this change.
-- [ ] **Validate the platform-verb refactor on NixOS (branch `refactor/one-verb-one-script`).** Windows is validated; the Nix pass exercises the new seams:
-  ```bash
-  git fetch && git switch refactor/one-verb-one-script   # fresh clone: -c ... origin/refactor/one-verb-one-script
-  nix flake check                 # new apps (setup/run/clean) evaluate
-  nix run .#setup                 # model -> per-user dir (~/.local/share/vt/models/cohere)
-  ./test.sh                       # must pick Nix, not a venv
-  ./run.sh doctor
-  ./build.sh                      # result/bin/vt
-  ./build.sh --bundle             # optional: the AppImage
-  ```
-  - `./test.sh` must print `[TEST]` output and run `nix develop --command python tools/vt_dev.py test`; if it says `No environment found` or shows `Venv:`, the toolchain detection is wrong.
-  - Stale-venv guard: `platforms/nix/*.sh` exports `VT_TOOLCHAIN=nix`, so an old `.venv` is ignored by the runner.
-  - `nix run .#setup` must write to the **per-user** dir, not the read-only store (`tools/vt_dev.py::model_dest()` fallback). `./test.sh` should then report `[OK] Model verified`.
-  - Flakes only see **tracked** files: `git add` any `flake.nix` / `tools/` tweak before `nix build`.
-  - Optional: drop a `model-bundle/` next to the built `.AppImage` and confirm `$APPIMAGE`/`$APPDIR` detection finds it.
-  - Commit flow: a new commit pushes normally; amending the refactor commit needs `git push --force-with-lease github refactor/one-verb-one-script`.
+- [x] **Validate the platform-verb refactor on NixOS (branch `refactor/one-verb-one-script`).** Verified 2026-09-30:
+  - `nix flake check` passes all outputs (`packages`, `apps`, `devShells`).
+  - `nix run .#setup` confirms weights in the per-user data dir (`~/.local/share/vt/models/cohere`).
+  - `./test.sh` correctly dispatches via Nix (`tools/vt_dev.py test`), passing 574 tests with 0 failures.
+  - `./run.sh doctor` reports all subsystems green and detects the live running engine.
+  - `./build.sh` produces `result/bin/vt` which runs cleanly and queries engine state over the control socket.
+  - `./build.sh --bundle` packages the standalone AppImage.
+  - Package namespacing under `src/voice_transcriber/` eliminated stdlib `platform` shadowing, and `packaging/nix/package.nix` builds via `buildPythonApplication` with pure sandbox `pytestCheckHook`.
 
 ## Packaging / distribution gaps (end-user artifacts)
 

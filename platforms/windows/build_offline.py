@@ -138,6 +138,14 @@ def build_exe():
         
         # Hidden imports
         "--hidden-import=hal",
+        "--hidden-import=voice_transcriber",
+        "--hidden-import=voice_transcriber.main",
+        "--hidden-import=voice_transcriber.hal",
+        "--hidden-import=voice_transcriber.platform.windows",
+        "--hidden-import=voice_transcriber.platform.windows.hotkeys",
+        "--hidden-import=voice_transcriber.platform.windows.clipboard",
+        "--hidden-import=voice_transcriber.platform.windows.audio_cues",
+        "--hidden-import=voice_transcriber.platform.windows.notifications",
         "--hidden-import=platform.windows",
         "--hidden-import=platform.windows.hotkeys",
         "--hidden-import=platform.windows.clipboard",
