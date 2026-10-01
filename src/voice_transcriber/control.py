@@ -234,7 +234,15 @@ def default_socket_path() -> str:
     override = os.environ.get(CONTROL_SOCKET_ENV)
     if override:
         return override
-    base = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        base = runtime_dir
+    else:
+        base = os.path.join(tempfile.gettempdir(), f"vt-{_user_identifier()}")
+        try:
+            os.makedirs(base, mode=0o700, exist_ok=True)
+        except OSError:
+            base = tempfile.gettempdir()
     return os.path.join(base, f"vt-control-{_user_identifier()}.sock")
 
 
@@ -274,6 +282,10 @@ class ControlServer:
                 os.unlink(self.socket_path)
             server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             server.bind(self.socket_path)
+            try:
+                os.chmod(self.socket_path, 0o600)
+            except OSError:
+                pass
             server.listen(8)
             server.settimeout(0.5)  # so the accept loop can notice _stop
         except OSError:

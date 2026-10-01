@@ -109,3 +109,13 @@ class TestConfigureLogging:
         target = tmp_path / "vt.log"
         assert logging_setup.configure_logging(log_file=target, console=False) == target
         assert logging.getLogger().level == logging.WARNING
+
+    def test_log_file_permissions_are_restricted_to_owner(self, tmp_path):
+        if os.name != "posix":
+            pytest.skip("POSIX only")
+        import stat
+        target = tmp_path / "secure.log"
+        logging_setup.configure_logging(log_file=target, console=False)
+        logging.warning("test message")
+        mode = stat.S_IMODE(os.stat(target).st_mode)
+        assert mode == 0o600, f"Expected 0600, got {oct(mode)}"

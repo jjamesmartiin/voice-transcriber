@@ -131,6 +131,19 @@ class TestSocketTransport:
             server.stop()
         assert not os.path.exists(server.socket_path)
 
+    def test_socket_permissions_are_restricted_to_owner(self, tmp_path):
+        """Control socket must be 0600 on POSIX so other users cannot connect."""
+        if os.name != "posix":
+            pytest.skip("POSIX only")
+        import stat
+        server = _server(tmp_path)
+        assert server.start() is True
+        try:
+            mode = stat.S_IMODE(os.stat(server.socket_path).st_mode)
+            assert mode == 0o600, f"Expected 0600, got {oct(mode)}"
+        finally:
+            server.stop()
+
     def test_round_trip_over_a_real_socket(self, tmp_path):
         engine = _FakeEngine()
         server = _server(tmp_path, engine)

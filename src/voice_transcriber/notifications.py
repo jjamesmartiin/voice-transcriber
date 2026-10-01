@@ -305,23 +305,17 @@ if __name__ == "__main__":
         self.overlay_processes.append(process)
     
     def _cleanup_overlays(self):
-        """Clean up all active overlay processes and kill any orphaned overlay processes from prior sessions."""
+        """Clean up all active overlay child processes."""
         for process in self.overlay_processes:
             try:
                 process.terminate()
                 process.wait(timeout=0.2)
-            except:
+            except Exception:
                 try:
                     process.kill()
-                except:
+                except Exception:
                     pass
         self.overlay_processes = []
-        
-        # Kill orphaned overlay processes from previous app runs/crashes
-        try:
-            subprocess.run(['pkill', '-f', 'create_overlay'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-        except Exception:
-            pass
     
     def _show_terminal_notification(self, text, sub_text=None, elapsed_sec=None, rec_duration=None, proc_time=None):
         """Show a colorful terminal notification."""

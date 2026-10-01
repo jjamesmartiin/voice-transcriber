@@ -849,7 +849,8 @@ class SimpleVoiceTranscriber:
                         add_space = getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True)
                         text_to_type = (transcription + ' ') if add_space else transcription
                         if self.hotkey_system and self.hotkey_system.type_text(text_to_type, fast=is_fast):
-                            logger.info(f"Typed ({'fast' if is_fast else 'slow'}): {text_to_type}")
+                            logger.info("Typed (%s, %d chars)", 'fast' if is_fast else 'slow', len(text_to_type))
+                            logger.debug("Typed text: %s", text_to_type)
                         else:
                             raise Exception("uinput typing failed or not available")
                     except Exception as e:
@@ -867,7 +868,8 @@ class SimpleVoiceTranscriber:
                     copy_success = copy_to_clipboard_crossplatform(transcription, self.clipboard_sink)
                     
                     if copy_success:
-                        logger.info(f"Copied to clipboard: {transcription}")
+                        logger.info("Copied transcription to clipboard (%d chars)", len(transcription))
+                        logger.debug("Copied text: %s", transcription)
                         
                         # Show completion notification only after clipboard successfully copies
                         try:

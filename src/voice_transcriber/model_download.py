@@ -371,11 +371,16 @@ def _read_local_manifest(bundle_dir, prefix):
 
 
 def _extract_bundle_archive(path, dest):
-    """Extract a .zip / .tar[.*] bundle into ``dest`` (trusted local input)."""
+    """Extract a .zip / .tar[.*] bundle into ``dest`` with path-traversal guards."""
+    dest_path = os.path.abspath(dest)
     if path.lower().endswith(".zip"):
         import zipfile
 
         with zipfile.ZipFile(path) as zf:
+            for member in zf.namelist():
+                target = os.path.abspath(os.path.join(dest, member))
+                if not (target == dest_path or target.startswith(dest_path + os.sep)):
+                    raise RuntimeError(f"Zip slip path traversal detected: {member!r}")
             zf.extractall(dest)
         return
     if tarfile.is_tarfile(path):
@@ -383,6 +388,10 @@ def _extract_bundle_archive(path, dest):
             if hasattr(tarfile, "data_filter"):
                 tf.extractall(dest, filter="data")
             else:
+                for member in tf.getmembers():
+                    target = os.path.abspath(os.path.join(dest, member.name))
+                    if not (target == dest_path or target.startswith(dest_path + os.sep)):
+                        raise RuntimeError(f"Tar path traversal detected: {member.name!r}")
                 tf.extractall(dest)
         return
     raise RuntimeError(

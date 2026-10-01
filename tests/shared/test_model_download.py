@@ -410,3 +410,17 @@ def test_ensure_local_cohere_explicit_missing_bundle_never_downloads(monkeypatch
     monkeypatch.setattr(model_download.urllib.request, "urlopen", _network_forbidden)
 
     assert model_download.ensure_local_cohere(dest=str(tmp_path / "dest")) is None
+
+
+def test_extract_bundle_archive_rejects_zip_slip(tmp_path):
+    """Archives with '../' traversing outside dest must be rejected."""
+    import zipfile
+    bad_zip = tmp_path / "bad.zip"
+    with zipfile.ZipFile(bad_zip, "w") as zf:
+        zf.writestr("../../evil.txt", "pwned")
+
+    dest = tmp_path / "extract_dest"
+    dest.mkdir()
+    with pytest.raises(RuntimeError, match="Zip slip path traversal detected"):
+        model_download._extract_bundle_archive(str(bad_zip), str(dest))
+    assert not (tmp_path / "evil.txt").exists()

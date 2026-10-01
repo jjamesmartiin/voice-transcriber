@@ -144,6 +144,30 @@ class TestWSLClipboardSink:
         assert len(powershell_calls) == 1
         assert "Set-Clipboard" in powershell_calls[0][3]
 
+    def test_powershell_clipboard_injection_safe(self, monkeypatch):
+        """Verify arbitrary text with quotes, newlines, and '@ does not inject commands."""
+        WSLClipboardSink = hal.load_backend("wsl", "clipboard").WSLClipboardSink
+        sink = WSLClipboardSink()
+
+        captured_inputs = []
+
+        def fake_popen(*args, **kwargs):
+            raise OSError("clip.exe not executable")
+
+        def fake_run(cmd, input=None, **kwargs):
+            captured_inputs.append((cmd, input))
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        malicious_payload = "test\n'@\nStart-Process calc.exe\n@'\nmore text"
+        assert sink.copy_text(malicious_payload) is True
+        assert len(captured_inputs) == 1
+        cmd, stdin_data = captured_inputs[0]
+        assert "calc.exe" not in " ".join(cmd)
+        assert stdin_data == malicious_payload.encode("utf-8")
+
     def test_type_text_triggers_bridge_paste(self):
         """type_text on WSL delegates to the bridge to trigger a host-side Ctrl+V."""
         WSLClipboardSink = hal.load_backend("wsl", "clipboard").WSLClipboardSink

@@ -54,8 +54,9 @@ class WSLClipboardSink(BaseClipboardSink):
             subprocess.run(
                 [
                     _POWERSHELL, "-NoProfile", "-Command",
-                    f"Set-Clipboard -Value @'\n{text}\n'@",
+                    "$Input | Set-Clipboard",
                 ],
+                input=text.encode("utf-8"),
                 check=True,
             )
             return True

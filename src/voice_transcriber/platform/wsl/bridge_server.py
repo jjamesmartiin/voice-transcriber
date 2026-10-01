@@ -63,8 +63,9 @@ def copy_to_windows_clipboard(text: str) -> bool:
         subprocess.run(
             [
                 _POWERSHELL, "-NoProfile", "-Command",
-                f"Set-Clipboard -Value @'\n{text}\n'@",
+                "$Input | Set-Clipboard",
             ],
+            input=text.encode("utf-8"),
             check=True,
         )
         logger.info("Copied transcription to Windows clipboard via PowerShell")

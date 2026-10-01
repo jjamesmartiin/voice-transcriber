@@ -101,6 +101,11 @@ def configure_logging(level: str | int | None = None, log_file=None, console: bo
             file_handler.setFormatter(formatter)
             handlers.append(file_handler)
             log_path = target
+            if os.name == "posix":
+                try:
+                    os.chmod(target, 0o600)
+                except OSError:
+                    pass
         except Exception:
             log_path = None
 
