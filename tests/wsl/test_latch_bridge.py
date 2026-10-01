@@ -28,7 +28,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = REPO_ROOT / "src"
 
-BRIDGE_SCRIPT = SRC_DIR / "platform" / "wsl" / "wsl_win_hotkeys.ps1"
+BRIDGE_SCRIPT = SRC_DIR / "voice_transcriber" / "platform" / "wsl" / "wsl_win_hotkeys.ps1"
 
 
 def _manager_with_events(events):

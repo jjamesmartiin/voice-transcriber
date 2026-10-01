@@ -4,6 +4,7 @@
 env/
 venv/
 result
+*.egg-info/
 
 # Local model copies & release artifacts.
 # Model weights are normally installed per-user (~/.local/share/vt/models/cohere)

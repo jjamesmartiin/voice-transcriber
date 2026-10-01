@@ -30,7 +30,7 @@ if str(SRC_DIR) not in sys.path:
 
 import hal  # noqa: E402
 
-BRIDGE_SCRIPT = REPO_ROOT / "src" / "platform" / "wsl" / "wsl_win_hotkeys.ps1"
+BRIDGE_SCRIPT = REPO_ROOT / "src" / "voice_transcriber" / "platform" / "wsl" / "wsl_win_hotkeys.ps1"
 
 
 def _mock_bridge(monkeypatch):

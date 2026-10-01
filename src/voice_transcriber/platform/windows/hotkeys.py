@@ -7,6 +7,7 @@ never requires ``pynput`` or the ``keyboard`` library.
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 
@@ -51,12 +52,15 @@ class WindowsHotkeyManager(BaseHotkeyManager):
             logger.error(f"pynput not installed. Run: pip install pynput ({e})")
             self.devices = []
             return
-        try:
-            import keyboard as kb_lib
-        except ImportError as e:
-            logger.error(f"keyboard not installed. Run: pip install keyboard ({e})")
-            self.devices = []
-            return
+        if sys.platform.startswith("win"):
+            try:
+                import keyboard as kb_lib
+            except ImportError as e:
+                logger.error(f"keyboard not installed. Run: pip install keyboard ({e})")
+                self.devices = []
+                return
+        else:
+            kb_lib = None
 
         self._pynput_keyboard = pynput_keyboard
         self._Key = Key

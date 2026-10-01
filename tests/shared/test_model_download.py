@@ -203,15 +203,15 @@ def test_model_revision_lives_only_in_model_download():
     """
     rev = model_download.REVISION
     sha = model_download.SAFETENSORS_SHA256
-    for rel in ("src/transcribe_cohere.py", "scripts/prepare_model_release.py"):
+    for rel in ("src/voice_transcriber/transcribe_cohere.py", "scripts/prepare_model_release.py"):
         text = (REPO_ROOT / rel).read_text(encoding="utf-8")
         assert rev not in text, (
             f"{rel} duplicates REVISION — import it from model_download instead")
         assert sha not in text, (
             f"{rel} duplicates SAFETENSORS_SHA256 — import it instead")
-    own = (REPO_ROOT / "src" / "model_download.py").read_text(encoding="utf-8")
+    own = (REPO_ROOT / "src" / "voice_transcriber" / "model_download.py").read_text(encoding="utf-8")
     assert rev in own and sha in own, (
-        "src/model_download.py is the declared home of the revision")
+        "src/voice_transcriber/model_download.py is the declared home of the revision")
 
 
 def test_publish_script_reads_constants_from_this_module():

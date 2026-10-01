@@ -437,7 +437,7 @@ class TestMacOSHotkeyManager:
 
     def test_check_accessibility_permissions_mock(self, monkeypatch):
         import ctypes
-        from src.platform.macos.hotkeys import check_accessibility_permissions
+        from voice_transcriber.platform.macos.hotkeys import check_accessibility_permissions
 
         class FakeAppServices:
             def AXIsProcessTrusted(self):

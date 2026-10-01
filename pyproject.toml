@@ -63,10 +63,11 @@ gui = [
 ]
 
 [project.scripts]
-vt = "main:cli"
+vt = "voice_transcriber.main:cli"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["voice_transcriber*"]

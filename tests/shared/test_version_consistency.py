@@ -19,7 +19,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PY_TUI = REPO_ROOT / "src" / "tui.py"
+PY_TUI = REPO_ROOT / "src" / "voice_transcriber" / "tui.py"
 RUST_MAIN = REPO_ROOT / "tui-rs" / "src" / "main.rs"
 FLAKE = REPO_ROOT / "flake.nix"
 

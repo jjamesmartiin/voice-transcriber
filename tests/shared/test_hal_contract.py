@@ -151,7 +151,7 @@ class TestStdlibShadowGuard:
         result = self._run(
             f"""
             import sys
-            sys.path.insert(0, {str(SRC_DIR)!r})
+            sys.path.insert(0, {str(SRC_DIR / "voice_transcriber")!r})
             sys.modules.pop('platform', None)
             sys._MEIPASS = {str(tmp_path)!r}
             import platform
