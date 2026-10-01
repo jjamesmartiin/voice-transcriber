@@ -30,55 +30,51 @@ run.bat
 
 > **Note:** The `.bat` launchers automatically bypass PowerShell's script execution policy (`-ExecutionPolicy Bypass`), so you will not run into digital signature or `PSSecurityException` errors on downloaded scripts.
 
-> **Only need to run the app?** `run.bat` is the one command: it creates
-> `.venv`, installs dependencies if they are missing, downloads the model on
-> first use if there is no complete local copy, and launches. Plain `run.bat`
-> never installs or runs the test tooling.
+> **Setup and run are separate.** `setup.bat` prepares the machine (Python,
+> `.venv`, dependencies, and the model). `run.bat` only launches — it never
+> installs anything. `test.bat` / `build.bat` / `clean.bat` are their own entry
+> points.
 
-### 2a. Launcher flags & modes
-
-`run.bat` accepts flags (before the mode) and a mode. Everything after the mode
-is forwarded to it, e.g. `run.bat test shared -k tui -v`.
+### 2a. The five entry points
 
 ```cmd
-run.bat                     :: launch the app (installs deps + model if needed)
-run.bat doctor              :: run system diagnostics (audio devices, permissions, GPU, model)
-run.bat verify              :: report Python / deps / model / GPU / mic status
-run.bat fetch               :: download + verify the model (~2.8 GB), then exit
-run.bat --no-install        :: skip venv creation and every pip install, run anyway
-run.bat --no-model          :: do not auto-download the model
+setup.bat                  :: prepare: venv + deps + model (drop weights in models\)
+setup.bat --no-dev         :: skip pytest / PyInstaller (faster)
+setup.bat --no-model       :: do not acquire the model (weights placed later)
+
+run.bat                    :: launch the app
+run.bat doctor             :: forward a control verb (start/stop/status/doctor/...)
 run.bat --model-dir D:\vt\models\cohere   :: load weights from another location
 run.bat --venv C:\py\vt-venv               :: use a venv outside the repo
-run.bat test                :: run the shared + Windows test tiers
-run.bat test shared -k tui  :: one tier (all|shared|windows|platform|e2e|model)
-run.bat build               :: build the standalone EXE
-run.bat clean               :: remove .venv / build / dist / caches
-run.bat clean --models --yes:: ...plus the downloaded weights, no prompt
-run.bat help                :: show all flags and modes (same as run.bat --help)
+run.bat --no-model                         :: do not auto-download the model
+
+test.bat                   :: environment check + shared & Windows test tiers
+test.bat verify            :: environment check only (test == verify)
+test.bat shared -k tui -v  :: one tier (all|shared|windows|platform|e2e|model)
+
+build.bat                  :: build the standalone EXE (weights included)
+build.bat --no-model       :: build the ~1 GB model-free bundle
+
+clean.bat                  :: remove .venv / build / dist / caches
+clean.bat --models --yes   :: ...plus the downloaded weights, no prompt
 ```
 
-`setup.bat` takes one flag (plus help):
+`--help` works on every script (`setup.bat --help`, `run.bat --help`, ...).
 
-```cmd
-setup.bat --no-dev          :: skip installing pytest / PyInstaller (faster setup)
-setup.bat --help            :: show usage
-```
+**Where the model lives.** Drop weights in `<repo>\models\`:
 
-**Skipping / relocating dependencies.** `--no-install` is the escape hatch for a
-slow or unwanted install: it never touches `pip`, uses the repo venv if present
-(otherwise the host Python), and just tries to run. To have the launcher accept
-artifacts you already have, put them where it looks:
+- `models\cohere\` — an unpacked copy, used as-is; or
+- a split bundle in `models\` (`*.partN.xz` + `SHA256SUMS`, or a `.zip`/`.tar`)
+  — assembled offline by the app's own installer, no extra tools.
 
-- **Model weights** — `run.bat verify` reports whether a complete model is
-  present. Drop a complete set into `<repo>\models\cohere`, or point elsewhere
-  with `run.bat --model-dir <path>` (equivalently, set `VT_MODEL_DIR`). A
-  complete directory is used as-is; nothing is re-downloaded.
-- **Dev tooling** — if pytest / PyInstaller are already in the venv, `test` and
-  `build` use them and install nothing.
+`setup.bat` checks that folder first, assembles a bundle if present, and only
+downloads (~2.8 GB, one time) if neither is there. `test.bat verify` reports
+whether a complete model is present without changing anything. To relocate an
+existing copy instead, pass `run.bat --model-dir <path>` (or set `VT_MODEL_DIR`).
+See [`docs/offline_install.md`](../../docs/offline_install.md).
 
-**First run downloads ~2.8 GB.** `run.bat fetch` does that step on its own (with
-progress) so it is not a surprise during launch; `run.bat verify` says whether
-the weights are already in place.
+**Dev tooling** — if pytest / PyInstaller are already in the venv, `test.bat` and
+`build.bat` use them and install nothing.
 
 **When something goes wrong.** Output is also written to a per-user log at
 `%LOCALAPPDATA%\vt\vt.log` — override the path with `VT_LOG_FILE`, raise the
@@ -162,13 +158,15 @@ From the repo root, one command per tier:
 .\test.ps1 e2e          # model/audio end-to-end (local only)
 ```
 
-The launcher runs the same shared + Windows tiers:
+The test runner is a separate entry point:
 ```cmd
-run.bat test
+test.bat            :: environment check + shared & Windows tiers
+test.bat verify     :: environment check only (test == verify)
 ```
 or via PowerShell:
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 test
+.\test.ps1
+powershell -ExecutionPolicy Bypass -File .\platforms\windows\test.ps1
 ```
 
 > The shared/platform tiers are PyTorch-free, so they run on a bare Python
@@ -177,8 +175,8 @@ powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 test
 
 > **pytest is installed by `setup.bat`** (via
 > `platforms\windows\requirements-dev.txt`), so `.\test.ps1` works on a fresh
-> clone with no manual `pip install`. If you skipped setup and only ran
-> `run.bat`, the launcher installs the test tooling on demand.
+> clone with no manual `pip install`. `test.bat` (and `test.ps1`) install the
+> test tooling on demand if it is missing.
 
 ---
 
@@ -186,11 +184,11 @@ powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 test
 
 To package Voice Transcriber into a self-contained `.exe`:
 ```cmd
-run.bat build
+build.bat
 ```
 or via PowerShell:
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 build
+powershell -ExecutionPolicy Bypass -File .\platforms\windows\build.ps1
 ```
 or directly with Python:
 ```powershell
@@ -198,8 +196,25 @@ python platforms\windows\build_offline.py
 ```
 This produces an offline distribution in `dist/` that requires no Python installation on the target Windows machine.
 
-> PyInstaller is installed by `setup.bat`; if it is missing, `run.bat build`
+> PyInstaller is installed by `setup.bat`; if it is missing, `build.bat`
 > installs it from `platforms\windows\requirements-dev.txt` before building.
+
+### Model-free build (airgapped / small)
+
+To produce a ~1.1 GB bundle that installs the weights on first run instead of
+bundling them:
+
+```cmd
+build.bat --no-model
+```
+
+On first run the app installs the Cohere weights either from the release assets
+(online) or from an offline split bundle. For an airgapped host, copy the split
+bundle next to the executable as `model-bundle\` (a directory of
+`cohere-transcribe-<rev>.partN.xz` + `SHA256SUMS`, or a single `.zip`), or point
+`VT_MODEL_SOURCE_DIR` at it. The app verifies and assembles the parts with its
+own bundled `lzma`/`tarfile` — no `7z`, `xz`, or `unzip` needed. See
+[`docs/offline_install.md`](../../docs/offline_install.md).
 
 ---
 
@@ -240,11 +255,11 @@ ERROR: Could not install packages due to an OSError: [WinError 206] The filename
 **Cause:** The launcher exits non-zero before or during launch (missing Python, a pip failure, or a startup crash). A double-clicked `run.bat` now keeps its window open on error, but the full detail is in the log.
 **Fix:**
 - Read the log: `%LOCALAPPDATA%\vt\vt.log` (override with `VT_LOG_FILE`, add detail with `VT_LOG_LEVEL=INFO`).
-- Run `run.bat verify` for a status report, or run it from an already-open Command Prompt so the output stays visible.
+- Run `test.bat verify` for a status report, or run `run.bat` from an already-open Command Prompt so the output stays visible.
 
 ### 4. Model Download Is Slow, or You Want to Skip It
 **Symptom:** The first launch seems to hang while the ~2.8 GB Cohere model downloads.
 **Fix:**
-- `run.bat fetch` downloads and verifies the model on its own, with progress, then exits.
-- `run.bat verify` reports whether a complete model is already present. Drop one into `<repo>\models\cohere` or pass `run.bat --model-dir <path>`; a complete directory is used as-is.
+- `setup.bat` acquires the model on its own: it checks `models\`, assembles a split bundle if one is present, and only downloads as a last resort.
+- `test.bat verify` reports whether a complete model is already present. Drop one into `<repo>\models\cohere` (or a split bundle into `models\`), or pass `run.bat --model-dir <path>`.
 - `run.bat --no-model` launches without downloading one (useful only if a model is already installed).

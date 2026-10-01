@@ -6,7 +6,10 @@ module imports cleanly on any host. These run on Linux, Windows, and WSL.
 """
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -115,6 +118,67 @@ class TestImportSafety:
     )
     def test_backend_module_imports(self, platform, module):
         assert hal.load_backend(platform, module) is not None
+
+
+class TestStdlibShadowGuard:
+    """``src/platform`` must never rob callers of the stdlib ``platform`` API.
+
+    ``src/`` is on ``sys.path`` and the HAL package is named ``platform``, so a
+    plain ``import platform`` can resolve to it. The shadow guard replaces
+    ``sys.modules['platform']`` with the real stdlib module. A frozen
+    PyInstaller build packs the HAL *as* ``platform`` and ships the stdlib copy
+    as data under ``stdlib_shim/``, which is the path that regressed (crash at
+    startup inside ``pyi_rth_pkgres``). Each case runs in a subprocess so the
+    stdlib module never gets permanently swapped out of the test process.
+    """
+
+    def _run(self, script: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_frozen_bundle_uses_bundled_stdlib_shim(self, tmp_path):
+        shim_dir = tmp_path / "stdlib_shim"
+        shim_dir.mkdir()
+        (shim_dir / "platform.py").write_text(
+            "SENTINEL = 'vt-shim'\n"
+            "def system():\n    return 'shim'\n"
+            "def uname():\n    return ()\n",
+            encoding="utf-8",
+        )
+        result = self._run(
+            f"""
+            import sys
+            sys.path.insert(0, {str(SRC_DIR)!r})
+            sys.modules.pop('platform', None)
+            sys._MEIPASS = {str(tmp_path)!r}
+            import platform
+            assert platform.system() == 'shim', platform.system()
+            assert platform.SENTINEL == 'vt-shim'
+            print('OK')
+            """
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "OK"
+
+    def test_source_checkout_falls_back_to_stdlib(self):
+        result = self._run(
+            f"""
+            import sys
+            sys.path.insert(0, {str(SRC_DIR)!r})
+            sys.modules.pop('platform', None)
+            if hasattr(sys, '_MEIPASS'):
+                del sys._MEIPASS
+            import platform
+            assert isinstance(platform.system(), str)
+            assert hasattr(platform, 'uname')
+            print('OK')
+            """
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "OK"
 
 
 class TestHotkeysShimBackwardCompatibility:

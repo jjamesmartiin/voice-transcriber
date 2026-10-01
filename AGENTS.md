@@ -119,6 +119,16 @@ nix build .#vt-tui --no-link --print-out-paths
 
 ## Conventions
 
+- **One verb = one script.** The five verbs (`setup`, `run`, `test`, `build`,
+  `clean`) each have one root entry point: `./<verb>.sh` (POSIX) and `./<verb>.bat`
+  (Windows). A root `.sh` detects the toolchain (`nix` | `linux` | `macos`) and
+  execs `platforms/<toolchain>/<verb>.sh`. The verb **body** lives once in
+  `tools/vt_dev.py` (stdlib-only, shared by Linux/macOS/Windows); the Nix toolchain
+  uses the flake (`nix run` / `nix develop` / `nix build`). Windows `.ps1` scripts
+  bootstrap only (find Python, long paths, UTF-8) and call the same runner. Do not
+  add venv/pip/model logic to a platform script. Structural pins:
+  `tests/shared/test_posix_tooling.py`, `tests/windows/test_setup_tooling.py`,
+  `tests/shared/test_vt_dev.py`.
 - `src/` has no `__init__.py` (namespace package); tests add `src/` to
   `sys.path` via `tests/conftest.py`.
 - Prefer reusing the existing setters in `t2.py` (they keep the post-processor

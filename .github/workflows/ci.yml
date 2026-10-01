@@ -1,10 +1,11 @@
 name: ci
 
-# Three-OS unit-test matrix, run on every push / PR.
+# Four-OS unit-test matrix, run on every push / PR.
 #
 # Each job sets up its platform, then runs the shared (cross-platform,
 # model-free) tier plus that platform's own tier:
 #   Linux   -> tests/shared + tests/linux
+#   macOS   -> tests/shared + tests/macos
 #   Windows -> tests/shared + tests/windows
 #   WSL     -> tests/shared + tests/wsl   (simulated: ubuntu + VT_PLATFORM=wsl)
 #
@@ -54,6 +55,30 @@ jobs:
           VT_PLATFORM: windows
           PYTHONPATH: src
         run: python -m pytest tests/shared tests/windows -v --tb=short
+
+  unit-tests-macos:
+    name: Unit tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PortAudio
+        run: brew install portaudio
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest numpy soundfile sounddevice pyyaml pyperclip pynput rich psutil
+
+      - name: Run shared + macOS tests
+        env:
+          PYTHONPATH: src
+        run: python -m pytest tests/shared tests/macos -v --tb=short
 
   unit-tests-wsl:
     name: Unit tests (WSL)

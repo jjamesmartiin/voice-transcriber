@@ -215,6 +215,31 @@
             program = "${self.packages.${system}.default}/bin/vt";
           };
 
+          # `nix run .#run` is the explicit spelling of the default app.
+          run = {
+            type = "app";
+            program = "${self.packages.${system}.default}/bin/vt";
+          };
+
+          # Acquire/verify the model using the flake's interpreter. --no-deps
+          # tells tools/vt_dev.py that the flake already provides the deps.
+          setup = {
+            type = "app";
+            program = "${pkgs.writeShellScriptBin "vt-setup" ''
+              export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
+              exec ${pythonEnv}/bin/python ${./.}/tools/vt_dev.py setup --no-deps "$@"
+            ''}/bin/vt-setup";
+          };
+
+          # Remove generated state (result/, models/, caches). The venv is not
+          # used under Nix; vt_dev.py only removes what exists.
+          clean = {
+            type = "app";
+            program = "${pkgs.writeShellScriptBin "vt-clean" ''
+              exec ${pythonEnv}/bin/python ${./.}/tools/vt_dev.py clean "$@"
+            ''}/bin/vt-clean";
+          };
+
           test = {
             type = "app";
             program = "${pkgs.writeShellScriptBin "vt-test" ''

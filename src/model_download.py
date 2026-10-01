@@ -140,7 +140,7 @@ def cohere_models_dir():
     return os.path.join(get_data_dir(), "models", "cohere")
 
 
-def _write_provenance(dest, base_url, resolved_url=None):
+def _write_provenance(dest, base_url, resolved_url=None, source_kind="remote"):
     """Write SOURCE.json next to the weights so their origin is unambiguous."""
     import datetime as _dt
     release_tag = None
@@ -154,6 +154,7 @@ def _write_provenance(dest, base_url, resolved_url=None):
         "model_safetensors_sha256": SAFETENSORS_SHA256,
         "download_url_base": base_url,
         "release_tag": release_tag,
+        "source_kind": source_kind,
         "license": "Apache-2.0 (see LICENSE and NOTICE in this directory)",
         "installed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "note": "Weights mirrored from the " + REPO_ID + " HF snapshot via the "
@@ -268,6 +269,23 @@ def _sha256_file(path, chunk=1 << 20):
     return h.hexdigest()
 
 
+def _parse_part_manifest(text, prefix):
+    """Parse a SHA256SUMS body into {filename: sha256} for ``<prefix>.partN.xz``."""
+    manifest = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            digest, name = line.split(None, 1)
+        except ValueError:
+            continue
+        name = name.strip()
+        if re.fullmatch(rf"{re.escape(prefix)}\.part\d+\.xz", name):
+            manifest[name] = digest
+    return manifest
+
+
 def _fetch_part_manifest(base_url, prefix):
     """Download the SHA256SUMS file.
 
@@ -300,23 +318,182 @@ def _fetch_part_manifest(base_url, prefix):
             time.sleep(2 * attempt)
     if data is None:
         raise RuntimeError(f"Failed to download {sums_url}: {last_err}")
-    manifest = {}
-    for line in data.decode("utf-8", "replace").splitlines():
-        line = line.strip()
-        if not line:
+    return _parse_part_manifest(data.decode("utf-8", "replace"), prefix), resolved_url
+
+
+def _local_model_source():
+    """Locate an on-disk split bundle to install from, without the network.
+
+    Returns ``(path, explicit)``. ``VT_MODEL_SOURCE_DIR`` / ``VT_MODEL_BUNDLE``
+    is an explicit operator override and is used as-is even if it does not
+    exist, so a typo surfaces instead of silently downloading. A
+    ``model-bundle`` directory next to the executable, next to the running
+    AppImage (``$APPIMAGE`` / ``$APPDIR``) or the working directory is
+    auto-detected, which is the USB-stick layout for airgapped installs.
+    """
+    override = (os.environ.get("VT_MODEL_SOURCE_DIR")
+                or os.environ.get("VT_MODEL_BUNDLE") or "").strip()
+    if override:
+        return override, True
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "model-bundle"),
+    ]
+    # A double-clicked AppImage runs from a read-only squashfs mount and its
+    # ``sys.executable`` is the bundled interpreter, so look next to the
+    # ``.AppImage`` file itself (the AppImage runtime exports both vars).
+    for env in ("APPIMAGE", "APPDIR"):
+        base = (os.environ.get(env) or "").strip()
+        if not base:
             continue
-        try:
-            digest, name = line.split(None, 1)
-        except ValueError:
+        if env == "APPIMAGE":
+            base = os.path.dirname(os.path.abspath(base))
+        candidates.append(os.path.join(base, "model-bundle"))
+    candidates.append(os.path.join(os.getcwd(), "model-bundle"))
+    for cand in candidates:
+        if os.path.isdir(cand):
+            return cand, False
+    return None, False
+
+
+def _read_local_manifest(bundle_dir, prefix):
+    """Find and parse the SHA256SUMS inside a local bundle directory."""
+    names = [f"{prefix}.SHA256SUMS", "SHA256SUMS", "SHA256SUMS.txt"]
+    names += sorted(n for n in os.listdir(bundle_dir) if n.endswith(".SHA256SUMS"))
+    for name in names:
+        path = os.path.join(bundle_dir, name)
+        if not os.path.isfile(path):
             continue
-        if re.fullmatch(rf"{re.escape(prefix)}\.part\d+\.xz", name):
-            manifest[name] = digest
-    return manifest, resolved_url
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            manifest = _parse_part_manifest(f.read(), prefix)
+        if manifest:
+            return manifest
+    return {}
+
+
+def _extract_bundle_archive(path, dest):
+    """Extract a .zip / .tar[.*] bundle into ``dest`` (trusted local input)."""
+    if path.lower().endswith(".zip"):
+        import zipfile
+
+        with zipfile.ZipFile(path) as zf:
+            zf.extractall(dest)
+        return
+    if tarfile.is_tarfile(path):
+        with tarfile.open(path, "r:*") as tf:
+            if hasattr(tarfile, "data_filter"):
+                tf.extractall(dest, filter="data")
+            else:
+                tf.extractall(dest)
+        return
+    raise RuntimeError(
+        f"unsupported model bundle archive {path!r} (use a directory, .zip or .tar)")
+
+
+def install_from_local_bundle(source, dest=None, revision=REVISION):
+    """Install the Cohere model from a local split bundle, with no network.
+
+    ``source`` is either a directory holding ``cohere-transcribe-<rev>.partN.xz``
+    plus ``SHA256SUMS``, or a ``.zip`` / ``.tar[.*]`` archive containing them.
+    The parts are verified, decompressed, concatenated and extracted exactly as
+    the network installer does, so an airgapped host needs no extra tooling.
+    """
+    dest = dest or cohere_models_dir()
+    prefix = f"cohere-transcribe-{revision}"
+    tmp_extract = None
+    try:
+        if os.path.isdir(source):
+            bundle_dir = source
+        elif os.path.isfile(source):
+            tmp_extract = tempfile.mkdtemp(prefix="vt-model-bundle-")
+            _extract_bundle_archive(source, tmp_extract)
+            bundle_dir = tmp_extract
+        else:
+            raise FileNotFoundError(f"model bundle not found: {source}")
+
+        manifest = _read_local_manifest(bundle_dir, prefix)
+        if not manifest:
+            raise RuntimeError(
+                f"no {prefix}.partN.xz entries in any SHA256SUMS under {bundle_dir}")
+
+        part_paths = {}
+        for name in manifest:
+            part = os.path.join(bundle_dir, name)
+            if not os.path.isfile(part):
+                raise FileNotFoundError(f"bundle {source!r} is missing {name}")
+            part_paths[name] = part
+
+        print(f"Installing Cohere model from local bundle {source} "
+              f"({len(part_paths)} part(s))...", flush=True)
+        return _assemble_parts(
+            part_paths, manifest, dest,
+            origin=os.path.abspath(source), source_kind="local",
+        )
+    finally:
+        if tmp_extract:
+            shutil.rmtree(tmp_extract, ignore_errors=True)
+
+
+def _assemble_parts(part_paths, manifest, dest, origin,
+                    resolved_url=None, source_kind="remote"):
+    """Verify, decompress, concatenate and extract verified parts into ``dest``.
+
+    ``part_paths`` maps each manifest filename to an existing local path; the
+    caller owns those files and they are never deleted here. ``origin`` is
+    recorded in SOURCE.json (a release URL online, a filesystem path offline).
+    """
+    part_names = sorted(manifest)
+    dest_parent = os.path.dirname(os.path.abspath(dest))
+    os.makedirs(dest_parent, exist_ok=True)
+    tmp_root = tempfile.mkdtemp(prefix="vt-model-install-", dir=dest_parent)
+    try:
+        tar_path = os.path.join(tmp_root, "model.tar")
+        # Decompress each verified part straight into one concatenated tar.
+        with open(tar_path, "wb") as tar_out:
+            for name in part_names:
+                part_path = part_paths[name]
+                digest = _sha256_file(part_path)
+                if digest != manifest[name]:
+                    raise RuntimeError(
+                        f"SHA-256 mismatch for {name}: expected {manifest[name]}, "
+                        f"got {digest}. Aborting (no partial install).")
+                print(f"Verified {name} (sha256 ok). Decompressing...", flush=True)
+                with lzma.open(part_path, "rb") as fin:
+                    shutil.copyfileobj(fin, tar_out, 1 << 20)
+
+        # Extract into a staging dir, then atomically move into place.
+        staging = os.path.join(tmp_root, "extracted")
+        with tarfile.open(tar_path, "r") as tf:
+            if hasattr(tarfile, "data_filter"):
+                tf.extractall(staging, filter="data")
+            else:
+                tf.extractall(staging)
+        weights = os.path.join(staging, "model.safetensors")
+        got = _sha256_file(weights)
+        if got != SAFETENSORS_SHA256:
+            raise RuntimeError(
+                f"Extracted model.safetensors sha256 {got} does not match the "
+                f"expected {SAFETENSORS_SHA256}. Aborting.")
+        if not is_local_model_complete(staging):
+            raise RuntimeError("Extracted model directory is missing required files.")
+
+        if os.path.isdir(dest):
+            shutil.rmtree(dest)
+        shutil.move(staging, dest)
+        _write_provenance(dest, origin, resolved_url, source_kind=source_kind)
+        print(f"Model installed at {dest}. Loading fully offline from now on.\n"
+              f"Origin recorded in {os.path.join(dest, 'SOURCE.json')}.")
+        return dest
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
 
 
 def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
     """
     Make sure a loadable local Cohere model exists at `dest`.
+
+    Offline first: if a split bundle is present on disk (``VT_MODEL_SOURCE_DIR``
+    or a ``model-bundle/`` directory next to the app), it is installed with no
+    network. Otherwise the parts are fetched from the release assets.
 
     Returns the directory path on success (already there, or freshly installed),
     or None if auto-download is disabled / failed (caller may fall back to the
@@ -325,6 +502,23 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
     dest = dest or cohere_models_dir()
     if is_local_model_complete(dest):
         return dest
+
+    # Airgapped path: install from a bundle carried on disk before ever
+    # touching the network.
+    local_source, explicit = _local_model_source()
+    if local_source:
+        try:
+            installed = install_from_local_bundle(local_source, dest=dest,
+                                                  revision=revision)
+        except Exception as e:
+            print(f"Local model bundle install failed: {e}", flush=True)
+            installed = None
+        if installed:
+            return installed
+        if explicit:
+            # The operator pointed us at a specific bundle; do not silently fall
+            # back to the network - that is the whole point of airgap.
+            return None
 
     if os.environ.get("VT_AUTO_DOWNLOAD_MODEL", "1").strip().lower() in (
             "0", "false", "no", "off"):
@@ -370,50 +564,17 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
         return None
     print(f"Downloading Cohere model parts from {base_url} (Apache-2.0 release asset)...")
 
-    part_names = sorted(manifest)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    tmp_root = tempfile.mkdtemp(prefix="vt-model-dl-", dir=os.path.dirname(dest))
+    os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+    tmp_root = tempfile.mkdtemp(prefix="vt-model-dl-", dir=os.path.dirname(os.path.abspath(dest)))
     try:
-        tar_path = os.path.join(tmp_root, "model.tar")
-        # Decompress each verified part straight into one concatenated tar.
-        with open(tar_path, "wb") as tar_out:
-            for name in part_names:
-                part_xz = os.path.join(tmp_root, name)
-                _http_get(f"{base_url}/{name}", part_xz, name)
-                digest = _sha256_file(part_xz)
-                if digest != manifest[name]:
-                    raise RuntimeError(
-                        f"SHA-256 mismatch for {name}: expected {manifest[name]}, "
-                        f"got {digest}. Aborting (no partial install).")
-                print(f"Verified {name} (sha256 ok). Decompressing...", flush=True)
-                with lzma.open(part_xz, "rb") as fin:
-                    shutil.copyfileobj(fin, tar_out, 1 << 20)
-                os.unlink(part_xz)
-
-        # Extract into a staging dir, then atomically move into place.
-        staging = os.path.join(tmp_root, "extracted")
-        with tarfile.open(tar_path, "r") as tf:
-            if hasattr(tarfile, "data_filter"):
-                tf.extractall(staging, filter="data")
-            else:
-                tf.extractall(staging)
-        weights = os.path.join(staging, "model.safetensors")
-        got = _sha256_file(weights)
-        if got != SAFETENSORS_SHA256:
-            raise RuntimeError(
-                f"Extracted model.safetensors sha256 {got} does not match the "
-                f"expected {SAFETENSORS_SHA256}. Aborting.")
-        if not is_local_model_complete(staging):
-            raise RuntimeError("Extracted model directory is missing required files.")
-
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        if os.path.isdir(dest):
-            shutil.rmtree(dest)
-        shutil.move(staging, dest)
-        _write_provenance(dest, base_url, resolved_url)
-        print(f"Model installed at {dest}. Loading fully offline from now on.\n"
-              f"Origin recorded in {os.path.join(dest, 'SOURCE.json')}.")
-        return dest
+        part_paths = {}
+        for name in sorted(manifest):
+            part_xz = os.path.join(tmp_root, name)
+            _http_get(f"{base_url}/{name}", part_xz, name)
+            part_paths[name] = part_xz
+        return _assemble_parts(part_paths, manifest, dest,
+                               origin=base_url, resolved_url=resolved_url,
+                               source_kind="remote")
     except Exception as e:
         print(f"Model auto-download failed: {e}", flush=True)
         return None
@@ -429,6 +590,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--dest", default=None, help="Target installation directory (default: models/cohere)")
     parser.add_argument("--verify-only", action="store_true", help="Only verify existing local model files")
+    parser.add_argument("--from", dest="source", default=None,
+                        help="Install from a local split bundle (directory or .zip/.tar) instead of downloading")
     args = parser.parse_args()
 
     target = args.dest or cohere_models_dir()
@@ -440,7 +603,10 @@ if __name__ == "__main__":
             print(f"✕ Cohere model at {target} is missing or incomplete.")
             sys.exit(1)
 
-    result = ensure_local_cohere(dest=target)
+    if args.source:
+        result = install_from_local_bundle(args.source, dest=target)
+    else:
+        result = ensure_local_cohere(dest=target)
     if result:
         print(f"✓ Cohere model ready at {result}")
         sys.exit(0)

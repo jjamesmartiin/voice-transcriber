@@ -6,12 +6,16 @@ Unit tests for model_download module:
 - HTTP 404 fast-failure and candidate fallback routing
 - Provenance writing
 """
+import hashlib
 import io
 import json
+import lzma
 import os
 import sys
+import tarfile
 import tempfile
 import urllib.error
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -261,3 +265,148 @@ def test_manifest_listing_missing_parts_is_skipped(monkeypatch, tmp_path):
 
     assert downloaded, "expected the complete candidate to be used"
     assert all(u.startswith(good) for u in downloaded), downloaded
+
+
+def test_local_model_source_prefers_the_appimage_dir(monkeypatch, tmp_path):
+    """A double-clicked AppImage must find model-bundle/ next to the .AppImage.
+
+    Inside an AppImage ``sys.executable`` is the bundled interpreter, not the
+    user-visible file, so the old two candidates missed the USB-stick layout.
+    """
+    app_dir = tmp_path / "app"
+    run_dir = tmp_path / "run"
+    app_dir.mkdir()
+    run_dir.mkdir()
+    appimage = app_dir / "vt-x86_64.AppImage"
+    appimage.write_bytes(b"")
+    bundle = app_dir / "model-bundle"
+    bundle.mkdir()
+
+    monkeypatch.chdir(run_dir)
+    monkeypatch.delenv("VT_MODEL_SOURCE_DIR", raising=False)
+    monkeypatch.delenv("VT_MODEL_BUNDLE", raising=False)
+    monkeypatch.setenv("APPIMAGE", str(appimage))
+
+    assert model_download._local_model_source() == (str(bundle), False)
+
+
+# ---------------------------------------------------------------------------
+# Offline / airgapped installation from a local split bundle
+# ---------------------------------------------------------------------------
+def _make_local_bundle(tmp_path, revision="testrev", n_parts=2):
+    """Build a minimal split-xz bundle the installer can assemble offline.
+
+    Returns (bundle_dir, weights_bytes). The payload tar holds every file
+    ``is_local_model_complete`` requires at its root, split into ``n_parts``
+    contiguous byte ranges and xz-compressed independently - exactly the layout
+    ``scripts/prepare_model_release.py`` publishes.
+    """
+    prefix = f"cohere-transcribe-{revision}"
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    files = {name: f"stub-{name}".encode() for name in model_download._REQUIRED_LOCAL}
+    weights = b"fake-weights-" + b"x" * 128
+    files["model.safetensors"] = weights
+    for name, data in files.items():
+        (payload / name).write_bytes(data)
+
+    tar_buf = io.BytesIO()
+    with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+        for name in files:
+            tf.add(payload / name, arcname=name)
+    raw = tar_buf.getvalue()
+
+    size = (len(raw) + n_parts - 1) // n_parts
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    sums = []
+    for i in range(n_parts):
+        name = f"{prefix}.part{i + 1}.xz"
+        blob = lzma.compress(raw[i * size:(i + 1) * size])
+        (bundle / name).write_bytes(blob)
+        sums.append(f"{hashlib.sha256(blob).hexdigest()}  {name}")
+    (bundle / f"{prefix}.SHA256SUMS").write_text("\n".join(sums) + "\n", encoding="utf-8")
+    return bundle, weights
+
+
+def test_install_from_local_bundle_directory(monkeypatch, tmp_path):
+    bundle, weights = _make_local_bundle(tmp_path, revision="testrev")
+    monkeypatch.setattr(model_download, "SAFETENSORS_SHA256",
+                        hashlib.sha256(weights).hexdigest())
+    dest = tmp_path / "dest"
+
+    result = model_download.install_from_local_bundle(
+        str(bundle), dest=str(dest), revision="testrev")
+
+    assert result == str(dest)
+    assert (dest / "model.safetensors").read_bytes() == weights
+    for name in model_download._REQUIRED_LOCAL:
+        assert (dest / name).exists(), name
+    source = json.loads((dest / "SOURCE.json").read_text(encoding="utf-8"))
+    assert source["source_kind"] == "local"
+
+
+def test_install_from_local_bundle_zip(monkeypatch, tmp_path):
+    bundle, weights = _make_local_bundle(tmp_path, revision="testrev")
+    monkeypatch.setattr(model_download, "SAFETENSORS_SHA256",
+                        hashlib.sha256(weights).hexdigest())
+    archive = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for item in bundle.iterdir():
+            zf.write(item, arcname=item.name)
+    dest = tmp_path / "dest"
+
+    result = model_download.install_from_local_bundle(
+        str(archive), dest=str(dest), revision="testrev")
+
+    assert result == str(dest)
+    assert (dest / "model.safetensors").read_bytes() == weights
+
+
+def test_install_from_local_bundle_rejects_tampered_part(monkeypatch, tmp_path):
+    bundle, weights = _make_local_bundle(tmp_path, revision="testrev")
+    monkeypatch.setattr(model_download, "SAFETENSORS_SHA256",
+                        hashlib.sha256(weights).hexdigest())
+    target = sorted(bundle.glob("*.part1.xz"))[0]
+    blob = bytearray(target.read_bytes())
+    blob[-1] ^= 0xFF
+    target.write_bytes(bytes(blob))
+
+    with pytest.raises(RuntimeError, match="SHA-256 mismatch"):
+        model_download.install_from_local_bundle(
+            str(bundle), dest=str(tmp_path / "dest"), revision="testrev")
+
+
+def test_ensure_local_cohere_installs_from_env_bundle_offline(monkeypatch, tmp_path):
+    rev = model_download.REVISION
+    bundle, weights = _make_local_bundle(tmp_path, revision=rev)
+    monkeypatch.setattr(model_download, "SAFETENSORS_SHA256",
+                        hashlib.sha256(weights).hexdigest())
+    monkeypatch.setenv("VT_MODEL_SOURCE_DIR", str(bundle))
+    monkeypatch.setenv("VT_AUTO_DOWNLOAD_MODEL", "1")
+
+    def _network_forbidden(*a, **k):  # pragma: no cover - must not be reached
+        raise AssertionError("ensure_local_cohere hit the network despite a local bundle")
+
+    monkeypatch.setattr(model_download.urllib.request, "urlopen", _network_forbidden)
+    monkeypatch.setattr(model_download, "_asset_exists", _network_forbidden)
+
+    dest = tmp_path / "dest"
+    assert model_download.ensure_local_cohere(dest=str(dest)) == str(dest)
+    assert (dest / "model.safetensors").exists()
+
+
+def test_ensure_local_cohere_explicit_missing_bundle_never_downloads(monkeypatch, tmp_path):
+    """An explicit VT_MODEL_SOURCE_DIR that is wrong must fail closed.
+
+    Silently falling back to the network would defeat the point of airgap, and
+    could leak that a disconnected host has connectivity.
+    """
+    monkeypatch.setenv("VT_MODEL_SOURCE_DIR", str(tmp_path / "nope"))
+
+    def _network_forbidden(*a, **k):  # pragma: no cover - must not be reached
+        raise AssertionError("downloaded despite an explicit local bundle")
+
+    monkeypatch.setattr(model_download.urllib.request, "urlopen", _network_forbidden)
+
+    assert model_download.ensure_local_cohere(dest=str(tmp_path / "dest")) is None

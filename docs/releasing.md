@@ -253,7 +253,10 @@ Expect exactly **one** asset:
 
 | Asset | ~Size |
 | :--- | :--- |
-| `vt.AppImage` | ~1.18 GB |
+| `vt-x86_64.AppImage` | ~1.18 GB |
+
+Only `x86_64-linux` is built today (see TODO.md). The asset name carries the
+architecture so a future aarch64 build can attach to the same release.
 
 An app release carrying weight assets means someone hand-uploaded them; they are
 dead weight, because the client resolves weights from the bundle tag, never from

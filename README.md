@@ -11,10 +11,10 @@ host environments: **Linux (Wayland/X11)**, **Windows (native)**,
 
 | Platform | Status | Hotkeys | Output injection | Audio capture | Guide | Quick run |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Linux (Wayland / X11)** | Supported | `evdev` + `uinput` | `wl-copy`/`xclip` (copy) · `ydotool`/`xdotool` (type) | PulseAudio / PipeWire | [Linux guide](platforms/linux/README.md) | `./run.sh` or `nix run .` |
-| **Windows (native)** | Supported | `pynput` + `keyboard` | Win32 `SendInput` (Unicode/emoji) | WASAPI / DirectSound | [Windows guide](platforms/windows/README.md) | Double-click `run.bat` |
-| **Windows (WSL2 / NixOS)** | Supported | Windows-host bridge (PowerShell ⇄ socket IPC) | Host-side synthetic paste (`clip.exe` + `Ctrl+V`) | WSLg PulseAudio (`RDPSource`) | [WSL guide](platforms/wsl/README.md) | Double-click `run_wsl.bat` |
-| **macOS (Apple Silicon / Intel)** | Supported | `pynput` (Accessibility) | `pbcopy` (copy) · AppleScript / Quartz (type) | CoreAudio | [macOS guide](platforms/macos/README.md) | `./run.sh` or `nix run .` |
+| **Linux (Wayland / X11)** | Supported | `evdev` + `uinput` | `wl-copy`/`xclip` (copy) · `ydotool`/`xdotool` (type) | PulseAudio / PipeWire | [Linux guide](platforms/linux/README.md) | `vt-x86_64.AppImage`, or `nix run .` |
+| **Windows (native)** | Supported | `pynput` + `keyboard` | Win32 `SendInput` (Unicode/emoji) | WASAPI / DirectSound | [Windows guide](platforms/windows/README.md) | EXE folder, or `run.bat` from source |
+| **Windows (WSL2, any distro)** | Supported | Windows-host bridge (PowerShell ⇄ socket IPC) | Host-side synthetic paste (`clip.exe` + `Ctrl+V`) | WSLg PulseAudio (`RDPSource`) | [WSL guide](platforms/wsl/README.md) | Double-click `run_wsl.bat` |
+| **macOS (Apple Silicon / Intel)** | Supported | `pynput` (Accessibility) | `pbcopy` (copy) · AppleScript / Quartz (type) | CoreAudio | [macOS guide](platforms/macos/README.md) | `nix run .`, or `./setup.sh` + `./run.sh` |
 
 All four share the same engine, ASR backend, post-processor, and config format.
 Only the HAL backends differ: **hotkeys**, **clipboard/typing**,
@@ -98,33 +98,64 @@ for the platform you are targeting.
 ### Quick Start by Platform
 
 #### 🐧 Linux (Wayland / X11)
-```bash
-# 1-command launch (auto-detects Nix or creates local .venv on first run):
-./run.sh
 
-# Or explicit one-time setup:
-./setup.sh
+**End users: download the AppImage — no Nix, no Python, no setup.** Grab
+`vt-x86_64.AppImage` from the [releases page](https://github.com/jjamesmartiin/voice-transcriber/releases),
+`chmod +x` it, and run it. It bundles Python, PyTorch and the clipboard tools,
+so it works on any glibc **x86_64** distro. The weights are **not** bundled: it
+downloads them on first run, or reads a `model-bundle/` directory placed next to
+the `.AppImage` (or set `VT_MODEL_SOURCE_DIR`) for a fully offline install.
+
+```bash
+chmod +x vt-x86_64.AppImage
+./vt-x86_64.AppImage            # or --appimage-extract-and-run without FUSE 2
 ```
-> **Note:** If you are not yet in the `input` group for global hotkeys, run `sudo usermod -aG input $USER` and log back in. Run `./run.sh doctor` to test permissions and audio devices anytime.
+
+> **AppImage prerequisites (host-level, cannot be bundled):**
+> - **FUSE 2:** if your distro ships only FUSE 3, install `libfuse2` or run
+>   `./vt-x86_64.AppImage --appimage-extract-and-run` (equivalently
+>   `APPIMAGE_EXTRACT_AND_RUN=1`).
+> - **Global hotkeys:** `input` group membership and a writable `/dev/uinput`
+>   (udev rule). **Typing:** `ydotool` on Wayland or `xdotool` on X11.
+> - **GPU:** the bundle is **CPU-only**; CUDA needs host drivers and a
+>   CUDA-enabled build (run from source / Nix).
+>
+> Only **x86_64-linux** is built today (see `TODO.md`).
+
+**Running from a git checkout** (contributors / no AppImage):
+```bash
+# 1. One-time setup (venv + dependencies + model):
+./setup.sh
+
+# 2. Launch every time:
+./run.sh
+```
+> **Note:** If you are not yet in the `input` group for global hotkeys, run `sudo usermod -aG input $USER` and log back in. Run `./run.sh doctor` to test permissions and audio devices anytime. With Nix installed, `nix run .` is the recommended path (it needs no venv).
 
 #### 🪟 Windows (Native)
 From File Explorer or Command Prompt in the repo root:
 ```cmd
-run.bat       :: Double-click or run from CMD (auto-sets up .venv and starts)
+setup.bat     :: One-time: create .venv, install dependencies, get the model
+run.bat       :: Launch (or: run.bat doctor)
 ```
-> Optional: Run `setup.bat` for explicit environment setup, or `run.bat doctor` to verify audio and permissions.
+> `setup.bat` also works offline: drop weights in `models\` and it uses them.
 
-#### 🐧 Windows via WSL2 (NixOS-WSL)
+#### 🐧 Windows via WSL2 (any distro)
 From File Explorer or Command Prompt in the repo root:
 ```cmd
-run_wsl.bat   :: 1-click launcher for NixOS in WSL2
+setup_wsl.bat                :: one-time: register/configure a guest (NixOS default)
+run_wsl.bat                  :: 1-click launcher (auto-picks NixOS if registered)
+run_wsl.bat -Distro Ubuntu   :: use a specific WSL distribution
+run_wsl.bat setup            :: install the app + model inside the guest
 ```
-> (One-time setup if not yet imported: `setup_wsl.bat`)
+> The guest runs its own platform dispatcher, so **NixOS-WSL, Ubuntu-WSL, or any
+distro with Nix** all work — it picks Nix or its native apt/venv path exactly
+like bare Linux. Host hotkeys/clipboard go through the Windows PowerShell bridge.
 
 #### 🍎 macOS (Apple Silicon / Intel)
 ```bash
-# 1-command launch (auto-detects environment, checks brew portaudio, and runs):
-./run.sh
+./setup.sh    # one-time: venv + deps + model (checks brew portaudio)
+./run.sh      # launch
 ```
 > **Permissions note:** When prompted or in *System Settings → Privacy & Security*, allow **Accessibility** and **Microphone** access for your terminal app. Run `./run.sh doctor` to verify status.
 
@@ -345,11 +376,11 @@ One command per tier, from the repo root:
 | **End-to-end (model)** | `./test.sh e2e` | `.\test.ps1 e2e` |
 
 `./test.sh` auto-detects Linux vs WSL and runs the matching platform tier. Both
-scripts forward extra args to pytest, e.g. `.\test.ps1 shared -k tui -v`. The
-launchers also work: `run.bat test` (or `powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 test`).
-On Windows, `setup.bat` installs pytest (from `platforms\windows\requirements-dev.txt`),
-so the test tiers run on a fresh clone without a manual `pip install`; the
-`run.bat test` / `test.ps1` paths also install it on demand if it is missing.
+scripts forward extra args to pytest, e.g. `.\test.ps1 shared -k tui -v`. On
+Windows the same thing is `test.bat` (or
+`powershell -ExecutionPolicy Bypass -File .\platforms\windows\test.ps1`).
+`setup.bat` installs pytest (from `platforms\windows\requirements-dev.txt`), and
+`test.bat` / `test.ps1` install it on demand if it is missing.
 
 ### Mouse-mode coverage
 
@@ -422,18 +453,29 @@ access.
 
 | Target | Command | Output |
 | :--- | :--- | :--- |
-| **Linux (Nix)** | `nix build .` | `result/bin/vt` |
-| **Windows (offline EXE)** | `run.bat build` (or `powershell -ExecutionPolicy Bypass -File .\platforms\windows\run.ps1 build`) | `dist/VoiceTranscriber/` (PyInstaller `--onedir`, bundles the model) |
+| **Linux (Nix)** | `nix build .` (or `./build.sh`) | `result/bin/vt` |
+| **Windows (offline EXE)** | `build.bat` (or `powershell -ExecutionPolicy Bypass -File .\platforms\windows\build.ps1`) | `dist/VoiceTranscriber/` (PyInstaller `--onedir`, bundles the model) |
+| **Windows (model-free)** | `build.bat --no-model` | `dist/VoiceTranscriber/` (~1.1 GB; weights installed on first run) |
 
 The Windows build is self-contained (~6 GB: Python + PyTorch + the 3.9 GB Cohere
 model) and needs no Python install on the target machine. See
 [`platforms/windows/plan-to-compile.md`](platforms/windows/plan-to-compile.md).
 
+> **Airgapped / offline installs (any OS).** The app and the weights ship
+> separately: a small model-free app bundle per OS, plus **one OS-agnostic split
+> model bundle**. The app verifies and assembles the weights itself (`urllib` +
+> `lzma` + `tarfile`, all bundled) — no external `xz`/`7z`/`unzip`, no Python on
+> the target. Put the bundle in a `model-bundle/` directory next to the
+> executable, or point `VT_MODEL_SOURCE_DIR` at it. See
+> [`docs/offline_install.md`](docs/offline_install.md).
+
 > **No prebuilt Windows binary is published.** `dist/` is gitignored and the
 > release workflow only ships the Linux AppImage, so the Windows EXE must be
 > built on a Windows machine — PyInstaller cannot cross-compile. Once built,
 > the whole `dist/VoiceTranscriber/` folder is portable: copy it to any x64
-> Windows box and run `VoiceTranscriber.exe`.
+> Windows box and run `VoiceTranscriber.exe`. For an airgapped target, build
+> with `--no-model` and carry the split model bundle alongside — see
+> [`docs/offline_install.md`](docs/offline_install.md).
 
 > **Stale `result/` symlink:** the `result/` symlink in a checkout points at the
 > last `nix build`, which may predate recent frontend changes. Re-run `nix build .`

@@ -32,10 +32,15 @@ jobs:
           nix bundle --bundler github:ralismark/nix-appimage \
             --extra-experimental-features "nix-command flakes" \
             ".#default"
-          ls -lh *.AppImage
+          # Name the asset by architecture. Only x86_64-linux is built today
+          # (see TODO.md); the arch suffix lets a future aarch64 job attach to
+          # the same release without colliding.
+          appimage="$(ls -1 *.AppImage | head -n1)"
+          mv "$appimage" vt-x86_64.AppImage
+          ls -lh vt-x86_64.AppImage
 
       - name: Upload AppImage to release
         uses: softprops/action-gh-release@v2
         with:
-          files: ./*.AppImage
+          files: ./vt-*.AppImage
           fail_on_unmatched_files: true

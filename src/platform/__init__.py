@@ -34,9 +34,27 @@ if __name__ == "platform":  # pragma: no cover - depends on import order
     try:
         import importlib.util as _ilu
 
-        _stdlib_spec = _ilu.spec_from_file_location(
-            "platform", os.path.join(os.path.dirname(os.__file__), "platform.py")
-        )
+        # A frozen PyInstaller build packs *this* package as the archive's
+        # ``platform`` module, so the real stdlib module is shipped as data and
+        # loaded from ``stdlib_shim/platform.py`` (see build_offline.py).
+        # Running from a source checkout, the stdlib module sits next to os.py.
+        _candidates = []
+        _meipass = getattr(sys, "_MEIPASS", None)
+        if _meipass:
+            _candidates.append(os.path.join(_meipass, "stdlib_shim", "platform.py"))
+        _candidates.append(os.path.join(os.path.dirname(os.__file__), "platform.py"))
+
+        _stdlib_spec = None
+        for _candidate in _candidates:
+            if not os.path.exists(_candidate):
+                continue
+            _stdlib_spec = _ilu.spec_from_file_location("platform", _candidate)
+            if _stdlib_spec is not None and _stdlib_spec.loader is not None:
+                break
+            _stdlib_spec = None
+        if _stdlib_spec is None:
+            raise ImportError("stdlib platform.py not found")
+
         _stdlib_module = _ilu.module_from_spec(_stdlib_spec)
         sys.modules["platform"] = _stdlib_module
         _stdlib_spec.loader.exec_module(_stdlib_module)

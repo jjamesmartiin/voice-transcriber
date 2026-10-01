@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Linux (Ubuntu/Debian first-class) - run verb. apt + venv are the native tooling.
+# macOS (Darwin) - run verb. Homebrew + venv are the native tooling.
 # The verb itself lives in tools/vt_dev.py (so one fix lands on every platform);
 # this script only locates the repo/Python and hands off.
 VT_TAG=RUN

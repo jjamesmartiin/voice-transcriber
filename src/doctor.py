@@ -233,7 +233,7 @@ def check_model_weights() -> Dict[str, Any]:
             "message": (
                 f"Model weights verified ({size_mb:.1f} MB)"
                 if is_cached
-                else f"Weights not downloaded yet. Run with --fetch or let VT auto-download on first launch to {model_dir}"
+                else f"Weights not downloaded yet. Run setup (setup.bat / ./setup.sh) or let VT auto-download on first launch to {model_dir}"
             ),
         }
     except Exception as e:

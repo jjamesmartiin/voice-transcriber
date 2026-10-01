@@ -21,27 +21,36 @@ Voice Transcriber runs on Linux under both Wayland and X11.
 
 ## Running
 
-### ⚡ 1-Command Launcher (Recommended)
-From the repo root:
-```bash
-./run.sh
-```
-`./run.sh` automatically checks if Nix is available (using `nix run .`), or bootstraps a local `.venv` virtual environment if running outside Nix.
+### End users: the AppImage (recommended)
+Download `vt-x86_64.AppImage` from the releases page, `chmod +x` it, and run it.
+No Nix, no Python, no setup — the closure (Python, PyTorch, clipboard tools) is
+bundled. The weights download on first run, or put a `model-bundle/` directory
+next to the `.AppImage` for a fully offline install. See the
+[main README](../../README.md#-linux-wayland--x11) for the FUSE / hotkey / GPU
+prerequisites (all host-level, none Nix-related).
 
-### One-Time Setup (Non-Nix)
-```bash
-./setup.sh
-```
-Checks system dependencies (`portaudio`, `wl-clipboard`/`xclip`, `ydotool`/`xdotool`), creates `.venv`, installs requirements, and tests permissions.
+### Running from a git checkout
+One verb = one script: `./setup.sh`, `./run.sh`, `./test.sh`, `./build.sh`,
+`./clean.sh`. Each root script detects the toolchain and dispatches to
+`platforms/<toolchain>/`:
 
-### System Diagnostics (Doctor)
+- **Nix** (recommended): `nix run .` builds and launches with no venv.
+- **Native** (apt + venv): `./setup.sh` then `./run.sh`.
+
+Force one over auto-detection with `VT_USE_VENV=1` (native venv) or
+`VT_TOOLCHAIN=nix|linux`.
+
 ```bash
-./run.sh doctor
+./setup.sh        # venv + dependencies + model (~2.8 GB, one time)
+./run.sh          # launch
+./run.sh doctor   # system diagnostics
 ```
 
 ### With Nix directly
 ```bash
-nix run .
+nix run .                         # launch
+nix run .#setup                   # acquire the model
+nix develop                       # dev shell (python -m pytest tests/shared)
 ```
 
 ## Hotkeys

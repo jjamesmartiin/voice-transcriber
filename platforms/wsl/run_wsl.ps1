@@ -1,96 +1,90 @@
-# Voice Transcriber - NixOS WSL Launcher
-# Run: .\run_wsl.ps1
-
+# Voice Transcriber - WSL launcher.
+#
+# Works with any WSL distro: the guest runs its own platform dispatcher
+# (./run.sh, ./test.sh, ...), which picks Nix or the native apt/venv path
+# exactly like bare Linux. So a NixOS-WSL or an Ubuntu-WSL guest both work.
+#
+#   run_wsl.bat                    launch (auto-picks NixOS if registered)
+#   run_wsl.bat -Distro Ubuntu      use a specific WSL distribution
+#   run_wsl.bat status              forward a control verb to the app
+#   run_wsl.bat test [args]         run the guest test tier
+param(
+    [string]$Distro
+)
 $ErrorActionPreference = "Stop"
+$VtTag = "WSL"
+. (Join-Path $PSScriptRoot "..\common\common.ps1")
 
-$ScriptDir = $PSScriptRoot
-if (-not $ScriptDir) { $ScriptDir = Get-Location }
-
-if (Test-Path (Join-Path $ScriptDir "..\..\src")) {
-    $ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
-} elseif (Test-Path (Join-Path $ScriptDir "src")) {
-    $ProjectRoot = (Resolve-Path $ScriptDir).Path
-} else {
-    $ProjectRoot = (Get-Location).Path
-}
-
-function Write-Step { param([string]$m) Write-Host "`n[WSL] $m" -ForegroundColor Cyan }
-function Write-Success { param([string]$m) Write-Host "[OK] $m" -ForegroundColor Green }
-function Write-Warn { param([string]$m) Write-Host "[WARN] $m" -ForegroundColor Yellow }
-function Write-Err { param([string]$m) Write-Host "[ERROR] $m" -ForegroundColor Red }
+$ProjectRoot = Get-RepoRoot -StartDir $PSScriptRoot
 
 Write-Host @"
 ======================================================
-  Voice Transcriber (VT) - NixOS on WSL Launcher
+  Voice Transcriber (VT) - WSL Launcher
 ======================================================
 "@ -ForegroundColor Magenta
 
-# 1. Check WSL installation
+# 1. WSL installed?
 try {
-    $wslVer = wsl --version 2>&1
+    wsl --version 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Err "WSL is not fully initialized. Please run .\setup_wsl.ps1 in an Administrator PowerShell prompt."
+        Write-Err "WSL is not fully initialized. Run setup_wsl.ps1 in an Administrator prompt."
         exit 1
     }
     Write-Success "WSL is installed"
 } catch {
-    Write-Err "WSL command not found. Please install WSL."
+    Write-Err "The 'wsl' command was not found. Install WSL first."
     exit 1
 }
 
-# 2. Check if NixOS distribution exists in WSL
-$distros = wsl --list --quiet 2>&1
-$hasNixOS = $distros -match "NixOS"
-
-if (-not $hasNixOS) {
-    Write-Warn "NixOS distribution not found in WSL."
-    Write-Step "Checking for downloaded nixos.wsl image..."
-    $imageDir = Join-Path $env:USERPROFILE "WSL"
-    $imagePath = Join-Path $imageDir "nixos.wsl"
-    if (Test-Path $imagePath) {
-        Write-Step "Importing NixOS distribution from $imagePath ..."
-        wsl --install --from-file $imagePath
-        if ($LASTEXITCODE -ne 0) {
-            # Fallback to import command
-            mkdir "$env:USERPROFILE\WSL\NixOS" -Force | Out-Null
-            wsl --import NixOS "$env:USERPROFILE\WSL\NixOS" $imagePath --version 2
-        }
-        Write-Success "NixOS distribution registered successfully!"
+# 2. Pick a distribution: -Distro, else NixOS if registered, else the first one.
+if (-not $Distro) {
+    $distros = @(wsl --list --quiet 2>&1 |
+        ForEach-Object { "$_".Trim() } |
+        Where-Object { $_ -and $_ -notmatch "^\x00+$" })
+    if ($distros -contains "NixOS") {
+        $Distro = "NixOS"
+    } elseif ($distros.Count -ge 1) {
+        $Distro = $distros[0]
     } else {
-        Write-Err "Could not find $imagePath. Please run .\setup_wsl.ps1"
+        Write-Err "No WSL distribution found. Run setup_wsl.bat first."
         exit 1
     }
+}
+Write-Success "Using WSL distribution: $Distro"
+
+# 3. Map the repo path into the guest.
+$wslPath = (wsl -d $Distro wslpath -u ($ProjectRoot.Replace('\', '/')) 2>&1).Trim()
+if (-not $wslPath -or $wslPath -match "error") {
+    Write-Err "Could not resolve the project path inside $Distro : $wslPath"
+    exit 1
+}
+Write-Host "Project WSL path: $wslPath" -ForegroundColor Gray
+
+# 4. Map a leading verb onto the guest's own entry point (run/test/setup/...).
+#    Anything else is forwarded to `./run.sh` as a control verb / app argument.
+$verbs = @("setup", "run", "test", "build", "clean")
+$guestVerb = "run"
+$guestArgs = @()
+if ($args.Count -gt 0 -and $verbs -contains "$($args[0])") {
+    $guestVerb = "$($args[0])"
+    if ($args.Count -gt 1) { $guestArgs = @($args[1..($args.Count - 1)]) }
 } else {
-    Write-Success "NixOS distribution found"
+    $guestArgs = @($args)
 }
 
-# 3. Convert Windows path to WSL path
-$wslPath = wsl -d NixOS wslpath -u ($ProjectRoot.Replace('\', '/')) 2>&1
-$wslPath = $wslPath.Trim()
+$quoted = (($guestArgs | ForEach-Object {
+    "'" + ("$_" -replace "'", "'\''") + "'"
+}) -join ' ')
 
-Write-Host "Project WSL Path: $wslPath" -ForegroundColor Gray
+$pulse = "export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native"
+$inner = "$pulse; cd '$wslPath' && bash ./$guestVerb.sh $quoted"
 
-# 5. Handle command arguments (test / check-audio / run)
-if ($args -and $args[0] -eq "check-audio") {
-    Write-Step "Running audio device diagnostics inside NixOS WSL..."
-    wsl -d NixOS -- bash -c "export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native; cd '$wslPath' && python3 src/check_devices.py"
-    exit $LASTEXITCODE
+Write-Step "Running '$guestVerb' inside $Distro..."
+if ($guestVerb -eq "run" -and $guestArgs.Count -eq 0) {
+    Write-Host "  WSLg PulseAudio: /mnt/wslg/runtime-dir/pulse/native" -ForegroundColor Cyan
+    Write-Host "  The guest picks Nix or its native venv automatically." -ForegroundColor Cyan
 }
 
-if ($args -and $args[0] -eq "test") {
-    Write-Step "Running transcription tests inside NixOS WSL..."
-    wsl -d NixOS -- bash -c "export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native; cd '$wslPath' && nix run .#test"
-    exit $LASTEXITCODE
-}
-
-# 6. Run Voice Transcriber via Nix Flake inside NixOS WSL
-Write-Step "Starting Voice Transcriber inside NixOS WSL..."
-Write-Host "  WSLg PulseAudio Socket: /mnt/wslg/runtime-dir/pulse/native" -ForegroundColor Cyan
-Write-Host "  Using Nix Flake for dependency management" -ForegroundColor Cyan
-
-$argStr = ""
-if ($args.Count -gt 0) {
-    $argStr = "-- " + (($args | ForEach-Object { "'$_'" }) -join ' ')
-}
-
-wsl -d NixOS -- bash -c "export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native; cd '$wslPath' && nix run . $argStr"
+# -l so a Nix profile / PATH set in ~/.bashrc is visible inside the guest.
+wsl -d $Distro -- bash -lc "$inner"
+exit $LASTEXITCODE

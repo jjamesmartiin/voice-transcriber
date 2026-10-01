@@ -232,6 +232,9 @@ def main():
                          "almost nothing on weights)")
     ap.add_argument("--skip-verify", action="store_true",
                     help="Skip the decompress-and-hash round-trip check")
+    ap.add_argument("--zip", dest="zip_path", default=None,
+                    help="Also write a single transportable .zip of the parts + "
+                         "SHA256SUMS (USB / airgapped delivery)")
     args = ap.parse_args()
 
     model_dir = args.model_dir or find_hf_cache_model_dir()
@@ -280,6 +283,19 @@ def main():
                 sys.exit(1)
             print("Verification passed: parts decompress, concatenate, and the "
                   "weights hash identically to the source model.\n")
+
+    if args.zip_path:
+        import zipfile
+
+        print(f"Writing transportable bundle -> {args.zip_path}")
+        with zipfile.ZipFile(args.zip_path, "w",
+                             compression=zipfile.ZIP_DEFLATED,
+                             allowZip64=True) as zf:
+            for i in range(1, args.parts + 1):
+                p = os.path.join(args.out, f"{prefix}.part{i}.xz")
+                zf.write(p, arcname=os.path.basename(p))
+            zf.write(sums_path, arcname=os.path.basename(sums_path))
+        print(f"  {args.zip_path}: {os.path.getsize(args.zip_path)/1e9:.2f} GB\n")
 
     print("Assets ready for upload:")
     total = 0

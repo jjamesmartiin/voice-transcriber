@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
-Build script for offline Voice Transcriber EXE
-Bundles the local Cohere model (models/cohere) for completely offline operation
+Build script for the standalone Windows Voice Transcriber EXE.
+
+By default the local Cohere model (models/cohere) is bundled for fully offline
+operation. Pass --no-model to build a smaller (~1 GB) bundle that installs the
+weights on first run instead - either from the release assets (online) or from a
+local split bundle on disk (`model-bundle/` next to the exe, or
+``VT_MODEL_SOURCE_DIR``), which is the airgapped-friendly build.
 """
+import argparse
 import os
+import platform as _stdlib_platform
 import sys
 import shutil
 import subprocess
@@ -118,6 +125,13 @@ def build_exe():
         
         # Add models directory
         f"--add-data={MODELS_DIR}{os.pathsep}models",
+
+        # Bundle the real stdlib ``platform`` module under a private directory:
+        # the HAL package (src/platform) is collected under the name ``platform``
+        # and shadows the stdlib module inside the archive. The shadow guard in
+        # src/platform/__init__.py loads this copy so numpy/torch/pkg_resources
+        # keep a working platform.system()/uname().
+        f"--add-data={_stdlib_platform.__file__}{os.pathsep}stdlib_shim",
         
         # Add all src files to root (not in src/ subfolder)
         f"--add-data={SRC_DIR}{os.pathsep}.",
@@ -169,7 +183,7 @@ def build_exe():
         print("=" * 60)
         print("BUILD SUCCESSFUL!")
         print("=" * 60)
-        exe_path = DIST_DIR / "VoiceTranscriber.exe"
+        exe_path = DIST_DIR / "VoiceTranscriber" / "VoiceTranscriber.exe"
         if exe_path.exists():
             size_mb = exe_path.stat().st_size / (1024 * 1024)
             print(f"EXE created: {exe_path}")
@@ -187,6 +201,15 @@ def build_exe():
         sys.exit(result.returncode)
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Build the standalone Windows Voice Transcriber EXE.")
+    parser.add_argument(
+        "--no-model", action="store_true",
+        help="Do not bundle the Cohere weights. The app installs them on first "
+             "run, from the release assets or an offline model-bundle/ directory "
+             "(VT_MODEL_SOURCE_DIR) - the airgapped-friendly build.")
+    args = parser.parse_args()
+
     print("Voice Transcriber - Offline Build Script")
     print("=" * 60)
     print()
@@ -199,15 +222,21 @@ def main():
         print("ERROR: PyInstaller not installed")
         print("Install with: pip install pyinstaller")
         sys.exit(1)
-    
-    # Ensure models are cached
-    ensure_cached_models()
-    
-    # Skip prompt - auto-proceed
-    print("\nProceeding with build automatically...")
-    
-    # Prepare bundled models
-    prepare_bundled_models()
+
+    if args.no_model:
+        print("--no-model: bundling no weights (installed on first run).")
+        if MODELS_DIR.exists():
+            shutil.rmtree(MODELS_DIR)
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    else:
+        # Ensure models are cached
+        ensure_cached_models()
+
+        # Skip prompt - auto-proceed
+        print("\nProceeding with build automatically...")
+
+        # Prepare bundled models
+        prepare_bundled_models()
     
     # Build the EXE
     build_exe()

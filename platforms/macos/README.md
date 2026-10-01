@@ -14,15 +14,16 @@ brew install portaudio python@3.12
 ```
 
 ### 2. Setup
-From the repository root, run the setup script:
+From the repository root, run the setup script (it creates `.venv`, installs
+dependencies, and acquires the model):
 
 ```bash
 ./setup.sh
 ```
 
-To optionally pre-download the ~2.8 GB Cohere ASR model weights during setup:
+To skip the model for now (and place weights in `models/` yourself):
 ```bash
-./setup.sh --fetch
+./setup.sh --no-model
 ```
 
 ### 3. Permissions (Important)

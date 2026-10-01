@@ -1,4 +1,12 @@
-# Voice Transcriber (VT) - NixOS on WSL Guide
+# Voice Transcriber (VT) - WSL Guide
+
+> **Any WSL distribution works.** The recommended guest is **NixOS-WSL** (Nix
+> provides every dependency reproducibly), but a plain **Ubuntu** guest is
+> supported too: the guest runs its own `./setup.sh` / `./run.sh`, which uses
+> the native apt + venv path. Pass `-Distro <name>` to `run_wsl.ps1`,
+> `run_wsl_bridge.ps1` or `setup_wsl.ps1`; without it NixOS is auto-picked when
+> registered. Only the Windows-host hotkey/clipboard bridge is distro-specific,
+> and it is unchanged.
 
 This document explains how Voice Transcriber runs inside **NixOS on WSL2**, how dependencies are managed reproducibly with **Nix Flakes**, and how **Windows microphone audio passthrough** works.
 

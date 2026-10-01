@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # ==============================================================================
-# Voice Transcriber - root entry point: TEST
+# Voice Transcriber - root entry point: CLEAN
 #
-# ./test.sh [all|shared|platform|e2e|perf|verify] [pytest args]
+# ./clean.sh [--models] [--yes]   remove generated state
 #
 # One verb = one script. This dispatcher picks the platform toolchain and execs
-# platforms/<toolchain>/test.sh, which uses that OS's native tooling (apt/brew/
+# platforms/<toolchain>/clean.sh, which uses that OS's native tooling (apt/brew/
 # venv, or Nix). The verb logic lives in tools/vt_dev.py (native) or the flake.
 #
 # VT_TOOLCHAIN=nix|linux|macos overrides auto-detection.
@@ -23,4 +23,4 @@ case "${1:-}" in
 esac
 
 TOOLCHAIN="$(vt_detect_toolchain)"
-exec "$HERE/platforms/$TOOLCHAIN/test.sh" "$@"
+exec "$HERE/platforms/$TOOLCHAIN/clean.sh" "$@"

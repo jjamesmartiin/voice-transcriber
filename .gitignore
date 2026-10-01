@@ -11,6 +11,10 @@ result
 /models/
 /dist/
 
+# PyInstaller scratch dir + generated spec (platforms/windows/build_offline.py)
+/build/
+/VoiceTranscriber.spec
+
 # Root-level local config overrides (ignored so local edits aren't committed)
 /config.json
 /config.yaml
