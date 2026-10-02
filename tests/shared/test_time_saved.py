@@ -174,6 +174,24 @@ class TestConfigLoadingAndDefaults:
         t2.reset_to_defaults()
         assert t2.TYPING_WPM == 40
 
+    def test_cycle_typing_wpm(self, clean_config):
+        """cycle_typing_wpm advances through presets and persists."""
+        t2.set_typing_wpm(40)
+        assert t2.cycle_typing_wpm() == 50
+        assert t2.TYPING_WPM == 50
+        assert t2.cycle_typing_wpm() == 60
+        assert t2.cycle_typing_wpm() == 70
+        assert t2.cycle_typing_wpm() == 80
+        assert t2.cycle_typing_wpm() == 100
+        assert t2.cycle_typing_wpm() == 30
+        assert t2.cycle_typing_wpm() == 40
+        # Custom value outside presets advances to next higher preset
+        t2.set_typing_wpm(45)
+        assert t2.cycle_typing_wpm() == 50
+        # Very high custom value wraps to first preset
+        t2.set_typing_wpm(150)
+        assert t2.cycle_typing_wpm() == 30
+
 
 # ===========================================================================
 # 4. Session Accumulation and Status Tracking

@@ -92,6 +92,8 @@ class RatatuiTui:
         self.on_toggle_numbers = None
         self.on_toggle_serial_collapse = None
         self.on_toggle_spell_command = None
+        self.on_cycle_typing_wpm = None
+        self.on_set_typing_wpm = None
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
         self.on_set_theme = None
@@ -273,6 +275,14 @@ class RatatuiTui:
             self.on_toggle_serial_collapse()
         elif cmd == "toggle_spell_command" and getattr(self, "on_toggle_spell_command", None):
             self.on_toggle_spell_command()
+        elif cmd == "cycle_typing_wpm" and getattr(self, "on_cycle_typing_wpm", None):
+            self.on_cycle_typing_wpm()
+        elif cmd == "set_typing_wpm":
+            wpm = msg.get("wpm") or msg.get("value")
+            if wpm is not None and getattr(self, "on_set_typing_wpm", None):
+                self.on_set_typing_wpm(wpm)
+            elif getattr(self, "on_cycle_typing_wpm", None):
+                self.on_cycle_typing_wpm()
         elif cmd == "toggle_middle_click" and self.on_toggle_middle_click:
             self.on_toggle_middle_click()
         elif cmd == "toggle_trailing_space" and getattr(self, "on_toggle_trailing_space", None):
@@ -419,7 +429,7 @@ class RatatuiTui:
                          sound_theme=None, ui_theme=None, punctuation_mode=None,
                          trailing_space=None, auto_punctuate=None, number_digits=None,
                          number_mode=None, serial_collapse=None, spell_command=None,
-                         middle_click_enabled=None):
+                         middle_click_enabled=None, typing_wpm=None):
         msg = {"t": "cfg"}
         if backend is not None:
             self.model_backend = backend
@@ -470,6 +480,8 @@ class RatatuiTui:
         if middle_click_enabled is not None:
             self.middle_click_enabled = bool(middle_click_enabled)
             msg["middle_click_enabled"] = self.middle_click_enabled
+        if typing_wpm is not None:
+            msg["typing_wpm"] = int(typing_wpm)
         self._send(msg)
 
     def get_effective_color(self):

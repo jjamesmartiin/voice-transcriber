@@ -11,12 +11,18 @@ Fixes common ASR artifacts, disfluencies, and punctuation errors:
 """
 
 import os
+import sys
 import re
 import time
 import json
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+_current_mod = sys.modules.get(__name__)
+if _current_mod is not None:
+    sys.modules.setdefault("post_processor", _current_mod)
+    sys.modules.setdefault("voice_transcriber.post_processor", _current_mod)
 
 # Precompiled hallucination patterns
 HALLUCINATION_PATTERNS = [
@@ -1083,6 +1089,8 @@ def set_number_digits_mode(mode) -> None:
     """Set the runtime number conversion mode (used by the 'n' hotkey)."""
     global _number_digits_mode
     _number_digits_mode = normalize_number_mode(mode)
+    if "VT_NUMBER_DIGITS" in os.environ:
+        os.environ["VT_NUMBER_DIGITS"] = _number_digits_mode
 
 
 def is_number_digits_enabled() -> bool:

@@ -118,6 +118,7 @@ class VoiceTranscriberTUI:
         self.on_toggle_trailing_space = None
         self.on_toggle_auto_punctuate = None
         self.on_toggle_numbers = None
+        self.on_cycle_typing_wpm = None
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
         self.on_open_theme_picker = None
@@ -191,7 +192,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
             
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -223,6 +224,8 @@ class VoiceTranscriberTUI:
                 self.spell_command = bool(spell_command)
             if middle_click_enabled is not None:
                 self.middle_click_enabled = bool(middle_click_enabled)
+            if typing_wpm is not None:
+                self.typing_wpm = int(typing_wpm)
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 

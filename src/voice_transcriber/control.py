@@ -162,6 +162,12 @@ VERBS: dict[str, dict] = {
         "choices": ["on", "off"],
         "toggles": True,
     },
+    "wpm": {
+        "summary": "Set or cycle average typing speed in WPM for time saved calculations",
+        "value": "words-per-minute",
+        "aliases": ["typing-wpm", "set-wpm"],
+        "returns": ["typing_wpm"],
+    },
     "middle-click": {
         "summary": "Middle-mouse-button push-to-talk",
         "value": "state",
@@ -202,7 +208,13 @@ VERBS: dict[str, dict] = {
 
 def normalize_verb(verb: str) -> str:
     """Canonicalise a verb: case-insensitive, ``_`` and ``-`` interchangeable."""
-    return str(verb or "").strip().lower().replace("_", "-")
+    norm = str(verb or "").strip().lower().replace("_", "-")
+    if norm in VERBS:
+        return norm
+    for canonical, spec in VERBS.items():
+        if norm in spec.get("aliases", []):
+            return canonical
+    return norm
 
 
 def verb_spec(verb: str) -> dict:

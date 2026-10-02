@@ -544,6 +544,7 @@ pub fn run_theme_picker(
                             serial_collapse,
                             spell_command,
                             middle_click_enabled,
+                            typing_wpm,
                         } => {
                             app.apply_config(
                                 mic,
@@ -562,6 +563,7 @@ pub fn run_theme_picker(
                                 serial_collapse,
                                 spell_command,
                                 middle_click_enabled,
+                                typing_wpm,
                             );
                         }
                         _ => {}

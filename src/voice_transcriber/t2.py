@@ -5,6 +5,11 @@
 import os
 import sys
 
+_current_t2 = sys.modules.get(__name__)
+if _current_t2 is not None:
+    sys.modules.setdefault("t2", _current_t2)
+    sys.modules.setdefault("voice_transcriber.t2", _current_t2)
+
 # Auto-configure WSL2 audio passthrough via WSLg PulseAudio socket if running in WSL
 if "PULSE_SERVER" not in os.environ:
     if os.path.exists("/mnt/wslg/runtime-dir/pulse/native"):
@@ -891,6 +896,7 @@ def reset_to_defaults() -> dict:
     for name, value in DEFAULT_SETTINGS.items():
         globals()[name] = value
     NUMBER_DIGITS = (NUMBER_MODE != "words")
+    set_number_digits(NUMBER_MODE)
     save_audio_config()
     logger.info("All settings restored to shipped defaults")
     return dict(DEFAULT_SETTINGS)
@@ -980,6 +986,26 @@ def set_typing_wpm(wpm: int) -> int:
 
 def get_typing_wpm() -> int:
     """Get current average typing WPM setting."""
+    return TYPING_WPM
+
+
+WPM_PRESETS = (30, 40, 50, 60, 70, 80, 100)
+
+
+def cycle_typing_wpm() -> int:
+    """Cycle through WPM presets (30, 40, 50, 60, 70, 80, 100) and persist."""
+    global TYPING_WPM
+    try:
+        cur = int(TYPING_WPM)
+    except (ValueError, TypeError):
+        cur = 40
+    if cur in WPM_PRESETS:
+        idx = WPM_PRESETS.index(cur)
+        next_wpm = WPM_PRESETS[(idx + 1) % len(WPM_PRESETS)]
+    else:
+        next_candidates = [w for w in WPM_PRESETS if w > cur]
+        next_wpm = next_candidates[0] if next_candidates else WPM_PRESETS[0]
+    set_typing_wpm(next_wpm)
     return TYPING_WPM
 
 
@@ -1174,6 +1200,8 @@ def set_number_digits(value):
     global NUMBER_DIGITS, NUMBER_MODE
     NUMBER_MODE = _normalize_number_mode(value)
     NUMBER_DIGITS = NUMBER_MODE != "words"
+    if "VT_NUMBER_DIGITS" in os.environ:
+        os.environ["VT_NUMBER_DIGITS"] = NUMBER_MODE
     try:
         from post_processor import set_number_digits_mode
         set_number_digits_mode(NUMBER_MODE)
@@ -1836,6 +1864,12 @@ def select_settings_picker():
             "keywords": "spell spelled verbal command letters c a t acronym dictation",
         },
         {
+            "id": "typing_wpm",
+            "icon": "⚡ ",
+            "title": "Typing Speed",
+            "keywords": "typing speed wpm words per minute time saved benchmark calculation stats",
+        },
+        {
             "id": "middle_click",
             "icon": "🖱️ ",
             "title": "Mouse Hotkey",
@@ -1902,6 +1936,8 @@ def select_settings_picker():
                 return "Enabled (say 'spell C A T')", "[ON]", "green"
             else:
                 return "Disabled", "[OFF]", "dim white"
+        elif item_id == "typing_wpm":
+            return f"{TYPING_WPM} WPM (time saved baseline)", f"[{TYPING_WPM} WPM]", "cyan"
         elif item_id == "middle_click":
             if MIDDLE_CLICK_ENABLED:
                 return "Enabled (hold middle click)", "[ON]", "green"
@@ -2047,6 +2083,26 @@ def select_settings_picker():
                     save_audio_config()
                 elif item_id == "spell_command":
                     toggle_spell_command()
+                    save_audio_config()
+                elif item_id == "typing_wpm":
+                    if key == 'ENTER':
+                        console.clear()
+                        console.print()
+                        console.print("[bold cyan]⚡ Typing Speed Configuration[/bold cyan]")
+                        console.print(f"[dim white]Current speed: {TYPING_WPM} words/minute[/dim white]\n")
+                        console.print("Enter your average typing speed in words per minute (e.g. 40, 65, 80):")
+                        console.print("[dim white](Press Enter without typing to keep current)[/dim white]")
+                        try:
+                            val_str = input("❯ ").strip()
+                            if val_str:
+                                val = int(val_str)
+                                if 0 < val <= 500:
+                                    set_typing_wpm(val)
+                        except (ValueError, EOFError, KeyboardInterrupt):
+                            pass
+                        console.clear()
+                    else:
+                        cycle_typing_wpm()
                     save_audio_config()
                 elif item_id == "middle_click":
                     set_middle_click_enabled(not MIDDLE_CLICK_ENABLED)

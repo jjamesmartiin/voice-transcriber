@@ -211,6 +211,7 @@ the settings modal would.
 | `spell` | state | `on`, `off` (omit to toggle) |
 | `middle-click` | state | `on`, `off` (omit to toggle) |
 | `mute` | state | `on`, `off` (omit to toggle) |
+| `wpm` | words-per-minute | Integer WPM, e.g. `40`, `60`, `80` (omit to cycle presets) |
 
 `on`/`off` also accept `true`/`false`, `1`/`0`, `yes`/`no`, `enable`/`disable`.
 

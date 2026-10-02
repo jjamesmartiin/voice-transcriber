@@ -186,6 +186,7 @@ impl Runtime {
                 serial_collapse,
                 spell_command,
                 middle_click_enabled,
+                typing_wpm,
             } => app.apply_config(
                 mic,
                 secondary,
@@ -203,6 +204,7 @@ impl Runtime {
                 serial_collapse,
                 spell_command,
                 middle_click_enabled,
+                typing_wpm,
             ),
             Wire::Tx {
                 text,

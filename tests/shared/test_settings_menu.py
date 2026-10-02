@@ -163,6 +163,17 @@ class TestSettingsPersistence:
         t2.load_audio_config(file_path=str(cfg))
         assert t2.UI_THEME == "dracula"
 
+    def test_typing_wpm_cycle_persists(self, cfg, monkeypatch):
+        monkeypatch.setattr(t2, "TYPING_WPM", 40)
+        new = t2.cycle_typing_wpm()
+        assert new == 50
+        assert t2.TYPING_WPM == 50
+        t2.save_audio_config()
+
+        monkeypatch.setattr(t2, "TYPING_WPM", 40)
+        t2.load_audio_config(file_path=str(cfg))
+        assert t2.TYPING_WPM == 50
+
 
 def _fake_sd_with_mic_at(index):
     """A sounddevice stand-in whose only input device sits at ``index``.
@@ -385,3 +396,25 @@ class TestSettingsMenuLifecycle:
         assert calls == []
         app.tui.print_warning.assert_called_once()
         app._sync_tui_state.assert_not_called()
+
+    def test_set_typing_wpm_callback(self, monkeypatch):
+        app = _make_app(monkeypatch)
+        monkeypatch.setattr(t2, "TYPING_WPM", 40)
+        monkeypatch.setattr(t2, "save_audio_config", lambda: None)
+
+        app._on_tui_set_typing_wpm("65")
+
+        assert t2.TYPING_WPM == 65
+        app._sync_tui_state.assert_called_once()
+        app.tui.print_event.assert_called_once()
+
+    def test_cycle_typing_wpm_callback(self, monkeypatch):
+        app = _make_app(monkeypatch)
+        monkeypatch.setattr(t2, "TYPING_WPM", 40)
+        monkeypatch.setattr(t2, "save_audio_config", lambda: None)
+
+        app._on_tui_cycle_typing_wpm()
+
+        assert t2.TYPING_WPM == 50
+        app._sync_tui_state.assert_called_once()
+        app.tui.print_event.assert_called_once()

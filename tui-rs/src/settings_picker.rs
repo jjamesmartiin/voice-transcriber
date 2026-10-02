@@ -25,6 +25,7 @@ pub enum SettingKind {
     NumberDigits,
     SerialCollapse,
     SpellCommand,
+    TypingWpm,
     MiddleClick,
     SoundMute,
     OutputMode,
@@ -43,7 +44,7 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 12] = [
+pub const SETTINGS: [SettingItem; 13] = [
     // NOTE: icons must be exactly one glyph whose *own* codepoint already
     // occupies its final width in every terminal - never a `U+FE0F`
     // variation-selector sequence and never a ZWJ sequence. Terminals that
@@ -88,6 +89,12 @@ pub const SETTINGS: [SettingItem; 12] = [
         icon: "🔠",
         title: "Spell Command",
         keywords: "spell spelled verbal command letters c a t acronym dictation",
+    },
+    SettingItem {
+        kind: SettingKind::TypingWpm,
+        icon: "⚡",
+        title: "Typing Speed",
+        keywords: "typing speed wpm words per minute time saved benchmark calculation stats",
     },
     SettingItem {
         kind: SettingKind::MiddleClick,
@@ -199,6 +206,26 @@ impl SettingItem {
                 } else {
                     ("Spell command ignored".to_string(), "[OFF]", Color::DarkGray)
                 }
+            }
+            SettingKind::TypingWpm => {
+                let badge = match app.typing_wpm {
+                    20 => "[20 WPM]",
+                    30 => "[30 WPM]",
+                    40 => "[40 WPM]",
+                    50 => "[50 WPM]",
+                    60 => "[60 WPM]",
+                    70 => "[70 WPM]",
+                    80 => "[80 WPM]",
+                    90 => "[90 WPM]",
+                    100 => "[100 WPM]",
+                    120 => "[120 WPM]",
+                    _ => "[WPM]",
+                };
+                (
+                    format!("{} WPM · time saved baseline", app.typing_wpm),
+                    badge,
+                    Color::Cyan,
+                )
             }
             SettingKind::MiddleClick => {
                 if app.middle_click_enabled {
@@ -481,9 +508,10 @@ fn fuzzy_subsequence(pattern: &str, target: &str) -> Option<usize> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum SettingsPickerAction {
     Toggle(SettingKind),
+    SetWpm(u32),
     Close,
     Continue,
 }
@@ -497,6 +525,8 @@ pub struct SettingsPickerState {
     pub defaults_done: bool,
     /// Arming flag: the factory reset needs a second Enter/Space to commit.
     pub confirm_defaults: bool,
+    /// Active WPM input buffer when prompt dialog is open.
+    pub wpm_input: Option<String>,
 }
 
 impl SettingsPickerState {
@@ -508,6 +538,7 @@ impl SettingsPickerState {
             reset_done: false,
             defaults_done: false,
             confirm_defaults: false,
+            wpm_input: None,
         }
     }
 
@@ -558,6 +589,48 @@ impl SettingsPickerState {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> SettingsPickerAction {
+        if let Some(ref mut input) = self.wpm_input {
+            match key.code {
+                KeyCode::Esc => {
+                    self.wpm_input = None;
+                    return SettingsPickerAction::Continue;
+                }
+                KeyCode::Enter => {
+                    let parsed = if input.is_empty() {
+                        None
+                    } else {
+                        input.trim().parse::<u32>().ok()
+                    };
+                    self.wpm_input = None;
+                    if let Some(val) = parsed {
+                        if val > 0 && val <= 500 {
+                            return SettingsPickerAction::SetWpm(val);
+                        }
+                    }
+                    return SettingsPickerAction::Continue;
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                    return SettingsPickerAction::Continue;
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    input.clear();
+                    return SettingsPickerAction::Continue;
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.wpm_input = None;
+                    return SettingsPickerAction::Continue;
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    if input.len() < 3 {
+                        input.push(c);
+                    }
+                    return SettingsPickerAction::Continue;
+                }
+                _ => return SettingsPickerAction::Continue,
+            }
+        }
+
         // Arming the destructive factory reset survives only until the next
         // keystroke that is not the confirming Enter/Space.
         let is_activate = key.code == KeyCode::Enter
@@ -590,7 +663,13 @@ impl SettingsPickerState {
             KeyCode::Esc => SettingsPickerAction::Close,
             KeyCode::Enter => {
                 if let Some(&idx) = self.filtered_indices.get(self.selected_index) {
-                    SettingsPickerAction::Toggle(SETTINGS[idx].kind)
+                    let kind = SETTINGS[idx].kind;
+                    if kind == SettingKind::TypingWpm {
+                        self.wpm_input = Some(String::new());
+                        SettingsPickerAction::Continue
+                    } else {
+                        SettingsPickerAction::Toggle(kind)
+                    }
                 } else {
                     SettingsPickerAction::Close
                 }
@@ -600,7 +679,13 @@ impl SettingsPickerState {
                 // If user is actively typing a multi-word search, space appends to query.
                 if self.query.is_empty() {
                     if let Some(&idx) = self.filtered_indices.get(self.selected_index) {
-                        return SettingsPickerAction::Toggle(SETTINGS[idx].kind);
+                        let kind = SETTINGS[idx].kind;
+                        if kind == SettingKind::TypingWpm {
+                            self.wpm_input = Some(String::new());
+                            return SettingsPickerAction::Continue;
+                        } else {
+                            return SettingsPickerAction::Toggle(kind);
+                        }
                     }
                 }
                 self.query.push(' ');
@@ -779,6 +864,84 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
         Span::styled("Done", Style::default().add_modifier(Modifier::DIM)),
     ]);
     frame.render_widget(Paragraph::new(footer), chunks[4]);
+
+    if let Some(ref input) = state.wpm_input {
+        let prompt_w = 52u16.min(area.width.saturating_sub(4)).max(34);
+        let prompt_h = 7u16.min(area.height.saturating_sub(2)).max(5);
+        let px = (area.width.saturating_sub(prompt_w)) / 2;
+        let py = (area.height.saturating_sub(prompt_h)) / 2;
+        let prompt_area = Rect {
+            x: px,
+            y: py,
+            width: prompt_w,
+            height: prompt_h,
+        };
+
+        frame.render_widget(Clear, prompt_area);
+
+        let p_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme_color).add_modifier(Modifier::BOLD))
+            .title(Span::styled(
+                " ⚡ Typing Speed (WPM) ",
+                Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
+            ));
+
+        let p_inner = p_block.inner(prompt_area);
+        frame.render_widget(p_block, prompt_area);
+
+        let p_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Prompt label
+                Constraint::Length(1), // Divider
+                Constraint::Length(1), // Input
+                Constraint::Length(1), // Divider
+                Constraint::Length(1), // Footer
+            ])
+            .split(p_inner);
+
+        let prompt_label = Line::from(vec![
+            Span::styled(" Enter typing speed in words/minute:", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]);
+        frame.render_widget(Paragraph::new(prompt_label), p_chunks[0]);
+
+        let sep1 = Line::from(vec![
+            Span::styled("─".repeat(p_inner.width as usize), Style::default().fg(Color::DarkGray)),
+        ]);
+        frame.render_widget(Paragraph::new(sep1), p_chunks[1]);
+
+        let input_spans = if input.is_empty() {
+            vec![
+                Span::styled(" ❯ ", Style::default().fg(theme_color).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{}", app.typing_wpm), Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("█", Style::default().fg(theme_color)),
+                Span::styled(" words/min (current)", Style::default().fg(Color::DarkGray)),
+            ]
+        } else {
+            vec![
+                Span::styled(" ❯ ", Style::default().fg(theme_color).add_modifier(Modifier::BOLD)),
+                Span::styled(input.clone(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled("█", Style::default().fg(theme_color)),
+                Span::styled(" words/min", Style::default().fg(Color::Cyan)),
+            ]
+        };
+        frame.render_widget(Paragraph::new(Line::from(input_spans)), p_chunks[2]);
+
+        let sep2 = Line::from(vec![
+            Span::styled("─".repeat(p_inner.width as usize), Style::default().fg(Color::DarkGray)),
+        ]);
+        frame.render_widget(Paragraph::new(sep2), p_chunks[3]);
+
+        let footer = Line::from(vec![
+            Span::styled(" [Enter] ", Style::default().fg(Color::Green)),
+            Span::styled("Save   ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled("[Esc] ", Style::default().fg(Color::Red)),
+            Span::styled("Cancel", Style::default().add_modifier(Modifier::DIM)),
+        ]);
+        frame.render_widget(Paragraph::new(footer), p_chunks[4]);
+    }
 }
 
 /// Hand the screen over to a nested modal picker (theme / microphone).
@@ -846,6 +1009,7 @@ pub fn run_settings_picker(
                             serial_collapse,
                             spell_command,
                             middle_click_enabled,
+                            typing_wpm,
                         } => {
                             app.apply_config(
                                 mic,
@@ -864,6 +1028,7 @@ pub fn run_settings_picker(
                                 serial_collapse,
                                 spell_command,
                                 middle_click_enabled,
+                                typing_wpm,
                             );
                         }
                         _ => {}
@@ -884,6 +1049,12 @@ pub fn run_settings_picker(
                     match state.handle_key(key) {
                         SettingsPickerAction::Close => break,
                         SettingsPickerAction::Continue => {}
+                        SettingsPickerAction::SetWpm(val) => {
+                            app.typing_wpm = val;
+                            if let Some(w) = writer {
+                                ipc::send_cmd_value(w, "set_typing_wpm", "wpm", &val.to_string());
+                            }
+                        }
                         SettingsPickerAction::Toggle(kind) => {
                             match kind {
                                 SettingKind::TrailingSpace => {
@@ -919,6 +1090,12 @@ pub fn run_settings_picker(
                                     app.spell_command = !app.spell_command;
                                     if let Some(w) = writer {
                                         ipc::send_cmd(w, "toggle_spell_command");
+                                    }
+                                }
+                                SettingKind::TypingWpm => {
+                                    app.cycle_typing_wpm();
+                                    if let Some(w) = writer {
+                                        ipc::send_cmd(w, "cycle_typing_wpm");
                                     }
                                 }
                                 SettingKind::MiddleClick => {
@@ -1069,6 +1246,46 @@ mod tests {
     }
 
     #[test]
+    fn test_typing_wpm_prompt_and_input() {
+        let app = App::new("1.1.1", Theme::Cyan);
+        let mut state = SettingsPickerState::new();
+
+        // Search for 'speed'
+        state.query = "speed".to_string();
+        state.update_filter();
+        let top_match = SETTINGS[state.filtered_indices[0]].kind;
+        assert_eq!(top_match, SettingKind::TypingWpm);
+
+        // Press Enter to open WPM prompt
+        let action = state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(action, SettingsPickerAction::Continue);
+        assert!(state.wpm_input.is_some());
+
+        // Render with prompt active
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_settings_picker(f, &state, &app)).unwrap();
+
+        // Type '6', '5'
+        state.handle_key(KeyEvent::new(KeyCode::Char('6'), KeyModifiers::NONE));
+        state.handle_key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE));
+        assert_eq!(state.wpm_input.as_deref(), Some("65"));
+
+        // Press Enter to submit
+        let action = state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(action, SettingsPickerAction::SetWpm(65));
+        assert!(state.wpm_input.is_none());
+
+        // Cancel test: open again, type, hit Esc
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(state.wpm_input.is_some());
+        state.handle_key(KeyEvent::new(KeyCode::Char('9'), KeyModifiers::NONE));
+        let cancel_act = state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(cancel_act, SettingsPickerAction::Continue);
+        assert!(state.wpm_input.is_none());
+    }
+
+    #[test]
     fn test_setting_icons_have_terminal_independent_width() {
         use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -1175,6 +1392,10 @@ mod tests {
         for mode in ["auto", "digits", "words"] {
             app.number_mode = mode.to_string();
             check(&app, &idle, SettingKind::NumberDigits);
+        }
+        for wpm in [30, 40, 50, 60, 70, 80, 100] {
+            app.typing_wpm = wpm;
+            check(&app, &idle, SettingKind::TypingWpm);
         }
         for mode in ["clipboard", "type", "type_fast", "paste", "paste_terminal"] {
             app.output_mode = mode.to_string();

@@ -90,6 +90,8 @@ pub enum Wire {
         spell_command: Option<bool>,
         #[serde(default)]
         middle_click_enabled: Option<bool>,
+        #[serde(default)]
+        typing_wpm: Option<u32>,
     },
     #[serde(rename = "tx")]
     Tx {

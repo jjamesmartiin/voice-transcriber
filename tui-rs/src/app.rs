@@ -175,6 +175,7 @@ pub struct App {
     pub number_mode: String,
     pub serial_collapse: bool,
     pub spell_command: bool,
+    pub typing_wpm: u32,
     pub middle_click_enabled: bool,
     pub punctuation_mode: String,
     #[allow(dead_code)]
@@ -226,6 +227,7 @@ impl App {
             number_mode: "auto".to_string(),
             serial_collapse: true,
             spell_command: true,
+            typing_wpm: 40,
             middle_click_enabled: false,
             punctuation_mode: "full".to_string(),
             sound_theme: "proximity".to_string(),
@@ -331,6 +333,20 @@ impl App {
         };
     }
 
+    pub fn cycle_typing_wpm(&mut self) -> u32 {
+        const PRESETS: [u32; 7] = [30, 40, 50, 60, 70, 80, 100];
+        let next = match PRESETS.iter().position(|&x| x == self.typing_wpm) {
+            Some(idx) => PRESETS[(idx + 1) % PRESETS.len()],
+            None => PRESETS
+                .iter()
+                .copied()
+                .find(|&x| x > self.typing_wpm)
+                .unwrap_or(PRESETS[0]),
+        };
+        self.typing_wpm = next;
+        next
+    }
+
     /// Apply a `cfg` message from the Python backend (authoritative config).
     pub fn apply_config(
         &mut self,
@@ -350,6 +366,7 @@ impl App {
         serial_collapse: Option<bool>,
         spell_command: Option<bool>,
         middle_click_enabled: Option<bool>,
+        typing_wpm: Option<u32>,
     ) {
         if let Some(m) = mic {
             self.active_device = m;
@@ -402,6 +419,9 @@ impl App {
         }
         if let Some(s) = spell_command {
             self.spell_command = s;
+        }
+        if let Some(w) = typing_wpm {
+            self.typing_wpm = w;
         }
     }
 }

@@ -31,7 +31,7 @@ python src/main.py wait --json       # includes last_transcription
 > is up. There is no offline fallback: verified with per-user state present but
 > no engine. Start an instance first (or set `VT_CONTROL_SOCKET`).
 
-`help --json` is the source of truth for the verb surface (24 verbs, with
+`help --json` is the source of truth for the verb surface (25 verbs, with
 `choices` / `required` / `toggles` per verb). It is served locally from
 `src/control.py`, so it works with no engine running. Do not hardcode verb lists
 from docs — read the catalogue.

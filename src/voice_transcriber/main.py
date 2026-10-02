@@ -212,6 +212,7 @@ class SimpleVoiceTranscriber:
             serial_collapse=getattr(t2, 'SERIAL_COLLAPSE', True),
             spell_command=getattr(t2, 'SPELL_COMMAND', True),
             middle_click_enabled=getattr(t2, 'MIDDLE_CLICK_ENABLED', False),
+            typing_wpm=getattr(t2, 'TYPING_WPM', 40),
         )
         if hasattr(self, 'visual_notification') and self.visual_notification:
             self.visual_notification.set_active_device(get_active_device_name(include_model=False))
@@ -227,6 +228,8 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_numbers = self._on_tui_toggle_numbers
         self.tui.on_toggle_serial_collapse = self._on_tui_toggle_serial_collapse
         self.tui.on_toggle_spell_command = self._on_tui_toggle_spell_command
+        self.tui.on_cycle_typing_wpm = self._on_tui_cycle_typing_wpm
+        self.tui.on_set_typing_wpm = self._on_tui_set_typing_wpm
         self.tui.on_toggle_middle_click = self._on_tui_toggle_middle_click
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
         self.tui.on_reset_defaults = self._on_tui_reset_defaults
@@ -398,6 +401,25 @@ class SimpleVoiceTranscriber:
         self._sync_tui_state()
         status = "ENABLED (say 'spell C A T')" if enabled else "DISABLED"
         self.tui.print_event("✍️ Spell Command", f"Verbal spell command is now {status}", level="info")
+
+    def _on_tui_cycle_typing_wpm(self):
+        import t2
+        new_wpm = t2.cycle_typing_wpm()
+        t2.save_audio_config()
+        self._sync_tui_state()
+        self.tui.print_event("⚡ Typing Speed", f"Typing speed is now {new_wpm} WPM", level="info")
+
+    def _on_tui_set_typing_wpm(self, wpm):
+        import t2
+        try:
+            val = int(wpm)
+            if val > 0:
+                t2.set_typing_wpm(val)
+                t2.save_audio_config()
+                self._sync_tui_state()
+                self.tui.print_event("⚡ Typing Speed", f"Typing speed is now {val} WPM", level="info")
+        except (ValueError, TypeError):
+            pass
 
     def _on_tui_toggle_middle_click(self):
         import t2
@@ -1149,6 +1171,24 @@ class SimpleVoiceTranscriber:
             t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb, spell_command=t2.SPELL_COMMAND)
+
+        if verb in ("wpm", "typing-wpm", "set-wpm"):
+            if value:
+                try:
+                    val = int(value)
+                    if val <= 0:
+                        raise ValueError
+                except ValueError:
+                    raise ValueError(f"WPM must be a positive integer, got {value!r}")
+                t2.set_typing_wpm(val)
+                t2.save_audio_config()
+                self._sync_tui_state()
+                return self._control_status(verb, typing_wpm=t2.TYPING_WPM)
+            else:
+                new_wpm = t2.cycle_typing_wpm()
+                t2.save_audio_config()
+                self._sync_tui_state()
+                return self._control_status(verb, typing_wpm=new_wpm)
 
         # -- toggles -------------------------------------------------------
         if verb == "middle-click":

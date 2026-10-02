@@ -332,6 +332,7 @@ class TestEngineVerbs:
             ("serial", "off", "serial_collapse"),
             ("spell", "off", "spell_command"),
             ("middle-click", "on", "middle_click"),
+            ("wpm", "60", "typing_wpm"),
         ],
     )
     def test_setters_apply_and_echo_the_new_value(self, engine, verb, value, key):
@@ -345,6 +346,16 @@ class TestEngineVerbs:
         before = t2.IS_MUTED
         engine.handle_control("mute", {})
         assert t2.IS_MUTED is not before
+
+    def test_wpm_cycles_without_a_value(self, engine):
+        import t2
+
+        engine.handle_control("wpm", {"value": "40"})
+        assert t2.TYPING_WPM == 40
+        resp = engine.handle_control("wpm", {})
+        assert resp["ok"] is True
+        assert resp["typing_wpm"] == 50
+        assert t2.TYPING_WPM == 50
 
     def test_setters_require_a_value(self, engine):
         with pytest.raises(ValueError, match="needs a value"):
