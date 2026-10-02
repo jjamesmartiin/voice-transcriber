@@ -418,3 +418,14 @@ class TestSettingsMenuLifecycle:
         assert t2.TYPING_WPM == 50
         app._sync_tui_state.assert_called_once()
         app.tui.print_event.assert_called_once()
+
+    def test_set_punctuation_mode_callback(self, monkeypatch):
+        app = _make_app(monkeypatch)
+        monkeypatch.setattr(t2, "PUNCTUATION_MODE", "full")
+        monkeypatch.setattr(t2, "save_audio_config", lambda: None)
+
+        app._on_tui_set_punctuation_mode("casual")
+
+        assert t2.PUNCTUATION_MODE == "no_terminal_period"
+        app._sync_tui_state.assert_called_once()
+        app.tui.print_event.assert_called_once()

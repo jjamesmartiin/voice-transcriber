@@ -1125,10 +1125,14 @@ pub fn run_settings_picker(
                                     }
                                 }
                                 SettingKind::PunctuationMode => {
-                                    app.cycle_punctuation();
-                                    if let Some(w) = writer {
-                                        ipc::send_cmd(w, "cycle_punctuation");
-                                    }
+                                    // Nested preset picker modal.
+                                    let _ = hand_over_screen(&mut terminal, || {
+                                        crate::preset_picker::run_preset_picker(
+                                            writer,
+                                            rx,
+                                            app,
+                                        )
+                                    });
                                 }
                                 SettingKind::Theme => {
                                     // Nested theme picker modal.

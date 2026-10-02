@@ -12,6 +12,7 @@ mod app;
 mod demo;
 mod ipc;
 mod mic_picker;
+mod preset_picker;
 mod settings_picker;
 mod textfit;
 mod theme_picker;

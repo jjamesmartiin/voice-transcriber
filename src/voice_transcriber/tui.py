@@ -121,6 +121,9 @@ class VoiceTranscriberTUI:
         self.on_cycle_typing_wpm = None
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
+        self.on_set_theme = None
+        self.on_cycle_punctuation = None
+        self.on_set_punctuation = None
         self.on_open_theme_picker = None
         self.on_open_preset_picker = None
         self.on_open_settings_picker = None

@@ -232,6 +232,7 @@ class SimpleVoiceTranscriber:
         self.tui.on_set_typing_wpm = self._on_tui_set_typing_wpm
         self.tui.on_toggle_middle_click = self._on_tui_toggle_middle_click
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
+        self.tui.on_set_punctuation = self._on_tui_set_punctuation_mode
         self.tui.on_reset_defaults = self._on_tui_reset_defaults
         self.tui.on_open_preset_picker = self.open_preset_picker
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
@@ -438,6 +439,14 @@ class SimpleVoiceTranscriber:
         self._sync_tui_state()
         disp = t2.get_preset_display_name(new_mode)
         self.tui.print_event("✨ Mode Preset", f"Preset set to {disp}", level="info")
+
+    def _on_tui_set_punctuation_mode(self, new_mode):
+        import t2
+        t2.set_punctuation_mode(new_mode)
+        t2.save_audio_config()
+        self._sync_tui_state()
+        disp = t2.get_preset_display_name(new_mode)
+        self.tui.print_event("✨ Mode Preset", f"Active preset set to {disp}", level="success")
 
     def _on_tui_reset_defaults(self):
         """Restore every user-tunable setting to its shipped default."""

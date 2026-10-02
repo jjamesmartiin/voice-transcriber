@@ -97,6 +97,8 @@ class RatatuiTui:
         self.on_toggle_middle_click = None
         self.on_cycle_theme = None
         self.on_set_theme = None
+        self.on_cycle_punctuation = None
+        self.on_set_punctuation = None
         self.on_reset_defaults = None
         self.on_reset_terminal = None
         self.on_quit = None
@@ -299,6 +301,12 @@ class RatatuiTui:
                 self.on_cycle_theme()
         elif cmd in ("cycle_punctuation", "cycle_preset") and getattr(self, "on_cycle_punctuation", None):
             self.on_cycle_punctuation()
+        elif cmd in ("set_punctuation", "set_preset"):
+            mode = msg.get("mode") or msg.get("preset") or msg.get("value")
+            if mode and getattr(self, "on_set_punctuation", None):
+                self.on_set_punctuation(mode)
+            elif getattr(self, "on_cycle_punctuation", None):
+                self.on_cycle_punctuation()
         elif cmd == "open_preset_picker" and getattr(self, "on_open_preset_picker", None):
             self.on_open_preset_picker()
         elif cmd == "reset_defaults" and getattr(self, "on_reset_defaults", None):
