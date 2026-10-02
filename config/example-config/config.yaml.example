@@ -191,6 +191,13 @@ sound_theme: "proximity"
 ui_theme: "red"
 
 # ------------------------------------------------------------------------------
+# Average Typing Speed (Words Per Minute)
+# Used to calculate estimated "Time Saved" compared to manual typing.
+# Displayed in transcription badges and cumulative session stats.
+# Default: 40
+typing_wpm: 40
+
+# ------------------------------------------------------------------------------
 # Primary Audio Input Device Name
 # Substring match for primary microphone device name.
 # Available Options:

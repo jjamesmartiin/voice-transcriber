@@ -102,6 +102,10 @@ pub enum Wire {
         ready: f32,
         #[serde(default)]
         status: Option<String>,
+        #[serde(default)]
+        time_saved: Option<f32>,
+        #[serde(default)]
+        session_time_saved: Option<f32>,
     },
     #[serde(rename = "ev")]
     Ev {

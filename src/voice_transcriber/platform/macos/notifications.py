@@ -108,6 +108,8 @@ class MacOSVisualNotification:
                 device_name=self.active_device,
                 rec_duration=rec_duration or 0.0,
                 proc_time=proc_time or 0.0,
+                time_saved=kwargs.get("time_saved", 0.0),
+                session_time_saved=kwargs.get("session_time_saved", 0.0),
             )
             if hasattr(self.tui, "update_state"):
                 self.tui.update_state("READY")

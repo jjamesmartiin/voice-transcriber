@@ -112,6 +112,25 @@ class WindowsVisualNotification:
         if sub_text:
             message = f"✓ {sub_text[:30]}..."
         logger.info(f"Transcription: {sub_text}")
+        if self.tui and sub_text and hasattr(self.tui, "print_transcription"):
+            try:
+                import t2
+                typed = getattr(t2, "AUTO_TYPE", False)
+            except Exception:
+                typed = False
+            self.tui.print_transcription(
+                sub_text,
+                elapsed_sec=kwargs.get("elapsed_sec") or 0.0,
+                copy_success=True,
+                typed_success=typed,
+                device_name=getattr(self, "active_device", None),
+                rec_duration=kwargs.get("rec_duration") or 0.0,
+                proc_time=kwargs.get("proc_time") or 0.0,
+                time_saved=kwargs.get("time_saved", 0.0),
+                session_time_saved=kwargs.get("session_time_saved", 0.0),
+            )
+            if hasattr(self.tui, "update_state"):
+                self.tui.update_state("READY")
         self._show_tkinter_overlay(message, "#00aa44")
 
     def show_error(self, message):

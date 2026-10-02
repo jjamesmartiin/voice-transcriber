@@ -56,6 +56,9 @@ keep_bluetooth_handsfree = true
 # Sound cue theme: "proximity", "pop", "chime", or "silent"
 sound_theme = "proximity"
 
+# Average typing speed (WPM) for estimated time saved calculations (default: 40)
+typing_wpm = 40
+
 # Device selection: primary/secondary device names (null/omitted for default)
 override_mode = "auto"
 # primary_device_name = "USB Audio"

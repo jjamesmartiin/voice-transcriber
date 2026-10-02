@@ -133,6 +133,7 @@ PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "aesthetic_
 LANGUAGE = "en"
 WAIT_FOR_MODEL_ON_STARTUP = True
 ENABLE_SLM = False
+TYPING_WPM = 40
 
 # Shipped defaults for every user-tunable setting. Applied by
 # reset_to_defaults() (settings modal -> "Reset to Defaults"), and the target
@@ -162,6 +163,7 @@ DEFAULT_SETTINGS = {
     'LANGUAGE': "en",
     'WAIT_FOR_MODEL_ON_STARTUP': True,
     'ENABLE_SLM': False,
+    'TYPING_WPM': 40,
 }
 
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
@@ -536,7 +538,7 @@ def _normalize_bool(value, default: bool = False) -> bool:
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, TYPING_WPM, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -612,6 +614,13 @@ def load_audio_config(file_path=None):
             elif env_slm in ["0", "false", "no"]:
                 ENABLE_SLM = False
             os.environ["VT_ENABLE_SLM"] = "1" if ENABLE_SLM else "0"
+
+            try:
+                TYPING_WPM = int(config.get('typing_wpm', 40))
+                if TYPING_WPM <= 0:
+                    TYPING_WPM = 40
+            except (ValueError, TypeError):
+                TYPING_WPM = 40
 
             AUTO_TYPE_TRAILING_SPACE = config.get('auto_type_trailing_space', True)
             env_trailing_space = os.environ.get("VT_AUTO_TYPE_TRAILING_SPACE", "").strip().lower()
@@ -754,6 +763,15 @@ def load_audio_config(file_path=None):
         elif env_spell_command in ["0", "false", "no", "off"]:
             SPELL_COMMAND = False
 
+        env_wpm = os.environ.get("VT_TYPING_WPM", "").strip()
+        if env_wpm:
+            try:
+                parsed_wpm = int(env_wpm)
+                if parsed_wpm > 0:
+                    TYPING_WPM = parsed_wpm
+            except (ValueError, TypeError):
+                pass
+
         # Keep the post-processor's runtime number mode in sync with the loaded config
         set_number_digits(NUMBER_MODE)
 
@@ -778,7 +796,7 @@ def load_audio_config(file_path=None):
 
 def save_audio_config(file_path=None):
     """Save audio device configuration to local file preserving existing keys and format"""
-    global CONFIG_FILE, AUTO_TYPE, OUTPUT_MODE, COPY_TO_CLIPBOARD, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, SERIAL_COLLAPSE, SPELL_COMMAND
+    global CONFIG_FILE, AUTO_TYPE, OUTPUT_MODE, COPY_TO_CLIPBOARD, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, SERIAL_COLLAPSE, SPELL_COMMAND, TYPING_WPM
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     elif CONFIG_FILE is None:
@@ -840,6 +858,7 @@ def save_audio_config(file_path=None):
             'language': LANGUAGE,
             'enable_slm': ENABLE_SLM,
             'wait_for_model_on_startup': WAIT_FOR_MODEL_ON_STARTUP,
+            'typing_wpm': TYPING_WPM,
         })
 
         if CONFIG_FILE.suffix == '.toml':
@@ -944,6 +963,74 @@ def set_auto_type_auto_punctuate(enabled: bool) -> bool:
 
 def get_auto_type_auto_punctuate() -> bool:
     return AUTO_TYPE_AUTO_PUNCTUATE
+
+
+def set_typing_wpm(wpm: int) -> int:
+    """Set average typing WPM and persist to config."""
+    global TYPING_WPM
+    try:
+        val = int(wpm)
+        if val > 0:
+            TYPING_WPM = val
+            save_audio_config()
+    except (ValueError, TypeError):
+        pass
+    return TYPING_WPM
+
+
+def get_typing_wpm() -> int:
+    """Get current average typing WPM setting."""
+    return TYPING_WPM
+
+
+def calculate_time_saved(text: str, actual_duration_sec: float, wpm: float | None = None) -> float:
+    """Calculate estimated time saved in seconds compared to typing.
+
+    Args:
+        text: Transcribed text string.
+        actual_duration_sec: Actual time taken for speech + processing.
+        wpm: Typing words per minute (defaults to TYPING_WPM).
+
+    Returns:
+        Time saved in seconds (float >= 0.0). If word count is 0, returns 0.0.
+    """
+    if not text:
+        return 0.0
+    words = len(text.strip().split())
+    if words == 0:
+        return 0.0
+
+    if wpm is None:
+        wpm = TYPING_WPM
+    try:
+        wpm = float(wpm)
+    except (ValueError, TypeError):
+        wpm = 40.0
+    if wpm <= 0:
+        wpm = 40.0
+
+    typing_time = (words / wpm) * 60.0
+    return max(0.0, typing_time - actual_duration_sec)
+
+
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to human-readable string.
+
+    Examples:
+        format_duration(14) -> "14s"
+        format_duration(135) -> "2m 15s"
+        format_duration(3900) -> "1h 05m"
+    """
+    total_sec = max(0, int(round(seconds)))
+    if total_sec < 60:
+        return f"{total_sec}s"
+    if total_sec < 3600:
+        mins = total_sec // 60
+        secs = total_sec % 60
+        return f"{mins}m {secs:02d}s"
+    hours = total_sec // 3600
+    mins = (total_sec % 3600) // 60
+    return f"{hours}h {mins:02d}m"
 
 
 def get_canonical_preset_name(name: str) -> str:

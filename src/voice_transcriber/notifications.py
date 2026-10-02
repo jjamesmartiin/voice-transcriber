@@ -142,7 +142,7 @@ class VisualNotification:
         if not self.tui:
             self._show_terminal_notification(f"Loading {text}...")
     
-    def show_completed(self, text="COMPLETED", sub_text=None, elapsed_sec=None, rec_duration=None, proc_time=None):
+    def show_completed(self, text="COMPLETED", sub_text=None, elapsed_sec=None, rec_duration=None, proc_time=None, time_saved=0.0, session_time_saved=0.0, **kwargs):
         """Show a completion notification."""
         self._cleanup_overlays()
         self._create_overlay("COMPLETED", "#00aaff", persistent=False)
@@ -157,7 +157,9 @@ class VisualNotification:
                 typed_success=typed,
                 device_name=self.active_device,
                 rec_duration=rec_duration or 0.0,
-                proc_time=proc_time or 0.0
+                proc_time=proc_time or 0.0,
+                time_saved=time_saved,
+                session_time_saved=session_time_saved,
             )
             self.tui.update_state("READY")
         elif not self.tui:

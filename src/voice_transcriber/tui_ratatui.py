@@ -504,7 +504,8 @@ class RatatuiTui:
 
     def print_transcription(self, text, elapsed_sec=0.0, copy_success=True,
                             typed_success=False, device_name=None,
-                            rec_duration=0.0, proc_time=0.0):
+                            rec_duration=0.0, proc_time=0.0,
+                            time_saved=0.0, session_time_saved=0.0):
         self.transcription_count += 1
         if typed_success:
             status = "typed"
@@ -512,14 +513,25 @@ class RatatuiTui:
             status = "copied"
         else:
             status = "error"
-        self._send({
+        payload = {
             "t": "tx",
             "text": text,
             "rec": float(rec_duration or 0.0),
             "proc": float(proc_time or 0.0),
             "ready": float(elapsed_sec or 0.0),
             "status": status,
-        })
+        }
+        if time_saved is not None:
+            try:
+                payload["time_saved"] = float(time_saved)
+            except (ValueError, TypeError):
+                pass
+        if session_time_saved is not None:
+            try:
+                payload["session_time_saved"] = float(session_time_saved)
+            except (ValueError, TypeError):
+                pass
+        self._send(payload)
 
     def print_event(self, title, message, level="info"):
         self._send({"t": "ev", "title": str(title), "message": str(message),

@@ -30,6 +30,7 @@ def cfg(tmp_path, monkeypatch):
         "VT_PUNCTUATION_MODE",
         "VT_AUTO_TYPE_TRAILING_SPACE",
         "VT_AUTO_TYPE_AUTO_PUNCTUATE",
+        "VT_TYPING_WPM",
     ):
         monkeypatch.delenv(var, raising=False)
     return path
@@ -293,6 +294,7 @@ class TestResetToDefaults:
             "middle_click_enabled": "MIDDLE_CLICK_ENABLED",
             "sound_theme": "SOUND_THEME",
             "ui_theme": "UI_THEME",
+            "typing_wpm": "TYPING_WPM",
         }
 
         for example_key, default_key in key_map.items():

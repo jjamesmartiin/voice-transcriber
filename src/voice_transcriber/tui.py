@@ -53,6 +53,23 @@ def detect_system_theme_color():
     return "green"
 
 
+def _format_duration_helper(seconds):
+    try:
+        from t2 import format_duration
+        return format_duration(seconds)
+    except Exception:
+        total_sec = max(0, int(round(seconds)))
+        if total_sec < 60:
+            return f"{total_sec}s"
+        if total_sec < 3600:
+            mins = total_sec // 60
+            secs = total_sec % 60
+            return f"{mins}m {secs:02d}s"
+        hours = total_sec // 3600
+        mins = (total_sec % 3600) // 60
+        return f"{hours}h {mins:02d}m"
+
+
 class VoiceTranscriberTUI:
     def __init__(self, app_version="1.2.0", ui_theme="auto"):
         self.app_version = app_version
@@ -373,7 +390,7 @@ class VoiceTranscriberTUI:
 
         return prompt
 
-    def print_transcription(self, text, elapsed_sec=0.0, copy_success=True, typed_success=False, device_name=None, rec_duration=0.0, proc_time=0.0):
+    def print_transcription(self, text, elapsed_sec=0.0, copy_success=True, typed_success=False, device_name=None, rec_duration=0.0, proc_time=0.0, time_saved=0.0, session_time_saved=0.0):
         """
         Print transcription directly into interactive shell scrollback stream:
         - Top horizontal divider line with prompt tag, recording duration, processing time, and post-release latency
@@ -407,6 +424,29 @@ class VoiceTranscriberTUI:
             else:
                 top_rule.append("│ ", style="dim white")
                 top_rule.append(f"proc: {elapsed_sec:.2f}s ", style="yellow")
+            if time_saved:
+                if isinstance(time_saved, (int, float)):
+                    saved_str = f"+{_format_duration_helper(time_saved)}" if time_saved > 0 else None
+                else:
+                    saved_str = str(time_saved).strip()
+                    if saved_str and not saved_str.startswith("+"):
+                        saved_str = f"+{saved_str}"
+
+                if saved_str:
+                    total_str = None
+                    if session_time_saved:
+                        if isinstance(session_time_saved, (int, float)):
+                            if session_time_saved > 0:
+                                total_str = _format_duration_helper(session_time_saved)
+                        else:
+                            total_str = str(session_time_saved).strip()
+
+                    top_rule.append("│ ", style="dim white")
+                    if total_str:
+                        badge = f"⚡ saved: {saved_str} (total: {total_str}) "
+                    else:
+                        badge = f"⚡ saved: {saved_str} "
+                    top_rule.append(badge, style="bold green")
             top_rule.append("│ ", style="dim white")
             top_rule.append(f"{status_str}\n", style=status_color)
             self.console.print(top_rule)

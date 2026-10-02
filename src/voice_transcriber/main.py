@@ -87,6 +87,11 @@ class SimpleVoiceTranscriber:
         self.audio_frames = []
         self.copy_to_clipboard = False
         self.start_time = 0
+
+        # Cumulative session stats for time saved tracking
+        self.session_words = 0
+        self.session_time_saved_sec = 0.0
+        self.session_transcriptions = 0
         
         # Initialize the TUI frontend (ratatui if available, else Rich).
         self.tui = create_tui()
@@ -833,6 +838,12 @@ class SimpleVoiceTranscriber:
                 self.last_transcription = transcription
                 self.last_finish_time = time.time()
 
+                words = len(transcription.strip().split())
+                time_saved = t2.calculate_time_saved(transcription, rec_duration + proc_time)
+                self.session_words = getattr(self, 'session_words', 0) + words
+                self.session_time_saved_sec = getattr(self, 'session_time_saved_sec', 0.0) + time_saved
+                self.session_transcriptions = getattr(self, 'session_transcriptions', 0) + 1
+
                 if effective_mode in ("type", "type_fast"):
                     try:
                         logger.debug("Waiting for modifier release before typing...")
@@ -878,7 +889,9 @@ class SimpleVoiceTranscriber:
                                 sub_text=transcription,
                                 elapsed_sec=post_release_latency,
                                 rec_duration=audio_rec_duration,
-                                proc_time=proc_time
+                                proc_time=proc_time,
+                                time_saved=time_saved,
+                                session_time_saved=self.session_time_saved_sec,
                             )
                         except Exception as e:
                             logger.warning(f"Visual notification error: {e}")
@@ -946,6 +959,9 @@ class SimpleVoiceTranscriber:
             "ui_theme": getattr(t2, "UI_THEME", "auto"),
             "middle_click": bool(getattr(t2, "MIDDLE_CLICK_ENABLED", False)),
             "last_transcription": getattr(self, "last_transcription", ""),
+            "session_words": getattr(self, "session_words", 0),
+            "session_time_saved_sec": getattr(self, "session_time_saved_sec", 0.0),
+            "typing_wpm": getattr(t2, "TYPING_WPM", 40),
             **extra,
         }
 

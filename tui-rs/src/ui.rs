@@ -308,6 +308,21 @@ pub struct Block {
     pub bottom: Line<'static>,
 }
 
+fn format_duration(seconds: f32) -> String {
+    let total_sec = seconds.round().max(0.0) as u64;
+    if total_sec < 60 {
+        format!("{total_sec}s")
+    } else if total_sec < 3600 {
+        let mins = total_sec / 60;
+        let secs = total_sec % 60;
+        format!("{mins}m {secs:02}s")
+    } else {
+        let hours = total_sec / 3600;
+        let mins = (total_sec % 3600) / 60;
+        format!("{hours}h {mins:02}m")
+    }
+}
+
 pub fn transcription_block(
     app: &App,
     width: u16,
@@ -316,6 +331,8 @@ pub fn transcription_block(
     proc: f32,
     ready: f32,
     status: OutStatus,
+    time_saved: Option<f32>,
+    session_time_saved: Option<f32>,
 ) -> Block {
     let c = app.effective_color().color();
     let ts = chrono::Local::now().format("%H:%M:%S").to_string();
@@ -352,6 +369,25 @@ pub fn transcription_block(
             format!("proc: {proc:.2}s "),
             Style::default().fg(Color::Yellow),
         ));
+    }
+    if let Some(saved) = time_saved {
+        if saved > 0.0 {
+            spans.push(Span::styled("│ ", dim()));
+            let badge = if let Some(total) = session_time_saved {
+                if total > 0.0 {
+                    format!(
+                        "⚡ saved: +{} (total: {}) ",
+                        format_duration(saved),
+                        format_duration(total)
+                    )
+                } else {
+                    format!("⚡ saved: +{} ", format_duration(saved))
+                }
+            } else {
+                format!("⚡ saved: +{} ", format_duration(saved))
+            };
+            spans.push(Span::styled(badge, bold(Color::Green)));
+        }
     }
     spans.push(Span::styled("│ ", dim()));
     spans.push(Span::styled(
@@ -460,5 +496,23 @@ mod tests {
         let block_magenta = event_block(&app, 80, "✅ Model Ready", "Model loaded", Level::Success);
         assert_eq!(block_magenta.top.spans[0].style.fg, Some(Color::Magenta));
         assert_eq!(block_magenta.bottom.spans[0].style.fg, Some(Color::Magenta));
+    }
+
+    #[test]
+    fn test_transcription_block_time_saved_badge() {
+        let app = App::new("1.1.1", Theme::Cyan);
+        let block = transcription_block(
+            &app,
+            80,
+            "hello world",
+            1.5,
+            0.5,
+            0.2,
+            OutStatus::Typed,
+            Some(12.0),
+            Some(105.0),
+        );
+        let top_str: String = block.top.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(top_str.contains("⚡ saved: +12s (total: 1m 45s)"));
     }
 }
