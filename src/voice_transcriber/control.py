@@ -56,6 +56,8 @@ import sys
 import tempfile
 import threading
 
+import console_text
+
 #: Environment variable that overrides the control socket path.
 CONTROL_SOCKET_ENV = "VT_CONTROL_SOCKET"
 
@@ -487,9 +489,31 @@ def _print_verbs(stream=None) -> None:
         print(line, file=stream)
 
 
+def _plural(count: int, singular: str) -> str:
+    return f"{count} {singular}" if count == 1 else f"{count} {singular}s"
+
+
+def _print_stats_summary(response: dict) -> None:
+    """One line of lifetime dictation totals (absent on engines that predate them)."""
+    if "lifetime_time_saved" not in response:
+        return
+    parts = [f"time saved: {response.get('lifetime_time_saved', '0s')} all-time"]
+    if response.get("lifetime_words"):
+        parts.append(_plural(response["lifetime_words"], "word"))
+    if response.get("lifetime_transcriptions"):
+        parts.append(_plural(response["lifetime_transcriptions"], "dictation"))
+    if response.get("lifetime_sessions"):
+        parts.append(_plural(response["lifetime_sessions"], "session"))
+    session_sec = response.get("session_time_saved_sec")
+    if session_sec:
+        parts.append(f"{round(session_sec)}s this session")
+    # safe_print: a stream that cannot encode "·" gets "|" instead of a crash.
+    console_text.safe_print(" · ".join(parts))
+
+
 def _print_human(verb: str, response: dict) -> None:
     if not response.get("ok"):
-        print(f"✗ {response.get('error', 'command failed')}", file=sys.stderr)
+        console_text.safe_print(f"✗ {response.get('error', 'command failed')}", file=sys.stderr)
         return
 
     if verb in ("status", "wait"):
@@ -506,12 +530,13 @@ def _print_human(verb: str, response: dict) -> None:
             "last_transcription",
         ):
             if key in response:
-                print(f"{key}: {response[key]}")
+                console_text.safe_print(f"{key}: {response[key]}")
+        _print_stats_summary(response)
         return
 
     if verb == "mics":
         for name in response.get("devices", []):
-            print(name)
+            console_text.safe_print(name)
         return
 
     if verb == "help":
@@ -519,7 +544,7 @@ def _print_human(verb: str, response: dict) -> None:
         return
 
     detail = response.get("state") or response.get("device") or response.get("theme")
-    print(f"✓ {verb}" + (f" → {detail}" if detail else ""))
+    console_text.safe_print(f"✓ {verb}" + (f" → {detail}" if detail else ""))
 
 
 def run_cli(argv=None, stream=None) -> int | None:
@@ -554,7 +579,7 @@ def run_cli(argv=None, stream=None) -> int | None:
         return 0 if res.get("ok") else 1
 
     if verb not in VERBS:
-        print(f"Unknown control verb: {verb!r}", file=sys.stderr)
+        console_text.safe_print(f"Unknown control verb: {verb!r}", file=sys.stderr)
         _print_verbs(sys.stderr)
         return 2
 

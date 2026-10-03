@@ -81,6 +81,12 @@ See [`docs/offline_install.md`](../../docs/offline_install.md).
 detail with `VT_LOG_LEVEL=INFO`. A `run.bat` started by double-click keeps its
 window open on error so the message is readable.
 
+**Legacy code pages.** When the console (or a redirected pipe/file) cannot encode
+the UI's emoji and box-drawing glyphs, they fall back to ASCII automatically —
+`⚡ saved: +12s` becomes `* saved: +12s`, `│` becomes `|`. Nothing raises and no
+output is lost. Set `VT_ASCII=1` to force that ASCII rendering even on a UTF-8
+console.
+
 ### 3. Setup via PowerShell
 If you prefer running via PowerShell directly, pass `-ExecutionPolicy Bypass` (since Windows blocks downloaded `.ps1` scripts by default):
 ```powershell
@@ -273,3 +279,11 @@ ERROR: Could not install packages due to an OSError: [WinError 206] The filename
 3. Go to the **Advanced** tab.
 4. **Uncheck** *"Allow applications to take exclusive control of this device"*.
 5. Click **Apply** and **OK**. Both Discord and Voice Transcriber can now share the microphone stream.
+
+### 6. Emoji or Box Characters Appear as ASCII (`*`, `|`) or Question Marks
+**Symptom:** The transcript divider shows `* saved: +12s` instead of `⚡ saved: +12s`, or stray `?` characters appear.  
+**Cause:** The output stream cannot encode those glyphs — a legacy console code page (e.g. a redirected `run.bat > log.txt`), or `PYTHONIOENCODING=ascii` in the environment. The app downgrades them on purpose: Rich otherwise raises `UnicodeEncodeError` and the divider disappears entirely.  
+**Fix:**
+1. This is safe and lossless — every glyph has an ASCII stand-in.  
+2. For the full glyph set, use Windows Terminal (UTF-8 by default), or set `PYTHONIOENCODING=utf-8`.  
+3. To force ASCII everywhere *including* UTF-8 consoles, set `VT_ASCII=1`.  

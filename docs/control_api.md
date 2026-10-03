@@ -140,9 +140,20 @@ Every reply is a JSON object with at least `ok`:
   "punctuation_mode": "full",
   "ui_theme": "red",
   "middle_click": false,
-  "last_transcription": "I deployed on NixOS using kubectl."
+  "last_transcription": "I deployed on NixOS using kubectl.",
+  "session_words": 30,
+  "session_time_saved_sec": 41.2,
+  "lifetime_words": 4210,
+  "lifetime_time_saved_sec": 4802.3,
+  "lifetime_time_saved": "1h 20m",
+  "lifetime_transcriptions": 512,
+  "lifetime_sessions": 37,
+  "typing_wpm": 40
 }
 ```
+
+Volume metrics (`last_transcription`, `session_*`, `lifetime_*`) are descriptive —
+see [Dictation stats](#dictation-stats).
 
 Failures carry `error` instead of state:
 
@@ -153,6 +164,43 @@ Failures carry `error` instead of state:
 `state` is one of `READY`, `RECORDING`, `PROCESSING` (and `UNKNOWN` before the
 frontend reports in). `PROCESSING` covers both "transcribing" and the initial
 model load.
+
+### Dictation stats
+
+`status` and `wait` also report how much typing dictation has saved, computed at
+`typing_wpm` (see the `wpm` verb):
+
+| Field | Meaning |
+| :--- | :--- |
+| `session_words`, `session_time_saved_sec` | This engine process only; resets on restart |
+| `lifetime_words`, `lifetime_time_saved_sec` | All-time, persisted across restarts |
+| `lifetime_time_saved` | The same total pre-formatted (`"1h 20m"`) for humans |
+| `lifetime_transcriptions` | Number of dictations folded into the totals |
+| `lifetime_sessions` | Engine launches counted |
+
+Totals live in a small JSON file (`stats.json`) in the platform data directory,
+written after **every** dictation so a crash loses at most the in-flight one. The
+file is created automatically on first launch (engine startup counts a session),
+and the directory is created with it if it does not exist. Override the location
+with `VT_STATS_FILE` (git ignores any `stats.json`, so an override into the repo
+is still safe). They are *not* part of `config.yaml`, so `reset-defaults` leaves
+them alone — delete the file to clear them:
+
+```bash
+python src/main.py status                              # ...ends with a one-line summary
+rm "${XDG_DATA_HOME:-$HOME/.local/share}/vt/stats.json" # wipe the all-time totals
+```
+
+> **Native Windows:** the file and the `⚡ saved` badge work exactly as on
+> Linux/macOS, but the command above does not — the control API needs
+> `AF_UNIX`, which stock CPython does not expose on Windows (see the note at the
+> top of this document). Read the totals from the badge, or from
+> `%LOCALAPPDATA%\vt\stats.json`.
+
+Human-readable CLI output is encoding-safe: on a stream that cannot encode the
+`·` separator or the `✓`/`✗` markers they become `|`, `+` and `x` rather than
+raising `UnicodeEncodeError`. Use `--json` when you want to parse the reply
+regardless of the console's encoding.
 
 ---
 
@@ -379,6 +427,7 @@ The API is designed to be driven without reading the source.
 | :--- | :--- |
 | Is it running? | `python src/main.py ping --json` |
 | What is it doing? | `python src/main.py status --json` |
+| How much time have I saved? | `python src/main.py status` (the `lifetime_time_saved` field; Linux/WSL/macOS only — on native Windows use the badge) |
 | Dictate something | `start` → wait → `stop` → `wait --json` |
 | Change output | `python src/main.py output clipboard` |
 | Silence the cues | `python src/main.py mute off` |

@@ -56,7 +56,8 @@ keep_bluetooth_handsfree = true
 # Sound cue theme: "proximity", "pop", "chime", or "silent"
 sound_theme = "proximity"
 
-# Average typing speed (WPM) for estimated time saved calculations (default: 40)
+# Average typing speed (WPM) for estimated time saved calculations (default: 40).
+# The all-time total lives outside the config, in <data dir>/stats.json.
 typing_wpm = 40
 
 # Device selection: primary/secondary device names (null/omitted for default)

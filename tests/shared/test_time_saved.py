@@ -125,6 +125,22 @@ class TestDurationFormatting:
         assert t2.format_duration(7320) == "2h 02m"
         assert t2.format_duration(36000) == "10h 00m"
 
+    def test_half_seconds_round_up_like_the_rust_frontend(self):
+        """Parity with tui-rs/src/ui.rs::format_duration.
+
+        Python's builtin round() is banker's rounding (round(2.5) == 2), so using
+        it made the Rich and ratatui badges disagree by a second on exactly-.5
+        values. Both sides now round half up; these are the same expected values
+        pinned in ui.rs::tests::test_format_duration_matches_the_python_frontend.
+        """
+        assert t2.format_duration(0.5) == "1s"
+        assert t2.format_duration(2.5) == "3s"
+        assert t2.format_duration(12.5) == "13s"
+        assert t2.format_duration(62.5) == "1m 03s"
+        assert t2.format_duration(3599.5) == "1h 00m"
+        assert t2.format_duration(14.4) == "14s"
+        assert t2.format_duration(14.5) == "15s"
+
 
 # ===========================================================================
 # 3. Config Loading and Defaults
@@ -237,6 +253,9 @@ class TestSessionAccumulation:
         assert status["session_words"] == 0
         assert status["session_time_saved_sec"] == 0.0
         assert status["typing_wpm"] == 40
+        assert status["lifetime_words"] == 0
+        assert status["lifetime_time_saved_sec"] == 0.0
+        assert status["lifetime_time_saved"] == "0s"
 
     def test_process_recording_accumulates_stats(self, monkeypatch):
         """process_recording updates session_words, session_time_saved_sec, and session_transcriptions."""
@@ -313,8 +332,50 @@ class TestSessionAccumulation:
         _, kwargs = app.visual_notification.show_completed.call_args
         assert "time_saved" in kwargs
         assert "session_time_saved" in kwargs
+        assert "lifetime_time_saved" in kwargs
         assert kwargs["time_saved"] > 0.0
         assert kwargs["session_time_saved"] == kwargs["time_saved"]
+
+    def test_engine_startup_creates_the_stats_file(self, monkeypatch, tmp_path):
+        """Engine start writes stats.json even if the user never dictates."""
+        stats_path = tmp_path / "stats.json"
+        monkeypatch.setenv("VT_STATS_FILE", str(stats_path))
+        app = self._create_app(monkeypatch)
+        assert not stats_path.exists()
+
+        app._refresh_lifetime_stats(record_session=True)
+
+        assert stats_path.exists()
+        assert app.lifetime_sessions == 1
+        assert app.lifetime_time_saved_sec == 0.0
+
+    def test_lifetime_stats_persist_across_engine_instances(self, monkeypatch, tmp_path):
+        """The all-time total outlives the process; the session total does not."""
+        monkeypatch.setenv("VT_STATS_FILE", str(tmp_path / "stats.json"))
+        app = self._create_app(monkeypatch)
+        monkeypatch.setattr("main.process_audio_stream", lambda frames: ("word " * 20, 0.1))
+        app.start_time = 100.0
+        app.release_time = 102.0
+        monkeypatch.setattr("time.time", lambda: 102.5)
+
+        app.process_recording()
+
+        saved = app.lifetime_time_saved_sec
+        assert app.lifetime_words == 20
+        assert app.lifetime_transcriptions == 1
+        assert saved > 0.0
+
+        # A new engine: session counters start at zero, lifetime totals resume.
+        app2 = self._create_app(monkeypatch)
+        app2._refresh_lifetime_stats()
+        assert app2.session_time_saved_sec == 0.0
+        assert app2.lifetime_words == 20
+        assert app2.lifetime_transcriptions == 1
+        assert app2.lifetime_time_saved_sec == pytest.approx(saved)
+
+        status = app2._control_status()
+        assert status["lifetime_time_saved_sec"] == pytest.approx(saved)
+        assert status["lifetime_words"] == 20
 
 
 # ===========================================================================
@@ -337,7 +398,43 @@ class TestTuiDisplay:
         )
 
         output = tui.console.export_text()
-        assert "⚡ saved: +12s (total: 1m 45s)" in output
+        assert "⚡ saved: +12s (session: 1m 45s)" in output
+
+    def test_rich_tui_prints_lifetime_total(self):
+        """With lifetime stats the badge labels the session and the all-time total."""
+        tui = VoiceTranscriberTUI(ui_theme="cyan")
+        tui.console.width = 120
+        tui.console.record = True
+
+        tui.print_transcription(
+            text="All-time totals.",
+            elapsed_sec=0.5,
+            rec_duration=2.0,
+            proc_time=0.4,
+            time_saved=12.0,
+            session_time_saved=105.0,
+            lifetime_time_saved=3661.0,
+        )
+
+        output = tui.console.export_text()
+        assert "⚡ saved: +12s (session: 1m 45s · total: 1h 01m)" in output
+
+    def test_rich_tui_lifetime_only_on_a_fresh_session(self):
+        """First dictation of a session: session total == all-time, so show one label."""
+        tui = VoiceTranscriberTUI(ui_theme="cyan")
+        tui.console.width = 120
+        tui.console.record = True
+
+        tui.print_transcription(
+            text="Fresh session.",
+            elapsed_sec=0.5,
+            time_saved=12.0,
+            session_time_saved=12.0,
+            lifetime_time_saved=12.0,
+        )
+
+        output = tui.console.export_text()
+        assert "⚡ saved: +12s (total: 12s)" in output
 
     def test_rich_tui_without_time_saved_omits_badge(self):
         """When time_saved is 0.0 or omitted, no badge is displayed and output is clean."""
@@ -369,10 +466,10 @@ class TestTuiDisplay:
         )
 
         output = tui.console.export_text()
-        assert "⚡ saved: +15s (total: 3m 30s)" in output
+        assert "⚡ saved: +15s (session: 3m 30s)" in output
 
     def test_ratatui_forwards_time_saved(self):
-        """RatatuiTui includes time_saved and session_time_saved in the IPC payload."""
+        """RatatuiTui includes time_saved, session and lifetime totals in the IPC payload."""
         tui = RatatuiTui.__new__(RatatuiTui)
         tui.transcription_count = 0
         sent = []
@@ -385,6 +482,7 @@ class TestTuiDisplay:
             proc_time=0.2,
             time_saved=14.5,
             session_time_saved=65.0,
+            lifetime_time_saved=3600.0,
         )
 
         assert len(sent) == 1
@@ -393,3 +491,4 @@ class TestTuiDisplay:
         assert msg["text"] == "Ratatui IPC test"
         assert msg["time_saved"] == 14.5
         assert msg["session_time_saved"] == 65.0
+        assert msg["lifetime_time_saved"] == 3600.0

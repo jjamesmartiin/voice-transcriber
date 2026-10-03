@@ -593,6 +593,10 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
 
 if __name__ == "__main__":
     import argparse
+    # The ✓/✕ markers below must not raise on a stream that cannot encode them
+    # (legacy codepage, LANG=C, PYTHONIOENCODING=ascii). See console_text.
+    import console_text
+    console_text.harden_standard_streams()
     parser = argparse.ArgumentParser(
         prog="python -m src.model_download",
         description="Download and verify Cohere model assets from GitHub release.",

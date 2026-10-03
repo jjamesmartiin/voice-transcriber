@@ -525,7 +525,8 @@ class RatatuiTui:
     def print_transcription(self, text, elapsed_sec=0.0, copy_success=True,
                             typed_success=False, device_name=None,
                             rec_duration=0.0, proc_time=0.0,
-                            time_saved=0.0, session_time_saved=0.0):
+                            time_saved=0.0, session_time_saved=0.0,
+                            lifetime_time_saved=0.0):
         self.transcription_count += 1
         if typed_success:
             status = "typed"
@@ -549,6 +550,11 @@ class RatatuiTui:
         if session_time_saved is not None:
             try:
                 payload["session_time_saved"] = float(session_time_saved)
+            except (ValueError, TypeError):
+                pass
+        if lifetime_time_saved is not None:
+            try:
+                payload["lifetime_time_saved"] = float(lifetime_time_saved)
             except (ValueError, TypeError):
                 pass
         self._send(payload)

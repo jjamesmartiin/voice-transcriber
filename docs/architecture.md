@@ -128,6 +128,8 @@ flowchart TD
 | **ASR Engine** | [`src/transcribe2.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/transcribe2.py) | Runs the Cohere Transcribe2 model. Uses HuggingFace local snapshot resolution for sub-1.5s cold starts. |
 | **Wispr Flow Post-Processor** | [`src/post_processor.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/post_processor.py) | Multi-stage text cleanup pipeline: verbal retraction parsing, stutter removal, dangling clause linking, mid-sentence casing normalization, acronym preservation (`TECHNICAL_ACRONYMS_AND_PROPER_NOUNS`), and optional `vLLM` SLM polish. |
 | **Notifications & UI** | [`src/notifications.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/notifications.py) | Floating Tkinter status pill overlay displaying real-time pipeline state (`RECORDING`, `PROCESSING`, `COMPLETED`) and total post-release latency timers. |
+| **Lifetime Stats** | [`src/stats.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/stats.py) | Persistent all-time dictation totals (`time_saved_sec`, `words`, `transcriptions`, `sessions`) for the `⚡ saved` badge. Atomic read-modify-write JSON in the data dir, updated after every dictation; fail-soft so a bad file can never break recording. |
+| **Console Encoding Safety** | [`src/console_text.py`](file:///home/jamesm/gitprojects/voice-transcriber/src/console_text.py) | Keeps every output path from raising `UnicodeEncodeError` on a stream that cannot encode the UI's glyphs (legacy Windows code page, `LANG=C`, `PYTHONIOENCODING=ascii`). Installs `errors="replace"` on stdout/stderr, and downgrades `⚡ │ · ✓` to ASCII stand-ins per encoding (`EncodingSafeStream` wraps the Rich console). `VT_ASCII=1` forces ASCII. |
 
 ---
 

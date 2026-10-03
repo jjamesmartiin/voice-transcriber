@@ -108,6 +108,8 @@ pub enum Wire {
         time_saved: Option<f32>,
         #[serde(default)]
         session_time_saved: Option<f32>,
+        #[serde(default)]
+        lifetime_time_saved: Option<f32>,
     },
     #[serde(rename = "ev")]
     Ev {
@@ -203,5 +205,61 @@ pub fn level_from_wire(s: Option<&str>) -> Level {
         "warning" => Level::Warning,
         "error" => Level::Error,
         _ => Level::Info,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `tx` (transcription) wire message must tolerate both directions of
+    /// version skew, since the Python engine and this binary are upgraded
+    /// independently (the engine may be restarted at a different time than the
+    /// TUI is rebuilt, and a `VT_TUI_BIN` dev build can be older than either):
+    ///   * an older engine that never sends `lifetime_time_saved`
+    ///   * a newer engine that sends fields this binary does not know about
+    #[test]
+    fn tx_message_parses_without_lifetime_time_saved() {
+        let json = r#"{"t":"tx","text":"hello","rec":1.5,"proc":0.5,"ready":0.2,"status":"copied","time_saved":12.0,"session_time_saved":105.0}"#;
+        match serde_json::from_str::<Wire>(json).expect("old engine payload must parse") {
+            Wire::Tx { lifetime_time_saved, session_time_saved, text, .. } => {
+                assert_eq!(text, "hello");
+                assert_eq!(session_time_saved, Some(105.0));
+                assert_eq!(lifetime_time_saved, None);
+            }
+            other => panic!("expected Tx, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tx_message_parses_with_lifetime_time_saved() {
+        let json = r#"{"t":"tx","text":"hi","rec":1.0,"proc":0.1,"ready":0.1,"status":"typed","time_saved":12.0,"session_time_saved":105.0,"lifetime_time_saved":3661.0}"#;
+        match serde_json::from_str::<Wire>(json).expect("new engine payload must parse") {
+            Wire::Tx { lifetime_time_saved, .. } => {
+                assert_eq!(lifetime_time_saved, Some(3661.0));
+            }
+            other => panic!("expected Tx, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tx_message_ignores_unknown_future_fields() {
+        // A newer engine adding a field must not break an older TUI.
+        let json = r#"{"t":"tx","text":"hi","rec":1.0,"proc":0.1,"ready":0.1,"status":"copied","time_saved":12.0,"session_time_saved":105.0,"lifetime_time_saved":3661.0,"words_per_second":9.9}"#;
+        assert!(serde_json::from_str::<Wire>(json).is_ok());
+    }
+
+    #[test]
+    fn tx_message_tolerates_only_the_required_text_field() {
+        /// Every numeric field is `#[serde(default)]`, so a minimal producer works.
+        let json = r#"{"t":"tx","text":"minimal"}"#;
+        match serde_json::from_str::<Wire>(json).expect("minimal payload must parse") {
+            Wire::Tx { lifetime_time_saved, time_saved, session_time_saved, .. } => {
+                assert_eq!(lifetime_time_saved, None);
+                assert_eq!(time_saved, None);
+                assert_eq!(session_time_saved, None);
+            }
+            other => panic!("expected Tx, got {other:?}"),
+        }
     }
 }

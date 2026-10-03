@@ -32,6 +32,13 @@ if str(src_dir) not in sys.path:
 _TEST_LOG_FILE = Path(tempfile.gettempdir()) / f"vt-tests-{os.getpid()}.log"
 os.environ.setdefault("VT_LOG_FILE", str(_TEST_LOG_FILE))
 
+# Lifetime dictation stats are persisted to <data dir>/stats.json. Tests must
+# never touch the developer's real totals, so point VT_STATS_FILE at a temp file
+# for the whole session. Tests that want a specific path monkeypatch the env var
+# themselves (tests/shared/test_stats.py).
+_TEST_STATS_FILE = Path(tempfile.gettempdir()) / f"vt-stats-tests-{os.getpid()}.json"
+os.environ.setdefault("VT_STATS_FILE", str(_TEST_STATS_FILE))
+
 class PowerCpuMonitor:
     """Utility class to measure CPU utilization and ACPI battery power consumption."""
     def __init__(self, sample_interval=0.05):

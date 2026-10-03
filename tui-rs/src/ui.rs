@@ -323,6 +323,11 @@ fn format_duration(seconds: f32) -> String {
     }
 }
 
+fn format_optional_duration(value: Option<f32>) -> Option<String> {
+    // Mirrors tui.py::_format_optional_duration: nothing worth showing -> None.
+    value.filter(|v| *v > 0.0).map(format_duration)
+}
+
 pub fn transcription_block(
     app: &App,
     width: u16,
@@ -333,6 +338,7 @@ pub fn transcription_block(
     status: OutStatus,
     time_saved: Option<f32>,
     session_time_saved: Option<f32>,
+    lifetime_time_saved: Option<f32>,
 ) -> Block {
     let c = app.effective_color().color();
     let ts = chrono::Local::now().format("%H:%M:%S").to_string();
@@ -373,18 +379,22 @@ pub fn transcription_block(
     if let Some(saved) = time_saved {
         if saved > 0.0 {
             spans.push(Span::styled("│ ", dim()));
-            let badge = if let Some(total) = session_time_saved {
-                if total > 0.0 {
-                    format!(
-                        "⚡ saved: +{} (total: {}) ",
-                        format_duration(saved),
-                        format_duration(total)
-                    )
-                } else {
-                    format!("⚡ saved: +{} ", format_duration(saved))
+            let session = format_optional_duration(session_time_saved);
+            let lifetime = format_optional_duration(lifetime_time_saved);
+            let totals = match (&session, &lifetime) {
+                (Some(s), Some(l)) if s != l => {
+                    Some(format!("(session: {s} · total: {l})"))
                 }
-            } else {
-                format!("⚡ saved: +{} ", format_duration(saved))
+                // Fresh session: the all-time total is the interesting number.
+                (_, Some(l)) => Some(format!("(total: {l})")),
+                (Some(s), None) => Some(format!("(session: {s})")),
+                (None, None) => None,
+            };
+            let badge = match totals {
+                Some(totals) => {
+                    format!("⚡ saved: +{} {totals} ", format_duration(saved))
+                }
+                None => format!("⚡ saved: +{} ", format_duration(saved)),
             };
             spans.push(Span::styled(badge, bold(Color::Green)));
         }
@@ -511,8 +521,51 @@ mod tests {
             OutStatus::Typed,
             Some(12.0),
             Some(105.0),
+            None,
         );
         let top_str: String = block.top.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(top_str.contains("⚡ saved: +12s (total: 1m 45s)"));
+        assert!(top_str.contains("⚡ saved: +12s (session: 1m 45s)"));
+    }
+
+    #[test]
+    fn test_transcription_block_lifetime_badge() {
+        let app = App::new("1.1.1", Theme::Cyan);
+        let block = transcription_block(
+            &app,
+            80,
+            "hello world",
+            1.5,
+            0.5,
+            0.2,
+            OutStatus::Typed,
+            Some(12.0),
+            Some(105.0),
+            Some(3600.0),
+        );
+        let top_str: String = block.top.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(top_str.contains("⚡ saved: +12s (session: 1m 45s · total: 1h 00m)"));
+    }
+
+    /// Parity with tui.format_duration_helper / t2.format_duration in Python.
+    ///
+    /// Rust's f32::round rounds half away from zero; Python's builtin round() is
+    /// banker's rounding (round(2.5) == 2). The Python side was aligned to
+    /// half-up so both frontends print the same badge. Keep these expected values
+    /// in sync with tests/shared/test_time_saved.py::
+    /// test_half_seconds_round_up_like_the_rust_frontend.
+    #[test]
+    fn test_format_duration_matches_the_python_frontend() {
+        assert_eq!(format_duration(0.0), "0s");
+        assert_eq!(format_duration(14.0), "14s");
+        assert_eq!(format_duration(14.4), "14s");
+        assert_eq!(format_duration(14.5), "15s");
+        assert_eq!(format_duration(0.5), "1s");
+        assert_eq!(format_duration(2.5), "3s");
+        assert_eq!(format_duration(12.5), "13s");
+        assert_eq!(format_duration(62.5), "1m 03s");
+        assert_eq!(format_duration(3599.5), "1h 00m");
+        assert_eq!(format_duration(135.0), "2m 15s");
+        assert_eq!(format_duration(3900.0), "1h 05m");
+        assert_eq!(format_duration(-5.0), "0s");
     }
 }

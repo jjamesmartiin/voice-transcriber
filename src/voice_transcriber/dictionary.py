@@ -12,6 +12,8 @@ from pathlib import Path
 import sys
 from typing import Any, Dict, List, Optional
 
+import console_text
+
 CANDIDATE_PATHS = [
     Path("config/dictionary.yaml"),
     Path("config/dictionary.yml"),
@@ -308,6 +310,9 @@ def test_phrase(text: str) -> str:
 
 def main(args=None):
     """CLI entry point for dictionary management."""
+    # The ✓/✕/• markers below must not raise on a stream that cannot encode them
+    # (legacy codepage, LANG=C, PYTHONIOENCODING=ascii). See console_text.
+    console_text.harden_standard_streams()
     parser = argparse.ArgumentParser(
         prog="python -m src.dictionary",
         description="Manage the Voice Transcriber custom word & phrase dictionary.",

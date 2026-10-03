@@ -27,6 +27,8 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
+import console_text
+
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 COLOR_PALETTES = ["auto", "green", "cyan", "blue", "magenta", "yellow", "red", "white"]
 
@@ -58,7 +60,8 @@ def _format_duration_helper(seconds):
         from t2 import format_duration
         return format_duration(seconds)
     except Exception:
-        total_sec = max(0, int(round(seconds)))
+        # Half-up rounding, matching t2.format_duration and the Rust frontend.
+        total_sec = max(0, int(seconds + 0.5))
         if total_sec < 60:
             return f"{total_sec}s"
         if total_sec < 3600:
@@ -70,10 +73,28 @@ def _format_duration_helper(seconds):
         return f"{hours}h {mins:02d}m"
 
 
+def _format_optional_duration(value):
+    """Format a duration for the badge, or return ``None`` when it shows nothing.
+
+    Accepts either a number of seconds or an already-formatted string (the
+    frontends accept both). Zero, negative, empty and ``None`` values all mean
+    "don't render this part of the badge".
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return _format_duration_helper(value) if value > 0 else None
+    text_value = str(value).strip()
+    return text_value or None
+
+
 class VoiceTranscriberTUI:
     def __init__(self, app_version="1.2.0", ui_theme="auto"):
         self.app_version = app_version
-        self.console = Console()
+        # Wrapped so a stream that cannot encode our glyphs (legacy codepage,
+        # LANG=C, PYTHONIOENCODING=ascii) gets ASCII stand-ins instead of Rich
+        # re-raising UnicodeEncodeError and losing the output entirely.
+        self.console = Console(file=console_text.EncodingSafeStream())
         self.lock = threading.Lock()
         self.ui_theme = ui_theme
         
@@ -396,7 +417,7 @@ class VoiceTranscriberTUI:
 
         return prompt
 
-    def print_transcription(self, text, elapsed_sec=0.0, copy_success=True, typed_success=False, device_name=None, rec_duration=0.0, proc_time=0.0, time_saved=0.0, session_time_saved=0.0):
+    def print_transcription(self, text, elapsed_sec=0.0, copy_success=True, typed_success=False, device_name=None, rec_duration=0.0, proc_time=0.0, time_saved=0.0, session_time_saved=0.0, lifetime_time_saved=0.0):
         """
         Print transcription directly into interactive shell scrollback stream:
         - Top horizontal divider line with prompt tag, recording duration, processing time, and post-release latency
@@ -439,19 +460,24 @@ class VoiceTranscriberTUI:
                         saved_str = f"+{saved_str}"
 
                 if saved_str:
-                    total_str = None
-                    if session_time_saved:
-                        if isinstance(session_time_saved, (int, float)):
-                            if session_time_saved > 0:
-                                total_str = _format_duration_helper(session_time_saved)
-                        else:
-                            total_str = str(session_time_saved).strip()
+                    session_str = _format_optional_duration(session_time_saved)
+                    lifetime_str = _format_optional_duration(lifetime_time_saved)
+                    if session_str and lifetime_str and lifetime_str != session_str:
+                        totals = f"(session: {session_str} · total: {lifetime_str})"
+                    elif lifetime_str:
+                        # Fresh session: the all-time total is the interesting number.
+                        totals = f"(total: {lifetime_str})"
+                    elif session_str:
+                        totals = f"(session: {session_str})"
+                    else:
+                        totals = None
 
                     top_rule.append("│ ", style="dim white")
-                    if total_str:
-                        badge = f"⚡ saved: {saved_str} (total: {total_str}) "
-                    else:
-                        badge = f"⚡ saved: {saved_str} "
+                    badge = (
+                        f"⚡ saved: {saved_str} {totals} "
+                        if totals
+                        else f"⚡ saved: {saved_str} "
+                    )
                     top_rule.append(badge, style="bold green")
             top_rule.append("│ ", style="dim white")
             top_rule.append(f"{status_str}\n", style=status_color)

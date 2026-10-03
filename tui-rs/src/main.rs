@@ -215,6 +215,7 @@ impl Runtime {
                 status,
                 time_saved,
                 session_time_saved,
+                lifetime_time_saved,
             } => {
                 app.transcription_count += 1;
                 let block = ui::transcription_block(
@@ -227,6 +228,7 @@ impl Runtime {
                     ipc::status_from_wire(status.as_deref()),
                     time_saved,
                     session_time_saved,
+                    lifetime_time_saved,
                 );
                 self.emit_block(&block)?;
             }
@@ -497,7 +499,7 @@ fn apply_local_action(app: &mut App, rt: &mut Runtime, action: Action) -> io::Re
         } => {
             app.transcription_count += 1;
             let width = rt.width();
-            let block = ui::transcription_block(app, width, &text, rec, proc, ready, status, None, None);
+            let block = ui::transcription_block(app, width, &text, rec, proc, ready, status, None, None, None);
             rt.emit_block(&block)?;
             app.update_state(RunState::Ready, String::new());
         }

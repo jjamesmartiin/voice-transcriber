@@ -22,6 +22,8 @@ LOG_FILE = logging_setup.configure_logging()
 # Import core modules
 import hal
 import control
+import stats
+import console_text
 from tui import VoiceTranscriberTUI
 
 # Import transcription functionality
@@ -92,6 +94,15 @@ class SimpleVoiceTranscriber:
         self.session_words = 0
         self.session_time_saved_sec = 0.0
         self.session_transcriptions = 0
+
+        # Lifetime stats (persisted across sessions by src/stats.py).
+        # Counted once per engine launch; the transcription totals are folded
+        # in as dictations complete.
+        self.lifetime_words = 0
+        self.lifetime_time_saved_sec = 0.0
+        self.lifetime_transcriptions = 0
+        self.lifetime_sessions = 0
+        self._refresh_lifetime_stats(record_session=True)
         
         # Initialize the TUI frontend (ratatui if available, else Rich).
         self.tui = create_tui()
@@ -875,6 +886,9 @@ class SimpleVoiceTranscriber:
                 self.session_time_saved_sec = getattr(self, 'session_time_saved_sec', 0.0) + time_saved
                 self.session_transcriptions = getattr(self, 'session_transcriptions', 0) + 1
 
+                # Fold this dictation into the persistent all-time totals.
+                self._refresh_lifetime_stats(words=words, time_saved_sec=time_saved)
+
                 if effective_mode in ("type", "type_fast"):
                     try:
                         logger.debug("Waiting for modifier release before typing...")
@@ -923,6 +937,7 @@ class SimpleVoiceTranscriber:
                                 proc_time=proc_time,
                                 time_saved=time_saved,
                                 session_time_saved=self.session_time_saved_sec,
+                                lifetime_time_saved=self.lifetime_time_saved_sec,
                             )
                         except Exception as e:
                             logger.warning(f"Visual notification error: {e}")
@@ -992,9 +1007,40 @@ class SimpleVoiceTranscriber:
             "last_transcription": getattr(self, "last_transcription", ""),
             "session_words": getattr(self, "session_words", 0),
             "session_time_saved_sec": getattr(self, "session_time_saved_sec", 0.0),
+            "lifetime_words": getattr(self, "lifetime_words", 0),
+            "lifetime_time_saved_sec": getattr(self, "lifetime_time_saved_sec", 0.0),
+            "lifetime_time_saved": t2.format_duration(getattr(self, "lifetime_time_saved_sec", 0.0)),
+            "lifetime_transcriptions": getattr(self, "lifetime_transcriptions", 0),
+            "lifetime_sessions": getattr(self, "lifetime_sessions", 0),
             "typing_wpm": getattr(t2, "TYPING_WPM", 40),
             **extra,
         }
+
+    def _refresh_lifetime_stats(self, words=0, time_saved_sec=0.0, record_session=False):
+        """Sync the in-memory lifetime counters with the persisted stats file.
+
+        Called once at startup (``record_session=True``) and after every
+        successful dictation. Either way the stats file is created if it does
+        not exist yet, so a first launch always leaves one behind.
+
+        Failures are swallowed by :mod:`stats`; the in-memory values then keep
+        their previous value so the UI never breaks over a stat.
+        """
+        try:
+            if record_session:
+                record = stats.record_session_start()
+            elif words or time_saved_sec:
+                record = stats.record_transcription(words, time_saved_sec)
+            else:
+                record = stats.ensure()
+        except Exception as e:  # never let bookkeeping break dictation
+            logger.warning(f"Could not update lifetime stats: {e}")
+            return
+
+        self.lifetime_words = int(record.get("words", 0))
+        self.lifetime_time_saved_sec = float(record.get("time_saved_sec", 0.0))
+        self.lifetime_transcriptions = int(record.get("transcriptions", 0))
+        self.lifetime_sessions = int(record.get("sessions", 0))
 
     @staticmethod
     def _control_on_off(value):
@@ -1324,6 +1370,10 @@ def check_permissions():
 
 def cli():
     """Main CLI entry point for Voice Transcriber."""
+    # Never let a stream that cannot encode our glyphs (legacy Windows codepage,
+    # LANG=C behind a pipe, PYTHONIOENCODING=ascii) break any output path.
+    console_text.harden_standard_streams()
+
     if LOG_FILE:
         logger.info("Log file: %s", LOG_FILE)
 

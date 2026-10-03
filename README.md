@@ -298,6 +298,8 @@ sub-pickers reached from inside the settings modal:
 - **Interactive Modal Pickers**: `⚙️ Settings & Configuration`, `🎤 Microphone Input Device`, and `🎨 Select UI Color Theme` overlays with real-time search filtering, arrow/Tab navigation, and in-place toggling.
 - **Inline CLI Prompt Stream**: Responsive status prompt line with active mic, model, sound, output mode, trailing space, punctuation, numbers, and mouse hold badges.
 - **Clean Word-Wrapped Transcriptions**: Direct terminal scrollback with timing metadata dividers and zero border interference for 100% clean copy-paste.
+- **Persistent Time-Saved Counter**: every transcription divider carries a `⚡ saved: +14s (session: 2m 15s · total: 1h 20m)` badge — the time dictation saved versus typing, the running session total, and an **all-time total that survives restarts**. The estimate uses the `typing_wpm` setting.
+- **Encoding-safe output**: on a console or pipe that cannot encode the emoji and box-drawing glyphs (a legacy Windows code page, `LANG=C`, `PYTHONIOENCODING=ascii`), they degrade to ASCII stand-ins — `⚡`→`*`, `│`→`|`, `·`→`|` — instead of raising `UnicodeEncodeError` and losing the divider. Nothing is ever dropped silently. Set `VT_ASCII=1` to force the ASCII rendering everywhere.
 
 ---
 
@@ -323,7 +325,9 @@ Voice Transcriber Architecture
 │    * Filler-word and stutter removal                        │
 │    * Verbal retraction parser ("no wait", "scratch that")   │
 │    * Spoken numbers to digits conversion                    │
+│    * Spoken dates to ordinal days ("October 20th")          │
 │    * Sentence casing & terminal punctuation                 │
+│  - Lifetime stats & time-saved estimate (stats.py)          │
 │  - TUI: ratatui (default) / Rich (fallback)                 │
 └──────────────────────────────┬──────────────────────────────┘
                                │
@@ -509,7 +513,7 @@ Supported options:
 - `copy_to_clipboard`: `true` or `false`.
 - `auto_type_trailing_space`: append a space after auto-typed text.
 - `auto_type_auto_punctuate`: enforce terminal punctuation on auto-typed text.
-- `number_digits`: `auto` (default: only consecutive spoken digit chains such as phone/serial numbers become digits, while ordinals and small isolated counts read as words — `"the 5th item"` → `"the fifth item"`, `"I have 2 dogs"` → `"I have two dogs"`), `digits` (always convert), or `words` (never convert). Legacy `true`/`false` are accepted as aliases for `digits`/`words`.
+- `number_digits`: `auto` (default: only consecutive spoken digit chains such as phone/serial numbers become digits, while ordinals and small isolated counts read as words — `"the 5th item"` → `"the fifth item"`, `"I have 2 dogs"` → `"I have two dogs"`), `digits` (always convert), or `words` (never convert). Legacy `true`/`false` are accepted as aliases for `digits`/`words`. Spoken dates are the one exception in `auto`/`digits`: the day is always written as an ordinal numeral (`"October twentieth"` → `"October 20th"`, `"the twentieth of October"` → `"the 20th of October"`, `"October twentieth twenty twenty five"` → `"October 20th, 2025"`); `words` mode leaves them spelled out.
 - `serial_collapse`: `true` (default) writes serial numbers, model/part codes and NATO phonetic dictation as a single token (`"A B C 1 2 3"` → `ABC123`, `"Alpha Bravo 4"` → `AB4`); `false` keeps single-space separators.
 - `spell_command`: `true` (default) enables the verbal spell command (`"spell C A T"` → `CAT`); `false` leaves `"spell ..."` phrases untouched.
 - `keep_bluetooth_handsfree`: `true` keeps Bluetooth devices in hands-free mode so media does not pause when recording ends.
@@ -517,6 +521,7 @@ Supported options:
 - `enable_slm`: `true` to enable the optional local vLLM grammar-polish pass (default `false`).
 - `sound_theme`: audio cue pack — `proximity` (default), `pop`, `chime`, or `silent`.
 - `ui_theme`: `auto` (follow the terminal) or one of `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white`.
+- `typing_wpm`: words-per-minute typing baseline used for the `⚡ saved` estimate (default `40`; preset cycling lives in the `wpm` control verb).
 - `dictionary`: key-value map of custom phrase replacements (see `config/dictionary.yaml`).
 - `dictionary_file`: path to an external YAML/JSON dictionary; takes precedence over the inline `dictionary` map.
 
@@ -524,6 +529,16 @@ Supported options:
 key, including the ones not listed above (`primary_device_name`,
 `middle_click_enabled`, …). Any option can be overridden per-session with its
 `VT_*` environment variable, e.g. `VT_OUTPUT_MODE=clipboard`, `VT_UI_THEME=cyan`.
+
+> **Not everything is config.** The all-time time-saved totals live in
+> `stats.json` in the platform data directory (`$XDG_DATA_HOME/vt/`,
+> `~/.local/share/vt/`, or `%LOCALAPPDATA%\vt\`), **not** in `config.yaml` —
+> `reset-defaults` and config edits never touch them. The file (and its
+> directory) is created automatically on the first launch, and `stats.json` is
+> gitignored wherever it lands. Point `VT_STATS_FILE` somewhere else, or delete
+> the file to start counting from zero. Read the totals with
+> `python src/main.py status` (Linux/macOS/WSL; on native Windows read the badge
+> or the file, since the control API is unavailable there).
 
 Options can also be changed live from the settings modal (`s`/`S`/`,` in the
 terminal), or programmatically via the [Control API](#control-api).

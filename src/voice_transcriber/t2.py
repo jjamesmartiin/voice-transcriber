@@ -1042,12 +1042,17 @@ def calculate_time_saved(text: str, actual_duration_sec: float, wpm: float | Non
 def format_duration(seconds: float) -> str:
     """Format duration in seconds to human-readable string.
 
+    Rounds half *up* (``2.5 -> "3s"``), matching ``format_duration`` in
+    ``tui-rs/src/ui.rs``. Python's builtin ``round`` is banker's rounding
+    (``round(2.5) == 2``), which would make the Rich and ratatui frontends
+    disagree by a second on exactly-.5 values.
+
     Examples:
         format_duration(14) -> "14s"
         format_duration(135) -> "2m 15s"
         format_duration(3900) -> "1h 05m"
     """
-    total_sec = max(0, int(round(seconds)))
+    total_sec = max(0, int(seconds + 0.5))
     if total_sec < 60:
         return f"{total_sec}s"
     if total_sec < 3600:

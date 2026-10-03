@@ -2,7 +2,7 @@
 """
 Cross-platform runtime tests for the Windows CPU-speed fixes.
 
-Covers three things that are easy to regress and must behave identically across
+Covers four things that are easy to regress and must behave identically across
 Linux / Windows / WSL:
 
 1. ``transcribe_cohere._cpu_supports_bf16()`` — must keep using /proc/cpuinfo on
@@ -15,6 +15,11 @@ Linux / Windows / WSL:
    accept both a Python list (what ``record_audio_stream`` returns on the
    Windows/native fast path) and a NumPy array, without calling ``.size`` on a
    list.
+4. ``t2.get_data_dir()`` / ``stats.stats_path()`` — the per-user data directory
+   (where ``stats.json`` and the config live) must resolve to
+   ``%LOCALAPPDATA%\vt`` on Windows and ``$XDG_DATA_HOME/vt`` or
+   ``~/.local/share/vt`` elsewhere, and the stats file must be created there on
+   first launch.
 
 The transcribe_cohere tests require torch/transformers and are skipped where it
 is not installed (the lightweight Windows CI runner). The process_recording
@@ -22,6 +27,7 @@ tests only need ``main`` and run on every platform.
 """
 import builtins
 import io
+import os
 import sys
 import threading
 import types
@@ -286,3 +292,81 @@ class TestAudioFramesEmptyCheck:
 
         app.process_recording()
         assert seen == []
+
+
+# ===========================================================================
+# 4. Data-directory selection (where stats.json / config land)
+# ===========================================================================
+class TestDataDirSelection:
+    """``get_data_dir()`` picks the platform data dir; ``stats.json`` lives there.
+
+    ``t2.os`` is replaced with a tiny namespace instead of patching the real
+    ``os`` module: ``os.name`` also selects the ``pathlib`` flavour, so flipping
+    it globally would break ``Path`` construction (and pytest) on the host.
+    """
+
+    def _isolate_home(self, monkeypatch, tmp_path):
+        """Never touch the real home: creating ~/AppData on Linux would be a mess."""
+        home = tmp_path / "home"
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+        return home
+
+    def _pretend_platform(self, monkeypatch, name):
+        import t2
+
+        monkeypatch.setattr(t2, "os", types.SimpleNamespace(name=name, environ=os.environ))
+
+    def test_windows_uses_localappdata(self, monkeypatch, tmp_path):
+        import t2
+
+        home = self._isolate_home(monkeypatch, tmp_path)
+        self._pretend_platform(monkeypatch, "nt")
+        assert t2.get_data_dir() == home / "AppData" / "Local" / "vt"
+
+    def test_posix_uses_xdg_local_share(self, monkeypatch, tmp_path):
+        import t2
+
+        home = self._isolate_home(monkeypatch, tmp_path)
+        self._pretend_platform(monkeypatch, "posix")
+        assert t2.get_data_dir() == home / ".local" / "share" / "vt"
+
+    def test_xdg_data_home_wins_on_any_platform(self, monkeypatch, tmp_path):
+        import t2
+
+        self._isolate_home(monkeypatch, tmp_path)
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+        for platform_name in ("nt", "posix"):
+            self._pretend_platform(monkeypatch, platform_name)
+            assert t2.get_data_dir() == tmp_path / "xdg" / "vt"
+
+    def test_first_launch_creates_stats_in_the_windows_data_dir(self, monkeypatch, tmp_path):
+        """End-to-end: Windows path resolution + automatic file creation."""
+        import stats
+
+        home = self._isolate_home(monkeypatch, tmp_path)
+        self._pretend_platform(monkeypatch, "nt")
+        monkeypatch.delenv("VT_STATS_FILE", raising=False)  # use the platform default
+        monkeypatch.setattr(stats, "_cleaned_temp_files", False)
+
+        target = home / "AppData" / "Local" / "vt" / "stats.json"
+        assert stats.stats_path() == target
+        assert not target.exists()
+
+        stats.record_session_start()  # what engine startup does
+
+        assert target.exists(), "first launch must create stats.json in the data dir"
+        assert stats.snapshot()["sessions"] == 1
+
+    def test_first_launch_creates_stats_in_the_posix_data_dir(self, monkeypatch, tmp_path):
+        import stats
+
+        home = self._isolate_home(monkeypatch, tmp_path)
+        self._pretend_platform(monkeypatch, "posix")
+        monkeypatch.delenv("VT_STATS_FILE", raising=False)
+        monkeypatch.setattr(stats, "_cleaned_temp_files", False)
+
+        target = home / ".local" / "share" / "vt" / "stats.json"
+        assert stats.stats_path() == target
+        stats.record_session_start()
+        assert target.exists()

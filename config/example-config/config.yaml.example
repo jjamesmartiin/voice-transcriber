@@ -193,7 +193,8 @@ ui_theme: "red"
 # ------------------------------------------------------------------------------
 # Average Typing Speed (Words Per Minute)
 # Used to calculate estimated "Time Saved" compared to manual typing.
-# Displayed in transcription badges and cumulative session stats.
+# Displayed in transcription badges, the session running total, and the
+# all-time total persisted in <data dir>/stats.json across sessions.
 # Default: 40
 typing_wpm: 40
 
