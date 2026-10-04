@@ -61,6 +61,21 @@ class _FakeKeyEvent:
         self.value = value
 
 
+class _ScriptedDevice:
+    """Device stand-in whose ``active_keys()`` is the state a test scripts."""
+
+    def __init__(self):
+        self.name = "scripted-device"
+        self.path = "/dev/input/event-scripted"
+        self.held = set()
+
+    def active_keys(self):
+        return set(self.held)
+
+    def close(self):
+        pass
+
+
 class TestMouseModeApi:
     @pytest.mark.parametrize("platform", sorted(CLASS_NAMES))
     def test_backend_overrides_mouse_mode_toggle(self, platform):
@@ -120,8 +135,17 @@ def _make_manager(platform: str):
             manager.cleanup()
             pytest.skip("evdev not available on this host")
         code = manager.MIDDLE_MOUSE_KEYS[0]
+        # The backend decides push-to-talk from each device's live key state, so
+        # the injected press must move a device's state, exactly as the kernel
+        # does before it makes the event readable.
+        device = _ScriptedDevice()
+        manager.devices = [device]
 
         def inject(pressed: bool):
+            if pressed:
+                device.held.add(code)
+            else:
+                device.held.discard(code)
             manager.handle_key_event(_FakeKeyEvent(code, 1 if pressed else 0))
 
     elif platform == hal.WINDOWS:

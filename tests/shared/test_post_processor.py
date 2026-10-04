@@ -618,6 +618,85 @@ def test_full_pipeline_digits_mode_keeps_numerals(number_mode):
 
 
 # ---------------------------------------------------------------------------
+# Spoken dates: the day always carries an ordinal numeral (auto/digits modes)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text,expected", [
+    ("October twentieth", "October 20th"),
+    ("october twentieth", "October 20th"),
+    ("October the twentieth", "October 20th"),
+    ("October twenty", "October 20th"),
+    ("October twenty five", "October 25th"),
+    ("January one", "January 1st"),
+    ("September twenty", "September 20th"),
+    ("October thirty one", "October 31st"),
+    ("the twentieth of October", "the 20th of October"),
+    ("the fourth of July", "the 4th of July"),
+    ("meet on October twenty fifth at noon", "meet on October 25th at noon"),
+    ("October 20th", "October 20th"),
+    # A capitalized ambiguous month is a date even with a day of 1.
+    ("May first", "May 1st"),
+    ("March fourth", "March 4th"),
+])
+def test_format_dates_writes_the_day_as_an_ordinal(text, expected):
+    assert pp.format_dates(text, mode="auto") == expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("October twentieth twenty twenty five", "October 20th, 2025"),
+    ("October twenty five, 2025", "October 25th, 2025"),
+    ("October twenty twenty five", "October 2025"),
+    ("October 20th, 2025", "October 20th, 2025"),
+])
+def test_format_dates_handles_years(text, expected):
+    assert pp.format_dates(text, mode="auto") == expected
+
+
+@pytest.mark.parametrize("text", [
+    # "may"/"march" are ordinary verbs too: a bare cardinal day needs a date context.
+    "May one of you do the thing",
+    "may one of you do that",
+    "May one ask",
+    "we march twenty miles",
+    # ...and so are "first/second/third/fourth", which are ordinal words: the guard
+    # must cover ordinals as well as cardinals ("you may second that motion").
+    "we may first ask",
+    "you may second that motion",
+    "I may fourth the idea",
+    "we march first",
+    # A cardinal day without a year must terminate the date phrase.
+    "in October twenty people came",
+    "October twenty five people",
+])
+def test_format_dates_does_not_invent_dates(text):
+    assert pp.format_dates(text, mode="auto") == text
+
+
+def test_format_dates_leaves_words_mode_spelled_out():
+    assert pp.format_dates("the twentieth of October", mode="words") == "the twentieth of October"
+    assert pp.format_dates("October twentieth", mode="words") == "October twentieth"
+
+
+def test_full_pipeline_auto_mode_formats_dates(number_mode):
+    pp.set_number_digits_mode("auto")
+    assert pp.clean_speech_transcription("October twentieth", skip_slm=True) == "October 20th"
+    assert pp.clean_speech_transcription("the twentieth of October", skip_slm=True) == \
+        "the 20th of October."
+    # Ordinals are normally spelled out in auto mode; a date is the exception.
+    assert pp.clean_speech_transcription("the 4th of July", skip_slm=True) == "the 4th of July."
+    assert pp.clean_speech_transcription("October twentieth twenty twenty five", skip_slm=True) == \
+        "October 20th, 2025."
+    # A mid-sentence month keeps its capitalization as part of the date.
+    assert pp.clean_speech_transcription("my birthday is June twenty third", skip_slm=True) == \
+        "my birthday is June 23rd."
+    # The ambiguous-month guard survives the whole pipeline.
+    assert pp.clean_speech_transcription("May one of you do the thing", skip_slm=True) == \
+        "May one of you do the thing."
+    assert pp.clean_speech_transcription("we march twenty miles", skip_slm=True) == \
+        "we march twenty miles."
+
+
+# ---------------------------------------------------------------------------
 # "oh" as an interjection vs. as a leading zero (regression)
 # ---------------------------------------------------------------------------
 

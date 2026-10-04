@@ -199,6 +199,15 @@ LEADING_STRAY_T_REGEX = re.compile(
     re.IGNORECASE
 )
 
+# Calendar month names. A capitalized month immediately followed by a day number is
+# part of a date and is never decapitalized mid-sentence ("my birthday is June
+# 23rd", not "june 23rd").
+_MONTH_NAMES = (
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+)
+_MONTH_DAY_FOLLOW_REGEX = re.compile(r"\d{1,2}(?:st|nd|rd|th)?$", re.IGNORECASE)
+
 # Common technical acronyms & proper nouns to preserve casing mid-sentence
 TECHNICAL_ACRONYMS_AND_PROPER_NOUNS = {
     "I", "vLLM", "NixOS", "PyTorch", "Python", "GitHub", "Git", "WSL", "WSLg",
@@ -249,6 +258,9 @@ def normalize_mid_sentence_casing(text: str) -> str:
     def _replace_mid_sentence_cap(m):
         word = m.group(1)
         if word in TECHNICAL_ACRONYMS_AND_PROPER_NOUNS or word.isupper() or len(word) == 1:
+            return m.group(0)
+        # A month that names a date keeps its capitalization ("my birthday is June 23rd").
+        if word.lower() in _MONTH_NAMES and _MONTH_DAY_FOLLOW_REGEX.match(_next_token_after(text, m.end())):
             return m.group(0)
         # Preserve plural acronyms mid-sentence ("LLMs", "VMs", "GPUs", "APIs", "SSDs"):
         # all-caps stem + trailing plural 's'. The base-length guard keeps "Is"/"As"/"Us"
@@ -1316,6 +1328,216 @@ def expand_digits_to_words(text: str, mode: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Spoken-date formatting
+# ---------------------------------------------------------------------------
+# Dates are the one place a day is always written as an ordinal numeral, even in
+# the default "auto" mode where a bare ordinal normally reads as words
+# ("the 5th item" -> "the fifth item"). This runs *after*
+# expand_digits_to_words(), so "October twentieth" and "October 20th" converge on
+# the same canonical output:
+#   "October twentieth"                    -> "October 20th"
+#   "October the twentieth"                -> "October 20th"
+#   "October twenty"                       -> "October 20th"
+#   "the twentieth of October"             -> "the 20th of October"
+#   "October twentieth twenty twenty five" -> "October 20th, 2025"
+#   "October twenty twenty five"           -> "October 2025"
+# "words" mode stays spelled out by design; "digits" mode already produces the
+# numeral form and this pass is idempotent on it.
+_MONTH_ALT = "|".join(_MONTH_NAMES)
+
+# "March" and "May" are ordinary English verbs, so a bare cardinal after them is
+# only read as a day when the month is unambiguously a date: it is capitalized,
+# or it follows a date lead-in. Guards against "you may first ask" and
+# "we march twenty miles".
+_AMBIGUOUS_MONTHS = frozenset({"march", "may"})
+_DATE_LEAD_WORDS = frozenset({
+    "on", "in", "by", "till", "until", "before", "after", "since", "from",
+    "of", "the", "for", "at", "this", "next", "last", "around", "during",
+})
+
+# A cardinal day is accepted only when it terminates the date phrase (a year,
+# punctuation, end of text, or a clause leader such as a copula or pronoun).
+# "in October twenty people came" therefore stays prose, not "October 20th people".
+_DATE_TAIL_WORDS = frozenset({
+    "is", "was", "are", "were", "will", "would", "and", "or", "but", "so",
+    "i", "we", "you", "they", "he", "she", "it", "there", "this", "that",
+    "the", "a", "an", "my", "our", "your", "his", "her", "their",
+    "at", "in", "on", "by", "for", "to", "with", "from", "until", "till",
+    "before", "after", "since", "as", "when", "if", "which", "who",
+})
+
+_NUM_WORD_RUN = rf"(?:{_NUMBER_WORD})(?:(?:[\s-]+|\s+and\s+)(?:{_NUMBER_WORD}))*"
+_DIGIT_RUN = r"\d{1,4}(?:st|nd|rd|th)?(?!\d)"
+_DAY_TAIL = rf"(?:{_NUM_WORD_RUN}|{_DIGIT_RUN})"
+_YEAR_TAIL = (
+    rf"(?:\d{{4}}(?!\d)|(?:nineteen|twenty|two\s+thousand)"
+    rf"(?:(?:[\s-]+|\s+and\s+)(?:{_NUMBER_WORD}))*)"
+)
+_DAY_DIGIT_SPLIT = re.compile(r"^(\d+)(st|nd|rd|th)?$", re.IGNORECASE)
+
+# "the fourth of July" (day before the month)
+_DATE_OF_MONTH_REGEX = re.compile(
+    rf"\bthe\s+(?P<day>{_DAY_TAIL})\s+of\s+(?P<month>{_MONTH_ALT})\b",
+    re.IGNORECASE,
+)
+
+# "October [the] twentieth [,] [twenty twenty five]" (day, plus optional year, after the month)
+_DATE_MONTH_REGEX = re.compile(
+    rf"\b(?P<month>{_MONTH_ALT})\b(?:\s+the)?\s+(?P<phrase>{_DAY_TAIL})"
+    rf"(?:\s*,\s*(?P<year_comma>{_YEAR_TAIL})|\s+(?P<year_space>{_YEAR_TAIL}))?",
+    re.IGNORECASE,
+)
+
+
+def _spoken_year(text: str):
+    """Parse a spoken / numeric year phrase into a 4-digit year, or None."""
+    phrase = text.strip().strip(",").strip().lower()
+    if not phrase:
+        return None
+    if phrase.isdigit():
+        year = int(phrase)
+        return year if 1000 <= year <= 2999 else None
+    year = _parse_year(phrase.replace("-", " "))
+    if year is None or not (1000 <= year <= 2999):
+        return None
+    return year
+
+
+def _spoken_day(tokens):
+    """Parse a leading day-of-month from number tokens.
+
+    Returns ``(day, rest_tokens, is_ordinal)``; ``day`` is None when the tokens do
+    not begin with a plausible day.
+    """
+    for size in range(min(4, len(tokens)), 0, -1):
+        parsed = _parse_ordinal(tokens[:size])
+        if parsed and 1 <= parsed[0] <= 31:
+            return parsed[0], tokens[size:], True
+    for size in range(min(3, len(tokens)), 0, -1):
+        day = _parse_cardinal(tokens[:size])
+        if day is not None and 1 <= day <= 31:
+            return day, tokens[size:], False
+    return None, tokens, False
+
+
+def _title_month(month: str) -> str:
+    """Capitalize a month name for date output ("october" -> "October")."""
+    return month.capitalize()
+
+
+def _date_of_month_repl(m: re.Match) -> str:
+    """Rewrite "the fourth of July" -> "the 4th of July"."""
+    phrase = m.group("day").strip()
+    dm = _DAY_DIGIT_SPLIT.match(phrase)
+    if dm:
+        day = int(dm.group(1))
+    else:
+        tokens = [t.lower() for t in phrase.replace("-", " ").split()]
+        parsed = _parse_ordinal(tokens)
+        day = parsed[0] if parsed else _parse_cardinal(tokens)
+    if day is None or not 1 <= day <= 31:
+        return m.group(0)
+    return f"the {day}{_ordinal_suffix(day)} of {_title_month(m.group('month'))}"
+
+
+def _date_month_repl(m: re.Match) -> str:
+    """Rewrite "<Month> twentieth [twenty twenty five]" -> "<Month> 20th[, 2025]"."""
+    original = m.group(0)
+    month = m.group("month")
+    phrase = m.group("phrase").strip()
+    year_group = m.group("year_comma") or m.group("year_space")
+
+    day = None
+    is_ordinal_day = False
+    year = _spoken_year(year_group) if year_group else None
+    if year_group and year is None:
+        return original
+
+    dm = _DAY_DIGIT_SPLIT.match(phrase)
+    if dm:
+        number = int(dm.group(1))
+        if len(dm.group(1)) == 4 and not dm.group(2):
+            # "October 2025" is a month + year, never a day.
+            if year is not None or not 1000 <= number <= 2999:
+                return original
+            year = number
+        elif 1 <= number <= 31:
+            day, is_ordinal_day = number, bool(dm.group(2))
+        else:
+            return original
+    else:
+        tokens = [t.lower() for t in phrase.replace("-", " ").split()]
+        # A bare spoken year after the month ("October twenty twenty five") has no day.
+        whole_year = _spoken_year(" ".join(tokens)) if len(tokens) > 1 else None
+        if whole_year is not None:
+            if year is not None:
+                return original
+            year = whole_year
+        else:
+            day, rest, is_ordinal_day = _spoken_day(tokens)
+            if day is None:
+                return original
+            if rest:
+                if year is not None:
+                    return original
+                year = _spoken_year(" ".join(rest))
+                if year is None:
+                    return original
+
+    if day is not None and year is None:
+        # "March"/"May" are ordinary verbs too: "May one of you ...",
+        # "we march twenty miles", "you may second that motion" must stay prose, so
+        # an ambiguous month needs a clearly date-like context -- capitalized, or
+        # after a date lead-in -- for a day of *either* kind. Ordinals are included
+        # because "first/second/third/fourth" are verbs in exactly the same way.
+        if month.lower() in _AMBIGUOUS_MONTHS and not (
+            month[:1].isupper()
+            or _prev_word_before(m.string, m.start("month")) in _DATE_LEAD_WORDS
+        ):
+            return original
+        # A bare cardinal day is weaker evidence than an ordinal, so "May one" and
+        # "may twenty" need the extra tail check below even when capitalized.
+        if not is_ordinal_day:
+            if month.lower() in _AMBIGUOUS_MONTHS and day < 2:
+                return original
+            # A cardinal day must terminate the date ("in October twenty people
+            # came" is prose, not "October 20th people").
+            following = _next_token_after(m.string, m.end())
+            if following and following not in _DATE_TAIL_WORDS:
+                return original
+
+    title = _title_month(month)
+    if day is None:
+        if year is None:
+            return original
+        return f"{title} {year}"
+    if year is None:
+        return f"{title} {day}{_ordinal_suffix(day)}"
+    return f"{title} {day}{_ordinal_suffix(day)}, {year}"
+
+
+def format_dates(text: str, mode: str | None = None) -> str:
+    """Normalize spoken dates so the day always carries an ordinal numeral.
+
+    Active in ``auto`` and ``digits`` modes; ``words`` mode is left spelled out.
+    """
+    if not text:
+        return text
+    if (mode or _effective_number_mode()) == "words":
+        return text
+    # Cheap gate: both patterns below require a month name, so most utterances skip
+    # the regex work entirely (a substring test is far cheaper than either search).
+    text_lower = text.lower()
+    if not any(month in text_lower for month in _MONTH_NAMES):
+        return text
+    if _DATE_OF_MONTH_REGEX.search(text):
+        text = _DATE_OF_MONTH_REGEX.sub(_date_of_month_repl, text)
+    if _DATE_MONTH_REGEX.search(text):
+        text = _DATE_MONTH_REGEX.sub(_date_month_repl, text)
+    return text
+
+
+# ---------------------------------------------------------------------------
 # Serial Number, NATO Phonetic & Spell Command Processing
 # ---------------------------------------------------------------------------
 
@@ -2117,6 +2339,9 @@ def clean_speech_transcription(
 
     # 10c. Spell out ordinal digits & small standalone cardinals ("the 5th item" -> "the fifth item")
     cleaned = expand_digits_to_words(cleaned, mode=_num_mode)
+
+    # 10d. Normalize spoken dates so the day is always an ordinal numeral ("October twentieth" -> "October 20th")
+    cleaned = format_dates(cleaned, mode=_num_mode)
 
     # 11. Normalize standalone I and contractions
     if "i" in cleaned:

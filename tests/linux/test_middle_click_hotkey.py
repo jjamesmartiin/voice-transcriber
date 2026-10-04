@@ -18,6 +18,59 @@ import hal  # noqa: E402
 
 pytest.importorskip("evdev", reason="Linux evdev backend required")
 
+_LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+
+
+class ScriptedKeyboard:
+    """Device stand-in whose ``active_keys()`` is the state a test scripts."""
+
+    def __init__(self, held=()):
+        self.name = "scripted-device"
+        self.path = "/dev/input/event-scripted"
+        self.held = set(held)
+
+    def active_keys(self):
+        return set(self.held)
+
+    def close(self):
+        pass
+
+
+class ScriptedLinuxHotkeyManager(_LinuxHotkeyManager):
+    """Backend whose device state follows every event the test feeds it.
+
+    The backend reads the Alt+Shift chord and the mouse buttons from each
+    device's *live* key state (``EVIOCGKEY``) rather than from event
+    bookkeeping, because a cache latches a modifier forever whenever one key-up
+    is missed. The kernel updates that state before an event becomes readable,
+    so this double does the same: the tests' event feeds stay exactly as they
+    were, they just now move the device state the backend reads.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for device in self.devices:
+            try:
+                device.close()
+            except Exception:
+                pass
+        self.scripted_device = ScriptedKeyboard()
+        self.devices = [self.scripted_device]
+
+    def _apply(self, event):
+        if event.value == 1:
+            self.scripted_device.held.add(event.code)
+        elif event.value == 0:
+            self.scripted_device.held.discard(event.code)
+
+    def handle_key_event(self, event, forwarder=None):
+        self._apply(event)
+        return super().handle_key_event(event, forwarder)
+
+    def _handle_mouse_button_event(self, event, forwarder):
+        self._apply(event)
+        return super()._handle_mouse_button_event(event, forwarder)
+
 
 class FakeEvdevEvent:
     def __init__(self, code, value, ev_type=1):  # EV_KEY = 1
@@ -38,7 +91,7 @@ class FakeDevice:
 
 def test_linux_device_filtering():
     """Verify mouse devices with BTN_MIDDLE are detected and uinput is excluded."""
-    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     manager = LinuxHotkeyManager(MagicMock(), MagicMock())
     manager.set_middle_click_enabled(True)
     try:
@@ -77,7 +130,7 @@ def test_linux_device_filtering():
 
 def test_linux_quick_middle_click_does_not_trigger():
     """Quick middle click (<0.25s) should NOT trigger push-to-talk."""
-    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = LinuxHotkeyManager(cb_start, cb_stop)
@@ -101,7 +154,7 @@ def test_linux_quick_middle_click_does_not_trigger():
 
 def test_linux_middle_click_hold_triggers_and_releases():
     """Middle click held for >=0.25s triggers push-to-talk, release stops it."""
-    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = LinuxHotkeyManager(cb_start, cb_stop)
@@ -134,7 +187,7 @@ def test_linux_middle_click_hold_triggers_and_releases():
 
 def test_linux_middle_click_space_latch():
     """Holding middle click, tapping Space latches hands-free recording."""
-    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = LinuxHotkeyManager(cb_start, cb_stop)
@@ -165,7 +218,7 @@ def test_linux_middle_click_space_latch():
 
 def test_linux_alt_shift_still_works():
     """Alt+Shift recording works normally alongside middle click support."""
-    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = LinuxHotkeyManager(cb_start, cb_stop)
@@ -187,7 +240,7 @@ def test_linux_alt_shift_still_works():
 
 def test_linux_middle_click_quick_click_cancels():
     """Quick middle click (<0.25s) cancels the hold timer and does not trigger PTT."""
-    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = LinuxHotkeyManager(cb_start, cb_stop)
@@ -209,7 +262,7 @@ def test_linux_middle_click_quick_click_cancels():
 def test_middle_click_toggle_disabled():
     """When middle click mode is toggled off, middle clicks are ignored for push-to-talk."""
     import t2
-    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
     cb_stop = MagicMock()
     manager = LinuxHotkeyManager(cb_start, cb_stop)
@@ -259,7 +312,7 @@ class FakeForwarder:
 
 
 def _chord_manager():
-    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     manager = LinuxHotkeyManager(MagicMock(), MagicMock())
     manager.set_middle_click_enabled(True)
     manager.virtual_keyboard = MagicMock()
@@ -355,7 +408,7 @@ def test_linux_grabbed_middle_hold_records_and_is_eaten():
     """A middle press held past the tap window becomes a recording (no paste)."""
     cb_start = MagicMock()
     cb_stop = MagicMock()
-    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     manager = LinuxHotkeyManager(cb_start, cb_stop)
     manager.set_middle_click_enabled(True)
     manager.virtual_keyboard = MagicMock()
@@ -365,7 +418,7 @@ def test_linux_grabbed_middle_hold_records_and_is_eaten():
     try:
         manager._handle_grabbed_event(None, fwd, FakeEvdevEvent(274, 1))
         assert fwd.events == []  # buffered during the tap window
-        assert manager.key_states.get(274) is True
+        assert manager._pending_middle_events == [1]  # press held for the decision
 
         # Tap window elapses while still held -> promote to push-to-talk.
         manager._expire_pending_middle_click(force=True)
@@ -387,7 +440,7 @@ def test_linux_grabbed_middle_hold_records_and_is_eaten():
 def test_linux_grabbed_middle_quick_tap_passes_through():
     """Press+release inside the tap window replays as a normal middle click."""
     cb_start = MagicMock()
-    LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     manager = LinuxHotkeyManager(cb_start, MagicMock())
     manager.set_middle_click_enabled(True)
     manager.virtual_keyboard = MagicMock()

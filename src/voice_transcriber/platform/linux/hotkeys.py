@@ -32,8 +32,6 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         super().__init__(callback_start, callback_stop)
         self.devices = []
         self.virtual_keyboard = None
-        self.key_states = {}
-        self.device_key_states = {}
         self.evdev = None
         self.uinput = None
 
@@ -384,18 +382,34 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             return False
 
     # -- hotkey state queries ---------------------------------------------
+    def _held_keys(self):
+        """Every key/button the kernel currently reports as held.
+
+        Asks each monitored device for its live key state (``EVIOCGKEY``, via
+        ``active_keys()``) instead of replaying our own press/release
+        bookkeeping. A cache latches a key *forever* if a single key-up is ever
+        missed -- a remapper (kanata, input-remapper) grabbing a device
+        mid-press, an abrupt wireless disconnect, an fd being reused -- and a
+        latched Shift then makes a lone Alt press look like the Alt+Shift chord.
+        """
+        held = set()
+        for device in list(self.devices):
+            try:
+                held.update(device.active_keys())
+            except Exception:
+                # Disconnected, or the fd is already closed: holds nothing.
+                continue
+        return held
+
     def is_key_pressed(self, keys):
-        """Check if any of the given keys are pressed on any device."""
-        for dev_states in self.device_key_states.values():
-            if any(dev_states.get(k, False) for k in keys):
-                return True
-        return any(self.key_states.get(k, False) for k in keys)
+        """Check if any of the given keys is held right now (live kernel state)."""
+        wanted = set(keys)
+        return bool(wanted) and bool(wanted & self._held_keys())
 
     def is_alt_shift_pressed(self):
         """Check if the hotkey combination (Alt+Shift) is currently pressed."""
-        alt_pressed = self.is_key_pressed(self.ALT_KEYS)
-        shift_pressed = self.is_key_pressed(self.SHIFT_KEYS)
-        return alt_pressed and shift_pressed
+        held = self._held_keys()
+        return bool(set(self.ALT_KEYS) & held) and bool(set(self.SHIFT_KEYS) & held)
 
     def is_middle_click_pressed(self):
         """Check if the middle mouse button is currently pressed."""
@@ -464,13 +478,9 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         if not self.middle_click_enabled:
             return
 
-        key_code = event.code
         key_state = event.value  # 1 = press, 0 = release
 
         with self._lock:
-            if key_state in [0, 1]:
-                self.key_states[key_code] = (key_state == 1)
-
             if key_state == 1:
                 if not self.hotkey_active:
                     if self._middle_click_timer:
@@ -751,13 +761,8 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         value = event.value
         forward_later = []
         with self._lock:
-            if value in (0, 1):
-                self.key_states[code] = (value == 1)
-
             if self._chord_swallow:
-                if value == 0 and not any(
-                    self.key_states.get(k, False) for k in self.MOUSE_BUTTON_KEYS
-                ):
+                if value == 0 and not self.is_key_pressed(self.MOUSE_BUTTON_KEYS):
                     self._chord_swallow = False
                 return
 
@@ -819,8 +824,13 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             self._pending_middle_deadline = 0.0
             self._middle_eaten = False
 
-    def handle_key_event(self, event, forwarder=None, fd=None):
-        """Handle a key event and check for hotkey activation."""
+    def handle_key_event(self, event, forwarder=None):
+        """Handle a key event and check for hotkey activation.
+
+        The chord is decided from the devices' live key state (``_held_keys``),
+        never from bookkeeping of this event stream, so an event we never
+        received (grab, disconnect, fd reuse) cannot latch a modifier.
+        """
         if event.type != self.evdev.ecodes.EV_KEY:
             return
 
@@ -832,22 +842,12 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             self._handle_middle_mouse_event(event)
             return
 
-        # Left/right only matter for the chord. A non-grabbed mouse cannot have
-        # its clicks suppressed, so just keep the button state fresh.
+        # Left/right only matter for the mouse chord, which consults the live
+        # button state itself; there is nothing to record here.
         if key_code in self.MOUSE_BUTTON_KEYS:
-            if key_state in [0, 1]:
-                with self._lock:
-                    self.key_states[key_code] = (key_state == 1)
             return
 
         with self._lock:
-            if key_state in [0, 1]:
-                if fd is not None:
-                    if fd not in self.device_key_states:
-                        self.device_key_states[fd] = {}
-                    self.device_key_states[fd][key_code] = (key_state == 1)
-                self.key_states[key_code] = (key_state == 1)
-
             # Space pressed while the hotkey is held = hold the recording hands-free.
             if key_state == 1 and key_code in self.SPACE_KEY and self.hotkey_active:
                 logger.debug("Space latched - recording will hold after release")
@@ -902,7 +902,6 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                     if self.devices:
                         logger.warning("Devices lost (fd invalid). clearing list.")
                     self.devices = []
-                    self.key_states.clear()
                     continue
 
                 timeout = 1.0
@@ -930,7 +929,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                             if forwarder is not None:
                                 self._handle_grabbed_event(device, forwarder, event)
                             elif event.type == self.evdev.ecodes.EV_KEY:
-                                self.handle_key_event(event, fd=device.fd)
+                                self.handle_key_event(event)
                     except OSError as e:
                         is_disconnect = (e.errno == 19) or ("No such device" in str(e))
 
@@ -939,7 +938,6 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                         else:
                             logger.warning(f"Device {device.path} error: {e}")
 
-                        self.device_key_states.pop(device.fd, None)
                         self._release_mouse(device.path)
 
                         if device in self.devices:
@@ -948,10 +946,6 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                                 device.close()
                             except Exception:
                                 pass
-
-                        if not self.devices:
-                            self.key_states.clear()
-                            self.device_key_states.clear()
                         continue
 
             except Exception as e:
@@ -981,8 +975,6 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             except Exception:
                 pass
         self.devices = []
-        self.key_states.clear()
-        self.device_key_states.clear()
         if self.virtual_keyboard:
             try:
                 self.virtual_keyboard.destroy()

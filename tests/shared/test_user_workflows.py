@@ -36,6 +36,33 @@ from micro_batcher import (
 from tui import VoiceTranscriberTUI
 
 
+class _ScriptedKeyboard:
+    """Minimal evdev device that reports whatever keys the test holds.
+
+    The Linux hotkey backend reads the chord from the devices' *live* key state
+    (see ``LinuxHotkeyManager._held_keys``), so tests script the keyboard here
+    rather than poking event bookkeeping inside the manager.
+    """
+
+    def __init__(self, held=()):
+        self.name = "scripted-keyboard"
+        self.path = "/dev/input/scripted-keyboard"
+        self.held = set(held)
+
+    def active_keys(self):
+        return set(self.held)
+
+    def deliver(self, manager, code, value):
+        """Feed an event the way the kernel does: state first, then the event."""
+        if value == 1:
+            self.held.add(code)
+        else:
+            self.held.discard(code)
+        manager.handle_key_event(
+            MagicMock(type=manager.evdev.ecodes.EV_KEY, code=code, value=value)
+        )
+
+
 # ===========================================================================
 # 1. Push-to-Talk, Output Modes, and Ctrl Override Workflows
 # ===========================================================================
@@ -138,11 +165,12 @@ class TestHandsFreeLatchWorkflow:
             pytest.skip("Linux evdev dependency not available on this platform")
         manager.virtual_keyboard = MagicMock()
         manager.uinput = MagicMock()
+        keyboard = _ScriptedKeyboard()
+        manager.devices = [keyboard]
 
         try:
             # 1. Alt+Shift pressed down
-            manager.key_states[56] = 1   # KEY_LEFTALT
-            manager.key_states[42] = 1   # KEY_LEFTSHIFT
+            keyboard.held = {56, 42}  # KEY_LEFTALT, KEY_LEFTSHIFT
             fake_alt_event = MagicMock(type=manager.evdev.ecodes.EV_KEY, code=56, value=1)
             manager.handle_key_event(fake_alt_event)
             assert manager.hotkey_active is True
@@ -154,21 +182,18 @@ class TestHandsFreeLatchWorkflow:
             assert manager.latch_release is True
 
             # 3. Release Alt+Shift -> latch holds recording open
-            manager.key_states[56] = 0
-            manager.key_states[42] = 0
+            keyboard.held = set()
             fake_alt_up = MagicMock(type=manager.evdev.ecodes.EV_KEY, code=56, value=0)
             manager.handle_key_event(fake_alt_up)
             assert manager.latch_release is False
             cb_stop.assert_not_called()  # Did NOT stop recording
 
             # 4. Tap Alt+Shift again to conclude hands-free recording
-            manager.key_states[56] = 1
-            manager.key_states[42] = 1
+            keyboard.held = {56, 42}
             manager.handle_key_event(fake_alt_event)
             assert manager.hotkey_active is True
 
-            manager.key_states[56] = 0
-            manager.key_states[42] = 0
+            keyboard.held = set()
             manager.handle_key_event(fake_alt_up)
             assert manager.hotkey_active is False
             cb_stop.assert_called_once()
@@ -267,26 +292,28 @@ class TestMiddleClickWorkflow:
         manager.virtual_keyboard = MagicMock()
         manager.uinput = MagicMock()
         manager.set_middle_click_enabled(True)
+        keyboard = _ScriptedKeyboard()
+        manager.devices = [keyboard]
 
         try:
             btn_middle = 274
 
             # Quick click: press and immediately release (< 0.25s)
-            manager.handle_key_event(MagicMock(type=manager.evdev.ecodes.EV_KEY, code=btn_middle, value=1))
+            keyboard.deliver(manager, btn_middle, 1)
             time.sleep(0.05)
-            manager.handle_key_event(MagicMock(type=manager.evdev.ecodes.EV_KEY, code=btn_middle, value=0))
+            keyboard.deliver(manager, btn_middle, 0)
             time.sleep(0.25)
             assert cb_start.call_count == 0
             assert manager.hotkey_active is False
 
             # Long hold: press and hold >= 0.25s -> triggers recording
-            manager.handle_key_event(MagicMock(type=manager.evdev.ecodes.EV_KEY, code=btn_middle, value=1))
+            keyboard.deliver(manager, btn_middle, 1)
             time.sleep(0.28)
             assert cb_start.call_count == 1
             assert manager.hotkey_active is True
 
             # Release middle click -> stops recording
-            manager.handle_key_event(MagicMock(type=manager.evdev.ecodes.EV_KEY, code=btn_middle, value=0))
+            keyboard.deliver(manager, btn_middle, 0)
             assert cb_stop.call_count == 1
             assert manager.hotkey_active is False
         finally:
