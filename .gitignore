@@ -21,6 +21,18 @@ result
 /config.yaml
 /config.yml
 /audio_device_config.json
+/dictionary.local.yaml
+/dictionary.local.yml
+/dictionary.local.json
+/dictionary.user.yaml
+/dictionary.user.yml
+/dictionary.user.json
+config/dictionary.local.yaml
+config/dictionary.local.yml
+config/dictionary.local.json
+config/dictionary.user.yaml
+config/dictionary.user.yml
+config/dictionary.user.json
 
 # Lifetime dictation stats (src/voice_transcriber/stats.py). They live in the
 # per-user data dir (~/.local/share/vt/stats.json, %LOCALAPPDATA%\vt\stats.json)

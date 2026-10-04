@@ -449,9 +449,27 @@ def test_nato_phonetic_collapse(serial_settings, text, expected):
     "call Mike",
     "drinking whiskey",
     "playing golf",
+    # Spoken quantity followed by the indefinite article is prose, not a code.
+    "I pay like 150 to 170 a month",
+    "it costs 20 a year",
+    "three a day",
+    "we need 5 an hour",
+    "paid 170 a month",
 ])
 def test_serial_detection_ignores_natural_english(serial_settings, text):
     assert pp.process_serial_numbers(text) == text
+
+
+def test_quantity_plus_article_survives_full_pipeline(serial_settings):
+    # "150 to 170 a month" is a price, not a model code (F150 / XK94J still collapse).
+    out = pp.clean_speech_transcription(
+        "I pay like 150 to 170 a month for my car insurance"
+    )
+    assert "170A" not in out
+    assert "170 a month" in out
+
+    assert pp.process_serial_numbers("code F 1 5 0") == "code F150"
+    assert pp.process_serial_numbers("X K 9 4 J") == "XK94J"
 
 
 def test_serial_collapse_setting_controls_spacing(serial_settings):

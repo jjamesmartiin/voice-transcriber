@@ -1,0 +1,42 @@
+# Voice Transcriber — Personal / Local Custom Dictionary Template
+# Copy this file to config/dictionary.local.yaml (which is gitignored).
+#
+# Use this file for:
+# - Personal system hostnames (e.g. "home-jamesm5", "workstation-pro")
+# - People's names (friends, family, coworkers)
+# - Private company/client names and internal URLs
+# - Sensitive abbreviations or personal phone/address formatting
+#
+# Voice Transcriber automatically merges config/dictionary.local.yaml on top of
+# the shared config/dictionary.yaml. Local entries take precedence.
+#
+# To transfer your personal vocabulary to another machine:
+#   cp config/dictionary.local.yaml /path/to/other/machine/config/dictionary.local.yaml
+
+dictionary:
+  # Personal Hostnames & Machines
+  home dash james m5: home-jamesm5
+  home dash james m 5: home-jamesm5
+  home dash james m five: home-jamesm5
+  home dash james five: home-jamesm5
+  home dash james-m5: home-jamesm5
+  home-james m5: home-jamesm5
+  home-james m 5: home-jamesm5
+  home-james m five: home-jamesm5
+  home-james-m5: home-jamesm5
+  home james m5: home-jamesm5
+  home james m 5: home-jamesm5
+  home james m five: home-jamesm5
+
+  # Personal & Team Names
+  # john doe: John Doe
+  # jane smith: Jane Smith
+
+  # Private Repos / Projects
+  # my secret project: MySecretProject
+
+# Personal contextual rules (optional):
+# contextual_rules:
+#   - target: Alice
+#     spoken: ["allison", "ellis"]
+#     triggers_before: ["talked to", "met with", "call", "email"]

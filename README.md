@@ -514,7 +514,7 @@ Supported options:
 - `auto_type_trailing_space`: append a space after auto-typed text.
 - `auto_type_auto_punctuate`: enforce terminal punctuation on auto-typed text.
 - `number_digits`: `auto` (default: only consecutive spoken digit chains such as phone/serial numbers become digits, while ordinals and small isolated counts read as words — `"the 5th item"` → `"the fifth item"`, `"I have 2 dogs"` → `"I have two dogs"`), `digits` (always convert), or `words` (never convert). Legacy `true`/`false` are accepted as aliases for `digits`/`words`. Spoken dates are the one exception in `auto`/`digits`: the day is always written as an ordinal numeral (`"October twentieth"` → `"October 20th"`, `"the twentieth of October"` → `"the 20th of October"`, `"October twentieth twenty twenty five"` → `"October 20th, 2025"`); `words` mode leaves them spelled out.
-- `serial_collapse`: `true` (default) writes serial numbers, model/part codes and NATO phonetic dictation as a single token (`"A B C 1 2 3"` → `ABC123`, `"Alpha Bravo 4"` → `AB4`); `false` keeps single-space separators.
+- `serial_collapse`: `true` (default) writes serial numbers, model/part codes and NATO phonetic dictation as a single token (`"A B C 1 2 3"` → `ABC123`, `"Alpha Bravo 4"` → `AB4`); `false` keeps single-space separators. Prose is never touched: a quantity followed by the indefinite article (`"170 a month"`, `"20 a year"`) stays as spoken, so only trigger-anchored or unambiguous runs collapse.
 - `spell_command`: `true` (default) enables the verbal spell command (`"spell C A T"` → `CAT`); `false` leaves `"spell ..."` phrases untouched.
 - `keep_bluetooth_handsfree`: `true` keeps Bluetooth devices in hands-free mode so media does not pause when recording ends.
 - `punctuation_mode`: `full`, `no_terminal_period`, `no_punctuation`, or `lowercase_no_punctuation` (legacy alias `semi-formal` → `no_terminal_period`).
@@ -549,32 +549,52 @@ terminal), or programmatically via the [Control API](#control-api).
 
 Voice Transcriber includes a high-speed Trie-compacted custom dictionary replacer (~0.005 ms execution time) that matches spoken words and technical phrases case-insensitively, respects word boundaries, and applies exact replacement casing and formatting.
 
-The dictionary lives in `config/dictionary.yaml`.
+### Two-Tier Dictionary Architecture
+
+Voice Transcriber automatically layers two dictionaries at runtime with zero latency penalty:
+
+1. **Common Dictionary (`config/dictionary.yaml`)**:
+   - **Committed to git**.
+   - Shipped with the repository for shared developer tools, cloud infrastructure, and open-source packages (`kubectl`, `NixOS`, `systemctl`, `GitHub`, `0xDEADBEEF`, `UART`, etc.).
+2. **Personal / Local Dictionary (`config/dictionary.local.yaml`)**:
+   - **Gitignored** (`.gitignore`).
+   - Private to your machine. Used for personal system hostnames (`home-jamesm5`), family/coworker names, client names, private project codenames, or personal addresses.
+   - Simply copy `config/dictionary.local.yaml` to transfer your personal vocabulary between computers!
+
+Local definitions take precedence over common definitions if there is an overlap.
 
 ### Quick-Add via CLI
 
 You can add, list, remove, or test dictionary entries directly from the terminal without manually editing YAML files:
 
 ```bash
-# Add or update a spoken phrase -> replacement mapping
-python -m src.dictionary add "cube ctl" "kubectl"
-python -m src.dictionary add "deep seq" "Deepseek"
+# Add to your personal dictionary (default, gitignored)
+python -m src.dictionary add "home dash james m5" "home-jamesm5"
+python -m src.dictionary add "john doe" "John Doe"
 
-# Test how a sentence is transformed by the dictionary & post-processor
-python -m src.dictionary test "i deployed on nixos using cube ctl"
-# Output: "I deployed on NixOS using kubectl."
+# Add to the common dictionary (tracked in git)
+python -m src.dictionary add --common "cube ctl" "kubectl"
+python -m src.dictionary add --common "deep seq" "Deepseek"
 
-# List current dictionary entries (optionally filtered)
+# Test how a sentence is transformed by the combined dictionaries
+python -m src.dictionary test "i deployed on home dash james m5 using cube ctl"
+# Output: "I deployed on home-jamesm5 using kubectl."
+
+# List current dictionary entries (shows [common] vs [local] tags)
 python -m src.dictionary list
-python -m src.dictionary list nixos
+python -m src.dictionary list james
+python -m src.dictionary list --local
+
+# Check dictionary file paths and status
+python -m src.dictionary path
 
 # Remove an entry
-python -m src.dictionary remove "cube ctl"
+python -m src.dictionary remove "home dash james m5"
 ```
 
 ### Manual YAML Editing
 
-You can also edit `config/dictionary.yaml` directly:
+You can edit `config/dictionary.local.yaml` (personal) or `config/dictionary.yaml` (common) directly:
 
 ```yaml
 dictionary:

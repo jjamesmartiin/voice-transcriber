@@ -76,6 +76,88 @@ dictionary:
   g p i o: GPIO
   modbus: Modbus
   pololu: Pololu
+  gpu: GPU
+  cpu: CPU
+  tpu: TPU
+  npu: NPU
+
+  # GPUs, Accelerators & Memory
+  vram: VRAM
+  v ram: VRAM
+  v-ram: VRAM
+  vrams: VRAM
+  eram: VRAM
+  e ram: VRAM
+  e-ram: VRAM
+  erams: VRAM
+  iram: VRAM
+  i ram: VRAM
+  i-ram: VRAM
+  ee ram: VRAM
+  ee-ram: VRAM
+  nvram: NVRAM
+  nv ram: NVRAM
+  dram: DRAM
+  d ram: DRAM
+  sram: SRAM
+  s ram: SRAM
+  3060 ti: 3060 Ti
+  3070 ti: 3070 Ti
+  3080 ti: 3080 Ti
+  3090 ti: 3090 Ti
+  4060 ti: 4060 Ti
+  4070 ti: 4070 Ti
+  4070 ti super: 4070 Ti SUPER
+  4080 super: 4080 SUPER
+  4070 super: 4070 SUPER
+  gddr: GDDR
+  gddr6: GDDR6
+  gddr6x: GDDR6X
+  gddr7: GDDR7
+  hbm: HBM
+  hbm3: HBM3
+  hbm3e: HBM3e
+  rtx: RTX
+  gtx: GTX
+  cuda: CUDA
+  cudnn: cuDNN
+  cu dnn: cuDNN
+  tensorrt: TensorRT
+  tensor rt: TensorRT
+  rocm: ROCm
+  r o c m: ROCm
+
+  # GPU Models & ASR Number Repairs (e.g. "one thirty ninety" heard as decimal 130.90)
+  "130.90": "one 3090"
+  "130.9": "one 3090"
+  "130.80": "one 3080"
+  "130.8": "one 3080"
+  "130.70": "one 3070"
+  "130.7": "one 3070"
+  "130.60": "one 3060"
+  "130.6": "one 3060"
+  "140.90": "one 4090"
+  "140.9": "one 4090"
+  "140.80": "one 4080"
+  "140.8": "one 4080"
+  "140.70": "one 4070"
+  "140.7": "one 4070"
+  "140.60": "one 4060"
+  "140.6": "one 4060"
+  "150.90": "one 5090"
+  "150.9": "one 5090"
+  "150.80": "one 5080"
+  "150.8": "one 5080"
+  "150.70": "one 5070"
+  "150.7": "one 5070"
+  "150.60": "one 5060"
+  "150.6": "one 5060"
+  "120.80": "one 2080"
+  "120.8": "one 2080"
+  "120.70": "one 2070"
+  "120.7": "one 2070"
+  "120.60": "one 2060"
+  "120.6": "one 2060"
 
   # Networking & Protocols
   vlan: VLAN

@@ -18,6 +18,7 @@ import json
 import urllib.request
 import urllib.error
 from pathlib import Path
+from typing import Any
 
 _current_mod = sys.modules.get(__name__)
 if _current_mod is not None:
@@ -1733,6 +1734,21 @@ def _is_valid_untriggered_serial(raw: str) -> bool:
         return False
     lower_toks = [t.lower() for t in toks]
 
+    # Guard an English article adjacent to a number at either end of the run:
+    # 'a 2', but also '170 a month', 'costs 20 a year'. Spoken quantities
+    # followed by the indefinite article are prose, never a serial number.
+    # Interior articles stay (e.g. 'W P A 2' -> 'WPA2').
+    number_like = [t.isdigit() or t in _DIGIT_WORDS for t in lower_toks]
+    for idx, tok in enumerate(lower_toks):
+        if tok not in ("a", "an"):
+            continue
+        if idx not in (0, len(lower_toks) - 1):
+            continue
+        if (idx > 0 and number_like[idx - 1]) or (
+            idx + 1 < len(number_like) and number_like[idx + 1]
+        ):
+            return False
+
     # Guard 2-token English phrases: 'a hotel', 'a uniform', 'a 2', 'I 2', etc.
     if len(toks) == 2:
         if lower_toks[0] in ("a", "an", "i") and lower_toks[1] in _NATO_COMMON_WORDS:
@@ -2099,12 +2115,17 @@ def reset_custom_dictionary() -> None:
     set_contextual_rules(None)
 
 
-def load_custom_dictionary_from_file(file_path: str | os.PathLike) -> dict[str, str]:
+def load_custom_dictionary_from_file(
+    file_path: str | os.PathLike,
+    merge: bool = False,
+) -> dict[str, str]:
     """Loads dictionary mappings from a YAML or JSON file and applies them."""
+    global _CONTEXTUAL_RULES, _DICT_TRACKED_PATHS_MTIMES
     p = Path(file_path)
     if not p.exists():
         return {}
     try:
+        _DICT_TRACKED_PATHS_MTIMES[p] = p.stat().st_mtime
         content = p.read_text(encoding="utf-8")
         if p.suffix in (".yaml", ".yml"):
             try:
@@ -2115,72 +2136,199 @@ def load_custom_dictionary_from_file(file_path: str | os.PathLike) -> dict[str, 
         else:
             data = json.loads(content) if content.strip() else {}
         
+        file_mapping = {}
+        file_rules = []
         if isinstance(data, dict):
             if "contextual_rules" in data and isinstance(data["contextual_rules"], list):
-                set_contextual_rules(data["contextual_rules"])
+                file_rules = data["contextual_rules"]
             if "dictionary" in data and isinstance(data["dictionary"], dict):
-                mapping = data["dictionary"]
+                file_mapping = data["dictionary"]
             else:
-                mapping = {k: v for k, v in data.items() if k != "contextual_rules" and isinstance(v, (str, int, float))}
+                file_mapping = {k: v for k, v in data.items() if k != "contextual_rules" and isinstance(v, (str, int, float))}
+
+        if merge:
+            merged_map = dict(_CUSTOM_DICTIONARY)
+            merged_map.update(file_mapping)
+            set_custom_dictionary(merged_map)
+            if file_rules:
+                # Merge contextual rules (update matching targets, append new ones)
+                rule_objs = [ContextualRule.from_dict(r) for r in file_rules if isinstance(r, dict)]
+                existing_rules = list(_CONTEXTUAL_RULES)
+                target_map = {r.target.lower(): i for i, r in enumerate(existing_rules)}
+                for r in rule_objs:
+                    idx = target_map.get(r.target.lower())
+                    if idx is not None:
+                        existing_rules[idx] = r
+                    else:
+                        existing_rules.append(r)
+                _CONTEXTUAL_RULES = existing_rules
+            return merged_map
         else:
-            mapping = {}
-            
-        set_custom_dictionary(mapping)
-        return mapping
+            set_contextual_rules(file_rules if file_rules else None)
+            set_custom_dictionary(file_mapping)
+            return file_mapping
     except Exception as e:
         print(f"⚠️ [post_processor] Error loading dictionary from {file_path}: {e}")
         return {}
 
 
-def _auto_load_dictionary_if_needed() -> None:
-    """Auto-detects and loads dictionary from config.yaml or dictionary.yaml on first use."""
-    global _CUSTOM_DICT_INITIALIZED
-    if _CUSTOM_DICT_INITIALIZED:
-        return
-    _CUSTOM_DICT_INITIALIZED = True
-    
-    repo_root = Path(__file__).resolve().parent.parent
-    candidates = [
+_DICT_TRACKED_PATHS_MTIMES: dict[Path, float] = {}
+
+
+def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """
+    Loads and merges all configured dictionary layers in order of precedence:
+    1. Common / shared dictionary (config/dictionary.yaml)
+    2. Config-level dictionary (config/config.yaml or inline dictionary_file)
+    3. Personal / local dictionary (config/dictionary.local.yaml or ~/.local/share/vt/dictionary.yaml)
+    """
+    global _DICT_TRACKED_PATHS_MTIMES
+    repo_root = Path(__file__).resolve().parents[2]
+    merged_map: dict[str, str] = {}
+    merged_rules: list[dict[str, Any]] = []
+    new_mtimes: dict[Path, float] = {}
+
+    def _parse_file(p: Path) -> tuple[dict[str, str], list[dict[str, Any]]]:
+        if not p.exists():
+            return {}, []
+        try:
+            new_mtimes[p] = p.stat().st_mtime
+            content = p.read_text(encoding="utf-8")
+            if p.suffix in (".yaml", ".yml"):
+                try:
+                    import yaml
+                    data = yaml.safe_load(content) or {}
+                except Exception:
+                    data = json.loads(content) if content.strip() else {}
+            else:
+                data = json.loads(content) if content.strip() else {}
+
+            if not isinstance(data, dict):
+                return {}, []
+
+            f_map = {}
+            if "dictionary" in data and isinstance(data["dictionary"], dict):
+                f_map = {str(k): str(v) for k, v in data["dictionary"].items()}
+            elif "dictionary" in p.name:
+                f_map = {str(k): str(v) for k, v in data.items() if k != "contextual_rules" and isinstance(v, (str, int, float))}
+
+            f_rules = []
+            if "contextual_rules" in data and isinstance(data["contextual_rules"], list):
+                f_rules = [r for r in data["contextual_rules"] if isinstance(r, dict)]
+
+            return f_map, f_rules
+        except Exception:
+            return {}, []
+
+    def _merge_in(f_map: dict[str, str], f_rules: list[dict[str, Any]]):
+        merged_map.update(f_map)
+        if f_rules:
+            existing_targets = {r.get("target", "").lower(): i for i, r in enumerate(merged_rules)}
+            for r in f_rules:
+                t = r.get("target", "").lower()
+                if t in existing_targets:
+                    merged_rules[existing_targets[t]] = r
+                else:
+                    merged_rules.append(r)
+                    existing_targets[t] = len(merged_rules) - 1
+
+    # 1. Common / tracked dictionary candidates
+    common_candidates = [
         Path("config/dictionary.yaml"),
         Path("config/dictionary.yml"),
         Path("config/dictionary.json"),
         Path("dictionary.yaml"),
         Path("dictionary.json"),
-        Path("config/config.yaml"),
-        Path("config.yaml"),
-        repo_root / "config/dictionary.yaml",
-        repo_root / "config/dictionary.yml",
-        repo_root / "config/dictionary.json",
-        repo_root / "config/config.yaml",
+        repo_root / "config" / "dictionary.yaml",
+        repo_root / "config" / "dictionary.yml",
+        repo_root / "config" / "dictionary.json",
     ]
-    for c in candidates:
+    for c in common_candidates:
+        if c.exists():
+            f_map, f_rules = _parse_file(c)
+            _merge_in(f_map, f_rules)
+            break
+
+    # 2. Config file candidates (config.yaml)
+    config_candidates = [
+        Path("config/config.yaml"),
+        Path("config/config.yml"),
+        Path("config.yaml"),
+        repo_root / "config" / "config.yaml",
+    ]
+    for c in config_candidates:
         if c.exists():
             try:
+                new_mtimes[c] = c.stat().st_mtime
                 content = c.read_text(encoding="utf-8")
-                if c.suffix in (".yaml", ".yml"):
-                    try:
-                        import yaml
-                        data = yaml.safe_load(content) or {}
-                    except Exception:
-                        data = json.loads(content) if content.strip() else {}
-                else:
-                    data = json.loads(content) if content.strip() else {}
-                
-                if isinstance(data, dict):
-                    if "contextual_rules" in data and isinstance(data["contextual_rules"], list):
-                        set_contextual_rules(data["contextual_rules"])
-                    dict_file = data.get("dictionary_file")
+                try:
+                    import yaml
+                    c_data = yaml.safe_load(content) or {}
+                except Exception:
+                    c_data = json.loads(content) if content.strip() else {}
+                if isinstance(c_data, dict):
+                    dict_file = c_data.get("dictionary_file")
                     if dict_file and Path(dict_file).exists():
-                        load_custom_dictionary_from_file(dict_file)
-                        return
-                    if "dictionary" in data and isinstance(data["dictionary"], dict):
-                        set_custom_dictionary(data["dictionary"])
-                        return
-                    if "dictionary" in c.name and data:
-                        set_custom_dictionary(data)
-                        return
+                        f_map, f_rules = _parse_file(Path(dict_file))
+                        _merge_in(f_map, f_rules)
+                    elif "dictionary" in c_data and isinstance(c_data["dictionary"], dict):
+                        _merge_in(c_data["dictionary"], [])
             except Exception:
                 pass
+            break
+
+    # 3. Personal / local (gitignored) dictionary candidates
+    local_candidates = [
+        Path("config/dictionary.local.yaml"),
+        Path("config/dictionary.local.yml"),
+        Path("config/dictionary.local.json"),
+        Path("dictionary.local.yaml"),
+        Path("dictionary.local.json"),
+        Path("config/dictionary.user.yaml"),
+        Path("config/dictionary.user.yml"),
+        Path("config/dictionary.user.json"),
+        Path("dictionary.user.yaml"),
+        Path("dictionary.user.json"),
+        repo_root / "config" / "dictionary.local.yaml",
+        repo_root / "config" / "dictionary.user.yaml",
+        Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "vt" / "dictionary.yaml",
+    ]
+    for c in local_candidates:
+        if c.exists():
+            f_map, f_rules = _parse_file(c)
+            _merge_in(f_map, f_rules)
+            break
+
+    _DICT_TRACKED_PATHS_MTIMES = new_mtimes
+    set_custom_dictionary(merged_map if merged_map else None)
+    set_contextual_rules(merged_rules if merged_rules else None)
+    return merged_map, merged_rules
+
+
+def _check_and_reload_dictionary_if_changed() -> None:
+    """Checks if any dictionary file was modified and reloads if needed (~1 us check)."""
+    global _DICT_TRACKED_PATHS_MTIMES
+    try:
+        if not _DICT_TRACKED_PATHS_MTIMES:
+            return
+        for p, old_mtime in _DICT_TRACKED_PATHS_MTIMES.items():
+            if not p.exists():
+                load_merged_dictionaries()
+                return
+            if p.stat().st_mtime != old_mtime:
+                load_merged_dictionaries()
+                return
+    except Exception:
+        pass
+
+
+def _auto_load_dictionary_if_needed() -> None:
+    """Auto-detects and loads dictionaries (common + local merged) on first use."""
+    global _CUSTOM_DICT_INITIALIZED
+    if _CUSTOM_DICT_INITIALIZED:
+        return
+    _CUSTOM_DICT_INITIALIZED = True
+    load_merged_dictionaries()
 
 
 # Initialize custom dictionary once at module load
@@ -2212,6 +2360,9 @@ def clean_speech_transcription(
     """
     if not text:
         return ""
+
+    # Hot-reload dictionary if files were modified on disk (~1 us check)
+    _check_and_reload_dictionary_if_changed()
         
     cleaned = text
     cleaned_lower = text.lower()

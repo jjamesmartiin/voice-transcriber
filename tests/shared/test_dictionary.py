@@ -288,3 +288,60 @@ def test_contextual_rules_cli_and_roundtrip(tmp_path):
     assert len(dictionary.load_contextual_rules(path=custom_yaml)) == 0
 
 
+def test_multi_tier_dictionary_merging(tmp_path, monkeypatch):
+    import dictionary
+
+    common_file = tmp_path / "config" / "dictionary.yaml"
+    common_file.parent.mkdir(parents=True, exist_ok=True)
+    common_file.write_text("""
+dictionary:
+  kubernetes: Kubernetes
+  k8s: Kubernetes
+  server one: Server-1
+""")
+
+    local_file = tmp_path / "config" / "dictionary.local.yaml"
+    local_file.write_text("""
+dictionary:
+  home dash james m5: home-jamesm5
+  server one: MyCustomServer
+""")
+
+    monkeypatch.setattr(dictionary, "get_common_dictionary_path", lambda: common_file)
+    monkeypatch.setattr(dictionary, "get_local_dictionary_path", lambda create=False: local_file)
+
+    merged_map, _, sources = dictionary.load_merged_dictionary()
+    assert merged_map["kubernetes"] == "Kubernetes"
+    assert sources["kubernetes"] == "common"
+    assert merged_map["home dash james m5"] == "home-jamesm5"
+    assert sources["home dash james m5"] == "local"
+    # Local overrides common
+    assert merged_map["server one"] == "MyCustomServer"
+    assert sources["server one"] == "local"
+
+    post_processor.set_custom_dictionary(merged_map)
+    res = post_processor.clean_speech_transcription(
+        "i deployed kubernetes on home dash james m5 and server one"
+    )
+    assert res == "I deployed Kubernetes on home-jamesm5 and MyCustomServer."
+
+
+def test_vram_and_gpu_model_repairs():
+    """Verify common hardware dictionary repairs ERAM -> VRAM and 130.90 -> one 3090."""
+    repo_root = Path(__file__).resolve().parents[2]
+    post_processor.load_custom_dictionary_from_file(repo_root / "config" / "dictionary.yaml")
+
+    input_text = (
+        "We can research though there's other 3060s with like twelve gigabytes of "
+        "ERAM so if we could pair like four of them that would be pretty sizable "
+        "right that would be like better than 130.90 maybe"
+    )
+    out = post_processor.clean_speech_transcription(input_text, skip_slm=True)
+    assert "VRAM" in out
+    assert "one 3090" in out
+    assert "130.90" not in out
+    assert "ERAM" not in out
+
+
+
+

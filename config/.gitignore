@@ -3,3 +3,9 @@ config.yaml
 config.yml
 config.json
 audio_device_config.json
+dictionary.local.yaml
+dictionary.local.yml
+dictionary.local.json
+dictionary.user.yaml
+dictionary.user.yml
+dictionary.user.json
