@@ -103,6 +103,8 @@ nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
     Or change it in desktop settings (**GNOME Settings → Sound → Input**). PipeWire will fan out audio to both apps simultaneously.
 - **Direct ALSA Hardware Device (`hw:X,Y`):** Raw ALSA hardware devices enforce exclusive single-app access. If Discord or PipeWire opens `hw:X,Y`, Voice Transcriber will fail with `EBUSY`.
   - In Voice Transcriber's settings (`s`), always select **`default`** or **`pipewire`** instead of raw `hw:X,Y` devices.
+- **Find out which mic is actually live:** open the microphone picker (`s` → **Microphone**) and speak. Every visible row carries its own live level meter, so you can see at a glance which device is hearing you — typically the `default`/`pipewire` row is silent while a specific `hw:` device is the one picking up sound, which means the system default input is routed elsewhere (fix with `wpctl set-default`, above).
+  - The picker opens one capture stream per visible row, so the desktop's microphone-in-use indicator stays lit while it is open. Streams close when the picker does. Filtering the list narrows what gets opened, and a device another app holds exclusively (a raw `hw:X,Y` in Discord) is skipped — its row simply stays at 0%.
 
 ### 2. Global Hotkeys Not Detected
 **Symptom:** Pressing `Alt+Shift` or the middle mouse button does nothing.  

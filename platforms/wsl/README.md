@@ -83,6 +83,17 @@ Ensure Windows privacy settings allow WSL to access your microphone:
 - Ensure **"Microphone access"** is **ON**
 - Ensure **"Let desktop apps access your microphone"** is **ON**
 
+### The settings microphone picker shows several identical levels
+**Expected, not a bug** (and not yet confirmed on a real WSL host — see
+`TODO.md`). The picker in the settings modal meters every visible device at once
+by opening one capture stream per row. On WSL those streams all reach the same
+place: WSLg publishes your Windows default input as a single PulseAudio source
+(`RDPSource`), so `default`, `pipewire` and the `RDPSource`-backed entries
+report the *same* level. The levels are correct — there is simply one input
+behind several names. Only the *selection* matters on WSL: set the Windows
+default microphone (or the source you want) and pick `default` or `pipewire`.
+On Linux, where each `hw:` device is its own source, the rows usually differ.
+
 ---
 
 ## 3. Running the App

@@ -65,6 +65,23 @@ microphone sub-pickers, and a **Reset to Defaults** action that restores all
 shipped defaults (press Enter twice to confirm). Your microphone choice and the
 custom dictionary are never touched by a reset.
 
+The microphone picker meters **every visible row at once** — one capture stream
+per device — so you can see which mic is actually hearing you instead of
+selecting one and hoping. The monitored set follows the list, so filtering
+narrows what gets opened:
+
+| Key | Action |
+| :-- | :-- |
+| `↑` / `↓` | Move the highlight |
+| `Enter` / `Space` | Select the highlighted device |
+| *type* | Fuzzy-filter the list (also narrows what is metered) |
+| `Esc` | Cancel |
+
+On WSL, WSLg's PulseAudio server normally exposes a single real capture source
+(`RDPSource`), so expect several rows to show the *same* level — the meters are
+reading what WSLg gives Linux, which is one source behind several entries. Not
+confirmed on a WSL host yet; see `TODO.md`.
+
 There is no global hotkey for settings; from outside the terminal use the
 control API (`python src/main.py status`, `toggle`, `output type_fast`, …).
 
@@ -83,7 +100,10 @@ Python → Rust:
  "auto_type":false,"sound_theme":"proximity","ui_theme":"green"}
 {"t":"header"}                       # push the banner into scrollback
 {"t":"state","state":"RECORDING","sub":""}
-{"t":"vu","level":0.42}
+{"t":"vu","level":0.42}                # scalar meter: recording + main VU bar
+{"t":"vu","level":0.42,"levels":[{"i":4,"level":0.0},{"i":5,"level":0.44}]}
+                                     # per-device levels for the mic picker rows;
+                                     # an empty list blanks every row
 {"t":"tx","text":"...","rec":3.2,"proc":1.35,"ready":0.62,"status":"typed"}
 {"t":"ev","title":"...","message":"...","level":"info"}
 {"t":"suspend"} / {"t":"resume"} / {"t":"quit"}
@@ -96,7 +116,18 @@ Rust → Python:
                                      # toggle_numbers, cycle_theme,
                                      # reset_terminal, quit
 {"t":"cmd","cmd":"reset_defaults"}  # restore shipped defaults (settings modal)
+{"t":"cmd","cmd":"get_devices"}     # ask for the audio input device list
+{"t":"cmd","cmd":"start_mic_monitor","indices":[4,5]}
+                                     # open a level stream per visible picker row
+{"t":"cmd","cmd":"stop_mic_monitor"}
+{"t":"cmd","cmd":"set_device","device":"...","index":4}
 ```
+
+`start_mic_monitor` replaces the monitored set: devices missing from `indices`
+are closed, devices already open are kept, so scrolling the picker does not
+restart every stream. A device that refuses to open (held exclusively by
+another app, or rejecting the sample rate) is skipped rather than failing the
+whole picker — its row simply stays at 0%.
 
 Set `VT_TUI_DEBUG=/tmp/vt.log` for a trace of commands, suspend/resume, and
 settings-menu failures.

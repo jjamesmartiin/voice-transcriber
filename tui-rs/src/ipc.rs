@@ -9,6 +9,7 @@
 //! Python -> Rust:
 //!   {"t":"state","state":"READY","sub":""}
 //!   {"t":"vu","level":0.42}
+//!   {"t":"vu","level":0.42,"levels":[{"i":4,"level":0.0},{"i":5,"level":0.44}]}
 //!   {"t":"cfg","mic":"...","secondary":"...","backend":"cohere",
 //!    "muted":true,"auto_type":false,"sound_theme":"proximity","ui_theme":"auto"}
 //!   {"t":"tx","text":"...","rec":3.2,"proc":1.35,"ready":0.62,"status":"typed"}
@@ -41,6 +42,14 @@ pub struct AudioDeviceInfo {
     pub is_active: bool,
 }
 
+/// One device's live input level, as reported while the mic picker is open.
+/// `i` is the PortAudio device index (the same one `start_mic_monitor` takes).
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq)]
+pub struct VuLevel {
+    pub i: usize,
+    pub level: f32,
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(tag = "t")]
 pub enum Wire {
@@ -55,7 +64,13 @@ pub enum Wire {
         sub: String,
     },
     #[serde(rename = "vu")]
-    Vu { level: f32 },
+    Vu {
+        level: f32,
+        /// Per-device levels for the mic picker. Absent (empty) on a
+        /// scalar-only update, which the picker reads as "nothing monitored".
+        #[serde(default)]
+        levels: Vec<VuLevel>,
+    },
     #[serde(rename = "cfg")]
     Cfg {
         #[serde(default)]
@@ -185,7 +200,23 @@ pub fn send_cmd(stream: &UnixStream, cmd: &str) {
 
 /// Send a command with a string property.
 pub fn send_cmd_value(stream: &UnixStream, cmd: &str, key: &str, val: &str) {
-    let line = format!("{{\"t\":\"cmd\",\"cmd\":\"{cmd}\",\"{key}\":\"{val}\"}}\n");
+    let mut extra = serde_json::Map::new();
+    extra.insert(key.to_string(), serde_json::Value::String(val.to_string()));
+    send_cmd_json(stream, cmd, serde_json::Value::Object(extra));
+}
+
+/// Send a command object assembled by serde.
+///
+/// Audio device names routinely contain quotes, backslashes and commas, so the
+/// payload must be escaped rather than interpolated into a format string.
+pub fn send_cmd_json(stream: &UnixStream, cmd: &str, extra: serde_json::Value) {
+    let mut obj = serde_json::Map::new();
+    obj.insert("t".to_string(), serde_json::Value::String("cmd".to_string()));
+    obj.insert("cmd".to_string(), serde_json::Value::String(cmd.to_string()));
+    if let serde_json::Value::Object(extra) = extra {
+        obj.extend(extra);
+    }
+    let line = format!("{}\n", serde_json::Value::Object(obj));
     let mut w = stream;
     let _ = w.write_all(line.as_bytes());
     let _ = w.flush();
@@ -247,6 +278,59 @@ mod tests {
         // A newer engine adding a field must not break an older TUI.
         let json = r#"{"t":"tx","text":"hi","rec":1.0,"proc":0.1,"ready":0.1,"status":"copied","time_saved":12.0,"session_time_saved":105.0,"lifetime_time_saved":3661.0,"words_per_second":9.9}"#;
         assert!(serde_json::from_str::<Wire>(json).is_ok());
+    }
+
+    /// The picker used to receive a single scalar; it must still understand it.
+    #[test]
+    fn vu_message_tolerates_a_scalar_only_producer() {
+        match serde_json::from_str::<Wire>(r#"{"t":"vu","level":0.42}"#)
+            .expect("scalar vu must parse")
+        {
+            Wire::Vu { level, levels } => {
+                assert_eq!(level, 0.42);
+                assert!(levels.is_empty(), "no per-device levels were supplied");
+            }
+            other => panic!("expected Vu, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vu_message_carries_every_monitored_device() {
+        let json = r#"{"t":"vu","level":0.42,"levels":[{"i":4,"level":0.0},{"i":5,"level":0.44}]}"#;
+        match serde_json::from_str::<Wire>(json).expect("multi-device vu must parse") {
+            Wire::Vu { level, levels } => {
+                assert_eq!(level, 0.42);
+                assert_eq!(
+                    levels,
+                    vec![
+                        VuLevel { i: 4, level: 0.0 },
+                        VuLevel { i: 5, level: 0.44 },
+                    ]
+                );
+            }
+            other => panic!("expected Vu, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn send_cmd_json_escapes_device_names() {
+        // A name containing a quote must not terminate the JSON string early.
+        let line = command_line("set_device", serde_json::json!({ "device": "Mic \"Pro\" \\2" }));
+        let parsed: serde_json::Value = serde_json::from_str(&line).expect("must stay valid JSON");
+        assert_eq!(parsed["t"], "cmd");
+        assert_eq!(parsed["cmd"], "set_device");
+        assert_eq!(parsed["device"], "Mic \"Pro\" \\2");
+    }
+
+    /// Mirror of `send_cmd_json` that returns the line instead of writing it.
+    fn command_line(cmd: &str, extra: serde_json::Value) -> String {
+        let mut obj = serde_json::Map::new();
+        obj.insert("t".to_string(), serde_json::Value::String("cmd".to_string()));
+        obj.insert("cmd".to_string(), serde_json::Value::String(cmd.to_string()));
+        if let serde_json::Value::Object(extra) = extra {
+            obj.extend(extra);
+        }
+        serde_json::Value::Object(obj).to_string()
     }
 
     #[test]

@@ -295,7 +295,7 @@ this is the default on native Windows.
 Both frontends share the same visual layout and keyboard model — `s`/`S`/`,`
 for settings, `Space`/`Enter` to record — with the microphone and theme
 sub-pickers reached from inside the settings modal:
-- **Interactive Modal Pickers**: `⚙️ Settings & Configuration`, `🎤 Microphone Input Device`, and `🎨 Select UI Color Theme` overlays with real-time search filtering, arrow/Tab navigation, and in-place toggling.
+- **Interactive Modal Pickers**: `⚙️ Settings & Configuration`, `🎤 Microphone Input Device`, and `🎨 Select UI Color Theme` overlays with real-time search filtering, arrow/Tab navigation, and in-place toggling. The microphone picker shows a **live level for every visible device at once** — one capture stream per row — so you can see which mic is actually hearing you instead of selecting one and hoping. Streams follow the visible rows, so the search box also narrows what is monitored.
 - **Inline CLI Prompt Stream**: Responsive status prompt line with active mic, model, sound, output mode, trailing space, punctuation, numbers, and mouse hold badges.
 - **Clean Word-Wrapped Transcriptions**: Direct terminal scrollback with timing metadata dividers and zero border interference for 100% clean copy-paste.
 - **Persistent Time-Saved Counter**: every transcription divider carries a `⚡ saved: +14s (session: 2m 15s · total: 1h 20m)` badge — the time dictation saved versus typing, the running session total, and an **all-time total that survives restarts**. The estimate uses the `typing_wpm` setting.

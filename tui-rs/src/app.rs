@@ -3,6 +3,7 @@
 //! This deliberately mirrors the state held by `src/tui.py` (`VoiceTranscriberTUI`)
 //! so the two implementations can be compared side by side.
 
+use std::collections::HashMap;
 use std::time::Instant;
 
 use ratatui::style::Color;
@@ -159,6 +160,9 @@ pub struct App {
     pub rec_started: Option<Instant>,
     pub vu_level: f32,
     pub vu_peak: f32,
+    /// Per-device live levels driving the mic picker's rows, keyed by PortAudio
+    /// device index. Only populated while the picker is monitoring.
+    pub vu_levels: HashMap<usize, f32>,
     pub spinner: usize,
     pub transcription_count: usize,
     pub active_device: String,
@@ -195,6 +199,7 @@ impl App {
             rec_started: None,
             vu_level: 0.0,
             vu_peak: 0.0,
+            vu_levels: HashMap::new(),
             spinner: 0,
             transcription_count: 0,
             active_device: "HyperX QuadCast S".to_string(),
@@ -276,6 +281,7 @@ impl App {
             self.state_started = None;
             self.vu_level = 0.0;
             self.vu_peak = 0.0;
+            self.vu_levels.clear();
             self.rec_started = None;
         }
         if state == RunState::Recording {
@@ -289,6 +295,25 @@ impl App {
     pub fn update_vu(&mut self, level: f32) {
         self.vu_level = level.max(self.vu_level * 0.7);
         self.vu_peak = self.vu_peak.max(self.vu_level);
+    }
+
+    /// Apply one `vu` wire message: the scalar feeds the main meter and the
+    /// per-device list feeds the mic picker's rows.
+    pub fn apply_vu_wire(&mut self, level: f32, levels: &[crate::ipc::VuLevel]) {
+        self.update_vu(level);
+        self.update_vu_levels(levels);
+    }
+
+    /// Replace the per-device level map with a fresh snapshot, decaying any
+    /// device that got quieter and forgetting devices that stopped reporting.
+    /// An empty snapshot therefore clears every row.
+    pub fn update_vu_levels(&mut self, levels: &[crate::ipc::VuLevel]) {
+        let mut next: HashMap<usize, f32> = HashMap::with_capacity(levels.len());
+        for l in levels {
+            let decayed = self.vu_levels.get(&l.i).copied().unwrap_or(0.0) * 0.7;
+            next.insert(l.i, l.level.max(decayed));
+        }
+        self.vu_levels = next;
     }
 
     pub fn synthetic_vu(&mut self) {

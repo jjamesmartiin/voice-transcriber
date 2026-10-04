@@ -27,7 +27,10 @@ pub struct MicPickerState {
     pub query: String,
     pub selected_index: usize,
     pub filtered_indices: Vec<usize>,
-    pub last_monitored_device_idx: Option<usize>,
+    /// Device indices the engine is currently metering. Mirrors the last set
+    /// sent downstream, so the picker only re-commands when the visible rows
+    /// actually change (scroll, filter, device list update).
+    pub monitored: Vec<usize>,
 }
 
 impl MicPickerState {
@@ -36,7 +39,7 @@ impl MicPickerState {
             query: String::new(),
             selected_index: 0,
             filtered_indices: (0..device_count).collect(),
-            last_monitored_device_idx: None,
+            monitored: Vec::new(),
         }
     }
 
@@ -225,6 +228,54 @@ pub fn vu_bar_spans(level: f32, bar_len: usize) -> Vec<Span<'static>> {
 /// [`vu_bar_spans`] when called with `bar_len = VU_W - 7`.
 pub const VU_W: usize = 18;
 
+/// Modal box size for a terminal of this size. Shared by the renderer and the
+/// monitor sync loop so the rows that get metered are exactly the rows shown.
+const POPUP_MAX_W: u16 = 76;
+const POPUP_MAX_H: u16 = 18;
+const POPUP_MIN_W: u16 = 40;
+const POPUP_MIN_H: u16 = 12;
+/// Search line, tip line, two dividers and the footer.
+const POPUP_CHROME: usize = 5;
+
+fn popup_size(area_w: u16, area_h: u16) -> (u16, u16) {
+    let w = POPUP_MAX_W.min(area_w.saturating_sub(4)).max(POPUP_MIN_W);
+    let h = POPUP_MAX_H.min(area_h.saturating_sub(2)).max(POPUP_MIN_H);
+    (w, h)
+}
+
+/// How many device rows the modal can show at once.
+fn visible_rows(area_w: u16, area_h: u16) -> usize {
+    let (_, h) = popup_size(area_w, area_h);
+    (h as usize).saturating_sub(2 + POPUP_CHROME).max(1)
+}
+
+/// First position of `filtered_indices` to draw, keeping the highlight visible.
+fn scroll_offset(selected_index: usize, rows: usize) -> usize {
+    if selected_index >= rows {
+        selected_index - rows + 1
+    } else {
+        0
+    }
+}
+
+/// PortAudio indices of the device rows the modal is currently showing. These
+/// are exactly the devices the engine should be metering.
+fn visible_device_indices(
+    state: &MicPickerState,
+    devices: &[AudioDeviceInfo],
+    rows: usize,
+) -> Vec<usize> {
+    let rows = rows.max(1);
+    let scroll = scroll_offset(state.selected_index, rows);
+    state
+        .filtered_indices
+        .iter()
+        .skip(scroll)
+        .take(rows)
+        .filter_map(|&i| devices.get(i).map(|d| d.index))
+        .collect()
+}
+
 /// Fixed-width columns for one device row, derived from the modal's inner width
 /// so every row ends on the same column.
 struct MicRowLayout {
@@ -291,7 +342,7 @@ fn mic_row(
         name_style,
     ));
 
-    // Live VU meter for the highlighted / active device.
+    // Live VU meter for this row's device.
     spans.extend(vu_bar_spans(vu_level, VU_W - 7));
     spans.push(Span::raw(" "));
 
@@ -327,8 +378,7 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
     let theme_color = app.effective_color().color();
 
     // Centered popup modal
-    let popup_w = 76u16.min(area.width.saturating_sub(4)).max(40);
-    let popup_h = 18u16.min(area.height.saturating_sub(2)).max(12);
+    let (popup_w, popup_h) = popup_size(area.width, area.height);
     let x = (area.width.saturating_sub(popup_w)) / 2;
     let y = (area.height.saturating_sub(popup_h)) / 2;
     let popup_area = Rect {
@@ -395,8 +445,8 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
 
     // Live audio level helper tip
     let tip = Line::from(vec![
-        Span::styled("  💡 Live Monitor: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        Span::styled("Speak or hold Alt+Shift to preview audio levels in real time", Style::default().add_modifier(Modifier::DIM)),
+        Span::styled("  💡 Live Levels: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled("every visible device meters at once — speak to see which mic hears you", Style::default().add_modifier(Modifier::DIM)),
     ]);
     frame.render_widget(Paragraph::new(tip), chunks[2]);
 
@@ -414,33 +464,30 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
     } else {
         let max_visible = list_area.height as usize;
         let selected = state.selected_index;
-        let scroll_offset = if selected >= max_visible {
-            selected - max_visible + 1
-        } else {
-            0
-        };
+        let scroll = scroll_offset(selected, max_visible);
 
         let mut list_lines: Vec<Line<'static>> = Vec::new();
         let layout = MicRowLayout::new(list_area.width as usize);
         for (view_i, &opt_idx) in state
             .filtered_indices
             .iter()
-            .skip(scroll_offset)
+            .skip(scroll)
             .take(max_visible)
             .enumerate()
         {
-            let actual_idx = scroll_offset + view_i;
+            let actual_idx = scroll + view_i;
             let is_selected = actual_idx == state.selected_index;
             let dev = &devices[opt_idx];
             let is_active = dev.name.to_lowercase() == app.active_device.to_lowercase()
                 || (dev.is_active && app.active_device.is_empty());
 
-            // Only the highlighted / active device shows a live level.
-            let vu_level = if is_selected || is_active {
-                app.vu_level
-            } else {
-                0.0
-            };
+            // Every visible row meters at once, so the user can see which device
+            // is actually hearing them instead of guessing from the highlight.
+            //
+            // Identical values across rows are expected on hosts where several
+            // device entries resolve to one capture source (WSLg exposes a
+            // single PulseAudio source), not a fault in the per-index map.
+            let vu_level = app.vu_levels.get(&dev.index).copied().unwrap_or(0.0);
 
             list_lines.push(mic_row(
                 dev,
@@ -464,7 +511,7 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
     // Footer
     let footer = Line::from(vec![
         Span::styled(" [↑/↓] ", Style::default().fg(Color::Cyan)),
-        Span::styled("Preview   ", Style::default().add_modifier(Modifier::DIM)),
+        Span::styled("Navigate   ", Style::default().add_modifier(Modifier::DIM)),
         Span::styled("[Enter/Space] ", Style::default().fg(Color::Green)),
         Span::styled("Select   ", Style::default().add_modifier(Modifier::DIM)),
         Span::styled("[Type] ", Style::default().fg(Color::Cyan)),
@@ -489,10 +536,10 @@ pub fn run_mic_picker(
     terminal.hide_cursor()?;
     terminal.clear()?;
 
-    // Request fresh device list from Python backend
+    // Request fresh device list from Python backend. The monitored set is
+    // derived from what is actually on screen, so the loop below commands it.
     if let Some(w) = writer {
         ipc::send_cmd(w, "get_devices");
-        ipc::send_cmd(w, "start_mic_monitor");
     }
 
     let mut state = MicPickerState::new(app.audio_devices.len());
@@ -506,8 +553,27 @@ pub fn run_mic_picker(
     }
 
     loop {
+        // Do not let an erratic terminal size reading (a resize mid-frame, a
+        // terminal that reports 0x0) abort the picker: fall back to a sane
+        // default and let the next frame re-measure.
+        let (term_w, term_h) = terminal
+            .size()
+            .map(|s| (s.width, s.height))
+            .unwrap_or((80, 24));
+        let rows = visible_rows(term_w, term_h);
+        let visible = visible_device_indices(&state, &app.audio_devices, rows);
+
         if writer.is_none() {
+            // Demo mode: no engine to meter, so animate the visible rows too.
             app.synthetic_vu();
+            let demo: Vec<crate::ipc::VuLevel> = visible
+                .iter()
+                .map(|i| crate::ipc::VuLevel {
+                    i: *i,
+                    level: app.vu_level,
+                })
+                .collect();
+            app.update_vu_levels(&demo);
         }
 
         // Drain incoming messages
@@ -519,8 +585,8 @@ pub fn run_mic_picker(
                             app.update_devices(devices);
                             state.update_filter(&app.audio_devices);
                         }
-                        Wire::Vu { level } => {
-                            app.update_vu(level);
+                        Wire::Vu { level, levels } => {
+                            app.apply_vu_wire(level, &levels);
                         }
                         Wire::State { state: s, sub } => {
                             app.update_state(crate::app::RunState::from_wire(&s), sub);
@@ -540,21 +606,12 @@ pub fn run_mic_picker(
             }
         }
 
-        // If the highlighted device changed, switch live mic monitoring to it
-        if let Some(&dev_idx) = state.filtered_indices.get(state.selected_index) {
-            if let Some(dev) = app.audio_devices.get(dev_idx) {
-                if state.last_monitored_device_idx != Some(dev.index) {
-                    state.last_monitored_device_idx = Some(dev.index);
-                    if let Some(w) = writer {
-                        let line = format!(
-                            "{{\"t\":\"cmd\",\"cmd\":\"start_mic_monitor\",\"index\":{}}}\n",
-                            dev.index
-                        );
-                        let mut stream = w;
-                        let _ = std::io::Write::write_all(&mut stream, line.as_bytes());
-                        let _ = std::io::Write::flush(&mut stream);
-                    }
-                }
+        // Keep the engine metering exactly the rows on screen. This only fires
+        // when scrolling or filtering actually changes the visible set.
+        if visible != state.monitored {
+            state.monitored = visible.clone();
+            if let Some(w) = writer {
+                ipc::send_cmd_json(w, "start_mic_monitor", serde_json::json!({ "indices": visible }));
             }
         }
 
@@ -572,13 +629,14 @@ pub fn run_mic_picker(
                                 let dev_index = dev.index;
                                 app.active_device = dev_name.clone();
                                 if let Some(w) = writer {
-                                    let line = format!(
-                                        "{{\"t\":\"cmd\",\"cmd\":\"set_device\",\"device\":\"{}\",\"index\":{}}}\n",
-                                        dev_name, dev_index
+                                    ipc::send_cmd_json(
+                                        w,
+                                        "set_device",
+                                        serde_json::json!({
+                                            "device": dev_name,
+                                            "index": dev_index,
+                                        }),
                                     );
-                                    let mut stream = w;
-                                    let _ = std::io::Write::write_all(&mut stream, line.as_bytes());
-                                    let _ = std::io::Write::flush(&mut stream);
                                 }
                             }
                             break;
@@ -604,7 +662,84 @@ mod tests {
     use crate::app::{App, Theme};
 
     #[test]
-    fn test_mic_picker_filtering() {
+    fn visible_indices_meter_exactly_the_rows_on_screen() {
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        // Six devices with non-contiguous PortAudio indices, as PipeWire gives us.
+        app.audio_devices = [4usize, 5, 6, 8, 9, 12]
+            .iter()
+            .enumerate()
+            .map(|(i, &index)| AudioDeviceInfo {
+                index,
+                name: format!("Mic {i}"),
+                display_name: None,
+                channels: 1,
+                is_default: i == 0,
+                is_active: i == 0,
+            })
+            .collect();
+        let mut state = MicPickerState::new(app.audio_devices.len());
+
+        // Everything fits: every row is metered.
+        assert_eq!(
+            visible_device_indices(&state, &app.audio_devices, 10),
+            vec![4, 5, 6, 8, 9, 12]
+        );
+
+        // A short window follows the highlight rather than metering off-screen rows.
+        state.selected_index = 4;
+        assert_eq!(
+            visible_device_indices(&state, &app.audio_devices, 3),
+            vec![6, 8, 9]
+        );
+
+        // Filtering narrows the metered set to the matching row alone.
+        state.query = "mic 3".to_string();
+        state.update_filter(&app.audio_devices);
+        state.selected_index = 0;
+        assert_eq!(visible_device_indices(&state, &app.audio_devices, 10), vec![8]);
+
+        // A filter with no matches monitors nothing (which clears the meters).
+        state.query = "zzz".to_string();
+        state.update_filter(&app.audio_devices);
+        assert!(visible_device_indices(&state, &app.audio_devices, 10).is_empty());
+    }
+
+    #[test]
+    fn meter_window_matches_the_rendered_list_height() {
+        // The renderer and the monitor sync must agree on the row count, or the
+        // engine would meter rows the user cannot see.
+        for (w, h) in [(80u16, 24u16), (120, 40), (60, 20), (40, 12), (200, 60)] {
+            let (popup_w, popup_h) = popup_size(w, h);
+            let inner_h = popup_h as usize - 2;
+            let expected_rows = inner_h - POPUP_CHROME;
+            assert_eq!(visible_rows(w, h), expected_rows.max(1));
+            assert!(popup_w >= POPUP_MIN_W && popup_w <= POPUP_MAX_W);
+        }
+    }
+
+    #[test]
+    fn vu_bar_reflects_a_non_highlighted_rows_level() {
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        app.audio_devices = vec![AudioDeviceInfo {
+            index: 7,
+            name: "Quiet USB Mic".to_string(),
+            display_name: Some("Quiet USB Mic".to_string()),
+            channels: 1,
+            is_default: false,
+            is_active: false,
+        }];
+
+        // Nothing is highlighted or active, yet the row still shows its own level.
+        app.apply_vu_wire(0.0, &[crate::ipc::VuLevel { i: 7, level: 0.5 }]);
+        assert_eq!(app.vu_levels.get(&7), Some(&0.5));
+
+        // A snapshot that omits the device forgets it (levels are not cumulative).
+        app.apply_vu_wire(0.0, &[]);
+        assert!(app.vu_levels.is_empty());
+    }
+
+    #[test]
+    fn mic_picker_filtering() {
         let mut app = App::new("1.1.1", Theme::Cyan);
         app.audio_devices = vec![
             AudioDeviceInfo {

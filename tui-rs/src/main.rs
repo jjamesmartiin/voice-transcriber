@@ -169,7 +169,7 @@ impl Runtime {
         match wire {
             Wire::Devices { devices } => app.update_devices(devices),
             Wire::State { state, sub } => app.update_state(RunState::from_wire(&state), sub),
-            Wire::Vu { level } => app.update_vu(level),
+            Wire::Vu { level, levels } => app.apply_vu_wire(level, &levels),
             Wire::Cfg {
                 mic,
                 secondary,

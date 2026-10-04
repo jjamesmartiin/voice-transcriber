@@ -529,9 +529,9 @@ pub fn run_preset_picker(
                         Wire::State { state: s, sub } => {
                             app.update_state(crate::app::RunState::from_wire(&s), sub);
                         }
-                        Wire::Vu { level } => {
-                            app.update_vu(level);
-                        }
+                        Wire::Vu { level, levels } => {
+                            app.apply_vu_wire(level, &levels);
+                            }
                         Wire::Cfg {
                             mic,
                             secondary,

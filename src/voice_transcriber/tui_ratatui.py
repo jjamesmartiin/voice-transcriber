@@ -103,9 +103,9 @@ class RatatuiTui:
         self.on_reset_terminal = None
         self.on_quit = None
 
-        # --- Mic monitoring ---
-        self._mic_monitor_stream = None
-        self._mic_monitor_running = False
+        # --- Mic monitoring: one live level stream per visible picker row ---
+        self._mic_monitor_streams: dict[int, object] = {}
+        self._mic_levels: dict[int, float] = {}
 
         # --- IPC plumbing ---
         self._server = None
@@ -113,6 +113,9 @@ class RatatuiTui:
         self._proc = None
         self._pending: list[dict] = []
         self._send_lock = threading.Lock()
+        # Guards the VU send-throttle timestamp. One PortAudio callback thread
+        # runs per monitored device, so several can race the check at once.
+        self._vu_lock = threading.Lock()
         self._started = False
         self._closed = False
         self._suspended = False
@@ -316,8 +319,12 @@ class RatatuiTui:
         elif cmd == "get_devices":
             self.send_device_list()
         elif cmd == "start_mic_monitor":
-            idx = msg.get("index")
-            self.start_mic_monitor(int(idx) if idx is not None else None)
+            # ``indices`` (a list) is what the picker sends so every visible row
+            # meters at once; ``index`` is the older single-device form.
+            indices = msg.get("indices")
+            if indices is None:
+                indices = msg.get("index")
+            self.start_mic_monitor(indices)
         elif cmd == "stop_mic_monitor":
             self.stop_mic_monitor()
         elif cmd == "set_device":
@@ -352,78 +359,197 @@ class RatatuiTui:
         except Exception as e:
             logger.debug(f"Failed to send devices: {e}")
 
-    def start_mic_monitor(self, device_idx=None):
-        self.stop_mic_monitor()
+    # ------------------------------------------------------- mic monitoring
+
+    def start_mic_monitor(self, indices=None):
+        """Open live level streams for ``indices`` (the picker's visible rows).
+
+        Streams for devices that are no longer requested are closed and new ones
+        are opened, so scrolling or filtering the picker diffs the set instead of
+        tearing every device down and re-opening it on each keystroke.
+
+        Platform notes (see TODO.md, "Multi-device mic levels"):
+
+        * **Linux** — verified end-to-end in a real terminal.
+        * **WSL** — *unconfirmed*, but shares this exact code path. Audio arrives
+          through WSLg's PulseAudio server, which usually exposes a single real
+          capture source (``RDPSource``), so every visible row will most likely
+          report the *same* level. That is the expected outcome there, not a bug
+          in the per-device plumbing — the meters are still correct, just not
+          informative. If a WSL user reports identical bars, check this first.
+        * **Native Windows** — never reaches here: ``tui_available()`` requires
+          ``socket.AF_UNIX``, which stock CPython does not expose on Windows, so
+          the Rich TUI is used and this class is never constructed.
+        * **macOS** — expected to work (nothing below branches on platform) but
+          likewise unverified; a denied microphone permission fails every
+          stream, which the per-device skip degrades to flat bars, not an error.
+        """
         try:
             import sounddevice as sd
-            import numpy as np
-            import t2
-
-            dev = device_idx if device_idx is not None else t2.INPUT_DEVICE_INDEX
-            if dev is None:
-                dev = "default"
-            self._mic_monitor_running = True
-
-            def audio_callback(indata, frames, time_info, status):
-                if not getattr(self, "_mic_monitor_running", False):
-                    raise sd.CallbackStop()
-                rms = float(np.sqrt(np.mean(indata**2)))
-                level = min(1.0, max(0.0, rms * 8.0))
-                self.update_vu_level(level)
-
-            target_rate = 16000
-            try:
-                dev_info = sd.query_devices(dev)
-                target_rate = int(dev_info.get("default_samplerate", 16000))
-            except Exception:
-                pass
-
-            try:
-                self._mic_monitor_stream = sd.InputStream(
-                    device=dev,
-                    channels=1,
-                    samplerate=16000,
-                    blocksize=800,
-                    callback=audio_callback,
-                )
-                self._mic_monitor_stream.start()
-            except Exception:
-                self._mic_monitor_stream = sd.InputStream(
-                    device=dev,
-                    channels=1,
-                    samplerate=target_rate,
-                    blocksize=int(target_rate * 0.05),
-                    callback=audio_callback,
-                )
-                self._mic_monitor_stream.start()
         except Exception as e:
             logger.debug(f"start_mic_monitor failed: {e}")
+            return
+
+        if indices is None:
+            import t2
+            indices = [t2.INPUT_DEVICE_INDEX] if t2.INPUT_DEVICE_INDEX is not None else []
+        elif isinstance(indices, (int, str)):
+            indices = [indices]
+
+        wanted: list[int] = []
+        for idx in indices:
+            try:
+                idx = int(idx)
+            except (TypeError, ValueError):
+                continue
+            if idx not in wanted:
+                wanted.append(idx)
+
+        streams = getattr(self, "_mic_monitor_streams", None)
+        if streams is None:
+            streams = {}
+            self._mic_monitor_streams = streams
+        if getattr(self, "_mic_levels", None) is None:
+            self._mic_levels = {}
+
+        for idx in [i for i in streams if i not in wanted]:
+            self._release_monitor_stream(streams.pop(idx))
+        for idx in wanted:
+            if idx not in streams:
+                stream = self._open_monitor_stream(sd, idx)
+                if stream is not None:
+                    streams[idx] = stream
+
+        for idx in streams:
+            self._mic_levels.setdefault(idx, 0.0)
+        for idx in [i for i in self._mic_levels if i not in streams]:
+            del self._mic_levels[idx]
+
+        # Push immediately so a newly opened device shows 0% rather than the
+        # level the previous occupant of that row left behind. With nothing
+        # monitored (e.g. a filter that matches no device) send an explicit
+        # empty snapshot so the frontend clears its stale bars instead of
+        # keeping the last frame's levels.
+        if streams:
+            self._push_vu_levels(force=True)
+        else:
+            self.update_vu_level(0.0, levels={}, force=True)
+
+    def _open_monitor_stream(self, sd, device_idx):
+        """Open one capture stream; returns None if the device will not cooperate.
+
+        A device that another app holds exclusively, or that rejects our rate,
+        must not take the whole picker down with it.
+        """
+        import numpy as np
+
+        rate = self._pick_monitor_rate(sd, device_idx)
+        if rate is None:
+            return None
+
+        def audio_callback(indata, frames, time_info, status):
+            # A stream can deliver one last block after it was released, so only
+            # record levels for devices that are still part of the picker view.
+            if device_idx not in self._mic_monitor_streams:
+                return
+            rms = float(np.sqrt(np.mean(indata ** 2)))
+            self._mic_levels[device_idx] = min(1.0, max(0.0, rms * 8.0))
+            self._push_vu_levels()
+
+        try:
+            stream = sd.InputStream(
+                device=device_idx,
+                channels=1,
+                samplerate=rate,
+                blocksize=max(1, int(rate * 0.05)),
+                callback=audio_callback,
+            )
+            stream.start()
+            return stream
+        except Exception as e:
+            logger.debug(f"mic monitor: device {device_idx} at {rate}Hz failed: {e}")
+            return None
+
+    @staticmethod
+    def _pick_monitor_rate(sd, device_idx):
+        """Sample rate to open ``device_idx`` at, or None if it takes none.
+
+        Asking first (`Pa_IsFormatSupported`) matters for more than tidiness: a
+        *failed* ``InputStream`` open makes PortAudio write ALSA errors straight
+        to stderr, which is the same terminal the TUI is drawing on, so it
+        corrupts the picker's rendering. Prefer 16 kHz (the ASR path), then
+        whatever the device natively runs at -- raw ALSA ``hw:`` devices
+        routinely reject 16 kHz.
+        """
+        try:
+            native = int(sd.query_devices(device_idx).get("default_samplerate", 16000) or 16000)
+        except Exception:
+            native = 16000
+
+        candidates = []
+        for rate in (16000, native):
+            if rate > 0 and rate not in candidates:
+                candidates.append(rate)
+
+        for rate in candidates:
+            try:
+                sd.check_input_settings(device=device_idx, channels=1, samplerate=rate)
+                return rate
+            except Exception as e:
+                logger.debug(f"mic monitor: device {device_idx} refuses {rate}Hz: {e}")
+        return None
+
+    @staticmethod
+    def _release_monitor_stream(stream):
+        try:
+            stream.stop()
+            stream.close()
+        except Exception:
+            pass
 
     def stop_mic_monitor(self):
-        self._mic_monitor_running = False
-        stream = getattr(self, "_mic_monitor_stream", None)
-        if stream:
-            try:
-                stream.stop()
-                stream.close()
-            except Exception:
-                pass
-            self._mic_monitor_stream = None
-        self.update_vu_level(0.0)
+        """Close every live level stream and blank the per-device meters."""
+        streams = getattr(self, "_mic_monitor_streams", None) or {}
+        for idx in list(streams):
+            self._release_monitor_stream(streams.pop(idx))
+        self._mic_monitor_streams = {}
+        self._mic_levels = {}
+        self.update_vu_level(0.0, levels={}, force=True)
+
+    def _push_vu_levels(self, force=False):
+        """Send the current per-device snapshot, throttled like the scalar VU."""
+        levels = dict(self._mic_levels)
+        if not levels:
+            return
+        self.update_vu_level(max(levels.values()), levels=levels, force=force)
 
     def update_state(self, state, sub_text=""):
         self.state = state
         self.sub_state_text = sub_text
         self._send({"t": "state", "state": state, "sub": sub_text})
 
-    def update_vu_level(self, level):
+    def update_vu_level(self, level, levels=None, force=False):
+        """Publish a level update to the frontend.
+
+        ``level`` is the scalar meter used by the main screen (and by recording);
+        ``levels`` optionally carries one entry per monitored device for the mic
+        picker's per-row bars.
+        """
         self.vu_level = level
-        # The TUI only renders at ~10fps; throttle to avoid flooding the socket.
-        now = time.time()
-        if now - self._last_vu_sent < 0.03:
-            return
-        self._last_vu_sent = now
-        self._send({"t": "vu", "level": float(level)})
+        # The TUI only renders at ~10fps and every monitored device ticks this,
+        # so gate the send under a lock: without it several mic callbacks read a
+        # stale timestamp at once and all send.
+        with self._vu_lock:
+            now = time.time()
+            if not force and now - self._last_vu_sent < 0.03:
+                return
+            self._last_vu_sent = now
+        msg = {"t": "vu", "level": float(level)}
+        if levels is not None:
+            msg["levels"] = [
+                {"i": int(i), "level": float(v)} for i, v in sorted(levels.items())
+            ]
+        self._send(msg)
 
     def set_active_device(self, device_name):
         self.active_device = device_name or "Default Microphone"
