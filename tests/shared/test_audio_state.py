@@ -375,3 +375,131 @@ class TestStartupHealthCheck:
         assert is_healthy is True
         assert issues == []
 
+
+# ---------------------------------------------------------------------------
+# Inputs the device list is missing, and who is holding them
+# ---------------------------------------------------------------------------
+# PortAudio drops a device it cannot open while building its list, so an input
+# another app is capturing from vanishes from the picker. Recovering it needs the
+# two facts below: which ALSA cards can capture, and which client is holding one.
+#
+# A real `wpctl status` Streams section — one client line, then its streams.
+# GNOME Settings meters the Snowball (an input stream, `<`), while Chrome's
+# playback to a Bluetooth sink (`>`) is not a holder and must be ignored.
+WPCTL_STATUS = """
+Audio
+ ├─ Devices:
+ │      86. soundcore Q20i                      [bluez5]
+ ├─ Sources:
+ │  *  132. Blue Snowball Mono                  [vol: 0.32]
+ └─ Streams:
+        53. GNOME Settings
+            103. input_MONO      < Blue Snowball:capture_MONO\t[active]
+        84. Google Chrome
+            140. output_FR       > soundcore Q20i:playback_FR\t[active]
+
+Video
+ └─ Devices:
+        51. Integrated RGB Camera
+"""
+
+
+@pytest.fixture
+def proc_asound(tmp_path, monkeypatch):
+    """A fake ``/proc/asound``: two capture cards and one playback-only card."""
+    import audio_state
+
+    root = tmp_path / "asound"
+    root.mkdir()
+    (root / "cards").write_text(
+        " 0 [Generic        ]: HDA-Intel - HD-Audio Generic\n"
+        "                      HD-Audio Generic at 0xb04c8000 irq 113\n"
+        " 4 [Snowball       ]: USB-Audio - Blue Snowball\n"
+        "                      BLUE MICROPHONE Blue Snowball at usb-0000:c6:00.4-1.3.4.2, full speed\n"
+        " 5 [A7             ]: USB-Audio - Arctis Nova 7\n"
+        "                      SteelSeries Arctis Nova 7 at usb-0000:c6:00.4-1.3.4.1, full speed\n"
+    )
+    (root / "card0").mkdir()                    # HDMI only: no capture PCM
+    (root / "card0" / "pcm3p").write_text("")
+    for card in ("card4", "card5"):
+        (root / card / "pcm0c").mkdir(parents=True)
+    monkeypatch.setattr(audio_state, "_PROC_ASOUND", str(root))
+    return root
+
+
+# PortAudio names a card's devices "<card name>: <pcm> (hw:N,M)".
+ALL_MICS = [
+    "HD-Audio Generic: ALC257 Analog (hw:1,0)",
+    "Blue Snowball: USB Audio (hw:4,0)",
+    "Arctis Nova 7: USB Audio (hw:3,0)",
+]
+
+
+class TestUnlistedInputs:
+    def test_capture_cards_are_read_from_proc_asound(self, proc_asound):
+        import audio_state
+
+        assert audio_state.alsa_capture_cards() == {
+            "Blue Snowball": "Snowball",
+            "Arctis Nova 7": "A7",
+        }
+
+    def test_a_playback_only_card_is_not_an_input(self, proc_asound):
+        """Card 0 (HDMI) has no pcmNc, so it must never be reported as missing."""
+        import audio_state
+
+        assert "HD-Audio Generic" not in audio_state.alsa_capture_cards()
+
+    def test_no_proc_asound_is_unsupported_not_an_error(self, tmp_path, monkeypatch):
+        import audio_state
+
+        monkeypatch.setattr(audio_state, "_PROC_ASOUND", str(tmp_path / "absent"))
+        assert audio_state.alsa_capture_cards() == {}
+        assert audio_state.missing_input_devices(ALL_MICS) == []
+
+    def test_every_reported_device_is_accounted_for(self, proc_asound, wpctl):
+        import audio_state
+
+        assert audio_state.missing_input_devices(ALL_MICS) == []
+
+    def test_an_unlisted_card_names_the_app_holding_it(self, proc_asound, wpctl):
+        import audio_state
+
+        wpctl.status = WPCTL_STATUS
+        missing = audio_state.missing_input_devices(
+            [n for n in ALL_MICS if "Snowball" not in n]
+        )
+        assert missing == [
+            {"name": "Blue Snowball", "card_id": "Snowball", "holder": "GNOME Settings"}
+        ]
+
+    def test_playback_streams_are_not_read_as_holders(self, proc_asound, wpctl):
+        """Chrome plays *into* the Bluetooth sink; that is not holding the mic."""
+        import audio_state
+
+        wpctl.status = WPCTL_STATUS
+        holders = audio_state.active_source_holders()
+        assert holders == {"Blue Snowball": "GNOME Settings"}
+
+    def test_an_unlisted_card_without_a_holder_is_still_reported(self, proc_asound, wpctl):
+        import audio_state
+
+        wpctl.status = ""          # nothing is streaming
+        missing = audio_state.missing_input_devices(["HD-Audio Generic: ALC257 Analog (hw:1,0)"])
+        assert [m["name"] for m in missing] == ["Blue Snowball", "Arctis Nova 7"]
+        assert all(m["holder"] is None for m in missing)
+
+    def test_no_wpctl_means_no_holders_but_still_diagnoses(self, proc_asound, no_wpctl):
+        """A host without PipeWire (or wpctl) loses the "who", not the "what"."""
+        import audio_state
+
+        assert audio_state.active_source_holders() == {}
+        missing = audio_state.missing_input_devices([])
+        assert [m["name"] for m in missing] == ["Blue Snowball", "Arctis Nova 7"]
+        assert all(m["holder"] is None for m in missing)
+
+    def test_a_broken_wpctl_degrades_to_no_holders(self, proc_asound, wpctl):
+        import audio_state
+
+        wpctl.broken = "crash"
+        assert audio_state.active_source_holders() == {}

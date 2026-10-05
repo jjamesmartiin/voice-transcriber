@@ -365,6 +365,30 @@ class TestEngineVerbs:
         with pytest.raises(ValueError, match="expected on/off"):
             engine.handle_control("spell", {"value": "maybe"})
 
+    def test_rescan_mics_reports_devices_and_holders(self, engine, monkeypatch):
+        """`rescan-mics` is the scriptable form of the settings item."""
+        t2 = pytest.importorskip("t2")
+        monkeypatch.setattr(
+            t2,
+            "rescan_audio_devices",
+            lambda: {
+                "ok": True,
+                "count": 5,
+                "devices": ["default", "pipewire"],
+                "device": "default",
+                "missing": [{"name": "Blue Snowball", "holder": "GNOME Settings"}],
+                "notice": "Blue Snowball is being used by GNOME Settings",
+                "message": "5 input devices found · still missing: GNOME Settings",
+            },
+        )
+
+        reply = engine.handle_control("rescan-mics", {})
+
+        assert reply["ok"] is True
+        assert reply["devices"] == ["default", "pipewire"]
+        assert reply["device"] == "default"
+        assert reply["missing"][0]["holder"] == "GNOME Settings"
+
     def test_set_mic_without_a_match_reports_the_failure(self, engine):
         """A substring that matches nothing must error, not silently no-op."""
         with pytest.raises(ValueError, match="no input device matching"):
@@ -379,6 +403,7 @@ class TestEngineVerbs:
         blocking = {
             "start", "stop", "toggle", "settings", "mic", "theme",
             "reset-defaults", "reset-terminal", "quit", "set-mic", "mics",
+            "rescan-mics",
         }
         for verb in control.VERBS:
             if verb in blocking:

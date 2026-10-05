@@ -254,6 +254,7 @@ class SimpleVoiceTranscriber:
         self.tui.on_open_settings_picker = self.open_settings_picker
         self.tui.on_open_mic_picker = self.open_mic_picker
         self.tui.on_reset_terminal = self._on_tui_reset_terminal
+        self.tui.on_rescan_mics = self._on_tui_rescan_mics
         self.tui.on_quit = self._on_tui_quit
 
     def _on_tui_toggle_record(self):
@@ -634,6 +635,41 @@ class SimpleVoiceTranscriber:
         if hasattr(self, 'tui') and self.tui:
             self.tui._resume_live()
             self.tui.update_state("READY")
+
+    def _on_tui_rescan_mics(self):
+        """Re-enumerate audio devices and report what came back.
+
+        PortAudio builds its device list once, at startup, and leaves out any
+        device it cannot open at that moment -- so a mic another app was holding
+        then is missing from the picker until the engine restarts. This makes
+        that recoverable from the settings modal (and from `rescan-mics`)
+        instead of by quitting the app.
+        """
+        import t2
+        if getattr(self, 'recording', False):
+            self.tui.print_warning(
+                "Settings Locked",
+                "Cannot re-scan audio devices while recording is active.",
+            )
+            return {
+                "ok": False, "count": 0, "devices": [], "device": None,
+                "missing": [], "notice": "", "message": "recording in progress",
+            }
+
+        summary = t2.rescan_audio_devices()
+        self._sync_tui_state()
+        if summary.get("notice"):
+            self.tui.print_warning(
+                "🎙️ Microphones",
+                f"{summary['message']}. Close what is using it and re-scan again.",
+            )
+        else:
+            self.tui.print_event(
+                "🎙️ Microphones",
+                summary.get("message", "Audio devices re-scanned"),
+                level="success" if summary.get("ok") else "error",
+            )
+        return summary
 
     def _on_tui_reset_terminal(self):
         import t2
@@ -1150,6 +1186,17 @@ class SimpleVoiceTranscriber:
                 "ok": True,
                 "cmd": verb,
                 "devices": [d.get("name") for d in t2.get_input_devices() if d.get("name")],
+            }
+
+        if verb in ("rescan-mics", "rescan-microphones"):
+            summary = self._on_tui_rescan_mics()
+            return {
+                "ok": bool(summary.get("ok")),
+                "cmd": verb,
+                "devices": summary.get("devices", []),
+                "device": summary.get("device"),
+                "missing": summary.get("missing", []),
+                "message": summary.get("message", ""),
             }
 
         if verb in ("set-mic", "set-microphone"):

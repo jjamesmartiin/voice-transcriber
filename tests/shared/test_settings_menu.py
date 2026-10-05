@@ -372,6 +372,65 @@ class TestSettingsMenuLifecycle:
         app.tui.print_warning.assert_called_once()
         assert opened == []  # picker never opened
 
+    def test_rescan_mics_callback_reports_and_syncs(self, monkeypatch):
+        app = _make_app(monkeypatch)
+        calls = []
+        monkeypatch.setattr(
+            t2,
+            "rescan_audio_devices",
+            lambda: calls.append("rescan") or {
+                "ok": True,
+                "count": 6,
+                "devices": ["default"],
+                "device": "default",
+                "missing": [],
+                "notice": "",
+                "message": "6 input devices found",
+            },
+        )
+
+        app._on_tui_rescan_mics()
+
+        assert calls == ["rescan"]
+        app._sync_tui_state.assert_called_once()
+        app.tui.print_event.assert_called_once()
+        app.tui.print_warning.assert_not_called()
+
+    def test_rescan_mics_warns_when_a_mic_is_still_held(self, monkeypatch):
+        """A device that is still absent must say who has it, not just fail."""
+        app = _make_app(monkeypatch)
+        monkeypatch.setattr(
+            t2,
+            "rescan_audio_devices",
+            lambda: {
+                "ok": True,
+                "count": 5,
+                "devices": ["default"],
+                "device": "default",
+                "missing": [{"name": "Blue Snowball", "holder": "GNOME Settings"}],
+                "notice": "Blue Snowball is being used by GNOME Settings",
+                "message": "5 input devices found · still missing: GNOME Settings",
+            },
+        )
+
+        app._on_tui_rescan_mics()
+
+        app.tui.print_warning.assert_called_once()
+        assert "GNOME Settings" in app.tui.print_warning.call_args[0][1]
+        app.tui.print_event.assert_not_called()
+
+    def test_rescan_mics_blocked_while_recording(self, monkeypatch):
+        """Pa_Terminate closes open streams, so this is idle-only by design."""
+        app = _make_app(monkeypatch, recording=True)
+        calls = []
+        monkeypatch.setattr(t2, "rescan_audio_devices", lambda: calls.append("rescan"))
+
+        app._on_tui_rescan_mics()
+
+        assert calls == []
+        app.tui.print_warning.assert_called_once()
+        app._sync_tui_state.assert_not_called()
+
     def test_reset_defaults_callback_restores_and_notifies(self, monkeypatch):
         app = _make_app(monkeypatch)
         calls = []

@@ -347,6 +347,115 @@ def get_input_devices():
         return []
 
 
+def _reselect_input_device(devices=None):
+    """Re-point the configured mic at its index in a freshly enumerated list.
+
+    A device index is only a position in PortAudio's list, so it shifts the
+    moment a device appears or disappears (on the maintainer's machine
+    ``default`` moved 9 -> 10 when the Blue Snowball came back). The configured
+    *name* is the stable identity, so the selection is re-resolved from it. An
+    index that no longer exists is dropped rather than kept, so the auto logic
+    picks a working device at record time instead of failing on a stale one.
+    """
+    global INPUT_DEVICE_INDEX
+    if devices is None:
+        devices = get_input_devices()
+
+    if OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
+        wanted = SECONDARY_DEVICE_NAME
+    else:
+        wanted = PRIMARY_DEVICE_NAME
+
+    before = INPUT_DEVICE_INDEX
+    if wanted:
+        idx = find_device_index(wanted)
+        if idx is not None:
+            INPUT_DEVICE_INDEX = idx
+            set_default_input_device(idx)
+    elif INPUT_DEVICE_INDEX is not None and INPUT_DEVICE_INDEX >= len(devices):
+        INPUT_DEVICE_INDEX = None
+
+    if INPUT_DEVICE_INDEX != before:
+        logger.info(f"Microphone selection re-resolved: index {before} -> {INPUT_DEVICE_INDEX}")
+        save_audio_config()
+    return wanted or None
+
+
+def _mic_rescan_notice(summary):
+    """One line naming why an input is still unlisted, for the modal and TUI."""
+    parts = []
+    for dev in summary.get("missing") or []:
+        if dev.get("holder"):
+            parts.append(f"{dev['name']} is being used by {dev['holder']}")
+        else:
+            parts.append(f"{dev['name']} is busy or unusable")
+    return "; ".join(parts)
+
+
+def rescan_audio_devices():
+    """Re-enumerate audio devices, then re-point the selected mic at its index.
+
+    PortAudio builds its device list once, inside ``Pa_Initialize()``, and caches
+    it for the life of the process. A device it cannot open *at that moment* is
+    left out of the list entirely rather than marked unavailable, so a mic that
+    something else held when the app started (PipeWire routing the default
+    source, another app's level meter, a browser) stays invisible to the picker
+    until the process restarts. Re-initialising is the only way to ask PortAudio
+    to look again.
+
+    Precondition: nothing may be capturing. ``Pa_Terminate()`` closes every open
+    stream (``CloseOpenStreams`` in pa_front.c), so the warm input-stream cache
+    is dropped here first and callers must be idle.
+
+    Returns a summary: ``ok``, ``count``, ``devices`` (names), ``device`` (the
+    re-resolved selection), ``missing`` (cards PortAudio still does not list,
+    each with whoever holds it — see ``audio_state.missing_input_devices``) and a
+    human-readable ``message``.
+    """
+    summary = {
+        "ok": False,
+        "count": 0,
+        "devices": [],
+        "device": None,
+        "missing": [],
+        "notice": "",
+        "message": "",
+    }
+    try:
+        _close_cached_input_streams()
+        with silence_stderr():
+            sd._terminate()
+            sd._initialize()
+    except Exception as e:
+        logger.warning(f"Audio device re-scan failed: {e}")
+        summary["message"] = f"Audio device re-scan failed: {e}"
+        return summary
+
+    devices = get_input_devices()
+    summary["devices"] = [d.get("name") for d in devices if d.get("name")]
+    summary["count"] = len(devices)
+    summary["device"] = _reselect_input_device(devices)
+    summary["ok"] = True
+
+    try:
+        import audio_state
+        summary["missing"] = audio_state.missing_input_devices(summary["devices"])
+    except Exception as e:
+        logger.debug(f"Could not check for unlisted inputs: {e}")
+
+    plural = "" if summary["count"] == 1 else "s"
+    message = f"{summary['count']} input device{plural} found"
+    notice = _mic_rescan_notice(summary)
+    summary["notice"] = notice
+    summary["message"] = f"{message} · still missing: {notice}" if notice else message
+
+    try:
+        prewarm_input_stream()
+    except Exception as e:
+        logger.debug(f"Could not re-prewarm the input stream: {e}")
+    return summary
+
+
 def get_wireplumber_bt_autoswitch():
     """Check if WirePlumber autoswitch to headset profile is enabled."""
     import shutil
@@ -1897,6 +2006,7 @@ def select_settings_picker():
     console = Console()
     reset_done = False
     defaults_done = False
+    mic_rescan = None
     confirm_defaults = False
     query = ""
     selected_idx = 0
@@ -1969,6 +2079,12 @@ def select_settings_picker():
             "keywords": "mic microphone audio device input hardware primary secondary",
         },
         {
+            "id": "rescan_mics",
+            "icon": "♻ ",
+            "title": "Reset Microphones",
+            "keywords": "reset rescan refresh microphones mics devices audio input list enumerate plugged busy stale missing",
+        },
+        {
             "id": "reset_terminal",
             "icon": "🔄 ",
             "title": "Reset Terminal",
@@ -2039,6 +2155,12 @@ def select_settings_picker():
             if len(dev) > 30:
                 dev = dev[:27] + "..."
             return dev, "[SELECT]", "yellow"
+        elif item_id == "rescan_mics":
+            if mic_rescan is None:
+                return "Re-scan for microphones", "[RUN]", "yellow"
+            if mic_rescan.get("missing"):
+                return f"{mic_rescan['count']} found · {len(mic_rescan['missing'])} still in use", "[HELD]", "yellow"
+            return f"{mic_rescan['count']} input devices found", "[DONE]", "green"
         elif item_id == "reset_terminal":
             if reset_done:
                 return "Terminal & clipboard bridge reset", "[DONE]", "green"
@@ -2125,6 +2247,12 @@ def select_settings_picker():
         console.print(search_panel)
         console.print(main_panel)
 
+        # A mic that is still absent needs saying out loud, on every redraw: it is
+        # the one row state the user cannot act on from inside this modal.
+        _notice = _mic_rescan_notice(mic_rescan) if mic_rescan else ""
+        if _notice:
+            console.print(Text.from_markup(f"  [yellow]⚠ {_notice}. Close it and pick this again.[/yellow]"))
+
         key = _read_key()
         if key != 'ENTER':
             confirm_defaults = False
@@ -2189,6 +2317,8 @@ def select_settings_picker():
                     select_theme_picker()
                 elif item_id == "microphone":
                     select_microphone_picker()
+                elif item_id == "rescan_mics":
+                    mic_rescan = rescan_audio_devices()
                 elif item_id == "reset_terminal":
                     reset_terminal()
                     reset_done = True

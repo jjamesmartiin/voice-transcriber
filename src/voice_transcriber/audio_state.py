@@ -200,3 +200,117 @@ def preserve_default_source_mute():
             logger.debug(f"Could not restore microphone mute state: {e}")
 
 
+def _read_text(path: str) -> Optional[str]:
+    """Whole-file read that never raises; ``None`` when the file is not there."""
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except Exception as e:  # missing file, permissions, not Linux at all
+        logger.debug(f"Cannot read {path}: {e}")
+        return None
+
+
+def alsa_capture_cards() -> Dict[str, str]:
+    """Card name -> card id for every ALSA card that can capture.
+
+    PortAudio names a card's devices ``"<card name>: <pcm> (hw:N,M)"``, using
+    the name from ``snd_ctl_card_info_get_name`` — which is the trailing field
+    of a ``/proc/asound/cards`` line::
+
+         4 [Snowball       ]: USB-Audio - Blue Snowball
+
+    so matching a card against the device list is a substring test. Only cards
+    with a capture PCM (``cardN/pcmNc``) matter for dictation. Returns ``{}``
+    where there is no ``/proc/asound`` (native Windows, macOS).
+    """
+    cards: Dict[str, str] = {}
+    listing = _read_text(f"{_PROC_ASOUND}/cards")
+    if listing is None:
+        return cards
+    for line in listing.splitlines():
+        match = re.match(r"\s*(\d+)\s+\[(\S+)\s*\]\s*:\s*\S+\s+-\s+(.+?)\s*$", line)
+        if not match:
+            continue
+        index, card_id, name = match.group(1), match.group(2), match.group(3)
+        try:
+            captures = Path(f"{_PROC_ASOUND}/card{index}").glob("pcm*c")
+            has_capture = any(captures)
+        except Exception:
+            has_capture = False
+        if has_capture:
+            cards[name] = card_id
+    return cards
+
+
+def active_source_holders() -> Dict[str, str]:
+    """Source name -> the client capturing from it, from ``wpctl status``.
+
+    A source another process is recording from is held open by PipeWire, and
+    that is exactly what hides it from PortAudio's device enumeration. wpctl
+    prints the holders in its *Streams* section: a client line followed by one
+    line per stream, where an input stream reads
+    ``input_MONO < Blue Snowball:capture_MONO [active]``. Only the capture
+    direction (``<``) is recorded, and the name left of the port is the
+    *source*, so callers match on it. Returns ``{}`` when wpctl is unavailable
+    or reports nothing.
+    """
+    res = _wpctl("status")
+    if res is None or res.returncode != 0:
+        return {}
+
+    holders: Dict[str, str] = {}
+    section = ""
+    client: Optional[str] = None
+    for line in (res.stdout or "").splitlines():
+        # Strip the tree glyphs wpctl draws the hierarchy with, then read what
+        # is left: a bare word ("Audio", "Streams:") opens a section, a
+        # "<id>. <name>" line is either a client or one of its streams.
+        head = re.sub(r"^[\s\u2500-\u257f]+", "", line).strip()
+        if not head:
+            continue
+        if re.match(r"^[A-Za-z][A-Za-z /]*:?$", head):
+            section = head.rstrip(":").strip().lower()
+            client = None
+            continue
+        if section != "streams":
+            continue
+        # A stream line is one that points somewhere ("<" is capture, ">" is
+        # playback); only the capture side names a source that we care about, and
+        # either side must be consumed so its "<id>. <port>" is not mistaken for
+        # a client name. The node naming the source can contain spaces, so take
+        # everything up to the port that follows it.
+        if "<" in line or ">" in line:
+            stream = re.search(r"<\s*(.+?)\s*(?:\[[^\]]*\])?\s*$", line)
+            if stream and client:
+                source = stream.group(1).rsplit(":", 1)[0].strip()
+                if source:
+                    holders.setdefault(source, client)
+            continue
+        node = re.match(r"\s*\d+\.\s+(\S.*?)\s*$", line)
+        if node:
+            client = node.group(1)
+    return holders
+
+
+def missing_input_devices(device_names: Iterable[str]) -> List[Dict[str, Any]]:
+    """Inputs the system has that PortAudio left out, and who is holding them.
+
+    ``device_names`` is what ``sounddevice.query_devices()`` reports. Any card
+    with a capture PCM in ``/proc/asound`` that no reported device name mentions
+    is one PortAudio could not open while building its list — almost always
+    because something else already had it (``holder`` names that app when wpctl
+    can tell, else ``None``). These are the devices a re-scan can bring back, so
+    naming them is the actionable part of a failed re-scan. Empty on hosts whose
+    cards cannot be enumerated at all.
+    """
+    reported = [str(name).lower() for name in device_names]
+    holders = active_source_holders()
+    missing: List[Dict[str, Any]] = []
+    for name, card_id in alsa_capture_cards().items():
+        if any(name.lower() in device for device in reported):
+            continue
+        holder = next(
+            (client for source, client in holders.items() if name.lower() in source.lower()),
+            None,
+        )
+        missing.append({"name": name, "card_id": card_id, "holder": holder})
+    return missing

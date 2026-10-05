@@ -265,7 +265,7 @@ Under Nix the same verbs pass through the wrapper: `nix run . -- status`.
 | Group | Verbs |
 | :--- | :--- |
 | **Recording** | `start`, `stop`, `toggle`, `wait`, `status` |
-| **Devices** | `mics`, `set-mic` |
+| **Devices** | `mics`, `set-mic`, `rescan-mics` |
 | **Settings** | `output`, `numbers`, `punctuation`, `theme`, `trailing-space`, `auto-punctuate`, `serial`, `spell`, `middle-click`, `mute` |
 | **Modals** | `settings`, `mic` (interactive — take over the terminal) |
 | **Lifecycle** | `reset-defaults`, `reset-terminal`, `ping`, `doctor`, `help`, `quit` |

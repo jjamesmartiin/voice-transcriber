@@ -101,6 +101,7 @@ class RatatuiTui:
         self.on_set_punctuation = None
         self.on_reset_defaults = None
         self.on_reset_terminal = None
+        self.on_rescan_mics = None
         self.on_quit = None
 
         # --- Mic monitoring: one live level stream per visible picker row ---
@@ -316,6 +317,8 @@ class RatatuiTui:
             self.on_reset_defaults()
         elif cmd == "reset_terminal" and self.on_reset_terminal:
             self.on_reset_terminal()
+        elif cmd == "rescan_mics" and self.on_rescan_mics:
+            self.on_rescan_mics()
         elif cmd == "get_devices":
             self.send_device_list()
         elif cmd == "start_mic_monitor":

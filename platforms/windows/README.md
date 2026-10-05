@@ -280,6 +280,8 @@ ERROR: Could not install packages due to an OSError: [WinError 206] The filename
 4. **Uncheck** *"Allow applications to take exclusive control of this device"*.
 5. Click **Apply** and **OK**. Both Discord and Voice Transcriber can now share the microphone stream.
 
+**If the mic does not appear in the device list at all:** the engine enumerates audio devices once, when it starts, and leaves out any device it cannot open at that moment — so a mic claimed by another app before launch stays missing from the picker for the life of the process. Choose **`s` → Reset Microphones** in the settings modal to re-enumerate and re-resolve your selection without restarting. On Windows the app cannot always tell *which* app is holding a device, so a device that is still absent is reported as "busy or unusable" rather than named.
+
 ### 6. Emoji or Box Characters Appear as ASCII (`*`, `|`) or Question Marks
 **Symptom:** The transcript divider shows `* saved: +12s` instead of `⚡ saved: +12s`, or stray `?` characters appear.  
 **Cause:** The output stream cannot encode those glyphs — a legacy console code page (e.g. a redirected `run.bat > log.txt`), or `PYTHONIOENCODING=ascii` in the environment. The app downgrades them on purpose: Rich otherwise raises `UnicodeEncodeError` and the divider disappears entirely.  

@@ -107,6 +107,10 @@ VERBS: dict[str, dict] = {
         "value": "device",
         "required": True,
     },
+    "rescan-mics": {
+        "summary": "Re-scan input devices and re-resolve the selected mic (recovers one held by another app at startup)",
+        "returns": ["devices", "device", "missing"],
+    },
     "settings": {
         "summary": "Open the settings modal (the only config entry point)",
     },

@@ -151,6 +151,7 @@ class VoiceTranscriberTUI:
         self.on_open_mic_picker = None
         self.on_set_theme = None
         self.on_reset_terminal = None
+        self.on_rescan_mics = None
         self.on_quit = None
         
         # Live display control

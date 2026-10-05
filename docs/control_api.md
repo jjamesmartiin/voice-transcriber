@@ -206,10 +206,11 @@ regardless of the console's encoding.
 
 ## Verbs
 
-`start`, `stop`, `toggle`, `wait`, `status`, `mics`, `set-mic`, `settings`,
+`start`, `stop`, `toggle`, `wait`, `status`, `mics`, `set-mic`, `rescan-mics`,
+`settings`,
 `mic`, `theme`, `output`, `numbers`, `punctuation`, `trailing-space`,
 `auto-punctuate`, `serial`, `spell`, `middle-click`, `mute`, `reset-defaults`,
-`reset-terminal`, `ping`, `help`, `quit`.
+`reset-terminal`, `ping`, `doctor`, `help`, `quit`.
 
 Get this catalogue programmatically — it is the machine-readable source of truth
 (see [For LLM agents](#for-llm-agents)). `help --json` is served locally, so it
@@ -246,6 +247,15 @@ or is typed as usual. Read it from `last_transcription` on `status`/`wait`.
 | :--- | :--- | :--- |
 | `mics` | — | Returns `devices`: a list of input device names |
 | `set-mic` | name substring | First case-insensitive substring match wins; errors if nothing matches |
+| `rescan-mics` | — | Re-enumerates input devices and re-resolves the selected mic. Returns `devices`, `device` and `missing` (inputs the engine still cannot see, each with the `holder` app when known). Refused while recording |
+
+> **Why `rescan-mics` exists.** PortAudio builds its device list once, at
+> startup, and *omits* any device it cannot open at that moment instead of
+> marking it unavailable. A microphone another app is holding then — PipeWire
+> routing the system default, a level meter, a browser — is therefore missing
+> from `mics` for the life of the process, even though it is plugged in. This is
+> the only verb that repairs that without a restart; it is also the settings
+> modal's **Reset Microphones** item.
 
 ### Settings
 

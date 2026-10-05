@@ -32,6 +32,7 @@ pub enum SettingKind {
     PunctuationMode,
     Theme,
     Microphone,
+    RescanMics,
     ResetTerminal,
     ResetDefaults,
 }
@@ -44,7 +45,7 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 13] = [
+pub const SETTINGS: [SettingItem; 14] = [
     // NOTE: icons must be exactly one glyph whose *own* codepoint already
     // occupies its final width in every terminal - never a `U+FE0F`
     // variation-selector sequence and never a ZWJ sequence. Terminals that
@@ -119,6 +120,12 @@ pub const SETTINGS: [SettingItem; 13] = [
         icon: "🎤",
         title: "Audio Device (Mic)",
         keywords: "mic microphone audio device input hardware primary secondary",
+    },
+    SettingItem {
+        kind: SettingKind::RescanMics,
+        icon: "♻",
+        title: "Reset Microphones",
+        keywords: "reset rescan refresh microphones mics devices audio input list enumerate plugged busy stale missing",
     },
     SettingItem {
         kind: SettingKind::ResetTerminal,
@@ -299,6 +306,21 @@ impl SettingItem {
                 // it is the one value handed to the row renderer untruncated:
                 // `textfit` only clips it if it truly cannot fit.
                 (app.active_device.clone(), "[SELECT]", Color::Yellow)
+            }
+            SettingKind::RescanMics => {
+                if state.mic_rescan_done {
+                    (
+                        "Audio devices re-scanned".to_string(),
+                        "[DONE]",
+                        Color::Green,
+                    )
+                } else {
+                    (
+                        "Re-scan for microphones".to_string(),
+                        "[RUN]",
+                        Color::Yellow,
+                    )
+                }
             }
             SettingKind::ResetTerminal => {
                 if state.reset_done {
@@ -521,6 +543,8 @@ pub struct SettingsPickerState {
     pub selected_index: usize,
     pub filtered_indices: Vec<usize>,
     pub reset_done: bool,
+    /// True once "Reset Microphones" ran, until the picker is closed.
+    pub mic_rescan_done: bool,
     /// True once "Reset to Defaults" ran, until the picker is closed.
     pub defaults_done: bool,
     /// Arming flag: the factory reset needs a second Enter/Space to commit.
@@ -536,6 +560,7 @@ impl SettingsPickerState {
             selected_index: 0,
             filtered_indices: (0..SETTINGS.len()).collect(),
             reset_done: false,
+            mic_rescan_done: false,
             defaults_done: false,
             confirm_defaults: false,
             wpm_input: None,
@@ -1151,6 +1176,15 @@ pub fn run_settings_picker(
                                         crate::mic_picker::run_mic_picker(writer, rx, app)
                                     });
                                 }
+                                SettingKind::RescanMics => {
+                                    // The engine re-enumerates PortAudio and
+                                    // reports what came back (including any mic
+                                    // another app is still holding) as an event.
+                                    if let Some(w) = writer {
+                                        ipc::send_cmd(w, "rescan_mics");
+                                    }
+                                    state.mic_rescan_done = true;
+                                }
                                 SettingKind::ResetTerminal => {
                                     if let Some(w) = writer {
                                         ipc::send_cmd(w, "reset_terminal");
@@ -1350,6 +1384,11 @@ mod tests {
             s.reset_done = true;
             s
         };
+        let mic_rescan_done = {
+            let mut s = SettingsPickerState::new();
+            s.mic_rescan_done = true;
+            s
+        };
         let reset_armed = {
             let mut s = SettingsPickerState::new();
             s.confirm_defaults = true;
@@ -1435,6 +1474,9 @@ mod tests {
         }
         for state in [&idle, &reset_done] {
             check(&app, state, SettingKind::ResetTerminal);
+        }
+        for state in [&idle, &mic_rescan_done] {
+            check(&app, state, SettingKind::RescanMics);
         }
         for state in [&idle, &reset_armed, &reset_committed] {
             check(&app, state, SettingKind::ResetDefaults);
@@ -1529,6 +1571,26 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_rescan_mics_is_findable_and_not_destructive() {
+        let mut state = SettingsPickerState::new();
+        state.query = "mic".to_string();
+        state.update_filter();
+        let pos = state
+            .filtered_indices
+            .iter()
+            .position(|&i| SETTINGS[i].kind == SettingKind::RescanMics)
+            .expect("reset-microphones must be findable by search");
+        state.selected_index = pos;
+
+        // One activation is enough: unlike the factory reset there is nothing
+        // destructive about re-enumerating devices, so it must not need arming.
+        let action = state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(action, SettingsPickerAction::Toggle(SettingKind::RescanMics));
+        assert!(!state.confirm_defaults);
+        assert!(!state.mic_rescan_done);
     }
 
     #[test]

@@ -116,6 +116,7 @@ Rust → Python:
                                      # toggle_numbers, cycle_theme,
                                      # reset_terminal, quit
 {"t":"cmd","cmd":"reset_defaults"}  # restore shipped defaults (settings modal)
+{"t":"cmd","cmd":"rescan_mics"}      # re-enumerate audio devices (settings modal)
 {"t":"cmd","cmd":"get_devices"}     # ask for the audio input device list
 {"t":"cmd","cmd":"start_mic_monitor","indices":[4,5]}
                                      # open a level stream per visible picker row
