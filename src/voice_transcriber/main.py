@@ -131,12 +131,14 @@ class SimpleVoiceTranscriber:
         self.model_load_error = None
         self._load_started_at = time.time()
         
-        # Proactively check microphone health on startup
+        # Proactively check microphone health on startup. A *muted* default
+        # source lands here too: the device is present, opens fine, and records
+        # silence, so reporting it as missing hardware would be a lie.
         is_healthy, mic_issues = t2.check_microphone_health()
         if not is_healthy:
             platform_name = self.platform.upper()
-            warn_msg = f"⚠️ HARDWARE MICROPHONE NOT DETECTED ({platform_name})!\n" + "\n".join([f" • {issue}" for issue in mic_issues])
-            self.tui.print_warning("MICROPHONE HARDWARE WARNING", warn_msg)
+            warn_msg = f"⚠️ MICROPHONE PROBLEM DETECTED ({platform_name})!\n" + "\n".join([f" • {issue}" for issue in mic_issues])
+            self.tui.print_warning("MICROPHONE WARNING", warn_msg)
         
         # Initialize visual notification (platform-appropriate backend)
         self.visual_notification = hal.get_visual_notification(

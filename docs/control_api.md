@@ -220,6 +220,11 @@ from its own `help` verb.
 python src/main.py help --json
 ```
 
+`doctor` is answered locally as well, so diagnostics work with no engine up —
+`python src/main.py doctor --json` for machines, `--fix` to let it repair what it
+safely can (currently: **unmute a muted default microphone**). Every other verb
+is a plain socket client and fails when no instance is running.
+
 ### Recording
 
 | Verb | Value | Notes |
@@ -282,6 +287,7 @@ They are refused while recording.
 | :--- | :--- |
 | `reset-defaults` | Restores shipped defaults; keeps the microphone choice and the dictionary |
 | `reset-terminal` | Resets terminal state and the clipboard bridge |
+| `doctor` | Runs diagnostics **locally** (no engine needed): audio devices, default-microphone **mute state**, permissions, acceleration, model weights. `--fix` unmutes a muted default microphone. Exits non-zero when a check fails |
 | `ping` | Returns `pid`; cheap liveness check |
 | `quit` | Replies first, then shuts the engine down (~0.25 s later) |
 

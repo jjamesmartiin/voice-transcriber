@@ -521,7 +521,23 @@ def check_microphone_health():
             issues.append("No audio input devices detected by PortAudio.")
     except Exception as e:
         issues.append(f"PortAudio error: {e}")
-        
+
+    # 3. Muted default source. A mute is invisible to every other check above:
+    #    the device opens fine, reports sane channels/rates, and then records pure
+    #    silence, so PortAudio reports a perfectly healthy microphone while the
+    #    user hears nothing and Discord says "no audio input detected".
+    try:
+        import audio_state
+        state = audio_state.describe_state()
+        if state.get("muted"):
+            label = state.get("name") or "the default input"
+            issues.append(
+                f"Default microphone '{label}' is MUTED — recording will capture silence "
+                f"(Discord reports \"no audio input detected\"). Unmute with: {state['fix_command']}"
+            )
+    except Exception as e:
+        logger.debug(f"Muted-source check skipped: {e}")
+
     return (len(issues) == 0), issues
 
 def reset_terminal():

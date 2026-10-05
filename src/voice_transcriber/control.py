@@ -199,7 +199,7 @@ VERBS: dict[str, dict] = {
         "returns": ["verbs"],
     },
     "doctor": {
-        "summary": "Run system diagnostics (audio devices, permissions, GPU/MPS, model weights)",
+        "summary": "Run system diagnostics (audio devices, mic mute state, permissions, GPU/MPS, model weights)",
         "aliases": ["check"],
     },
     "quit": {
@@ -469,6 +469,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="Print the raw JSON reply"
     )
     parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="doctor: repair what it safely can (currently: unmute a muted default microphone)",
+    )
+    parser.add_argument(
         "--socket", default=None, help=f"Control socket path (default: ${CONTROL_SOCKET_ENV} or the per-user runtime path)"
     )
     return parser
@@ -575,7 +580,11 @@ def run_cli(argv=None, stream=None) -> int | None:
     if verb in ("doctor", "check"):
         import doctor
 
-        res = doctor.run_doctor(json_format=bool(args.json), stream=stream or sys.stdout)
+        res = doctor.run_doctor(
+            json_format=bool(args.json),
+            stream=stream or sys.stdout,
+            fix=bool(getattr(args, "fix", False)),
+        )
         return 0 if res.get("ok") else 1
 
     if verb not in VERBS:

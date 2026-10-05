@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+import audio_state
 import hal
 
 
@@ -108,6 +109,70 @@ def check_audio_devices() -> Dict[str, Any]:
             "devices": [],
             "error": f"Failed to query audio devices: {e}",
         }
+
+
+def check_microphone_mute(fix: bool = False) -> Dict[str, Any]:
+    """Report (and optionally repair) a muted default microphone.
+
+    A muted source is the one capture failure that looks exactly like success:
+    the device opens, the channel count and sample rate are right, and every
+    sample is zero. Discord surfaces it ("no audio input detected"); nothing else
+    does — which is why this is a first-class doctor check and not a footnote.
+
+    Read-only unless ``fix`` is set. A mute can be deliberate, so repairing one
+    is always the caller's explicit choice (``doctor --fix``).
+    """
+    state = audio_state.describe_state()
+    if not state["supported"]:
+        return {
+            "ok": True,
+            "checked": False,
+            "muted": None,
+            "source": None,
+            "fixed": False,
+            "fix_command": state["fix_command"],
+            "detail": "Host has no wpctl (not a PipeWire platform); mute state not checked.",
+        }
+
+    muted = state["muted"]
+    source = state["name"]
+    label = source or "the default input"
+    result: Dict[str, Any] = {
+        "ok": not muted,
+        "checked": True,
+        "muted": muted,
+        "source": source,
+        "fixed": False,
+        "fix_command": state["fix_command"],
+        "detail": None,
+    }
+
+    if muted is None:
+        result["detail"] = "No default input to inspect right now (no mute state to report)."
+        return result
+    if not muted:
+        result["detail"] = f"Default input '{label}' is live."
+        return result
+    if fix:
+        if audio_state.unmute_default_source():
+            result.update(
+                ok=True,
+                muted=False,
+                fixed=True,
+                detail=f"Unmuted '{label}' (it was muted).",
+            )
+        else:
+            result["detail"] = (
+                f"Default input '{label}' is MUTED and wpctl could not unmute it — "
+                f"run: {state['fix_command']}"
+            )
+        return result
+
+    result["detail"] = (
+        f"Default input '{label}' is MUTED — every app reading it records pure silence "
+        f"(Discord calls this \"no audio input detected\")."
+    )
+    return result
 
 
 def check_hotkeys_and_permissions(plat: str) -> Dict[str, Any]:
@@ -262,14 +327,19 @@ def check_daemon() -> Dict[str, Any]:
     return {"running": False, "pid": None, "socket": None}
 
 
-def run_doctor(json_format: bool = False, stream=None) -> Dict[str, Any]:
-    """Execute the full doctor diagnostic check."""
+def run_doctor(json_format: bool = False, stream=None, fix: bool = False) -> Dict[str, Any]:
+    """Execute the full doctor diagnostic check.
+
+    ``fix`` repairs what doctor can repair on its own — currently: unmute a muted
+    default microphone. Everything else stays read-only.
+    """
     out = stream or sys.stdout
 
     plat_info = check_platform()
     plat = plat_info["platform"]
     torch_info = check_torch_acceleration()
     audio_info = check_audio_devices()
+    mic_mute_info = check_microphone_mute(fix=fix)
     hotkey_info = check_hotkeys_and_permissions(plat)
     clip_info = check_clipboard_and_typing(plat)
     model_info = check_model_weights()
@@ -279,6 +349,7 @@ def run_doctor(json_format: bool = False, stream=None) -> Dict[str, Any]:
         plat_info["ok"]
         and torch_info["ok"]
         and audio_info["ok"]
+        and mic_mute_info["ok"]
         and hotkey_info["ok"]
         and clip_info["ok"]
     )
@@ -288,6 +359,7 @@ def run_doctor(json_format: bool = False, stream=None) -> Dict[str, Any]:
         "platform": plat_info,
         "acceleration": torch_info,
         "audio": audio_info,
+        "microphone": mic_mute_info,
         "hotkeys": hotkey_info,
         "clipboard_and_typing": clip_info,
         "model_weights": model_info,
@@ -323,6 +395,13 @@ def run_doctor(json_format: bool = False, stream=None) -> Dict[str, Any]:
         print(f"[✓] Audio Capture: {audio_info['count']} input device(s) found (Active: {default_dev})", file=out)
     else:
         print(f"[✗] Audio Capture: {audio_info.get('error')}", file=out)
+
+    # 3b. Microphone Mute State — invisible capture failure (device healthy, samples all zero)
+    if mic_mute_info["checked"]:
+        mark = "✓" if mic_mute_info["ok"] else "✗"
+        print(f"[{mark}] Microphone Mute: {mic_mute_info['detail']}", file=out)
+        if not mic_mute_info["ok"]:
+            print(f"    Fix: {mic_mute_info['fix_command']}   (or re-run: doctor --fix)", file=out)
 
     # 4. Hotkeys & Permissions
     if hotkey_info["ok"]:

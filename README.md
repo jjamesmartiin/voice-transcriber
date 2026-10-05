@@ -173,6 +173,13 @@ Voice Transcriber includes a built-in diagnostic tool to verify microphones, sys
 run.bat doctor
 ```
 
+It also reports whether your **default microphone is muted**, which no other check can see: a muted source opens fine, reports sane channels and sample rate, and then records pure silence (Discord calls it *"no audio input detected"*). `doctor` fails loudly on it, and `--fix` unmutes it for you:
+
+```bash
+./run.sh doctor --fix     # Linux / macOS
+run.bat doctor --fix      # Windows (no PipeWire: reported as unchecked, not failed)
+```
+
 ---
 
 ## Controls

@@ -25,11 +25,13 @@ python src/main.py stop
 python src/main.py wait --json       # includes last_transcription
 ```
 
-> `help` is the only verb answered locally. Every other verb — including
-> `status` — is a pure UNIX-socket client (`send_command`, `src/control.py:388-400`)
-> and returns `ok: false, "no running Voice Transcriber at <sock>"` when no engine
-> is up. There is no offline fallback: verified with per-user state present but
-> no engine. Start an instance first (or set `VT_CONTROL_SOCKET`).
+> `help` and `doctor` are the only verbs answered locally. Every other verb —
+> including `status` — is a pure UNIX-socket client (`send_command`,
+> `src/control.py:388-400`) and returns `ok: false, "no running Voice Transcriber
+> at <sock>"` when no engine is up. There is no offline fallback: verified with
+> per-user state present but no engine. Start an instance first (or set
+> `VT_CONTROL_SOCKET`). `doctor --fix` runs locally too, so it can repair a muted
+> default microphone with no engine running.
 
 `help --json` is the source of truth for the verb surface (25 verbs, with
 `choices` / `required` / `toggles` per verb). It is served locally from

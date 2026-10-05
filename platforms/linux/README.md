@@ -94,6 +94,17 @@ nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
 ### 1. Microphone Captures Silence While in Discord, Browser, or WebRTC Calls
 **Symptom:** Voice Transcriber records silence or reports "No audio recorded", even though Discord or your browser call hears you fine.  
 **Causes & Fixes:**
+- **The input is muted (PipeWire level):** the most invisible cause, because a muted source still opens cleanly, still reports the right channel count and sample rate, and then hands back an *exact-zero* signal. Discord says *"No audio input detected"*, Voice Transcriber records silence, and every device list looks perfectly healthy.
+  ```bash
+  wpctl get-volume @DEFAULT_AUDIO_SOURCE@     # prints [MUTED] when muted
+  wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 0     # unmute it
+  ```
+  `./run.sh doctor` reports this explicitly (it is the one check that can see it), and `./run.sh doctor --fix` unmutes it for you.
+  - **Why it keeps coming back:** WirePlumber *persists* per-route mute state in `~/.local/state/wireplumber/default-routes`, so the mute is re-applied every time the device re-enumerates — replug, reboot, resume from sleep. It never clears itself. If your USB mic flaps, expect a previously muted mic to return muted:
+    ```bash
+    journalctl -k | grep -i "Product:"            # device arrivals
+    journalctl | grep "spa.alsa.*No such device"   # the drop that precedes them
+    ```
 - **Multiple Microphones (e.g. Headset vs. Desk USB Mic):** Discord explicitly selected your headset mic, while PipeWire/GNOME's system default was set to another input. Voice Transcriber listens to the system `default` input.
   - To route your headset mic to both:
     ```bash
@@ -103,6 +114,11 @@ nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
     Or change it in desktop settings (**GNOME Settings → Sound → Input**). PipeWire will fan out audio to both apps simultaneously.
 - **Direct ALSA Hardware Device (`hw:X,Y`):** Raw ALSA hardware devices enforce exclusive single-app access. If Discord or PipeWire opens `hw:X,Y`, Voice Transcriber will fail with `EBUSY`.
   - In Voice Transcriber's settings (`s`), always select **`default`** or **`pipewire`** instead of raw `hw:X,Y` devices.
+- **A plugged-in mic is missing from the device list entirely:** PortAudio builds its device list *once*, at startup, and **omits** any device it cannot open at that moment rather than listing it as unavailable. A mic that something was holding when the engine started — a `hw:X,Y` in Discord, the GNOME Sound panel's level meter, a browser — therefore never appears in the list, no matter how often you reconnect it. The mic and cable are fine.
+  - Fix it from the app: **`s` → Reset Microphones** re-enumerates the devices and re-resolves your selection (device indices shift whenever the list changes). Scriptable form: `./run.sh rescan-mics`.
+  - If a mic is *still* absent, the app names whatever is holding it, and `./run.sh rescan-mics --json` reports it as `missing[].holder`. Close that app and re-scan.
+  - Re-scanning re-initialises PortAudio, which closes open capture streams, so it is refused while recording.
+  - Selecting `default`/`pipewire` up front avoids the whole problem: the PipeWire PCM is shareable, so it is never held exclusively and never missing.
 - **Find out which mic is actually live:** open the microphone picker (`s` → **Microphone**) and speak. Every visible row carries its own live level meter, so you can see at a glance which device is hearing you — typically the `default`/`pipewire` row is silent while a specific `hw:` device is the one picking up sound, which means the system default input is routed elsewhere (fix with `wpctl set-default`, above).
   - The picker opens one capture stream per visible row, so the desktop's microphone-in-use indicator stays lit while it is open. Streams close when the picker does. Filtering the list narrows what gets opened, and a device another app holds exclusively (a raw `hw:X,Y` in Discord) is skipped — its row simply stays at 0%.
 
