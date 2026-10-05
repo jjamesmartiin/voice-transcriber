@@ -384,12 +384,66 @@ def set_wireplumber_bt_autoswitch(enable_autoswitch: bool):
         return False
 
 
+# Snapshot of WirePlumber's Bluetooth headset-profile autoswitch *before* this
+# process changed it, so quitting restores the system instead of leaving it
+# reconfigured. None = not read yet (and "unreadable" means "do not touch").
+_bt_autoswitch_before = None
+_bt_restore_registered = False
+
+
+def _register_exit_hook(fn):
+    """Indirection over atexit.register so tests can observe the hook."""
+    atexit.register(fn)
+
+
+def restore_bluetooth_autoswitch():
+    """Put WirePlumber's Bluetooth autoswitch setting back the way we found it.
+
+    Registered at exit by :func:`apply_bluetooth_handsfree_policy`, so the
+    setting is a loan, not a permanent edit. Safe to call more than once and
+    safe to call when nothing was ever changed.
+    """
+    global _bt_autoswitch_before, _bt_restore_registered
+    before = _bt_autoswitch_before
+    _bt_autoswitch_before = None
+    _bt_restore_registered = False
+    if before is None:
+        return False
+    if get_wireplumber_bt_autoswitch() == before:
+        return True
+    restored = set_wireplumber_bt_autoswitch(before)
+    if restored:
+        logger.info(
+            "Restored Bluetooth autoswitch-to-headset-profile to %s on exit",
+            "on" if before else "off",
+        )
+    return restored
+
+
 def apply_bluetooth_handsfree_policy(keep_handsfree: bool = True):
-    """Apply the policy to keep Bluetooth devices in hands-free mode (prevents media pause on record end)."""
-    if keep_handsfree:
-        set_wireplumber_bt_autoswitch(False)
-    else:
-        set_wireplumber_bt_autoswitch(True)
+    """Apply the policy to keep Bluetooth devices in hands-free mode (prevents media pause on record end).
+
+    This setting is global and persisted by WirePlumber, so the previous value is
+    snapshotted before the first change and put back on exit — the app must not
+    leave the user's system reconfigured after it quits (the same rule as the
+    microphone mute in ``audio_state``). If the current value cannot be read
+    there is nothing to restore, so the policy is skipped rather than applied
+    blind.
+    """
+    global _bt_autoswitch_before, _bt_restore_registered
+    current = get_wireplumber_bt_autoswitch()
+    if current is None:
+        logger.debug("wpctl could not report the Bluetooth autoswitch setting; leaving it untouched")
+        return False
+    if _bt_autoswitch_before is None:
+        _bt_autoswitch_before = current
+    if not _bt_restore_registered:
+        _register_exit_hook(restore_bluetooth_autoswitch)
+        _bt_restore_registered = True
+    desired = not keep_handsfree
+    if current == desired:
+        return True
+    return set_wireplumber_bt_autoswitch(desired)
 
 
 def find_device_index(name):

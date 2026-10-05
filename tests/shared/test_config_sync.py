@@ -4,6 +4,7 @@ Unit tests for configuration loading, saving, and TUI status bar synchronization
 """
 
 import os
+import subprocess
 import sys
 import tempfile
 import json
@@ -114,27 +115,90 @@ def test_set_default_input_device_preserves_output_device(monkeypatch):
         assert curr_reset[1] == out_dev
 
 
-def test_wireplumber_helpers(monkeypatch):
-    import subprocess
-    calls = []
+class FakeWirePlumberSettings:
+    """Stateful stand-in for `wpctl settings` — WirePlumber's *persisted* config.
 
-    def mock_run(cmd, *args, **kwargs):
-        calls.append(cmd)
-        class MockResult:
-            returncode = 0
-            stdout = "Value: false\n"
-        return MockResult()
+    Persistence is the whole point: the app borrows this global setting to keep
+    Bluetooth headsets in hands-free mode, so it must give it back on exit
+    instead of leaving the user's system reconfigured.
+    """
 
-    monkeypatch.setattr(subprocess, 'run', mock_run)
-    monkeypatch.setattr('shutil.which', lambda tool: '/usr/bin/' + tool)
+    SETTING = "bluetooth.autoswitch-to-headset-profile"
 
+    def __init__(self, autoswitch: bool = True, readable: bool = True):
+        self.autoswitch = autoswitch
+        self.readable = readable
+        self.calls: list[list[str]] = []
+
+    def run(self, cmd, *args, **kwargs):
+        self.calls.append(list(cmd))
+        if len(cmd) >= 2 and cmd[1] == "settings" and self.SETTING in cmd:
+            if "-s" in cmd:  # write: wpctl settings -s <name> <value>
+                self.autoswitch = cmd[cmd.index(self.SETTING) + 1] == "true"
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd[-1] == self.SETTING:  # read
+                if not self.readable:
+                    return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+                value = "true" if self.autoswitch else "false"
+                return subprocess.CompletedProcess(cmd, 0, stdout=f"Value: {value}\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    def writes(self):
+        return [c for c in self.calls if "-s" in c]
+
+
+@pytest.fixture
+def wp_settings(monkeypatch):
+    """Fake WirePlumber settings, with the exit hook captured instead of registered."""
+    fake = FakeWirePlumberSettings()
+    registered = []
+    monkeypatch.setattr(subprocess, "run", fake.run)
+    monkeypatch.setattr("shutil.which", lambda tool: "/usr/bin/" + tool)
+    monkeypatch.setattr(t2, "_register_exit_hook", registered.append)
+    monkeypatch.setattr(t2, "_bt_autoswitch_before", None)
+    monkeypatch.setattr(t2, "_bt_restore_registered", False)
+    fake.registered = registered
+    return fake
+
+
+def test_wireplumber_helpers(wp_settings):
     # Test query
-    val = t2.get_wireplumber_bt_autoswitch()
-    assert val is False
+    assert t2.get_wireplumber_bt_autoswitch() is True
 
     # Test setting policy (keep handsfree disables autoswitch)
+    assert t2.apply_bluetooth_handsfree_policy(True) is True
+    assert wp_settings.autoswitch is False
+    assert any("bluetooth.autoswitch-to-headset-profile" in c and "false" in c for c in wp_settings.calls)
+
+    # The setting is global and persisted, so it is restored when the app exits.
+    assert len(wp_settings.registered) == 1
+    wp_settings.registered[0]()
+    assert wp_settings.autoswitch is True
+
+
+def test_bt_policy_registers_the_exit_hook_only_once(wp_settings):
     t2.apply_bluetooth_handsfree_policy(True)
-    assert any("bluetooth.autoswitch-to-headset-profile" in c and "false" in c for c in calls)
+    t2.apply_bluetooth_handsfree_policy(True)
+    assert len(wp_settings.registered) == 1
+
+
+def test_bt_policy_does_not_write_when_already_correct(wp_settings):
+    wp_settings.autoswitch = False
+    t2.apply_bluetooth_handsfree_policy(True)
+    assert wp_settings.writes() == []
+
+
+def test_bt_policy_is_skipped_when_the_current_value_is_unknown(wp_settings):
+    """Nothing to restore means the setting must be left alone, not changed blind."""
+    wp_settings.readable = False
+    assert t2.apply_bluetooth_handsfree_policy(True) is False
+    assert wp_settings.autoswitch is True
+    assert wp_settings.writes() == []
+
+
+def test_bt_restore_is_a_noop_when_nothing_was_changed(wp_settings):
+    assert t2.restore_bluetooth_autoswitch() is False
+    assert wp_settings.calls == []
 
 
 def test_tui_status_bar_matches_settings():
