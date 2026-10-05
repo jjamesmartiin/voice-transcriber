@@ -136,11 +136,33 @@ def build_exe():
         # Add all src files to root (not in src/ subfolder)
         f"--add-data={SRC_DIR}{os.pathsep}.",
         
+        # Add config files (common dictionary, presets, examples)
+        f"--add-data={PROJECT_ROOT / 'config'}{os.pathsep}config",
+        
         # Hidden imports
         "--hidden-import=hal",
         "--hidden-import=voice_transcriber",
         "--hidden-import=voice_transcriber.main",
         "--hidden-import=voice_transcriber.hal",
+        "--hidden-import=voice_transcriber.audio_state",
+        "--hidden-import=voice_transcriber.check_devices",
+        "--hidden-import=voice_transcriber.console_text",
+        "--hidden-import=voice_transcriber.control",
+        "--hidden-import=voice_transcriber.dictionary",
+        "--hidden-import=voice_transcriber.doctor",
+        "--hidden-import=voice_transcriber.hotkeys",
+        "--hidden-import=voice_transcriber.logging_setup",
+        "--hidden-import=voice_transcriber.micro_batcher",
+        "--hidden-import=voice_transcriber.model_backend",
+        "--hidden-import=voice_transcriber.model_download",
+        "--hidden-import=voice_transcriber.notifications",
+        "--hidden-import=voice_transcriber.post_processor",
+        "--hidden-import=voice_transcriber.stats",
+        "--hidden-import=voice_transcriber.t2",
+        "--hidden-import=voice_transcriber.transcribe2",
+        "--hidden-import=voice_transcriber.transcribe_cohere",
+        "--hidden-import=voice_transcriber.tui",
+        "--hidden-import=voice_transcriber.tui_ratatui",
         "--hidden-import=voice_transcriber.platform.windows",
         "--hidden-import=voice_transcriber.platform.windows.hotkeys",
         "--hidden-import=voice_transcriber.platform.windows.clipboard",

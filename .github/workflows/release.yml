@@ -1,18 +1,30 @@
 name: release
 
-# Builds and attaches the portable Linux AppImage to a GitHub Release.
+# Builds and attaches release artifacts to a GitHub Release:
+# - Linux: portable AppImage (vt-x86_64.AppImage)
+# - Windows: standalone directory bundle zip (VoiceTranscriber-windows-x86_64.zip)
 #
 # No secrets or tokens are used anywhere in this workflow. The Cohere model
-# weights are NOT fetched in CI: they are Apache-2.0 and are mirrored by the
-# maintainer from the local HF cache into the same release (see
-# scripts/prepare_model_release.py and dist/model/), so end users install the
-# app and its model without any Hugging Face account.
+# weights are NOT fetched in CI: they live on a separate revision-keyed model
+# bundle tag (model-cohere-<rev12>), and the application auto-installs them on
+# first run from the release assets or loads them from a local models/cohere directory.
 #
-# Trigger: push a tag like v1.0.2  ->  AppImage is built and attached.
+# Trigger: push a tag like v1.2.1 -> AppImage and Windows EXE are built and attached.
+# Manual trigger: workflow_dispatch -> specify target tag.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to attach assets to (e.g. v1.2.1)"
+        required: false
+        default: "v1.2.1"
+      build_appimage:
+        description: "Build Linux AppImage (true/false)"
+        required: false
+        default: "true"
 
 permissions:
   contents: write
@@ -21,6 +33,7 @@ jobs:
   appimage:
     name: Build portable Linux AppImage
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.build_appimage == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -42,5 +55,40 @@ jobs:
       - name: Upload AppImage to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: ./vt-*.AppImage
+          fail_on_unmatched_files: true
+
+  windows-exe:
+    name: Build standalone Windows EXE
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r platforms/windows/requirements.txt
+          pip install -r platforms/windows/requirements-dev.txt
+
+      - name: Build standalone Windows bundle
+        run: |
+          python platforms/windows/build_offline.py --no-model
+
+      - name: Package Windows ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/VoiceTranscriber -DestinationPath VoiceTranscriber-windows-x86_64.zip
+          Get-Item VoiceTranscriber-windows-x86_64.zip | Select-Object Name, Length
+
+      - name: Upload Windows EXE zip to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          files: ./VoiceTranscriber-windows-x86_64.zip
           fail_on_unmatched_files: true

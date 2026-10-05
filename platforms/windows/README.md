@@ -186,7 +186,16 @@ powershell -ExecutionPolicy Bypass -File .\platforms\windows\test.ps1
 
 ---
 
-## Building a Standalone Offline EXE
+## Standalone Windows Binary & Packaging
+
+### Prebuilt Standalone Windows ZIP (No Python Required)
+Every GitHub release attaches a prebuilt **`VoiceTranscriber-windows-x86_64.zip`**:
+1. Download `VoiceTranscriber-windows-x86_64.zip` from [Releases](https://github.com/jjamesmartiin/voice-transcriber/releases/latest).
+2. Extract the archive to any folder (e.g. `C:\VoiceTranscriber`).
+3. Run `VoiceTranscriber.exe`.
+4. On first launch, it will ask to automatically download the Cohere model weights (~2.8 GB). Alternatively, drop the model files into `models\cohere\` next to `VoiceTranscriber.exe`.
+
+### Building a Standalone Offline EXE from Source
 
 To package Voice Transcriber into a self-contained `.exe`:
 ```cmd

@@ -133,6 +133,12 @@ chmod +x vt-x86_64.AppImage
 > **Note:** If you are not yet in the `input` group for global hotkeys, run `sudo usermod -aG input $USER` and log back in. Run `./run.sh doctor` to test permissions and audio devices anytime. With Nix installed, `nix run .` is the recommended path (it needs no venv).
 
 #### 🪟 Windows (Native)
+**Option A: Prebuilt Standalone EXE (no Python or build tools required)**
+1. Download **`VoiceTranscriber-windows-x86_64.zip`** from [Latest Release](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) and extract it anywhere.
+2. Run **`VoiceTranscriber.exe`**.
+3. On first launch, it will offer to download the Cohere model weights (~2.8 GB) automatically. If offline or preferred, drop the unpacked model files into `models\cohere\` next to `VoiceTranscriber.exe`.
+
+**Option B: From Source (with local venv)**
 From File Explorer or Command Prompt in the repo root:
 ```cmd
 setup.bat     :: One-time: create .venv, install dependencies, get the model
@@ -480,13 +486,13 @@ model) and needs no Python install on the target machine. See
 > executable, or point `VT_MODEL_SOURCE_DIR` at it. See
 > [`docs/offline_install.md`](docs/offline_install.md).
 
-> **No prebuilt Windows binary is published.** `dist/` is gitignored and the
-> release workflow only ships the Linux AppImage, so the Windows EXE must be
-> built on a Windows machine — PyInstaller cannot cross-compile. Once built,
-> the whole `dist/VoiceTranscriber/` folder is portable: copy it to any x64
-> Windows box and run `VoiceTranscriber.exe`. For an airgapped target, build
-> with `--no-model` and carry the split model bundle alongside — see
-> [`docs/offline_install.md`](docs/offline_install.md).
+> **Prebuilt Windows binary:** `VoiceTranscriber-windows-x86_64.zip` is attached
+> to every release on GitHub. It contains a self-contained Python runtime, PyTorch,
+> and `VoiceTranscriber.exe`. Model weights are either auto-downloaded on first run
+> or loaded from a `models\cohere\` folder placed next to the executable. You can
+> also build a standalone bundle locally on Windows using `build.bat` (or
+> `build.bat --no-model`). Once built, the whole `dist/VoiceTranscriber/` folder is
+> portable to any compatible x64 Windows machine.
 
 > **Stale `result/` symlink:** the `result/` symlink in a checkout points at the
 > last `nix build`, which may predate recent frontend changes. Re-run `nix build .`

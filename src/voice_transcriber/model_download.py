@@ -120,14 +120,27 @@ def cohere_models_dir():
     override = os.environ.get("VT_MODEL_DIR", "").strip()
     if override:
         return os.path.abspath(override)
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
         for cand in [
-            os.path.join(sys._MEIPASS, "models", "cohere"),
-            os.path.join(sys._MEIPASS, "models"),
-            sys._MEIPASS,
+            os.path.join(exe_dir, "models", "cohere"),
+            os.path.join(exe_dir, "model", "cohere"),
+            os.path.join(exe_dir, "models"),
+            exe_dir,
         ]:
-            if os.path.isdir(cand) and os.path.exists(os.path.join(cand, "config.json")):
+            if os.path.isdir(cand) and is_local_model_complete(cand):
                 return cand
+        if hasattr(sys, "_MEIPASS"):
+            for cand in [
+                os.path.join(sys._MEIPASS, "models", "cohere"),
+                os.path.join(sys._MEIPASS, "models"),
+                sys._MEIPASS,
+            ]:
+                if os.path.isdir(cand) and is_local_model_complete(cand):
+                    return cand
+        exe_models = os.path.join(exe_dir, "models", "cohere")
+        if os.path.isdir(exe_models) or os.access(exe_dir, os.W_OK):
+            return exe_models
     root = find_repo_root()
     if root:
         repo_dir = os.path.join(root, "models", "cohere")
@@ -496,6 +509,19 @@ def _assemble_parts(part_paths, manifest, dest, origin,
         shutil.rmtree(tmp_root, ignore_errors=True)
 
 
+def _print_manual_install_instructions(dest):
+    """Print clear instructions for manual model installation."""
+    print("\n" + "=" * 68)
+    print("  TO MANUALLY INSTALL THE COHERE TRANSCRIBE MODEL:")
+    print("  1. Download the split model parts and SHA256SUMS from GitHub:")
+    print(f"     https://github.com/jjamesmartiin/voice-transcriber/releases/tag/{MODEL_BUNDLE_TAG}")
+    print("  2. Decompress and extract the archive directly into:")
+    print(f"     {dest}")
+    print("     (Required: model.safetensors, config.json, tokenizer.json, etc.)")
+    print("  Or set the VT_MODEL_DIR environment variable to your model folder.")
+    print("=" * 68 + "\n", flush=True)
+
+
 def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
     """
     Make sure a loadable local Cohere model exists at `dest`.
@@ -529,10 +555,29 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
             # back to the network - that is the whole point of airgap.
             return None
 
-    if os.environ.get("VT_AUTO_DOWNLOAD_MODEL", "1").strip().lower() in (
-            "0", "false", "no", "off"):
+    auto_env = os.environ.get("VT_AUTO_DOWNLOAD_MODEL", "").strip().lower()
+    if auto_env in ("0", "false", "no", "off"):
         print("VT_AUTO_DOWNLOAD_MODEL=0: skipping automatic model download.")
+        _print_manual_install_instructions(dest)
         return None
+
+    if auto_env not in ("1", "true", "yes", "always"):
+        if sys.stdin and hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
+            try:
+                print("\n" + "-" * 68)
+                print("  Cohere Transcribe model weights are not installed.")
+                print(f"  Target location: {dest}")
+                print("  Download size: ~2.8 GB (~3.9 GB uncompressed on disk).")
+                print("-" * 68)
+                ans = input("  Would you like to download them automatically from GitHub now? [Y/n]: ").strip().lower()
+                if ans and ans not in ("y", "yes"):
+                    print("  Automatic download cancelled.")
+                    _print_manual_install_instructions(dest)
+                    return None
+            except (EOFError, KeyboardInterrupt):
+                print("\n  Download cancelled.")
+                _print_manual_install_instructions(dest)
+                return None
 
     prefix = f"cohere-transcribe-{revision}"
     primary_base = (base_url or _release_base()).rstrip("/")
@@ -570,6 +615,7 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
         print(f"Could not fetch model manifest from release assets ({candidates}).")
         for f in failures:
             print(f"  - {f}")
+        _print_manual_install_instructions(dest)
         return None
     print(f"Downloading Cohere model parts from {base_url} (Apache-2.0 release asset)...")
 
@@ -586,6 +632,7 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
                                source_kind="remote")
     except Exception as e:
         print(f"Model auto-download failed: {e}", flush=True)
+        _print_manual_install_instructions(dest)
         return None
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)

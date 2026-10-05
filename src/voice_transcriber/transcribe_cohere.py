@@ -346,10 +346,16 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "cohere"),
         os.path.join(os.getcwd(), "models", "cohere"),
     ]
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        search_dirs.insert(0, os.path.join(sys._MEIPASS, "models", "cohere"))
-        search_dirs.insert(0, os.path.join(sys._MEIPASS, "models"))
-        search_dirs.insert(0, sys._MEIPASS)
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
+        search_dirs.insert(0, os.path.join(exe_dir, "models", "cohere"))
+        search_dirs.insert(0, os.path.join(exe_dir, "model", "cohere"))
+        search_dirs.insert(0, os.path.join(exe_dir, "models"))
+        search_dirs.insert(0, exe_dir)
+        if hasattr(sys, "_MEIPASS"):
+            search_dirs.insert(0, os.path.join(sys._MEIPASS, "models", "cohere"))
+            search_dirs.insert(0, os.path.join(sys._MEIPASS, "models"))
+            search_dirs.insert(0, sys._MEIPASS)
     # Install target of the GitHub-release auto-installer: <repo>/models/cohere
     # when running from a git checkout, else the per-user dir (read-only Nix
     # store / AppImage installs).
@@ -370,10 +376,11 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
             local_path = installed
 
     if not local_path:
+        target_dir = cohere_models_dir() if cohere_models_dir else "models/cohere"
         raise RuntimeError(
-            "No local Cohere model found and the GitHub release download failed. "
-            "Set VT_MODEL_DIR to a directory containing model.safetensors, or run "
-            "with network access so the release assets can be fetched."
+            f"No local Cohere model found and download was not completed. "
+            f"Please place model files (model.safetensors, config.json, etc.) into '{target_dir}' "
+            f"or set VT_MODEL_DIR to your model directory."
         )
 
     # Prefer the resolved dtype; fall back to FP32 on CPU if BF16 load fails
