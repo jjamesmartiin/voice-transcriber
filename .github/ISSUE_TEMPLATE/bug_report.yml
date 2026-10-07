@@ -1,0 +1,103 @@
+name: Bug report
+description: Something did not work — a crash, wrong text, no audio, hotkeys not firing
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Two things make the biggest difference to how fast
+        this gets fixed: **which platform** you are on, and the output of the
+        built-in `doctor` check.
+
+        > **This is not the place for security problems.** Report those privately
+        > per [SECURITY.md](https://github.com/jjamesmartiin/voice-transcriber/blob/main/SECURITY.md).
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Where are you running Voice Transcriber?
+      options:
+        - Linux — Wayland
+        - Linux — X11
+        - Windows (native)
+        - Windows via WSL2
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Linux AppImage (vt-x86_64.AppImage)
+        - Windows release ZIP (VoiceTranscriber.exe)
+        - Nix (`nix run`)
+        - From source (`./setup.sh` / `setup.bat`)
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag, or the commit you built from.
+      placeholder: v1.2.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you expected, and what you got instead. Paste any error text verbatim.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of the built-in doctor check
+      description: |
+        Run `./run.sh doctor` (Linux/macOS) or `run.bat doctor` (Windows) and
+        paste the output. This is the single most useful thing in the report —
+        it reports microphone state, permissions, hardware acceleration and the
+        model cache.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        If the app started but misbehaved, attach the log. It lives in the
+        per-user data directory (`~/.local/share/vt/`, `%LOCALAPPDATA%\vt\`).
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go through SECURITY.md).
+          required: true

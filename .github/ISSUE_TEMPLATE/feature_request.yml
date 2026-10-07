@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a capability, a platform, or a change in behaviour
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is deliberately narrow: it is an *offline, local,
+        push-to-talk dictation engine*. Ideas that keep it fast, private and
+        predictable are the best fit. Ideas that need a cloud service, an
+        account, or telemetry will be declined — not because they are bad, but
+        because they are a different product.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        Describe the situation you are in, not the implementation you have in
+        mind. "I dictate a lot of command lines and it keeps writing `dash dash`
+        as words" is more useful than "add a dash mode".
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+      description: Including anything you already tried from the settings modal, dictionary, or Control API.
+    validations:
+      required: false

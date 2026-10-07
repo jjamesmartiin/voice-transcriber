@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/jjamesmartiin/voice-transcriber/security/advisories/new
+    about: Report security problems privately — never in a public issue.
+  - name: Setup, permissions and troubleshooting
+    url: https://github.com/jjamesmartiin/voice-transcriber#readme
+    about: Microphone access, the input group, Wayland typing and other common setup questions.
+  - name: Control API reference
+    url: https://github.com/jjamesmartiin/voice-transcriber/blob/main/docs/control_api.md
+    about: Scripting the engine — verbs, reply shapes, and recipes.
