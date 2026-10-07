@@ -37,7 +37,10 @@ def prefer_ratatui(monkeypatch):
 
 def test_without_af_unix_the_ratatui_frontend_is_unavailable(monkeypatch):
     """This is the whole Windows story: no AF_UNIX, no ratatui."""
-    monkeypatch.delattr(socket, "AF_UNIX")
+    # ``raising=False`` because on stock Windows CPython the attribute is absent
+    # already (bpo-33408), and ``delattr`` on a missing attribute raised
+    # AttributeError — so this test failed on the one platform it describes.
+    monkeypatch.delattr(socket, "AF_UNIX", raising=False)
 
     assert tui_ratatui.tui_available(REAL_BINARY) is False
 
@@ -54,7 +57,7 @@ def test_create_tui_falls_back_to_rich_without_af_unix(monkeypatch, prefer_ratat
     Regression guard: frontend features that only exist in the Rust UI (the mic
     picker's live per-device levels) must stay unreachable there.
     """
-    monkeypatch.delattr(socket, "AF_UNIX")
+    monkeypatch.delattr(socket, "AF_UNIX", raising=False)
 
     assert isinstance(main_mod.create_tui(), VoiceTranscriberTUI)
 

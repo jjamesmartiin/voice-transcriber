@@ -11,8 +11,10 @@ type`` and so on. These tests pin the parts that must not drift:
 """
 import json
 import os
+import shutil
 import socket
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -47,10 +49,23 @@ class _FakeEngine:
         return {"ok": True, "cmd": cmd}
 
 
-def _server(tmp_path, engine=None):
-    return control.ControlServer(
-        engine or _FakeEngine(), socket_path=str(tmp_path / "vt-control-test.sock")
-    )
+#: ``sun_path`` in ``sockaddr_un`` is 104 bytes on macOS and 108 on Linux, and
+#: ``bind()`` fails with ENAMETOOLONG past that. pytest's ``tmp_path`` on macOS is
+#: ``/private/var/folders/<...>/T/pytest-of-<user>/pytest-0/<test name>/``, which
+#: overflows it — so on macOS every socket test in this file failed with
+#: ``start() is False`` and it looked like the control API was broken there. The
+#: test harness was the problem, so the socket lives somewhere short instead.
+@pytest.fixture
+def sock_path():
+    directory = tempfile.mkdtemp(prefix="vtsock-")
+    try:
+        yield Path(directory) / "c.sock"
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def _server(sock_path, engine=None):
+    return control.ControlServer(engine or _FakeEngine(), socket_path=str(sock_path))
 
 
 # ---------------------------------------------------------------------------
@@ -121,8 +136,8 @@ requires_af_unix = pytest.mark.skipif(
 
 @requires_af_unix
 class TestSocketTransport:
-    def test_start_is_idempotent_and_creates_the_socket(self, tmp_path):
-        server = _server(tmp_path)
+    def test_start_is_idempotent_and_creates_the_socket(self, sock_path):
+        server = _server(sock_path)
         assert server.start() is True
         try:
             assert os.path.exists(server.socket_path)
@@ -131,12 +146,12 @@ class TestSocketTransport:
             server.stop()
         assert not os.path.exists(server.socket_path)
 
-    def test_socket_permissions_are_restricted_to_owner(self, tmp_path):
+    def test_socket_permissions_are_restricted_to_owner(self, sock_path):
         """Control socket must be 0600 on POSIX so other users cannot connect."""
         if os.name != "posix":
             pytest.skip("POSIX only")
         import stat
-        server = _server(tmp_path)
+        server = _server(sock_path)
         assert server.start() is True
         try:
             mode = stat.S_IMODE(os.stat(server.socket_path).st_mode)
@@ -144,9 +159,9 @@ class TestSocketTransport:
         finally:
             server.stop()
 
-    def test_round_trip_over_a_real_socket(self, tmp_path):
+    def test_round_trip_over_a_real_socket(self, sock_path):
         engine = _FakeEngine()
-        server = _server(tmp_path, engine)
+        server = _server(sock_path, engine)
         assert server.start() is True
         try:
             response = control.send_command("status", socket_path=server.socket_path)
@@ -155,10 +170,10 @@ class TestSocketTransport:
         finally:
             server.stop()
 
-    def test_several_clients_are_served_concurrently(self, tmp_path):
+    def test_several_clients_are_served_concurrently(self, sock_path):
         """The engine socket is not single-client (unlike the TUI socket)."""
         engine = _FakeEngine()
-        server = _server(tmp_path, engine)
+        server = _server(sock_path, engine)
         assert server.start() is True
         try:
             for _ in range(5):
@@ -167,9 +182,9 @@ class TestSocketTransport:
         finally:
             server.stop()
 
-    def test_raw_line_client_is_supported(self, tmp_path):
+    def test_raw_line_client_is_supported(self, sock_path):
         """No JSON, no library: connect, write a verb, read a reply."""
-        server = _server(tmp_path)
+        server = _server(sock_path)
         assert server.start() is True
         try:
             import socket as socketlib
@@ -191,6 +206,33 @@ class TestSocketTransport:
         assert "no running Voice Transcriber" in response["error"]
 
 
+class TestSocketPathLength:
+    """``sun_path`` is 104 bytes on macOS and 108 on Linux, NUL included.
+
+    Past that, ``bind()`` fails with ENAMETOOLONG. That is what made the macOS CI
+    job red: pytest's ``tmp_path`` there is ``/private/var/folders/...``, which
+    overflows the limit, so every socket test failed with ``start() is False``
+    and it looked like the control API was broken on macOS.
+    """
+
+    def test_the_default_path_fits_in_sun_path(self):
+        """The derived path must be bindable on the strictest platform."""
+        assert len(control.default_socket_path().encode()) <= 103
+
+    @requires_af_unix
+    def test_an_over_long_path_fails_cleanly_and_says_why(self, caplog):
+        server = control.ControlServer(_FakeEngine(), socket_path="/tmp/" + "x" * 200 + ".sock")
+        with caplog.at_level("WARNING"):
+            assert server.start() is False  # never raises into the app
+        assert "Control API unavailable" in caplog.text
+
+    @requires_af_unix
+    def test_the_short_fixture_path_is_actually_bindable(self, sock_path):
+        """Guards the fixture above: if it ever grows past the limit, the socket
+        tests would start failing with a misleading 'start() is False' again."""
+        assert len(str(sock_path).encode()) <= 103
+
+
 class TestUnsupportedTransport:
     """The no-AF_UNIX path is a supported degradation, not a crash.
 
@@ -206,8 +248,8 @@ class TestUnsupportedTransport:
     def test_socket_supported_asks_the_interpreter(self):
         assert control.socket_supported() == hasattr(socket, "AF_UNIX")
 
-    def test_server_start_refuses_without_raising(self, no_af_unix, tmp_path):
-        server = _server(tmp_path)
+    def test_server_start_refuses_without_raising(self, no_af_unix, sock_path):
+        server = _server(sock_path)
         assert server.start() is False
         assert server.started is False
 
@@ -255,8 +297,8 @@ class TestCli:
         assert "no running Voice Transcriber" in capsys.readouterr().err
 
     @requires_af_unix
-    def test_json_flag_prints_the_raw_reply(self, tmp_path, capsys):
-        server = _server(tmp_path)
+    def test_json_flag_prints_the_raw_reply(self, sock_path, capsys):
+        server = _server(sock_path)
         assert server.start() is True
         try:
             code = control.run_cli(
@@ -269,8 +311,8 @@ class TestCli:
             server.stop()
 
     @requires_af_unix
-    def test_socket_path_can_come_from_the_environment(self, tmp_path, monkeypatch):
-        server = _server(tmp_path)
+    def test_socket_path_can_come_from_the_environment(self, sock_path, monkeypatch):
+        server = _server(sock_path)
         assert server.start() is True
         try:
             monkeypatch.setenv(control.CONTROL_SOCKET_ENV, server.socket_path)

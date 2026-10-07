@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import socket
 import sys
@@ -57,6 +58,8 @@ import tempfile
 import threading
 
 import console_text
+
+logger = logging.getLogger(__name__)
 
 #: Environment variable that overrides the control socket path.
 CONTROL_SOCKET_ENV = "VT_CONTROL_SOCKET"
@@ -319,7 +322,16 @@ class ControlServer:
                 pass
             server.listen(8)
             server.settimeout(0.5)  # so the accept loop can notice _stop
-        except OSError:
+        except OSError as e:
+            # Never raise: a missing control API must not stop the app. But say
+            # *why* — the usual cause is a socket path longer than sun_path
+            # (104 bytes on macOS, 108 on Linux), which is otherwise invisible.
+            logger.warning(
+                "Control API unavailable at %s (%s); the app runs, but control "
+                "verbs and the TUI socket are off for this session.",
+                self.socket_path,
+                e,
+            )
             return False
 
         self._server = server
