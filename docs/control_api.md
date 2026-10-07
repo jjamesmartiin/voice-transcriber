@@ -56,31 +56,44 @@ as "not a control verb" so future flags stay safe.
 
 | | |
 | :--- | :--- |
-| **Socket** | `$XDG_RUNTIME_DIR/vt-control-<uid>.sock` |
-| **Override** | `VT_CONTROL_SOCKET=/path/to.sock` |
+| **Transport** | `AF_UNIX` where it exists; loopback **TCP** on native Windows |
+| **Socket (AF_UNIX)** | `$XDG_RUNTIME_DIR/vt-control-<uid>.sock` |
+| **Override (AF_UNIX)** | `VT_CONTROL_SOCKET=/path/to.sock` |
 | **Fallback dir** | `tempfile.gettempdir()` when `XDG_RUNTIME_DIR` is unset |
-| **Windows** | **Unavailable** — see the note below. The `<uid>` token would be `%USERNAME%` |
+| **Endpoint (TCP)** | `%TEMP%\vt-control-<user>.json` — host, port and token |
+| **Override (TCP)** | `VT_CONTROL_ENDPOINT_FILE=/path/to.json` |
+| **Force a transport** | `VT_CONTROL_TRANSPORT=unix` or `tcp` |
 | **Framing** | One newline-delimited JSON request, one newline-delimited JSON reply, per connection |
 | **Concurrency** | Many clients; each connection is served on its own daemon thread |
 | **Request limit** | 1 MiB, then the connection is dropped |
 | **Timeouts** | 5 s read/write per connection |
 
-> **Native Windows: the control API is unavailable.** Windows 10 1803+ supports
-> `AF_UNIX` at the OS level, but **stock CPython never exposes
-> `socket.AF_UNIX`** ([bpo-33408](https://bugs.python.org/issue33408); the
-> upstream PR is still unmerged), and `control.socket_supported()` is exactly
-> `hasattr(socket, "AF_UNIX")`. On native Windows the engine therefore does not
-> bind the socket — `src/main.py` records that at **debug** level only — and
-> every verb fails with:
->
-> ```
-> ✗ AF_UNIX sockets are unavailable on this platform
-> ```
->
-> The ratatui frontend is disabled for the same reason
-> (`tui_ratatui.tui_available()`), so native Windows falls back to the Rich TUI
-> and must be driven with terminal keys. **WSL is unaffected**: the app runs on a
-> Linux interpreter there, which has `AF_UNIX`. Tracked in
+The engine prefers `AF_UNIX`: the socket is addressed by a path, so filesystem
+permissions (`0600`) are the whole access-control story and nothing is exposed
+over the network stack.
+
+**Native Windows cannot use it.** Windows 10 1803+ supports `AF_UNIX` at the OS
+level, but **stock CPython never exposes `socket.AF_UNIX`**
+([bpo-33408](https://bugs.python.org/issue33408); the upstream PR is still
+unmerged). Windows therefore uses **loopback TCP**:
+
+- bound to `127.0.0.1` only, on a port the OS assigns (never guessed);
+- every request must carry the engine's **token**, compared in constant time, and
+  a mismatch answers only `{"ok": false, "error": "unauthorized"}`;
+- the host, port and token are published to a per-user endpoint file written
+  `0600`, which the client reads to find the engine and which is removed on clean
+  shutdown;
+- the client falls back to TCP automatically when there is no `AF_UNIX` socket on
+disk but a published endpoint exists, so a WSL client can drive a Windows engine.
+
+Loopback is not a security boundary on a shared machine — any process can
+connect to `127.0.0.1` — which is exactly why the token exists: it stands in for
+the file permissions the `AF_UNIX` socket would have used.
+
+> **Still Unix-only: the ratatui frontend.** `tui_ratatui.tui_available()`
+> requires `socket.AF_UNIX`, and the `tui-rs` crate imports `std::os::unix`, so
+> native Windows gets the Rich TUI and is driven with terminal keys. That is a
+> separate gate from the control API, which now works everywhere. See
 > [`TODO.md`](../TODO.md).
 
 The socket is created by the engine at startup and removed on clean shutdown. It

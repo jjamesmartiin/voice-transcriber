@@ -52,6 +52,7 @@ import argparse
 import json
 import logging
 import os
+import secrets
 import socket
 import sys
 import tempfile
@@ -61,8 +62,22 @@ import console_text
 
 logger = logging.getLogger(__name__)
 
-#: Environment variable that overrides the control socket path.
+#: Environment variable that overrides the control socket path (AF_UNIX).
 CONTROL_SOCKET_ENV = "VT_CONTROL_SOCKET"
+
+#: Force a transport: ``unix`` or ``tcp``. Mostly for tests and for a Windows
+#: host that wants to prove which one it is using.
+CONTROL_TRANSPORT_ENV = "VT_CONTROL_TRANSPORT"
+
+#: Where a TCP-transport engine publishes host/port/token.
+CONTROL_ENDPOINT_ENV = "VT_CONTROL_ENDPOINT_FILE"
+
+#: Transport names.
+UNIX = "unix"
+TCP = "tcp"
+
+#: Loopback only. The control API must never be reachable off-host.
+TCP_HOST = "127.0.0.1"
 
 #: Per-connection read/write timeout, and the default client timeout.
 DEFAULT_TIMEOUT = 5.0
@@ -243,13 +258,39 @@ def verb_spec(verb: str) -> dict:
     """Return the spec for ``verb`` (empty dict when unknown)."""
     return VERBS.get(normalize_verb(verb), {})
 
-def socket_supported() -> bool:
+def unix_sockets_supported() -> bool:
     """True when this interpreter can create ``AF_UNIX`` sockets.
 
-    Windows 10 1803+ supports them, so this is normally true everywhere; the
-    check keeps the failure mode explicit rather than an obscure ``OSError``.
+    Stock CPython on Windows never exposes ``socket.AF_UNIX`` (bpo-33408), even
+    though the OS has supported it since Windows 10 1803. That is a CPython
+    limitation, not a Windows one.
     """
     return hasattr(socket, "AF_UNIX")
+
+
+def default_transport() -> str:
+    """The transport this platform should serve over.
+
+    ``AF_UNIX`` wherever it exists: the socket is addressed by a path, so
+    filesystem permissions are the whole access-control story and nothing is
+    exposed over the network stack. Native Windows falls back to loopback TCP,
+    which is why the control API is no longer Unix-only.
+    """
+    explicit = (os.environ.get(CONTROL_TRANSPORT_ENV) or "").strip().lower()
+    if explicit in (UNIX, TCP):
+        return explicit
+    return UNIX if unix_sockets_supported() else TCP
+
+
+def socket_supported() -> bool:
+    """True when the control API can be served on this host.
+
+    Every platform CPython supports can open a loopback TCP socket, so this is
+    effectively always true now — it is kept because callers and the docs use it
+    as "is the control API available here", and because a future transport-less
+    platform should have one place to say so.
+    """
+    return unix_sockets_supported() or hasattr(socket, "socket")
 
 
 def _user_identifier() -> str:
@@ -264,7 +305,7 @@ def _user_identifier() -> str:
 
 
 def default_socket_path() -> str:
-    """Return the control socket path for this user."""
+    """Return the control socket path for this user (``AF_UNIX`` transport)."""
     override = os.environ.get(CONTROL_SOCKET_ENV)
     if override:
         return override
@@ -280,6 +321,59 @@ def default_socket_path() -> str:
     return os.path.join(base, f"vt-control-{_user_identifier()}.sock")
 
 
+def default_endpoint_file() -> str:
+    """Where a TCP-transport engine advertises host, port and token.
+
+    A path alone cannot address a TCP socket, and the port is assigned by the OS
+    so it cannot be guessed, so the running engine publishes an endpoint file next
+    to where the ``AF_UNIX`` socket would have lived.
+    """
+    override = os.environ.get(CONTROL_ENDPOINT_ENV)
+    if override:
+        return override
+    return os.path.join(
+        tempfile.gettempdir(), f"vt-control-{_user_identifier()}.json"
+    )
+
+
+def _write_endpoint_file(path: str, host: str, port: int, token: str) -> None:
+    """Publish the TCP endpoint, owner-only."""
+    payload = json.dumps(
+        {"transport": TCP, "host": host, "port": int(port), "token": token}
+    )
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(path, flags, 0o600)
+    try:
+        os.write(fd, payload.encode("utf-8"))
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:  # pragma: no cover - Windows ACLs are not POSIX modes
+        pass
+
+
+def read_endpoint_file(path: str | None = None) -> dict | None:
+    """Read a published TCP endpoint, or ``None`` if there is not one."""
+    target = path or default_endpoint_file()
+    try:
+        with open(target, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("port"):
+        return None
+    return data
+
+
+def _remove_endpoint_file(path: str) -> None:
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+    except OSError:  # pragma: no cover - defensive
+        pass
+
+
 class ControlServer:
     """Serve control requests by handing them to ``target.handle_control``.
 
@@ -288,13 +382,40 @@ class ControlServer:
     keeps this module free of engine imports (and import cycles).
     """
 
-    def __init__(self, target, socket_path: str | None = None) -> None:
+    def __init__(
+        self,
+        target,
+        socket_path: str | None = None,
+        transport: str | None = None,
+        endpoint_file: str | None = None,
+        token: str | None = None,
+    ) -> None:
         self.target = target
+        # An explicit ``socket_path`` can only mean the AF_UNIX transport; only
+        # fall back to the platform default when neither is given.
+        if transport:
+            self.transport = transport
+        elif socket_path:
+            self.transport = UNIX
+        else:
+            self.transport = default_transport()
         self.socket_path = socket_path or default_socket_path()
+        self.endpoint_file = endpoint_file or default_endpoint_file()
+        #: Only meaningful for the TCP transport; generated at ``start`` if absent.
+        self.token = token
+        self.host = TCP_HOST
+        self.port: int | None = None
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._started = False
+
+    @property
+    def address(self) -> str:
+        """A human-readable address for logs and error messages."""
+        if self.transport == TCP:
+            return f"{self.host}:{self.port}" if self.port else self.endpoint_file
+        return self.socket_path
 
     @property
     def started(self) -> bool:
@@ -309,7 +430,12 @@ class ControlServer:
         """
         if self._started:
             return True
-        if not socket_supported():
+        if self.transport == TCP:
+            return self._start_tcp()
+        return self._start_unix()
+
+    def _start_unix(self) -> bool:
+        if not unix_sockets_supported():
             return False
         try:
             if os.path.exists(self.socket_path):
@@ -328,19 +454,65 @@ class ControlServer:
             # (104 bytes on macOS, 108 on Linux), which is otherwise invisible.
             logger.warning(
                 "Control API unavailable at %s (%s); the app runs, but control "
-                "verbs and the TUI socket are off for this session.",
+                "verbs are off for this session.",
                 self.socket_path,
                 e,
             )
             return False
+        self._publish(server)
+        return True
 
+    def _start_tcp(self) -> bool:
+        """Bind loopback TCP and publish the port and token.
+
+        The port is assigned by the OS (``port 0``) rather than guessed, and the
+        token is required on every request. Binding is to ``127.0.0.1`` only, so
+        the only way in is from this host — the same trust boundary as the
+        ``AF_UNIX`` socket's filesystem permissions.
+        """
+        try:
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind((self.host, 0))
+            server.listen(8)
+            server.settimeout(0.5)
+        except OSError as e:
+            logger.warning(
+                "Control API unavailable on %s (%s); the app runs, but control "
+                "verbs are off for this session.",
+                self.host,
+                e,
+            )
+            return False
+
+        self.port = server.getsockname()[1]
+        self.token = self.token or secrets.token_urlsafe(32)
+        try:
+            _write_endpoint_file(
+                self.endpoint_file, self.host, self.port, self.token
+            )
+        except OSError as e:
+            logger.warning(
+                "Control API could not publish its endpoint at %s (%s); control "
+                "verbs would be unaddressable, so the server is stopping.",
+                self.endpoint_file,
+                e,
+            )
+            try:
+                server.close()
+            except OSError:
+                pass
+            return False
+        self._publish(server)
+        return True
+
+    def _publish(self, server: socket.socket) -> None:
         self._server = server
         self._started = True
         self._thread = threading.Thread(
             target=self._serve, name="vt-control", daemon=True
         )
         self._thread.start()
-        return True
 
     def stop(self) -> None:
         """Stop serving and remove the socket."""
@@ -360,6 +532,9 @@ class ControlServer:
                 os.unlink(self.socket_path)
         except OSError:
             pass
+        if self.transport == TCP:
+            _remove_endpoint_file(self.endpoint_file)
+            self.port = None
 
     # -- serving -----------------------------------------------------------
     def _serve(self) -> None:
@@ -400,6 +575,21 @@ class ControlServer:
             except OSError:
                 pass
 
+    def _authorized(self, request: dict) -> bool:
+        """Gate the TCP transport on a shared token.
+
+        Loopback is not a security boundary on a shared machine — any process can
+        connect to 127.0.0.1 — so the token is what stands in for the ``AF_UNIX``
+        socket's file permissions. It is compared in constant time, and a
+        mismatch reports only "unauthorized" so a caller learns nothing from
+        probing.
+        """
+        if self.transport != TCP:
+            return True
+        expected = self.token or ""
+        supplied = str(request.get("token") or "")
+        return bool(expected) and secrets.compare_digest(expected, supplied)
+
     def dispatch(self, line: str) -> dict:
         """Parse one request line and route it to the engine."""
         text = (line or "").strip()
@@ -415,6 +605,9 @@ class ControlServer:
 
         if not isinstance(request, dict):
             return {"ok": False, "error": "request must be a JSON object"}
+
+        if not self._authorized(request):
+            return {"ok": False, "error": "unauthorized"}
 
         cmd = str(request.get("cmd") or request.get("command") or "").strip()
         if not cmd:
@@ -442,21 +635,61 @@ def send_command(
     so callers (and shell scripts) can branch on ``ok``.
     """
     if not socket_supported():
-        return {"ok": False, "error": "AF_UNIX sockets are unavailable on this platform"}
+        return {"ok": False, "error": "the control API is unavailable on this platform"}
 
-    path = socket_path or default_socket_path()
     request = {"cmd": cmd}
     request.update(fields)
 
-    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    # An explicit path always means the AF_UNIX transport; otherwise this platform
+    # picks. On native Windows that is loopback TCP, because CPython there has no
+    # socket.AF_UNIX.
+    transport = UNIX if socket_path else default_transport()
+    if not socket_path and transport == UNIX:
+        # A published TCP endpoint wins over a unix socket that is not there: the
+        # engine may be on the other side of a WSL/Windows boundary, where this
+        # client has AF_UNIX but the engine does not.
+        if not os.path.exists(default_socket_path()) and read_endpoint_file():
+            transport = TCP
+
+    use_tcp = not socket_path and transport == TCP
+    if use_tcp:
+        endpoint = read_endpoint_file()
+        if not endpoint:
+            return {
+                "ok": False,
+                "error": (
+                    "no running Voice Transcriber found (no control endpoint "
+                    f"published at {default_endpoint_file()})"
+                ),
+            }
+        host = str(endpoint.get("host") or TCP_HOST)
+        port = int(endpoint["port"])
+        request["token"] = endpoint.get("token") or ""
+        address = f"{host}:{port}"
+        family: int = socket.AF_INET
+        destination = (host, port)
+    else:
+        if not unix_sockets_supported():
+            return {
+                "ok": False,
+                "error": "AF_UNIX sockets are unavailable on this platform",
+            }
+        address = socket_path or default_socket_path()
+        family = socket.AF_UNIX
+        destination = address
+
+    client = socket.socket(family, socket.SOCK_STREAM)
     client.settimeout(timeout)
     try:
         try:
-            client.connect(path)
+            client.connect(destination)
         except OSError as exc:
             return {
                 "ok": False,
-                "error": f"no running Voice Transcriber at {path} ({type(exc).__name__}: {exc})",
+                "error": (
+                    f"no running Voice Transcriber at {address} "
+                    f"({type(exc).__name__}: {exc})"
+                ),
             }
         client.sendall((json.dumps(request) + "\n").encode("utf-8"))
         data = b""

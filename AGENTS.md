@@ -38,11 +38,13 @@ python src/main.py wait --json       # includes last_transcription
 works with no engine running. Do not hardcode the verb list or its length in docs
 — read the catalogue.
 
-> **This does not work on native Windows.** Stock CPython on Windows never
-> exposes `socket.AF_UNIX` (bpo-33408), so the engine does not bind the control
-> socket there and every verb fails with `✗ AF_UNIX sockets are unavailable on
-> this platform`. To drive a Windows instance, use the terminal keys. Linux and
-> WSL are unaffected. See `docs/control_api.md` and `TODO.md`.
+> **Windows uses a different transport, not a different API.** Stock CPython on
+> Windows never exposes `socket.AF_UNIX` (bpo-33408), so the engine binds
+> loopback TCP instead (token-authenticated, `127.0.0.1` only, port and token
+> published to a per-user endpoint file) and the verbs are identical. The
+> **ratatui frontend** remains Unix-only — the `tui-rs` crate imports
+> `std::os::unix` — so a Windows instance uses the Rich TUI. See
+> `docs/control_api.md` and `TODO.md`.
 
 Use this for tests too. `tests/shared/test_control.py` shows the pattern.
 

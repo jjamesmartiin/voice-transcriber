@@ -11,6 +11,9 @@ result
 # or shipped as GitHub Release assets, NOT committed to this repo.
 /models/
 /dist/
+# `nix bundle` (./build.sh --bundle) writes ./vt.AppImage into the repo root, so
+# ignore the pattern rather than relying on nobody running the build first.
+*.AppImage
 
 # PyInstaller scratch dir + generated spec (platforms/windows/build_offline.py)
 /build/

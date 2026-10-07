@@ -54,10 +54,11 @@ there, an issue with the output of `./run.sh doctor` (or `run.bat doctor`) is th
 most useful thing you can send, and it will be treated as a bug in the claim
 above rather than as user error.
 
-> **Native Windows has no control API and no ratatui frontend.** Stock CPython on
-> Windows never exposes `socket.AF_UNIX` ([bpo-33408](https://bugs.python.org/issue33408)),
-> so the engine does not bind a socket there and the Rich TUI is used instead of
-> the Rust one. Linux, WSL2 and macOS are unaffected. See
+> **Native Windows has no ratatui frontend.** Stock CPython on Windows never
+> exposes `socket.AF_UNIX` ([bpo-33408](https://bugs.python.org/issue33408)), and
+> the `tui-rs` crate imports `std::os::unix`, so the Rich TUI is used there
+> instead of the Rust one. The **control API** is unaffected: it falls back to
+> token-authenticated loopback TCP. Linux, WSL2 and macOS are unaffected. See
 > [`docs/control_api.md`](docs/control_api.md).
 
 ---
@@ -159,6 +160,10 @@ chmod +x vt-x86_64.AppImage
 >   (udev rule). **Typing:** `ydotool` on Wayland or `xdotool` on X11.
 > - **GPU:** the bundle is **CPU-only**; CUDA needs host drivers and a
 >   CUDA-enabled build (run from source / Nix).
+> - **NixOS:** the bundled ALSA cannot find a config file (there is no
+>   `/usr/share/alsa/alsa.conf`), so PortAudio fails to initialise. Point it at
+>   the host copy — `ALSA_CONFIG_PATH=/nix/store/...-alsa-lib-*/share/alsa/alsa.conf`,
+>   or just use `nix run .` on NixOS, which is the better fit anyway.
 >
 > Only **x86_64-linux** is built today (see `TODO.md`).
 
@@ -340,11 +345,11 @@ Running `python src/main.py` with no verb still launches the app. Add `--json`
 for machine-readable output, or `--socket PATH` to target a specific instance.
 Under Nix the same verbs pass through the wrapper: `nix run . -- status`.
 
-> **Not available on native Windows.** Stock CPython on Windows never exposes
-> `socket.AF_UNIX`, so the engine does not bind the control socket there and
-> every verb fails with `✗ AF_UNIX sockets are unavailable on this platform`. Use
-> the terminal keys instead. **WSL works**, because the app runs on a Linux
-> interpreter there. See
+> **Windows works too, over loopback TCP.** Stock CPython on Windows never exposes
+> `socket.AF_UNIX` (bpo-33408), so the engine falls back to a token-authenticated
+> socket on `127.0.0.1` and publishes its port and token to a per-user file — the
+> verbs are the same. The **ratatui frontend** is still Unix-only (the Rust crate
+> imports `std::os::unix`), so native Windows uses the Rich TUI. See
 > [`docs/control_api.md`](docs/control_api.md#transport).
 
 | | |
@@ -630,8 +635,7 @@ key, including the ones not listed above (`primary_device_name`,
 > directory) is created automatically on the first launch, and `stats.json` is
 > gitignored wherever it lands. Point `VT_STATS_FILE` somewhere else, or delete
 > the file to start counting from zero. Read the totals with
-> `python src/main.py status` (Linux/macOS/WSL; on native Windows read the badge
-> or the file, since the control API is unavailable there).
+> `python src/main.py status` on any platform.
 
 Options can also be changed live from the settings modal (`s`/`S`/`,` in the
 terminal), or programmatically via the [Control API](#control-api).

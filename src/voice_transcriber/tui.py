@@ -133,6 +133,7 @@ class VoiceTranscriberTUI:
         self.number_mode = "auto"
         self.serial_collapse = True
         self.spell_command = True
+        self.hotkeys = []
         self.middle_click_enabled = False
         self.punctuation_mode = "full"
         self.copy_to_clipboard = True
@@ -228,7 +229,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -262,6 +263,13 @@ class VoiceTranscriberTUI:
                 self.middle_click_enabled = bool(middle_click_enabled)
             if typing_wpm is not None:
                 self.typing_wpm = int(typing_wpm)
+            if hotkeys is not None:
+                # Shared with the ratatui frontend's signature. This TUI does not
+                # render the chords yet, but ``main.py`` calls whichever frontend
+                # it got with the same keywords, so it must accept them — the
+                # omission was a TypeError on every startup that used Rich, which
+                # is the default on native Windows.
+                self.hotkeys = [str(chord) for chord in hotkeys]
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 

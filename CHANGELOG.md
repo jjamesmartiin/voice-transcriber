@@ -28,7 +28,12 @@ normally reuses the existing bundle. See
   attached to releases — a self-contained bundle needing no Python install. It
   prompts to download the model on first launch, or reads a local
   `models\cohere\` folder.
-- **`model_backend` actually works.** The config option is now read (it was never read),
+- **The control API now works on native Windows.** Windows 10+ supports `AF_UNIX`,
+  but stock CPython never exposes `socket.AF_UNIX` (bpo-33408), so the engine now falls
+  back to a loopback TCP transport: `127.0.0.1` only, an OS-assigned port, a per-run token
+  required on every request, and host/port/token published to a `0600` per-user endpoint
+  file. The verbs and reply shapes are unchanged. The ratatui frontend remains Unix-only,
+  so Windows keeps the Rich TUI. The config option is now read (it was never read),
   validated against a single backend registry, persisted, and reported clearly if you name a
   backend that does not exist. `transcribe2.set_backend()` was a no-op that silently kept
   Cohere. Cohere remains the only backend; adding another is one registry entry plus a
@@ -38,6 +43,13 @@ normally reuses the existing bundle. See
 
 ### Fixed
 
+- **The Rich TUI crashed on startup.** `_sync_tui_state` always passed `hotkeys=` to the
+  frontend, but only the ratatui TUI accepted it — so every launch that used the Rich TUI
+  died with `TypeError: unexpected keyword argument 'hotkeys'` before the model began
+  loading. That is the default frontend on native Windows, and it is also the no-TTY
+  fallback. Found by running a built AppImage, not by a test: every CI job that reaches the
+  call site picks the ratatui frontend. There is now a test asserting the two frontends
+  stay interchangeable, plus one that runs the real call site against the Rich TUI.
 - **macOS: `doctor` crashed when checking Accessibility permissions.**
   `check_hotkeys_and_permissions` did `from platform.macos.hotkeys import ...`,
   an absolute import that resolves to the *stdlib* `platform` module ("'platform'

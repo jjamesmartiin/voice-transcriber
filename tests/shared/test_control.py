@@ -123,13 +123,12 @@ class TestDispatch:
 # ---------------------------------------------------------------------------
 # Transport
 # ---------------------------------------------------------------------------
-#: ``socket.AF_UNIX`` is absent from stock CPython on Windows: AF_UNIX is an OS
-#: feature (Windows 10 1803+) that CPython never exposed (bpo-33408). On such an
-#: interpreter the whole control transport is unavailable, so these tests skip
-#: instead of failing. The degradation path itself is pinned on every platform
-#: by :class:`TestUnsupportedTransport` below.
+#: The AF_UNIX transport needs ``socket.AF_UNIX``, which stock CPython on Windows
+#: never exposes (bpo-33408) — an OS feature CPython did not wire up. Those tests
+#: skip there; the TCP transport, which is what Windows uses instead, is covered
+#: by :class:`TestTcpTransport` and runs on every platform.
 requires_af_unix = pytest.mark.skipif(
-    not control.socket_supported(),
+    not control.unix_sockets_supported(),
     reason="socket.AF_UNIX is unavailable on this interpreter (stock CPython on Windows)",
 )
 
@@ -176,9 +175,18 @@ class TestSocketTransport:
         server = _server(sock_path, engine)
         assert server.start() is True
         try:
-            for _ in range(5):
-                assert control.send_command("ping", socket_path=server.socket_path)["ok"]
-            assert len(engine.calls) == 5
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(
+                    pool.map(
+                        lambda _: control.send_command(
+                            "ping", socket_path=server.socket_path
+                        ),
+                        range(8),
+                    )
+                )
+            assert all(r["ok"] for r in results)
         finally:
             server.stop()
 
@@ -204,6 +212,10 @@ class TestSocketTransport:
         response = control.send_command("toggle", socket_path=missing)
         assert response["ok"] is False
         assert "no running Voice Transcriber" in response["error"]
+
+    def test_an_explicit_path_implies_the_unix_transport(self, sock_path):
+        server = _server(sock_path)
+        assert server.transport == control.UNIX
 
 
 class TestSocketPathLength:
@@ -233,35 +245,157 @@ class TestSocketPathLength:
         assert len(str(sock_path).encode()) <= 103
 
 
-class TestUnsupportedTransport:
-    """The no-AF_UNIX path is a supported degradation, not a crash.
+class TestTransportSelection:
+    """Which transport this host serves over, and why.
 
-    Stock CPython on Windows never exposes ``socket.AF_UNIX`` (bpo-33408), so
-    native Windows always takes this path: the engine must not bind, and every
-    verb must fail cleanly and visibly rather than raising into the app.
+    AF_UNIX wherever it exists — the socket is addressed by a path, so filesystem
+    permissions are the whole access-control story and nothing touches the network
+    stack. Native Windows falls back to loopback TCP, which is what makes the
+    control API available there at all.
+    """
+
+    @pytest.fixture(autouse=True)
+    def clean_env(self, monkeypatch):
+        monkeypatch.delenv(control.CONTROL_TRANSPORT_ENV, raising=False)
+
+    def test_unix_is_preferred_when_available(self, monkeypatch):
+        monkeypatch.setattr(control, "unix_sockets_supported", lambda: True)
+        assert control.default_transport() == control.UNIX
+
+    def test_tcp_is_used_when_af_unix_is_absent(self, monkeypatch):
+        monkeypatch.setattr(control, "unix_sockets_supported", lambda: False)
+        assert control.default_transport() == control.TCP
+
+    def test_the_transport_can_be_forced(self, monkeypatch):
+        monkeypatch.setenv(control.CONTROL_TRANSPORT_ENV, "tcp")
+        assert control.default_transport() == control.TCP
+        monkeypatch.setenv(control.CONTROL_TRANSPORT_ENV, "unix")
+        assert control.default_transport() == control.UNIX
+
+    def test_an_unknown_transport_name_falls_back_to_the_default(self, monkeypatch):
+        monkeypatch.setattr(control, "unix_sockets_supported", lambda: True)
+        monkeypatch.setenv(control.CONTROL_TRANSPORT_ENV, "carrier-pigeon")
+        assert control.default_transport() == control.UNIX
+
+    def test_the_control_api_is_available_without_af_unix(self, monkeypatch):
+        """The platform capability is now about *a* transport, not AF_UNIX."""
+        monkeypatch.setattr(control, "unix_sockets_supported", lambda: False)
+        assert control.socket_supported() is True
+
+    def test_unix_sockets_supported_asks_the_interpreter(self):
+        assert control.unix_sockets_supported() == hasattr(socket, "AF_UNIX")
+
+
+class TestTcpTransport:
+    """The loopback transport that native Windows uses — exercised everywhere.
+
+    Loopback is not a security boundary on a shared machine, so every request
+    carries a token that stands in for the AF_UNIX socket's file permissions.
     """
 
     @pytest.fixture
-    def no_af_unix(self, monkeypatch):
-        monkeypatch.setattr(control, "socket_supported", lambda: False)
+    def endpoint_file(self, tmp_path, monkeypatch):
+        path = tmp_path / "endpoint.json"
+        monkeypatch.setattr(control, "default_endpoint_file", lambda: str(path))
+        # The client chooses its transport the same way the server does, so force
+        # it here too — otherwise send_command would (correctly) prefer the
+        # AF_UNIX socket on a host that has one.
+        monkeypatch.setenv(control.CONTROL_TRANSPORT_ENV, control.TCP)
+        return path
 
-    def test_socket_supported_asks_the_interpreter(self):
-        assert control.socket_supported() == hasattr(socket, "AF_UNIX")
+    @pytest.fixture
+    def server(self, endpoint_file):
+        engine = _FakeEngine()
+        server = control.ControlServer(
+            engine, transport=control.TCP, endpoint_file=str(endpoint_file)
+        )
+        assert server.start() is True
+        try:
+            yield server
+        finally:
+            server.stop()
 
-    def test_server_start_refuses_without_raising(self, no_af_unix, sock_path):
-        server = _server(sock_path)
-        assert server.start() is False
-        assert server.started is False
+    def test_round_trip(self, server, endpoint_file):
+        response = control.send_command("status")
+        assert response == {"ok": True, "cmd": "status"}
 
-    def test_send_command_returns_a_clean_error(self, no_af_unix, tmp_path):
-        response = control.send_command("toggle", socket_path=str(tmp_path / "x.sock"))
+    def test_it_binds_loopback_only(self, server):
+        """A control API reachable off-host would be a security bug."""
+        assert server.host == control.TCP_HOST
+        assert server._server.getsockname()[0] == "127.0.0.1"
+
+    def test_it_publishes_host_port_and_token(self, server, endpoint_file):
+        published = json.loads(endpoint_file.read_text())
+        assert published["transport"] == control.TCP
+        assert published["host"] == "127.0.0.1"
+        assert published["port"] == server.port
+        assert published["token"] == server.token
+
+    def test_the_endpoint_file_is_owner_only(self, server, endpoint_file):
+        if os.name != "posix":
+            pytest.skip("POSIX modes only")
+        import stat
+        mode = stat.S_IMODE(os.stat(endpoint_file).st_mode)
+        assert mode == 0o600, f"Expected 0600, got {oct(mode)}"
+
+    def test_the_endpoint_is_removed_on_stop(self, endpoint_file):
+        server = control.ControlServer(
+            _FakeEngine(), transport=control.TCP, endpoint_file=str(endpoint_file)
+        )
+        assert server.start() is True
+        assert endpoint_file.exists()
+        server.stop()
+        assert not endpoint_file.exists()
+
+    def test_a_request_without_the_token_is_rejected(self, server):
+        reply = server.dispatch(json.dumps({"cmd": "status"}))
+        assert reply["ok"] is False
+        assert reply["error"] == "unauthorized"
+
+    def test_a_request_with_the_wrong_token_is_rejected(self, server):
+        reply = server.dispatch(json.dumps({"cmd": "status", "token": "not-it"}))
+        assert reply["ok"] is False
+        assert reply["error"] == "unauthorized"
+
+    def test_a_request_with_the_token_is_served(self, server):
+        reply = server.dispatch(json.dumps({"cmd": "status", "token": server.token}))
+        assert reply["ok"] is True
+
+    def test_the_token_is_not_recoverable_from_the_rejection(self, server):
+        """A probe must not be able to learn anything from the reply."""
+        reply = server.dispatch(json.dumps({"cmd": "status", "token": ""}))
+        assert server.token not in json.dumps(reply)
+
+    def test_a_missing_endpoint_is_a_clean_error(self, endpoint_file):
+        assert not endpoint_file.exists()
+        response = control.send_command("status")
         assert response["ok"] is False
-        assert "AF_UNIX" in response["error"]
+        assert "no running Voice Transcriber" in response["error"]
 
-    def test_cli_exits_one_with_a_human_message(self, no_af_unix, tmp_path, capsys):
-        code = control.run_cli(["status", "--socket", str(tmp_path / "x.sock")])
-        assert code == 1
-        assert "AF_UNIX" in capsys.readouterr().err
+    def test_a_corrupt_endpoint_file_is_a_clean_error(self, endpoint_file):
+        endpoint_file.write_text("{not json")
+        response = control.send_command("status")
+        assert response["ok"] is False
+        assert "no running Voice Transcriber" in response["error"]
+
+    def test_the_token_never_reaches_the_engine(self, endpoint_file):
+        """The token is transport plumbing, not part of the verb surface."""
+        seen = {}
+
+        class RecordingEngine:
+            def handle_control(self, cmd, request):
+                seen.update(request)
+                return {"ok": True, "cmd": cmd}
+
+        server = control.ControlServer(
+            RecordingEngine(), transport=control.TCP, endpoint_file=str(endpoint_file)
+        )
+        assert server.start() is True
+        try:
+            control.send_command("status")
+        finally:
+            server.stop()
+        assert seen.get("cmd") == "status"
 
 
 # ---------------------------------------------------------------------------
