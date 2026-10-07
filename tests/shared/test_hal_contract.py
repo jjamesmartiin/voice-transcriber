@@ -71,10 +71,27 @@ class TestFactories:
             (hal.MACOS, "MacOSHotkeyManager"),
         ],
     )
-    def test_hotkey_factory(self, platform, manager_name):
+    def test_hotkey_factory(self, platform, manager_name, monkeypatch):
+        if platform == hal.MACOS:
+            # Constructing the macOS manager starts a real pynput listener. On a
+            # headless runner that ends up calling the TIS/TSM input-source APIs
+            # from a worker thread and *segfaults the whole pytest process*
+            # (exit 139), taking the macOS CI job down with it — and a segfault
+            # cannot be caught in Python. The shared tier is documented as
+            # hermetic, so patch the OS listener out; the factory's actual job
+            # (platform -> class) is still what is under test.
+            backend = hal.load_backend("macos", "hotkeys")
+            monkeypatch.setattr(
+                backend.MacOSHotkeyManager, "_start_listener", lambda self: None
+            )
+
         manager = hal.create_hotkey_manager(platform)
         try:
             assert type(manager).__name__ == manager_name
+            if platform == hal.MACOS:
+                # Guard the patch above: if it ever stops applying, the next
+                # macOS run segfaults instead of failing a test.
+                assert manager.listener is None
         finally:
             manager.cleanup()
 
