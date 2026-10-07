@@ -155,11 +155,15 @@ def create_hotkey_manager(
     platform: str | None = None,
     callback_start=None,
     callback_stop=None,
+    binds=None,
 ):
     """Return the :class:`~platform.base.BaseHotkeyManager` for ``platform``.
 
-    The concrete backend is imported lazily so that, for example, importing the
-    Linux backend never requires ``pynput`` and vice versa.
+    ``binds`` is the user's push-to-talk bind list (anything
+    :func:`voice_transcriber.keybinds.parse_binds` accepts); ``None`` keeps the
+    shipped Alt+Shift chord. The concrete backend is imported lazily so that,
+    for example, importing the Linux backend never requires ``pynput`` and vice
+    versa.
     """
     platform = platform or detect_platform()
     if platform == LINUX:
@@ -175,6 +179,7 @@ def create_hotkey_manager(
     return _Cls(
         callback_start=callback_start,
         callback_stop=callback_stop,
+        binds=binds,
     )
 
 

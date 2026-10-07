@@ -496,3 +496,69 @@ class TestMacOSVisualNotification:
 
         notifier.hide_notification()
         fake_tui.update_state.assert_called_with("READY")
+
+
+class TestMacOSHotkeyBinds:
+    """User-configured binds on macOS (the shipped chord keeps Cmd-or-Alt)."""
+
+    @staticmethod
+    def _manager(binds=None):
+        MacOSHotkeyManager = hal.load_backend("macos", "hotkeys").MacOSHotkeyManager
+        manager = MacOSHotkeyManager(MagicMock(), MagicMock())
+        if binds is not None:
+            assert manager.set_binds(binds) is True
+        return manager
+
+    @staticmethod
+    def _fake_key_namespace(**attrs):
+        class FakeKey:
+            def __init__(self, name):
+                self.name = name
+
+            def __repr__(self):
+                return f"<Key {self.name}>"
+
+        return FakeKey, types.SimpleNamespace(
+            **{name: FakeKey(name) for name in attrs}
+        )
+
+    def test_a_user_bind_replaces_the_shipped_chord(self):
+        manager = self._manager("ctrl+shift")
+        try:
+            FakeKey, keys = self._fake_key_namespace(ctrl_l="ctrl_l", shift_l="shift_l")
+            manager._Key = keys
+            # Alt is no longer part of the trigger.
+            manager.pressed_keys = {FakeKey("alt_l"), FakeKey("shift_l")}
+            assert manager._is_main_hotkey_pressed() is False
+            manager.pressed_keys = {keys.ctrl_l, keys.shift_l}
+            assert manager._is_main_hotkey_pressed() is True
+        finally:
+            manager.cleanup()
+
+    def test_bare_alt_still_accepts_cmd_on_macos(self):
+        """``alt`` means the modifier by the space bar, which is Cmd here."""
+        manager = self._manager("alt+shift")
+        try:
+            FakeKey, keys = self._fake_key_namespace(shift_l="shift_l")
+            manager._Key = keys
+            cmd = FakeKey("cmd_l")
+            manager.CMD_KEYS = {cmd}
+            manager.pressed_keys = {cmd, keys.shift_l}
+            # The shipped chord is special-cased to the legacy behaviour, so use
+            # a chord with an extra key to exercise the expansion path.
+            assert manager.set_binds("alt+shift+space") is True
+            manager.pressed_keys = {cmd, keys.shift_l}
+            assert manager._is_main_hotkey_pressed() is False  # space missing
+        finally:
+            manager.cleanup()
+
+    def test_an_unusable_chord_is_refused_and_leaves_the_old_one_live(self):
+        manager = self._manager()
+        try:
+            before = list(manager.binds)
+            assert manager.set_binds("hyper+shift") is False
+            assert list(manager.binds) == before
+            assert manager.set_binds(12345) is False
+            assert list(manager.binds) == before
+        finally:
+            manager.cleanup()

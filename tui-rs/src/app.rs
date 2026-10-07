@@ -180,6 +180,9 @@ pub struct App {
     pub serial_collapse: bool,
     pub spell_command: bool,
     pub typing_wpm: u32,
+    /// Canonical push-to-talk chord spellings from the engine, e.g.
+    /// `["alt+shift", "f13"]`. Empty until the first `cfg` payload arrives.
+    pub hotkeys: Vec<String>,
     pub middle_click_enabled: bool,
     pub punctuation_mode: String,
     #[allow(dead_code)]
@@ -233,6 +236,7 @@ impl App {
             serial_collapse: true,
             spell_command: true,
             typing_wpm: 40,
+            hotkeys: Vec::new(),
             middle_click_enabled: false,
             punctuation_mode: "full".to_string(),
             sound_theme: "proximity".to_string(),
@@ -392,6 +396,7 @@ impl App {
         spell_command: Option<bool>,
         middle_click_enabled: Option<bool>,
         typing_wpm: Option<u32>,
+        hotkeys: Option<Vec<String>>,
     ) {
         if let Some(m) = mic {
             self.active_device = m;
@@ -447,6 +452,9 @@ impl App {
         }
         if let Some(w) = typing_wpm {
             self.typing_wpm = w;
+        }
+        if let Some(h) = hotkeys {
+            self.hotkeys = h;
         }
     }
 }

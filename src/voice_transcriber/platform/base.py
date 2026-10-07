@@ -9,6 +9,8 @@ See :mod:`src.platform` for the concrete factories.
 """
 from __future__ import annotations
 
+from voice_transcriber.keybinds import DEFAULT_BINDS
+
 
 class BaseClipboardSink:
     """Unified clipboard + typing-injection sink."""
@@ -55,9 +57,14 @@ class BaseHotkeyManager:
     """Unified global push-to-talk hotkey manager.
 
     Concrete backends drive the ``callback_start`` / ``callback_stop``
-    callbacks in response to the Alt+Shift hotkey (and the Space hands-free
-    latch) and are responsible for typing text into the active window when
-    asked.
+    callbacks in response to any configured push-to-talk *bind* (default: hold
+    Alt+Shift) and the Space hands-free latch, and are responsible for typing
+    text into the active window when asked.
+
+    A bind is a chord of OS-neutral key names plus the action it triggers; see
+    :mod:`voice_transcriber.keybinds` for the vocabulary and the semantics every
+    backend must honour. Backends that cannot honour a bind change return
+    ``False`` from :meth:`set_binds` rather than silently keeping the old chord.
 
     Configuration is deliberately *not* a global hotkey: settings are opened
     from the terminal frontend (``s`` / ``S`` / ``,``) or through the control
@@ -77,6 +84,10 @@ class BaseHotkeyManager:
         self.latch_release = False
         self.copy_to_clipboard_mode = False
         self.middle_click_enabled = False
+
+        # Push-to-talk chords, as :class:`keybinds.Bind` values. The default is
+        # the Alt+Shift chord this app has always shipped with.
+        self.binds: list = list(DEFAULT_BINDS)
 
         # Non-empty when the backend successfully initialised; ``main.py`` uses
         # this to decide whether global hotkeys are available.
@@ -123,3 +134,12 @@ class BaseHotkeyManager:
     def set_middle_click_enabled(self, enabled: bool) -> None:
         """Toggle middle click push-to-talk mode."""
         self.middle_click_enabled = bool(enabled)
+
+    def set_binds(self, binds) -> bool:
+        """Replace the push-to-talk binds.
+
+        Accepts anything :func:`keybinds.parse_binds` understands (chord strings
+        or ``{"keys": [...], "action": ...}`` mappings) and returns ``False``
+        when this backend cannot apply the change.
+        """
+        return False

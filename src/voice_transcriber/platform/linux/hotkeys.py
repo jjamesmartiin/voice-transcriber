@@ -14,6 +14,8 @@ import socket
 import threading
 import time
 
+from voice_transcriber import keybinds
+
 from ..base import BaseHotkeyManager
 
 logger = logging.getLogger(__name__)
@@ -22,14 +24,26 @@ logger = logging.getLogger(__name__)
 class LinuxHotkeyManager(BaseHotkeyManager):
     """Wayland/X11-compatible global hotkeys via evdev + uinput.
 
-    Hold ``Alt+Shift`` to record (push-to-talk), tap ``Space`` while holding to
-    latch hands-free. ``Ctrl`` held at activation switches the output mode to
-    clipboard. Settings are opened from the terminal frontend, not from a
-    global hotkey.
+    Hold any configured push-to-talk bind (default ``Alt+Shift``) to record,
+    tap ``Space`` while holding to latch hands-free. ``Ctrl`` held at activation
+    switches the output mode to clipboard. Settings are opened from the terminal
+    frontend, not from a global hotkey.
+
+    The binds are user-configurable (see :mod:`voice_transcriber.keybinds`);
+    :meth:`set_binds` applies a change at runtime, and :meth:`is_bind_pressed`
+    reports whether any of them is currently held.
     """
 
-    def __init__(self, callback_start, callback_stop):
+    # Bucket for events handed to ``handle_key_event`` without naming a device
+    # (legacy seams and tests). It has no provenance, so its keys are checked
+    # against every monitored device instead of one.
+    _UNNAMED_DEVICE = "<unnamed>"
+
+    def __init__(self, callback_start, callback_stop, binds=None):
         super().__init__(callback_start, callback_stop)
+        # Normalise the configured push-to-talk chords once, up front; ``None``
+        # means the shipped default (Alt+Shift).
+        self.binds = keybinds.parse_binds(binds)
         self.devices = []
         self.virtual_keyboard = None
         self.evdev = None
@@ -37,7 +51,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
 
         self.ALT_KEYS = [56, 100]  # KEY_LEFTALT, KEY_RIGHTALT
         self.SHIFT_KEYS = [42, 54]  # KEY_LEFTSHIFT, KEY_RIGHTSHIFT
-        # KEY_SPACE (pressed during an Alt+Shift hold = hands-free latch)
+        # KEY_SPACE (pressed during a push-to-talk hold = hands-free latch)
         self.SPACE_KEY = [57]
 
         # Modifier key codes (Ctrl is also the clipboard override at release).
@@ -77,6 +91,11 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         self._mouse_forwards = {}  # device.path -> {"device": dev, "virtual": Device}
         self._mouse_grab_failed = set()  # paths we already gave up on
         self._grab_sync_pending = True
+
+        # What each device's *event stream* last said about each key, keyed by
+        # device path: an fd is reused the moment it is closed, so fd-keyed
+        # bookkeeping can be inherited by a different device.
+        self._seen_keys = {}
         self._lock = threading.Lock()
 
         self.init_devices()
@@ -382,34 +401,117 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             return False
 
     # -- hotkey state queries ---------------------------------------------
-    def _held_keys(self):
-        """Every key/button the kernel currently reports as held.
+    def _record_key_state(self, device, code, value):
+        """Remember what ``device``'s event stream last said about ``code``."""
+        if value not in (0, 1):
+            return  # EV_KEY autorepeat reports no new press/release
+        key = device.path if device is not None else self._UNNAMED_DEVICE
+        with self._lock:
+            self._seen_keys.setdefault(key, {})[code] = (value == 1)
 
-        Asks each monitored device for its live key state (``EVIOCGKEY``, via
-        ``active_keys()``) instead of replaying our own press/release
-        bookkeeping. A cache latches a key *forever* if a single key-up is ever
-        missed -- a remapper (kanata, input-remapper) grabbing a device
-        mid-press, an abrupt wireless disconnect, an fd being reused -- and a
-        latched Shift then makes a lone Alt press look like the Alt+Shift chord.
+    def _device_live_keys(self, device):
+        """Keys the kernel reports as held on ``device`` right now.
+
+        ``EVIOCGKEY`` (``active_keys()``): the kernel's own bitmap, so a key-up
+        we never received cannot leave a key looking pressed.
         """
+        try:
+            return set(device.active_keys())
+        except Exception:
+            # Disconnected, or the fd is already closed: holds nothing.
+            return set()
+
+    def _pressed_on(self, device, wanted):
+        """``wanted`` keys that ``device`` reported pressed *and* still holds.
+
+        Both halves are load-bearing:
+
+        * The event stream is the only place a remapper's decision is visible,
+          so a key the remapper deleted does not count, however the kernel
+          still reports the physical key underneath it. ``kanata``'s home-row
+          mods make this concrete: the physical Right-Alt *position* emits
+          Right-Ctrl, so the grabbed keyboard's bitmap still says
+          ``KEY_RIGHTALT`` (that is the pre-remap truth) while the system only
+          ever received ``KEY_RIGHTCTRL``. Trusting the bitmap alone invented an
+          Alt the user had deliberately removed, and Right-Ctrl + Shift started
+          a recording.
+        * The kernel bitmap is the only place a key-up we never received
+          (a remapper grabbing a device mid-press, an abrupt wireless
+          disconnect, an fd being reused) has already happened, so a lost key-up
+          cannot latch a modifier and turn the next lone Alt press into a chord.
+        """
+        wanted = set(wanted)
+        if not wanted:
+            return set()
+        if device is None:
+            # No provenance: nothing can be attributed to one device, so the
+            # event stream is checked against every monitored device's live
+            # state (the same rule, minus the per-device attribution). Only
+            # legacy seams and tests reach this.
+            seen = self._seen_keys.get(self._UNNAMED_DEVICE)
+            if not seen:
+                return set()
+            live = set()
+            for monitored in list(self.devices):
+                live |= self._device_live_keys(monitored)
+            return {code for code in wanted if seen.get(code) and code in live}
+        seen = self._seen_keys.get(device.path)
+        if not seen:
+            return set()
+        live = self._device_live_keys(device)
+        return {code for code in wanted if seen.get(code) and code in live}
+
+    def _held_keys(self, keys):
+        """Every key in ``keys`` currently held, with per-device provenance."""
         held = set()
         for device in list(self.devices):
-            try:
-                held.update(device.active_keys())
-            except Exception:
-                # Disconnected, or the fd is already closed: holds nothing.
-                continue
-        return held
+            held |= self._pressed_on(device, keys)
+        return held | self._pressed_on(None, keys)
 
     def is_key_pressed(self, keys):
-        """Check if any of the given keys is held right now (live kernel state)."""
-        wanted = set(keys)
-        return bool(wanted) and bool(wanted & self._held_keys())
+        """Check if any of the given keys is held right now."""
+        return bool(self._held_keys(keys))
+
+    def is_bind_pressed(self) -> bool:
+        """Check whether any configured push-to-talk bind is currently held.
+
+        A bind is satisfied when *every* canonical name in its chord has at
+        least one of its evdev codes in the held set. A bare
+        ``ctrl``/``alt``/``shift``/``meta`` matches either side (its code tuple
+        carries both sides), while ``leftalt``/``rightctrl``/... match exactly
+        one. The per-device event-stream/kernel-bitmap rule lives in
+        :meth:`_pressed_on`, so a remapper-removed key cannot satisfy a chord.
+        """
+        for bind in list(self.binds):
+            held = self._held_keys(keybinds.evdev_codes(bind))
+            if all(
+                any(code in held for code in keybinds.EVDEV_CODES[name])
+                for name in bind.keys
+            ):
+                return True
+        return False
 
     def is_alt_shift_pressed(self):
-        """Check if the hotkey combination (Alt+Shift) is currently pressed."""
-        held = self._held_keys()
-        return bool(set(self.ALT_KEYS) & held) and bool(set(self.SHIFT_KEYS) & held)
+        """Backwards-compatible alias for :meth:`is_bind_pressed`."""
+        return self.is_bind_pressed()
+
+    def set_binds(self, binds) -> bool:
+        """Replace the push-to-talk binds with a newly parsed set.
+
+        Accepts anything :func:`keybinds.parse_binds` understands. Returns
+        ``False`` without raising when the value cannot be parsed, so a bad
+        control-API request can never take the engine down; the previous binds
+        stay live in that case.
+        """
+        try:
+            parsed = keybinds.parse_binds(binds)
+        except (keybinds.KeybindError, TypeError) as exc:
+            logger.warning("Rejected invalid push-to-talk binds: %s", exc)
+            return False
+        with self._lock:
+            self.binds = parsed
+        logger.info("Push-to-talk binds set to %s", keybinds.describe_binds(parsed))
+        return True
 
     def is_middle_click_pressed(self):
         """Check if the middle mouse button is currently pressed."""
@@ -682,6 +784,9 @@ class LinuxHotkeyManager(BaseHotkeyManager):
     def _handle_grabbed_event(self, device, forwarder, event):
         """Handle an event from a grabbed mouse, forwarding everything else."""
         if event.type == self.EV_KEY:
+            # Grabbed devices never reach ``handle_key_event``, so this is the
+            # seam that feeds their button state to the chord queries.
+            self._record_key_state(device, event.code, event.value)
             if event.code in self.MIDDLE_MOUSE_KEYS:
                 if self.middle_click_enabled:
                     self._handle_grabbed_middle_event(forwarder, event)
@@ -689,7 +794,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                 self._forward_event(forwarder, event)
                 return
             if event.code in self.MOUSE_BUTTON_KEYS:
-                self._handle_mouse_button_event(event, forwarder)
+                self._handle_mouse_button_event(event, forwarder, device)
                 return
         self._forward_event(forwarder, event)
 
@@ -755,10 +860,11 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             if self.callback_start:
                 self.callback_start()
 
-    def _handle_mouse_button_event(self, event, forwarder):
+    def _handle_mouse_button_event(self, event, forwarder, device=None):
         """Buffer left/right presses; a near-simultaneous pair becomes Enter."""
         code = event.code
         value = event.value
+        self._record_key_state(device, code, value)
         forward_later = []
         with self._lock:
             if self._chord_swallow:
@@ -824,18 +930,21 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             self._pending_middle_deadline = 0.0
             self._middle_eaten = False
 
-    def handle_key_event(self, event, forwarder=None):
+    def handle_key_event(self, event, device=None, forwarder=None):
         """Handle a key event and check for hotkey activation.
 
-        The chord is decided from the devices' live key state (``_held_keys``),
-        never from bookkeeping of this event stream, so an event we never
-        received (grab, disconnect, fd reuse) cannot latch a modifier.
+        The chord needs both halves of ``_pressed_on``: what this device's event
+        stream decided (which is all a remapper lets us see) *and* what the
+        kernel says is still down (which is what a lost key-up cannot fool).
+        Naming the ``device`` is what ties the two together; without it the
+        press is attributed to no device and only the kernel state is usable.
         """
         if event.type != self.evdev.ecodes.EV_KEY:
             return
 
         key_code = event.code
         key_state = event.value  # 1 = press, 0 = release, 2 = repeat
+        self._record_key_state(device, key_code, key_state)
 
         # Delegate middle mouse button events to _handle_middle_mouse_event
         if key_code in self.MIDDLE_MOUSE_KEYS:
@@ -853,14 +962,14 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                 logger.debug("Space latched - recording will hold after release")
                 self.latch_release = True
 
-            # Push-to-talk: hold Alt+Shift to record.
-            if self.is_alt_shift_pressed() and not self.hotkey_active:
+            # Push-to-talk: hold any configured bind to record.
+            if self.is_bind_pressed() and not self.hotkey_active:
                 logger.debug("Hotkey activated - starting recording")
                 self.hotkey_active = True
                 self.copy_to_clipboard_mode = self.is_ctrl_pressed()
                 if self.callback_start:
                     self.callback_start()
-            elif self.hotkey_active and not self.middle_click_active and not self.is_alt_shift_pressed():
+            elif self.hotkey_active and not self.middle_click_active and not self.is_bind_pressed():
                 self.hotkey_active = False
                 if self.latch_release:
                     logger.debug("⏸️ Space-latched release - continuing recording hands-free")
@@ -902,6 +1011,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                     if self.devices:
                         logger.warning("Devices lost (fd invalid). clearing list.")
                     self.devices = []
+                    self._seen_keys.clear()
                     continue
 
                 timeout = 1.0
@@ -929,7 +1039,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                             if forwarder is not None:
                                 self._handle_grabbed_event(device, forwarder, event)
                             elif event.type == self.evdev.ecodes.EV_KEY:
-                                self.handle_key_event(event)
+                                self.handle_key_event(event, device=device)
                     except OSError as e:
                         is_disconnect = (e.errno == 19) or ("No such device" in str(e))
 
@@ -939,6 +1049,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                             logger.warning(f"Device {device.path} error: {e}")
 
                         self._release_mouse(device.path)
+                        self._seen_keys.pop(device.path, None)
 
                         if device in self.devices:
                             self.devices.remove(device)
@@ -975,6 +1086,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             except Exception:
                 pass
         self.devices = []
+        self._seen_keys.clear()
         if self.virtual_keyboard:
             try:
                 self.virtual_keyboard.destroy()

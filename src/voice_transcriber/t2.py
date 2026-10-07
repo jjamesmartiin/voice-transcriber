@@ -5,6 +5,8 @@
 import os
 import sys
 
+from voice_transcriber import keybinds
+
 _current_t2 = sys.modules.get(__name__)
 if _current_t2 is not None:
     sys.modules.setdefault("t2", _current_t2)
@@ -130,6 +132,7 @@ NUMBER_DIGITS = True  # Back-compat mirror: False only when NUMBER_MODE == "word
 SERIAL_COLLAPSE = True  # Serial numbers / codes / NATO strings collapse to one token ("A B C 1 2 3" -> "ABC123")
 SPELL_COMMAND = True  # Verbal "spell C A T" -> "CAT" command processing
 MIDDLE_CLICK_ENABLED = False  # Push-to-talk by holding middle mouse button (>= 0.25s)
+HOTKEY_BINDS = keybinds.parse_binds(None)  # Push-to-talk chords; default is hold Alt+Shift
 KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
 UI_THEME = "auto"
@@ -169,7 +172,30 @@ DEFAULT_SETTINGS = {
     'WAIT_FOR_MODEL_ON_STARTUP': True,
     'ENABLE_SLM': False,
     'TYPING_WPM': 40,
+    # Binds, not config-shaped mappings: reset_to_defaults assigns this value
+    # straight onto the HOTKEY_BINDS global, and test_settings_menu asserts the
+    # global equals the default, so the two must be the same kind of object.
+    'HOTKEY_BINDS': list(keybinds.DEFAULT_BINDS),
 }
+
+
+def _load_hotkey_binds(raw):
+    """Parse the configured push-to-talk binds, falling back to the default.
+
+    A hand-edited config with a typo must not take the app down, so an unusable
+    entry logs and keeps the shipped chord -- and, because falling back
+    silently could leave someone pressing a hotkey that no longer exists, the
+    warning names both the error and the chord that is in force.
+    """
+    try:
+        return keybinds.parse_binds(raw)
+    except keybinds.KeybindError as e:
+        logger.warning(
+            f"⚠️  Ignoring invalid hotkeys config ({e}); "
+            f"using {keybinds.format_chord(keybinds.DEFAULT_CHORD)}"
+        )
+        return list(keybinds.DEFAULT_BINDS)
+
 
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 
@@ -722,7 +748,7 @@ def _normalize_bool(value, default: bool = False) -> bool:
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, TYPING_WPM, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, TYPING_WPM, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -770,6 +796,7 @@ def load_audio_config(file_path=None):
             SERIAL_COLLAPSE = _normalize_bool(config.get('serial_collapse', True), default=True)
             SPELL_COMMAND = _normalize_bool(config.get('spell_command', True), default=True)
             MIDDLE_CLICK_ENABLED = config.get('middle_click_enabled', False)
+            HOTKEY_BINDS = _load_hotkey_binds(config.get('hotkeys'))
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
 
             raw_punct = config.get('preset') or config.get('mode_preset') or config.get('punctuation_mode') or config.get('formatting_level') or 'full'
@@ -1043,6 +1070,7 @@ def save_audio_config(file_path=None):
             'enable_slm': ENABLE_SLM,
             'wait_for_model_on_startup': WAIT_FOR_MODEL_ON_STARTUP,
             'typing_wpm': TYPING_WPM,
+            'hotkeys': [b.to_config() for b in keybinds.parse_binds(HOTKEY_BINDS)],
         })
 
         if CONFIG_FILE.suffix == '.toml':
@@ -1076,6 +1104,12 @@ def reset_to_defaults() -> dict:
         globals()[name] = value
     NUMBER_DIGITS = (NUMBER_MODE != "words")
     set_number_digits(NUMBER_MODE)
+    try:
+        import hotkeys
+
+        hotkeys.set_global_binds(HOTKEY_BINDS)
+    except Exception:
+        pass
     save_audio_config()
     logger.info("All settings restored to shipped defaults")
     return dict(DEFAULT_SETTINGS)
@@ -1451,6 +1485,26 @@ def set_middle_click_enabled(enabled):
         hotkeys.set_global_middle_click_enabled(MIDDLE_CLICK_ENABLED)
     except Exception:
         pass
+
+
+def set_hotkey_binds(binds):
+    """Replace the push-to-talk binds at runtime (loads + live manager).
+
+    ``binds`` is anything :func:`keybinds.parse_binds` accepts: a chord string
+    (``"ctrl+shift"``), a list of them, or ``{"keys": [...], "action": ...}``
+    mappings. Raises :class:`keybinds.KeybindError` for an unusable chord so the
+    control API and the settings prompt can report a real message rather than
+    silently ignoring the request. Persisting is the caller's job, matching
+    every other setter here.
+    """
+    global HOTKEY_BINDS
+    HOTKEY_BINDS = keybinds.parse_binds(binds)
+    try:
+        import hotkeys
+        hotkeys.set_global_binds(HOTKEY_BINDS)
+    except Exception:
+        pass
+    return HOTKEY_BINDS
 
 
 def set_dictionary(mapping):

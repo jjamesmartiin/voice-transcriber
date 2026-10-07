@@ -27,6 +27,7 @@ pub enum SettingKind {
     SpellCommand,
     TypingWpm,
     MiddleClick,
+    Hotkeys,
     SoundMute,
     OutputMode,
     PunctuationMode,
@@ -45,7 +46,7 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 14] = [
+pub const SETTINGS: [SettingItem; 15] = [
     // NOTE: icons must be exactly one glyph whose *own* codepoint already
     // occupies its final width in every terminal - never a `U+FE0F`
     // variation-selector sequence and never a ZWJ sequence. Terminals that
@@ -102,6 +103,12 @@ pub const SETTINGS: [SettingItem; 14] = [
         icon: "👆",
         title: "Mouse Hotkey",
         keywords: "middle click mouse hotkey push to talk button hold",
+    },
+    SettingItem {
+        kind: SettingKind::Hotkeys,
+        icon: "🔑",
+        title: "Push-to-Talk Keys",
+        keywords: "push to talk hotkey key bind chord shortcut alt shift ptt keyboard f13 right ctrl add remove",
     },
     SettingItem {
         kind: SettingKind::SoundMute,
@@ -248,6 +255,14 @@ impl SettingItem {
                         Color::DarkGray,
                     )
                 }
+            }
+            SettingKind::Hotkeys => {
+                let desc = match app.hotkeys.len() {
+                    0 => "No keys bound · press Enter".to_string(),
+                    1 => "1 key bound · press Enter".to_string(),
+                    n => format!("{n} keys bound · press Enter"),
+                };
+                (desc, "[EDIT]", Color::Yellow)
             }
             SettingKind::SoundMute => {
                 if !app.is_muted {
@@ -759,9 +774,17 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
     let area = frame.area();
     let theme_color = app.effective_color().color();
 
-    // Centered popup modal
-    let popup_w = 72u16.min(area.width.saturating_sub(4)).max(34);
-    let popup_h = 18u16.min(area.height.saturating_sub(2)).max(12);
+    // Centered popup modal. Both dimensions are clamped to the screen: a
+    // minimum larger than the terminal used to size the popup past it, and
+    // every layout chunk inherited that oversized rect.
+    let popup_w = 72u16
+        .min(area.width.saturating_sub(4))
+        .max(34)
+        .min(area.width);
+    let popup_h = 18u16
+        .min(area.height.saturating_sub(2))
+        .max(12)
+        .min(area.height);
     let x = (area.width.saturating_sub(popup_w)) / 2;
     let y = (area.height.saturating_sub(popup_h)) / 2;
     let popup_area = Rect {
@@ -782,7 +805,10 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
             Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
         ));
 
-    let inner = block.inner(popup_area);
+    // Paragraph never clips to the frame buffer, so the inner rect has to be
+    // intersected here or the settings list writes past the last row (a panic
+    // on terminals shorter than the popup minimum).
+    let inner = block.inner(popup_area.intersection(area));
     frame.render_widget(block, popup_area);
 
     let chunks = Layout::default()
@@ -1035,6 +1061,7 @@ pub fn run_settings_picker(
                             spell_command,
                             middle_click_enabled,
                             typing_wpm,
+                            hotkeys,
                         } => {
                             app.apply_config(
                                 mic,
@@ -1054,6 +1081,7 @@ pub fn run_settings_picker(
                                 spell_command,
                                 middle_click_enabled,
                                 typing_wpm,
+                                hotkeys,
                             );
                         }
                         _ => {}
@@ -1128,6 +1156,12 @@ pub fn run_settings_picker(
                                     if let Some(w) = writer {
                                         ipc::send_cmd(w, "toggle_middle_click");
                                     }
+                                }
+                                SettingKind::Hotkeys => {
+                                    // Nested push-to-talk bind picker modal.
+                                    let _ = hand_over_screen(&mut terminal, || {
+                                        crate::bind_picker::run_bind_picker(writer, rx, app)
+                                    });
                                 }
                                 SettingKind::SoundMute => {
                                     app.is_muted = !app.is_muted;
@@ -1281,6 +1315,23 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|f| render_settings_picker(f, &state2, &app)).unwrap();
+    }
+
+    /// A terminal shorter than the popup's minimum used to panic: the centered
+    /// popup was force-sized past the screen, every chunk inherited that
+    /// oversized rect, and `Paragraph` (unlike `Block`) does not clip to the
+    /// frame buffer, so the settings list wrote row 3 of a 3-row buffer.
+    #[test]
+    fn test_render_on_a_terminal_shorter_than_the_popup_minimum() {
+        let app = App::new("1.1.1", Theme::Cyan);
+        for (w, h) in [(174, 3), (80, 5), (20, 2), (1, 1)] {
+            let state = SettingsPickerState::new();
+            let backend = ratatui::backend::TestBackend::new(w, h);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| render_settings_picker(f, &state, &app))
+                .unwrap_or_else(|e| panic!("{w}x{h} failed to draw: {e}"));
+        }
     }
 
     #[test]

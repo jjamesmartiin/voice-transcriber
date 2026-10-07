@@ -1,7 +1,21 @@
 # WSL-Windows Hotkey & Clipboard Bridge Helper
 # Spawns automatically from NixOS WSL - ZERO setup or Python needed on Windows.
+#
+# -Binds carries the push-to-talk chords, e.g. "164,165;160,161|124": '|'
+# separates binds, ';' separates the keys of one bind, ',' separates the
+# alternative virtual keys for one key. See voice_transcriber.keybinds.
+param(
+    [string]$Binds = ""
+)
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($Binds)) {
+    # Old caller / missing flag: Alt+Shift, the chord this app always shipped
+    # with. Must stay identical to voice_transcriber.keybinds.DEFAULT_VK_BINDS;
+    # tests/shared pins the equality because this file cannot import Python.
+    $Binds = "164,165;160,161"
+}
 
 $csharpCode = @"
 using System;
@@ -89,10 +103,38 @@ public class WinInterop {
         MiddleClickEnabled = enabled;
     }
 
-    public static bool IsAltShiftPressed() {
-        bool alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-        bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-        return alt && shift;
+    public static bool IsBindPressed(string binds) {
+        // '|' separates binds, ';' separates keys of one bind, ',' separates
+        // the alternative VK codes for one key. A bind is satisfied when every
+        // key group has at least one code down; any bind fires the trigger.
+        if (string.IsNullOrEmpty(binds)) {
+            return false;
+        }
+        foreach (string bind in binds.Split('|')) {
+            if (bind.Length == 0) {
+                continue;
+            }
+            bool bindDown = true;
+            foreach (string group in bind.Split(';')) {
+                bool keyDown = false;
+                foreach (string code in group.Split(',')) {
+                    int vk;
+                    if (int.TryParse(code.Trim(), out vk) &&
+                        (GetAsyncKeyState(vk) & 0x8000) != 0) {
+                        keyDown = true;
+                        break;
+                    }
+                }
+                if (!keyDown) {
+                    bindDown = false;
+                    break;
+                }
+            }
+            if (bindDown) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static bool IsSpacePressed() {
@@ -188,9 +230,9 @@ while ($true) {
         $mButtonActive = $false
     }
 
-    # Check Alt+Shift or Middle Click Hold (Record Trigger)
-    $isAltShiftDown = [WinInterop]::IsAltShiftPressed()
-    $isHotkeyDown = $isAltShiftDown -or $mButtonActive
+    # Check the configured bind(s) or Middle Click Hold (Record Trigger)
+    $isBindDown = [WinInterop]::IsBindPressed($Binds)
+    $isHotkeyDown = $isBindDown -or $mButtonActive
     if ($isHotkeyDown -and -not $wasHotkeyDown) {
         $wasHotkeyDown = $true
         if ($recording) {

@@ -12,6 +12,7 @@ import threading
 import time
 
 from ..base import BaseHotkeyManager
+from voice_transcriber import keybinds
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class MacOSHotkeyManager(BaseHotkeyManager):
 
     platform = "macos"
 
-    def __init__(self, callback_start, callback_stop):
+    def __init__(self, callback_start, callback_stop, binds=None):
         super().__init__(callback_start, callback_stop)
         self.listener = None
         self.mouse_listener = None
@@ -52,6 +53,12 @@ class MacOSHotkeyManager(BaseHotkeyManager):
         self._KeyCode = None
         self._pynput_keyboard = None
         self._pynput_mouse = None
+
+        try:
+            self.binds = keybinds.parse_binds(binds)
+        except keybinds.KeybindError as e:
+            logger.warning(f"Ignoring invalid hotkey binds ({e}); using the default chord")
+            self.binds = list(keybinds.DEFAULT_BINDS)
 
         self.CMD_KEYS = set()
         self.ALT_KEYS = set()
@@ -247,10 +254,63 @@ class MacOSHotkeyManager(BaseHotkeyManager):
         except Exception as e:
             logger.error(f"Error in key release handler: {e}")
 
+    def _using_default_binds(self):
+        return [b.keys for b in self.binds] == [
+            b.keys for b in keybinds.DEFAULT_BINDS
+        ]
+
+    def _key_set_for(self, name):
+        """The pynput keys that satisfy one canonical name (may be empty).
+
+        Attribute spellings come from the one declaration table
+        (``keybinds.KEYS`` via ``keybinds.PYNPUT_ATTRS``); letters and digits
+        have none and resolve through their character instead.
+        """
+        if self._Key is None:
+            return set()
+        return {
+            member
+            for attr in keybinds.PYNPUT_ATTRS.get(name, ())
+            if (member := getattr(self._Key, attr, None)) is not None
+        }
+
+    def _expanded_bind_keys(self):
+        """Binds as macOS chords, with the platform's Cmd standing in for Alt.
+
+        ``alt`` means "the modifier next to the space bar", which on macOS is Cmd
+        as much as Option -- this backend has always accepted Cmd+Shift *or*
+        Alt+Shift. A user chord naming ``alt`` therefore matches either, rather
+        than inventing a macOS-only vocabulary they would have to learn.
+        """
+        for bind in self.binds:
+            if "alt" in bind.keys:
+                yield tuple(name for name in bind.keys if name != "alt") + ("meta",)
+            yield bind.keys
+
     def _is_main_hotkey_pressed(self):
-        mod_pressed = bool(self.pressed_keys & (self.CMD_KEYS | self.ALT_KEYS))
-        shift_pressed = bool(self.pressed_keys & self.SHIFT_KEYS)
-        return mod_pressed and shift_pressed
+        if self._using_default_binds():
+            # Pin the shipped chord to this backend's historical meaning so the
+            # macOS key sets stay the single source of truth for it: both sides
+            # of Alt, plus Cmd, plus Shift.
+            mod_pressed = bool(self.pressed_keys & (self.CMD_KEYS | self.ALT_KEYS))
+            shift_pressed = bool(self.pressed_keys & self.SHIFT_KEYS)
+            return mod_pressed and shift_pressed
+        for keys in self._expanded_bind_keys():
+            if all(self._key_set_for(name) & self.pressed_keys for name in keys):
+                return True
+        return False
+
+    def set_binds(self, binds) -> bool:
+        """Replace the push-to-talk binds (see ``BaseHotkeyManager.set_binds``)."""
+        try:
+            parsed = keybinds.parse_binds(binds)
+        except (keybinds.KeybindError, TypeError) as e:
+            logger.warning(f"Rejected push-to-talk binds {binds!r}: {e}")
+            return False
+        with self._lock:
+            self.binds = parsed
+        logger.info(f"Push-to-talk binds: {keybinds.describe_binds(parsed)}")
+        return True
 
     # -- state queries -----------------------------------------------------
     def are_modifiers_pressed(self):

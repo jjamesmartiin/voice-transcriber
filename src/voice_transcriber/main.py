@@ -208,6 +208,7 @@ class SimpleVoiceTranscriber:
     def _sync_tui_state(self):
         """Sync t2 configuration state with TUI badges and visual notification"""
         import t2
+        from voice_transcriber import keybinds
         self.tui.set_active_device(get_active_device_name(include_model=False))
         self.tui.set_secondary_device(t2.SECONDARY_DEVICE_NAME)
         self.tui.set_config_state(
@@ -226,6 +227,9 @@ class SimpleVoiceTranscriber:
             spell_command=getattr(t2, 'SPELL_COMMAND', True),
             middle_click_enabled=getattr(t2, 'MIDDLE_CLICK_ENABLED', False),
             typing_wpm=getattr(t2, 'TYPING_WPM', 40),
+            hotkeys=[
+                b.chord for b in keybinds.parse_binds(getattr(t2, 'HOTKEY_BINDS', None))
+            ],
         )
         if hasattr(self, 'visual_notification') and self.visual_notification:
             self.visual_notification.set_active_device(get_active_device_name(include_model=False))
@@ -244,6 +248,8 @@ class SimpleVoiceTranscriber:
         self.tui.on_cycle_typing_wpm = self._on_tui_cycle_typing_wpm
         self.tui.on_set_typing_wpm = self._on_tui_set_typing_wpm
         self.tui.on_toggle_middle_click = self._on_tui_toggle_middle_click
+        self.tui.on_hotkey_add = self._on_tui_hotkey_add
+        self.tui.on_hotkey_remove = self._on_tui_hotkey_remove
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
         self.tui.on_set_punctuation = self._on_tui_set_punctuation_mode
         self.tui.on_reset_defaults = self._on_tui_reset_defaults
@@ -445,6 +451,84 @@ class SimpleVoiceTranscriber:
         self._sync_tui_state()
         status = "ENABLED" if t2.MIDDLE_CLICK_ENABLED else "DISABLED"
         self.tui.print_event("🖱️ Mouse Hotkey", f"Middle click hold mode is now {status}", level="info")
+
+    def _push_binds_at_hotkeys(self):
+        """Hand the current binds to the live manager, not just to ``t2``.
+
+        ``t2.set_hotkey_binds`` reaches a manager created by
+        ``hotkeys.create_global_hotkeys`` via the shim; this engine builds its
+        manager straight from the HAL, so a rebind has to be pushed explicitly.
+        """
+        import t2
+
+        if self.hotkey_system and hasattr(self.hotkey_system, "set_binds"):
+            self.hotkey_system.set_binds(t2.HOTKEY_BINDS)
+
+    def _on_tui_hotkey_add(self, chord):
+        """Bind one more chord to dictation (settings modal -> Hotkeys)."""
+        import t2
+        from voice_transcriber import keybinds
+
+        try:
+            current = keybinds.parse_binds(t2.HOTKEY_BINDS)
+            keys = keybinds.parse_chord(chord)
+            if any(bind.keys == keys for bind in current):
+                self.tui.print_event(
+                    "⌨️ Hotkeys",
+                    f"{keybinds.format_chord(keys)} is already bound",
+                    level="warning",
+                )
+                return
+            t2.set_hotkey_binds(
+                current + [keybinds.Bind(keys, keybinds.DEFAULT_ACTION)]
+            )
+            self._push_binds_at_hotkeys()
+            t2.save_audio_config()
+            self._sync_tui_state()
+            self.tui.print_event(
+                "⌨️ Hotkeys",
+                f"Bound {keybinds.format_chord(keys)} to dictation",
+                level="info",
+            )
+        except keybinds.KeybindError as e:
+            self.tui.print_event("⌨️ Hotkeys", str(e), level="error")
+
+    def _on_tui_hotkey_remove(self, chord):
+        """Drop one chord from dictation (settings modal -> Hotkeys)."""
+        import t2
+        from voice_transcriber import keybinds
+
+        try:
+            current = keybinds.parse_binds(t2.HOTKEY_BINDS)
+            keys = keybinds.parse_chord(chord)
+            remaining = [bind for bind in current if bind.keys != keys]
+            if len(remaining) == len(current):
+                self.tui.print_event(
+                    "⌨️ Hotkeys",
+                    f"{keybinds.format_chord(keys)} is not bound",
+                    level="warning",
+                )
+                return
+            if not remaining:
+                # Keeps push-to-talk reachable from the keyboard: the last bind
+                # can only be *changed*, never removed down to nothing.
+                self.tui.print_event(
+                    "⌨️ Hotkeys",
+                    "At least one bind is required; add another first",
+                    level="warning",
+                )
+                return
+            t2.set_hotkey_binds(remaining)
+            self._push_binds_at_hotkeys()
+            t2.save_audio_config()
+            self._sync_tui_state()
+            self.tui.print_event(
+                "⌨️ Hotkeys",
+                f"Unbound {keybinds.format_chord(keys)}",
+                level="info",
+            )
+        except keybinds.KeybindError as e:
+            self.tui.print_event("⌨️ Hotkeys", str(e), level="error")
 
     def _on_tui_cycle_punctuation_mode(self):
         import t2
@@ -701,16 +785,18 @@ class SimpleVoiceTranscriber:
         
     def init_hotkeys(self):
         """Initialize the global hotkey system via the HAL."""
+        import t2
+
         try:
             self.hotkey_system = hal.create_hotkey_manager(
                 platform=self.platform,
                 callback_start=self.start_recording,
                 callback_stop=self.stop_recording,
+                binds=getattr(t2, "HOTKEY_BINDS", None),
             )
             
             if self.hotkey_system.devices:
                 logger.debug("Global hotkey system initialized")
-                import t2
                 theme = getattr(t2, 'SOUND_THEME', None)
                 if theme:
                     if hasattr(self.hotkey_system, 'set_sound_theme'):
@@ -1107,6 +1193,77 @@ class SimpleVoiceTranscriber:
                 return
             time.sleep(0.02)
 
+    def _control_hotkey(self, verb, value):
+        """List/add/remove/reset the push-to-talk binds (control-API verb).
+
+        One verb carrying a small command keeps the catalogue flat: the value is
+        ``list`` (the default), ``add <chord>``, ``remove <chord>`` or
+        ``reset``. Every reply carries the resulting bind list, so a caller
+        never has to follow up to discover what happened.
+        """
+        import t2
+        from voice_transcriber import keybinds
+
+        current = keybinds.parse_binds(t2.HOTKEY_BINDS)
+        action, _, argument = (value or "list").partition(" ")
+        action = action.strip().lower()
+        argument = argument.strip()
+
+        if action in ("", "list", "ls", "show"):
+            pass
+        elif action in ("keys", "keynames", "names", "vocabulary"):
+            # The names a user may type, straight from the one declaration table
+            # (keybinds.KEYS) the backends resolve through -- so what a UI shows
+            # cannot drift from what the matcher accepts.
+            return self._control_status(
+                verb,
+                hotkeys=[bind.chord for bind in current],
+                keys=keybinds.catalogue(),
+            )
+        elif action == "add":
+            if not argument:
+                raise ValueError("hotkey add needs a chord, e.g. 'hotkey add ctrl+shift'")
+            keys = keybinds.parse_chord(argument)
+            if any(bind.keys == keys for bind in current):
+                raise ValueError(f"{keybinds.format_chord(keys)} is already bound")
+            current = current + [keybinds.Bind(keys, keybinds.DEFAULT_ACTION)]
+        elif action in ("remove", "rm", "delete", "del", "unbind"):
+            if not argument:
+                raise ValueError("hotkey remove needs a chord, e.g. 'hotkey remove f13'")
+            keys = keybinds.parse_chord(argument)
+            remaining = [bind for bind in current if bind.keys != keys]
+            if len(remaining) == len(current):
+                raise ValueError(
+                    f"{keybinds.format_chord(keys)} is not bound; "
+                    f"bound: {keybinds.describe_binds(current)}"
+                )
+            if not remaining:
+                # Push-to-talk has to stay reachable from the keyboard, so the
+                # last bind can be changed but never removed to nothing.
+                raise ValueError("at least one bind is required; add another first")
+            current = remaining
+        elif action in ("reset", "default", "defaults"):
+            current = list(keybinds.DEFAULT_BINDS)
+        else:
+            raise ValueError(
+                f"unknown hotkey action {action!r}; "
+                "use list, add <chord>, remove <chord> or reset"
+            )
+
+        if action not in ("", "list", "ls", "show"):
+            t2.set_hotkey_binds(current)
+            # ``t2`` propagates through the ``hotkeys`` shim's
+            # ``_current_hotkey_instance``, which is only set by
+            # ``create_global_hotkeys`` -- the engine builds its manager
+            # straight from the HAL, so push at it directly too (this is what
+            # the middle-click handler has always done).
+            if self.hotkey_system and hasattr(self.hotkey_system, "set_binds"):
+                self.hotkey_system.set_binds(t2.HOTKEY_BINDS)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            current = keybinds.parse_binds(t2.HOTKEY_BINDS)
+        return self._control_status(verb, hotkeys=[bind.chord for bind in current])
+
     def handle_control(self, cmd, request):
         """Dispatch one control-API request.
 
@@ -1293,6 +1450,9 @@ class SimpleVoiceTranscriber:
                 t2.save_audio_config()
                 self._sync_tui_state()
                 return self._control_status(verb, typing_wpm=new_wpm)
+
+        if verb == "hotkey":
+            return self._control_hotkey(verb, value)
 
         # -- toggles -------------------------------------------------------
         if verb == "middle-click":

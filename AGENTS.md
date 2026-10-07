@@ -33,10 +33,10 @@ python src/main.py wait --json       # includes last_transcription
 > `VT_CONTROL_SOCKET`). `doctor --fix` runs locally too, so it can repair a muted
 > default microphone with no engine running.
 
-`help --json` is the source of truth for the verb surface (25 verbs, with
-`choices` / `required` / `toggles` per verb). It is served locally from
-`src/control.py`, so it works with no engine running. Do not hardcode verb lists
-from docs — read the catalogue.
+`help --json` is the source of truth for the verb surface, carrying `choices` /
+`required` / `toggles` per verb. It is served locally from `src/control.py`, so it
+works with no engine running. Do not hardcode the verb list or its length in docs
+— read the catalogue.
 
 > **This does not work on native Windows.** Stock CPython on Windows never
 > exposes `socket.AF_UNIX` (bpo-33408), so the engine does not bind the control
@@ -103,10 +103,14 @@ nix build .#vt-tui --no-link --print-out-paths
   while the user types elsewhere). Terminal keys are exactly: `Space`/`Enter`
   record, `s`/`S`/`,` settings, `r` reset, `q`/`Esc`/`Ctrl+C` quit. `i` and `M`
   were removed on purpose — do not re-add per-frontend aliases.
-- **Global hotkeys are only** `Alt+Shift` (push-to-talk), `Space` while holding
-  (hands-free latch), and the middle mouse button. The latch semantics live in
-  `BaseHotkeyManager.latch_release`; the WSL host bridge mirrors them via
-  `LATCH_DOWN`/`LATCH_HOLD` and must withhold `HOTKEY_UP` while latched.
+- **Global hotkeys are only** the configured push-to-talk **binds** (default
+  `Alt+Shift`), `Space` while holding (hands-free latch), and the middle mouse
+  button. The latch semantics live in `BaseHotkeyManager.latch_release`; the WSL
+  host bridge mirrors them via `LATCH_DOWN`/`LATCH_HOLD` and must withhold
+  `HOTKEY_UP` while latched. Binds are user data, not code: the vocabulary and
+  the per-platform code tables live in one place (`voice_transcriber/keybinds.py`)
+  so the three backends cannot drift, and a backend that cannot honour a change
+  returns `False` from `set_binds` rather than silently keeping the old chord.
 - **The HAL is the only place that branches on OS.** `src/platform/__init__.py`
   detects; `src/hal.py` is the façade. Never branch on `sys.platform` elsewhere.
   An unknown `VT_PLATFORM` is a hard error by design.

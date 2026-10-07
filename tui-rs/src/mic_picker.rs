@@ -399,7 +399,10 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
             Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
         ));
 
-    let inner = block.inner(popup_area);
+    // Paragraph never clips to the frame buffer, so the inner rect has to be
+    // intersected here or the list writes past the last row (a panic on
+    // terminals shorter than the popup minimum).
+    let inner = block.inner(popup_area.intersection(area));
     frame.render_widget(block, popup_area);
 
     let chunks = Layout::default()

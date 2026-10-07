@@ -11,15 +11,37 @@ import sys
 import threading
 import time
 
+from voice_transcriber import keybinds
+
 from ..base import BaseHotkeyManager
 
 logger = logging.getLogger(__name__)
 
 
-class WindowsHotkeyManager(BaseHotkeyManager):
-    """Windows push-to-talk hotkeys using ``pynput``."""
+# pynput attribute spellings per canonical name (including ``alt_gr`` for the
+# right-hand Alt on Windows) live in the one declaration table,
+# ``keybinds.KEYS`` -- see ``keybinds.PYNPUT_ATTRS``. Missing members are
+# skipped at lookup time, so a spelling a given pynput version lacks is
+# harmless.
 
-    def __init__(self, callback_start, callback_stop):
+
+def _char_for_name(name: str) -> str | None:
+    """The printable character behind a canonical letter/digit name."""
+    if len(name) == 1 and (name.isalpha() or name.isdigit()):
+        return name
+    return None
+
+
+class WindowsHotkeyManager(BaseHotkeyManager):
+    """Windows push-to-talk hotkeys using ``pynput``.
+
+    The record trigger is no longer hardcoded to Alt+Shift: every configured
+    :class:`~voice_transcriber.keybinds.Bind` is resolved to the ``pynput`` keys
+    that satisfy it. A bare ``alt``/``ctrl``/``shift``/``meta`` matches either
+    side; the sided spellings match exactly one.
+    """
+
+    def __init__(self, callback_start, callback_stop, binds=None):
         super().__init__(callback_start, callback_stop)
         self.listener = None
         self.mouse_listener = None
@@ -33,6 +55,11 @@ class WindowsHotkeyManager(BaseHotkeyManager):
         self.SHIFT_KEYS = set()
         self.CTRL_KEYS = set()
         self._available = False
+        # Resolved form of ``self.binds``: one list of alternative-sets per
+        # bind, computed lazily so tests can swap ``_Key``/``_KeyCode`` after
+        # construction and so a missing pynput never breaks ``__init__``.
+        self._resolved_groups = None
+        self._resolve_key = None
 
         self.MIDDLE_CLICK_HOLD_DELAY = 0.25
         self._middle_click_timer = None
@@ -41,6 +68,9 @@ class WindowsHotkeyManager(BaseHotkeyManager):
         self._lock = threading.Lock()
 
         self._start_listener()
+
+        if binds is not None:
+            self.set_binds(binds)
 
     # -- setup -------------------------------------------------------------
     def _start_listener(self):
@@ -225,10 +255,87 @@ class WindowsHotkeyManager(BaseHotkeyManager):
         except Exception as e:
             logger.error(f"Error in key release handler: {e}")
 
+    def set_binds(self, binds) -> bool:
+        """Replace the push-to-talk binds (see :meth:`BaseHotkeyManager.set_binds`).
+
+        Invalid input is logged and rejected with ``False``; the previous binds
+        survive untouched. Never raises into the app.
+        """
+        try:
+            parsed = keybinds.parse_binds(binds)
+        except keybinds.KeybindError as e:
+            logger.warning("Ignoring invalid Windows hotkey binds: %s", e)
+            return False
+        self.binds = list(parsed)
+        # Invalidate the lazily-resolved matcher; the next key event rebuilds it.
+        self._resolved_groups = None
+        self._resolve_key = None
+        logger.info("Push-to-talk binds set to %s", keybinds.describe_binds(self.binds))
+        return True
+
+    def _alternatives_for(self, name: str) -> set:
+        """Every ``pynput`` key object that satisfies canonical ``name``."""
+        Key = self._Key
+        KeyCode = self._KeyCode
+        alternatives: set = set()
+
+        for attr in keybinds.PYNPUT_ATTRS.get(name, ()):
+            member = getattr(Key, attr, None)
+            if member is not None:
+                alternatives.add(member)
+
+        # Register the vk/char spelling as well: depending on the pynput version
+        # and platform a key arrives as a ``Key`` member or as a ``KeyCode``, and
+        # accepting both spellings means either event stream matches.
+
+        # Everything else is a virtual key code. pynput on Windows emits an
+        # ordinary character as ``KeyCode.from_char(...)`` (a shifted letter
+        # arrives uppercase) while a function/media key arrives as a vk-based
+        # ``KeyCode``; register both spellings so either event stream matches.
+        if KeyCode is not None:
+            from_vk = getattr(KeyCode, "from_vk", None)
+            from_char = getattr(KeyCode, "from_char", None)
+            for vk in keybinds.VK_CODES.get(name, ()):
+                if from_vk is None:
+                    break
+                try:
+                    alternatives.add(from_vk(vk))
+                except Exception:
+                    pass
+            char = _char_for_name(name)
+            if char is not None and from_char is not None:
+                for candidate in {char.lower(), char.upper()}:
+                    try:
+                        alternatives.add(from_char(candidate))
+                    except Exception:
+                        pass
+        return alternatives
+
+    def _build_resolved_groups(self):
+        return [
+            [self._alternatives_for(name) for name in bind.keys]
+            for bind in self.binds
+        ]
+
+    def _resolve_binds(self):
+        """Cache the matcher, rebuilding when the binds or pynput keys change."""
+        cache_key = (id(self.binds), id(self._Key), id(self._KeyCode))
+        if self._resolved_groups is None or self._resolve_key != cache_key:
+            self._resolved_groups = self._build_resolved_groups()
+            self._resolve_key = cache_key
+        return self._resolved_groups
+
     def _is_main_hotkey_pressed(self):
-        alt_pressed = bool(self.pressed_keys & self.ALT_KEYS)
-        shift_pressed = bool(self.pressed_keys & self.SHIFT_KEYS)
-        return alt_pressed and shift_pressed
+        """True while any configured bind is fully held."""
+        if not self.pressed_keys:
+            return False
+        for groups in self._resolve_binds():
+            if all(
+                any(alt in self.pressed_keys for alt in group)
+                for group in groups
+            ):
+                return True
+        return False
 
     # -- state queries -----------------------------------------------------
     def are_modifiers_pressed(self):

@@ -13,6 +13,8 @@ import subprocess
 import threading
 import time
 
+from voice_transcriber import keybinds
+
 from ..base import BaseHotkeyManager
 
 logger = logging.getLogger(__name__)
@@ -35,12 +37,21 @@ class WSLHotkeyManager(BaseHotkeyManager):
     arrives); this side simply mirrors the state.
     """
 
-    def __init__(self, callback_start, callback_stop):
+    def __init__(self, callback_start, callback_stop, binds=None):
         super().__init__(callback_start, callback_stop)
         self.process = None
         self.reader_thread = None
         # Non-empty so ``main.py`` knows hotkeys are active.
         self.devices = ["WSL-Windows-Host-Bridge"]
+
+        if binds is not None:
+            try:
+                self.binds = keybinds.parse_binds(binds)
+            except keybinds.KeybindError as e:
+                logger.warning("Ignoring invalid WSL hotkey binds: %s", e)
+        #: ``-Binds`` payload, e.g. ``164,165;160,161``. The host bridge owns
+        #: the actual matching because only it can read Windows key state.
+        self._binds_flag = keybinds.encode_vk_binds(self.binds)
         self.start()
 
     # -- lifecycle ---------------------------------------------------------
@@ -74,6 +85,7 @@ class WSLHotkeyManager(BaseHotkeyManager):
         cmd = [
             "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
             "-File", win_ps1,
+            "-Binds", getattr(self, "_binds_flag", keybinds.DEFAULT_VK_BINDS),
         ]
         try:
             self.process = subprocess.Popen(
@@ -98,7 +110,8 @@ class WSLHotkeyManager(BaseHotkeyManager):
             self.reader_thread.start()
             logger.info(
                 "🎙️ WSL Zero-Setup Windows Hotkey Bridge active! "
-                "Hold Alt+Shift anywhere in Windows to speak."
+                "Hold %s anywhere in Windows to speak.",
+                keybinds.describe_binds(self.binds),
             )
             return True
         except Exception as e:
@@ -149,6 +162,38 @@ class WSLHotkeyManager(BaseHotkeyManager):
 
     def is_hotkey_pressed(self):
         return self.hotkey_active
+
+    # -- binds -------------------------------------------------------------
+    def set_binds(self, binds) -> bool:
+        """Replace the push-to-talk binds and restart the host bridge.
+
+        The PowerShell helper polls a fixed chord list captured at launch, so
+        the only way to honour a change is to relaunch it with the new
+        ``-Binds`` payload. Invalid input is rejected with ``False`` and the
+        running bridge keeps its old chords. Never raises into the app.
+        """
+        try:
+            parsed = keybinds.parse_binds(binds)
+        except keybinds.KeybindError as e:
+            logger.warning("Ignoring invalid WSL hotkey binds: %s", e)
+            return False
+
+        self.binds = list(parsed)
+        self._binds_flag = keybinds.encode_vk_binds(self.binds)
+        logger.info(
+            "WSL push-to-talk binds set to %s; restarting hotkey bridge",
+            keybinds.describe_binds(self.binds),
+        )
+
+        if not self.running and self.process is None:
+            # Nothing to restart yet; ``start()`` will use the new payload.
+            return True
+        try:
+            self.stop()
+            return bool(self.start())
+        except Exception as e:  # pragma: no cover - defensive
+            logger.error("Failed to restart WSL hotkey bridge: %s", e)
+            return False
 
     # -- bridge commands ---------------------------------------------------
     def _send(self, command: str) -> bool:
@@ -207,6 +252,12 @@ class WSLHotkeyManager(BaseHotkeyManager):
             except Exception:
                 pass
             self.process = None
+        # Let the old reader exit before a restart spawns a replacement, so two
+        # threads can never drain the same stream.
+        thread = self.reader_thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=1.0)
+        self.reader_thread = None
 
 
 # Backwards-compatible alias used by the original ``src/hotkeys.py``.

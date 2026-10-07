@@ -169,10 +169,12 @@ class TestHandsFreeLatchWorkflow:
         manager.devices = [keyboard]
 
         try:
-            # 1. Alt+Shift pressed down
-            keyboard.held = {56, 42}  # KEY_LEFTALT, KEY_LEFTSHIFT
+            # 1. Alt+Shift pressed down. Both presses are fed state-then-event,
+            #    the way the kernel does: the backend needs the event stream
+            #    (a remapper's decision) *and* the live state to agree.
+            keyboard.deliver(manager, 56, 1)  # KEY_LEFTALT
+            keyboard.deliver(manager, 42, 1)  # KEY_LEFTSHIFT
             fake_alt_event = MagicMock(type=manager.evdev.ecodes.EV_KEY, code=56, value=1)
-            manager.handle_key_event(fake_alt_event)
             assert manager.hotkey_active is True
             cb_start.assert_called_once()
 

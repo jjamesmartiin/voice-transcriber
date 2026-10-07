@@ -9,6 +9,7 @@
 //! `Terminal::insert_before`.
 
 mod app;
+mod bind_picker;
 mod demo;
 mod ipc;
 mod mic_picker;
@@ -188,6 +189,7 @@ impl Runtime {
                 spell_command,
                 middle_click_enabled,
                 typing_wpm,
+                hotkeys,
             } => app.apply_config(
                 mic,
                 secondary,
@@ -206,6 +208,7 @@ impl Runtime {
                 spell_command,
                 middle_click_enabled,
                 typing_wpm,
+                hotkeys,
             ),
             Wire::Tx {
                 text,

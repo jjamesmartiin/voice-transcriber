@@ -107,6 +107,9 @@ pub enum Wire {
         middle_click_enabled: Option<bool>,
         #[serde(default)]
         typing_wpm: Option<u32>,
+        /// Canonical push-to-talk chord spellings, e.g. "alt+shift".
+        #[serde(default)]
+        hotkeys: Option<Vec<String>>,
     },
     #[serde(rename = "tx")]
     Tx {
@@ -309,6 +312,28 @@ mod tests {
                 );
             }
             other => panic!("expected Vu, got {other:?}"),
+        }
+    }
+
+    /// The push-to-talk chord list rides along on the same `cfg` payload as
+    /// `typing_wpm`; an older engine that omits it must still parse.
+    #[test]
+    fn cfg_message_carries_hotkeys_or_omits_them() {
+        let with = r#"{"t":"cfg","hotkeys":["alt+shift","f13"]}"#;
+        match serde_json::from_str::<Wire>(with).expect("hotkey cfg must parse") {
+            Wire::Cfg { hotkeys, .. } => {
+                assert_eq!(
+                    hotkeys,
+                    Some(vec!["alt+shift".to_string(), "f13".to_string()])
+                );
+            }
+            other => panic!("expected Cfg, got {other:?}"),
+        }
+
+        let without = r#"{"t":"cfg","typing_wpm":40}"#;
+        match serde_json::from_str::<Wire>(without).expect("old cfg must parse") {
+            Wire::Cfg { hotkeys, .. } => assert_eq!(hotkeys, None),
+            other => panic!("expected Cfg, got {other:?}"),
         }
     }
 

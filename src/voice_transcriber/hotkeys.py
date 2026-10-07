@@ -53,6 +53,25 @@ def set_global_middle_click_enabled(enabled: bool):
             logger.debug(f"set_global_middle_click_enabled failed: {e}")
 
 
+def set_global_binds(binds):
+    """Propagate push-to-talk binds to the active hotkey manager.
+
+    Returns ``True`` when a live manager applied them. Backends that cannot
+    apply a change report so instead of silently keeping the old chord.
+    """
+    global _current_hotkey_instance
+    if not _current_hotkey_instance:
+        return False
+    setter = getattr(_current_hotkey_instance, "set_binds", None)
+    if not callable(setter):
+        return False
+    try:
+        return bool(setter(binds))
+    except Exception as e:
+        logger.debug(f"set_global_binds failed: {e}")
+        return False
+
+
 def create_global_hotkeys(callback_start, callback_stop):
     """Create the platform-appropriate global hotkey manager via the HAL.
 

@@ -80,6 +80,7 @@ class RatatuiTui:
         self.spell_command = True
         self.transcription_count = 0
         self.vu_level = 0.0
+        self.hotkeys = []
 
         # Callbacks (wired by main.SimpleVoiceTranscriber).
         self.on_toggle_record = None
@@ -95,6 +96,8 @@ class RatatuiTui:
         self.on_cycle_typing_wpm = None
         self.on_set_typing_wpm = None
         self.on_toggle_middle_click = None
+        self.on_hotkey_add = None
+        self.on_hotkey_remove = None
         self.on_cycle_theme = None
         self.on_set_theme = None
         self.on_cycle_punctuation = None
@@ -289,6 +292,14 @@ class RatatuiTui:
                 self.on_set_typing_wpm(wpm)
             elif getattr(self, "on_cycle_typing_wpm", None):
                 self.on_cycle_typing_wpm()
+        elif cmd == "hotkey_add" and getattr(self, "on_hotkey_add", None):
+            chord = msg.get("chord") or msg.get("value") or ""
+            if str(chord).strip():
+                self.on_hotkey_add(str(chord).strip())
+        elif cmd == "hotkey_remove" and getattr(self, "on_hotkey_remove", None):
+            chord = msg.get("chord") or msg.get("value") or ""
+            if str(chord).strip():
+                self.on_hotkey_remove(str(chord).strip())
         elif cmd == "toggle_middle_click" and self.on_toggle_middle_click:
             self.on_toggle_middle_click()
         elif cmd == "toggle_trailing_space" and getattr(self, "on_toggle_trailing_space", None):
@@ -566,7 +577,7 @@ class RatatuiTui:
                          sound_theme=None, ui_theme=None, punctuation_mode=None,
                          trailing_space=None, auto_punctuate=None, number_digits=None,
                          number_mode=None, serial_collapse=None, spell_command=None,
-                         middle_click_enabled=None, typing_wpm=None):
+                         middle_click_enabled=None, typing_wpm=None, hotkeys=None):
         msg = {"t": "cfg"}
         if backend is not None:
             self.model_backend = backend
@@ -619,6 +630,11 @@ class RatatuiTui:
             msg["middle_click_enabled"] = self.middle_click_enabled
         if typing_wpm is not None:
             msg["typing_wpm"] = int(typing_wpm)
+        if hotkeys is not None:
+            # Canonical chord spellings, e.g. ["alt+shift", "f13"]; the frontend
+            # only ever displays them and asks the engine to add/remove.
+            self.hotkeys = [str(chord) for chord in hotkeys]
+            msg["hotkeys"] = self.hotkeys
         self._send(msg)
 
     def get_effective_color(self):

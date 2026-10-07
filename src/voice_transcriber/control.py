@@ -181,6 +181,19 @@ VERBS: dict[str, dict] = {
         "toggles": True,
         "returns": ["middle_click"],
     },
+    "hotkey": {
+        "summary": "List, add, remove or reset the push-to-talk chord binds",
+        "aliases": ["hotkeys", "binds"],
+        "value": "command",
+        "choices": [
+            "list",
+            "keys",
+            "add <chord>",
+            "remove <chord>",
+            "reset",
+        ],
+        "returns": ["hotkeys", "keys"],
+    },
     "mute": {
         "summary": "Mute the audio cues",
         "value": "state",

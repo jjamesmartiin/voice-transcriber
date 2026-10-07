@@ -209,7 +209,7 @@ regardless of the console's encoding.
 `start`, `stop`, `toggle`, `wait`, `status`, `mics`, `set-mic`, `rescan-mics`,
 `settings`,
 `mic`, `theme`, `output`, `numbers`, `punctuation`, `trailing-space`,
-`auto-punctuate`, `serial`, `spell`, `middle-click`, `mute`, `reset-defaults`,
+`auto-punctuate`, `serial`, `spell`, `middle-click`, `hotkey`, `mute`, `reset-defaults`,
 `reset-terminal`, `ping`, `doctor`, `help`, `quit`.
 
 Get this catalogue programmatically — it is the machine-readable source of truth
@@ -273,10 +273,44 @@ the settings modal would.
 | `serial` | state | `on`, `off` (omit to toggle) |
 | `spell` | state | `on`, `off` (omit to toggle) |
 | `middle-click` | state | `on`, `off` (omit to toggle) |
+| `hotkey` | command | `list` (default), `keys`, `add <chord>`, `remove <chord>`, `reset` |
 | `mute` | state | `on`, `off` (omit to toggle) |
 | `wpm` | words-per-minute | Integer WPM, e.g. `40`, `60`, `80` (omit to cycle presets) |
 
 `on`/`off` also accept `true`/`false`, `1`/`0`, `yes`/`no`, `enable`/`disable`.
+
+### Push-to-talk binds
+
+`hotkey` (aliases `hotkeys`, `binds`) manages the chords that start dictation.
+`Alt+Shift` is only the shipped default — a user can hold any number of chords,
+including a remapped one or a single key. Every reply carries the resulting list
+as `hotkeys`, so no follow-up call is needed:
+
+```bash
+python src/main.py hotkey --json                          # ["alt+shift"]
+python src/main.py hotkey keys --json                     # every valid key name
+python src/main.py hotkey "add ctrl+shift" --json         # add one
+python src/main.py hotkey "add f13" --json                # single key
+python src/main.py hotkey "remove alt+shift" --json       # drop one
+python src/main.py hotkey reset --json                    # back to Alt+Shift
+```
+
+`hotkey keys` returns `[{name, group, aliases}, ...]` for every bindable key,
+derived from the single declaration table the backends resolve through
+(`src/voice_transcriber/keybinds.py`), so the list a caller sees cannot drift
+from what the matcher accepts. Every reply also carries the resulting
+`hotkeys` list, so no follow-up call is needed.
+
+Chords are `+`-joined names from that table: modifiers
+(`ctrl`/`leftctrl`/`rightctrl`, `alt`, `shift`, `meta` — also `super`/`win`/`cmd`),
+`f1`–`f24`, letters, digits, `space`, `tab`, `esc`, `enter`,
+backspace/delete/insert, arrows, `home`/`end`/`pageup`/`pagedown`, `capslock`,
+`printscreen`, `scrolllock`, `pause`, `menu`. A bare modifier matches either
+side; `rightctrl+shift` matches only the right one; aliases (`option`, `pgup`,
+`return`, `escape`, …) resolve to the same chord. Removing the final bind is
+refused (push-to-talk has to stay reachable from the keyboard), and so is adding
+a chord that is already bound. Changes are persisted to `hotkeys:` in the config
+file and pushed at the live hotkey backend immediately.
 
 ### Interactive modals
 

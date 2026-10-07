@@ -407,7 +407,10 @@ pub fn render_preset_picker(frame: &mut Frame, state: &PresetPickerState, app: &
             Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
         ));
 
-    let inner = block.inner(popup_area);
+    // Paragraph never clips to the frame buffer, so the inner rect has to be
+    // intersected here or the list writes past the last row (a panic on
+    // terminals shorter than the popup minimum).
+    let inner = block.inner(popup_area.intersection(area));
     frame.render_widget(block, popup_area);
 
     let chunks = Layout::default()
@@ -550,6 +553,7 @@ pub fn run_preset_picker(
                             spell_command,
                             middle_click_enabled,
                             typing_wpm,
+                            hotkeys,
                         } => {
                             app.apply_config(
                                 mic,
@@ -569,6 +573,7 @@ pub fn run_preset_picker(
                                 spell_command,
                                 middle_click_enabled,
                                 typing_wpm,
+                                hotkeys,
                             );
                         }
                         _ => {}

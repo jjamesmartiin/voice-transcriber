@@ -143,8 +143,8 @@ class TestWSLHostBridgeMouseMode:
     def test_hold_threshold_and_trigger_are_wired(self, script):
         # A middle press must be held (not tapped) before it counts.
         assert "TotalMilliseconds -ge 250" in script
-        # Recording starts when Alt+Shift OR the held middle button is down.
-        assert "$isHotkeyDown = $isAltShiftDown -or $mButtonActive" in script
+        # Recording starts when a configured bind OR the held middle button is down.
+        assert "$isHotkeyDown = $isBindDown -or $mButtonActive" in script
 
     def test_hotkey_events_are_emitted(self, script):
         assert '"HOTKEY_DOWN"' in script
