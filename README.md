@@ -364,6 +364,11 @@ point at a specific `vt-tui` binary (e.g. a local `cargo` build during frontend
 development). If no binary is found, the app falls back to Rich automatically —
 this is the default on native Windows.
 
+![Voice Transcriber ratatui terminal UI](docs/assets/vt-tui-demo.svg)
+
+<sub>The ratatui frontend: inline scrollback, a live status line, and a timing
+divider per transcription.</sub>
+
 Both frontends share the same visual layout and keyboard model — `s`/`S`/`,`
 for settings, `Space`/`Enter` to record — with the microphone and theme
 sub-pickers reached from inside the settings modal:
@@ -373,50 +378,34 @@ sub-pickers reached from inside the settings modal:
 - **Persistent Time-Saved Counter**: every transcription divider carries a `⚡ saved: +14s (session: 2m 15s · total: 1h 20m)` badge — the time dictation saved versus typing, the running session total, and an **all-time total that survives restarts**. The estimate uses the `typing_wpm` setting.
 - **Encoding-safe output**: on a console or pipe that cannot encode the emoji and box-drawing glyphs (a legacy Windows code page, `LANG=C`, `PYTHONIOENCODING=ascii`), they degrade to ASCII stand-ins — `⚡`→`*`, `│`→`|`, `·`→`|` — instead of raising `UnicodeEncodeError` and losing the divider. Nothing is ever dropped silently. Set `VT_ASCII=1` to force the ASCII rendering everywhere.
 
+![Settings and configuration modal](docs/assets/vt-settings-modal.svg)
+
+<sub>Settings &amp; configuration — the single configuration entry point, with
+fuzzy filtering, in-place toggle badges, and sub-pickers for the microphone,
+theme and push-to-talk keys.</sub>
+
 ---
 
 ## Architecture
+
+Voice Transcriber unifies all supported platforms over a single shared core
+engine behind a Hardware/OS Abstraction Layer (HAL). The core owns the audio
+pipeline, the ASR backend, the post-processor and the frontends; `hal.py` is
+the loader and `src/platform/` holds the four per-OS backends.
+
+![Voice Transcriber system architecture](docs/assets/vt-architecture.svg)
+
+<sub>The pipeline end to end — audio capture and VAD, the ASR backend, the
+post-processor, the frontends, and the HAL that maps each per-OS concern onto
+Linux, Windows, WSL2 and macOS.</sub>
+
+Platform detection lives in `src/platform/__init__.py`; override it with
+`VT_PLATFORM=linux|windows|wsl|macos` (an unknown value is a hard error by design).
 
 > **Planning a port to another language?** Read
 > [`docs/archive/java-fork-plan.md`](docs/archive/java-fork-plan.md). It maps what is reusable
 > as-is (the `vt-tui` protocol, the control API, the revision-keyed weights
 > bundle) and why the ASR re-host, not the port, is the critical path.
-
-Voice Transcriber unifies all supported platforms over a single shared core
-engine using a Hardware/OS Abstraction Layer (HAL):
-
-```
-Voice Transcriber Architecture
-┌─────────────────────────────────────────────────────────────┐
-│                      Core Engine (src/)                     │
-│                                                             │
-│  - Audio Pipeline & Streaming VAD (t2.py, micro_batcher.py) │
-│  - ASR Engine (Cohere Transcribe)                           │
-│  - Post-Processor (post_processor.py)                       │
-│    * Trie-compacted dictionary replacer                     │
-│    * Filler-word and stutter removal                        │
-│    * Verbal retraction parser ("no wait", "scratch that")   │
-│    * Spoken numbers to digits conversion                    │
-│    * Spoken dates to ordinal days ("October 20th")          │
-│    * Sentence casing & terminal punctuation                 │
-│  - Lifetime stats & time-saved estimate (stats.py)          │
-│  - TUI: ratatui (default) / Rich (fallback)                 │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-            ┌──────────────────┴──────────────────┐
-            ▼                                     ▼
-┌──────────────────────┐              ┌──────────────────────┐
-│  src/hal.py (Loader) │              │  src/platform/ (HAL) │
-└───────────┬──────────┘              └──────────┬───────────┘
-            │                                    │
-    ┌───────┴───────────────┬────────────────────┼─────────────┴──────────┐
-    ▼                       ▼                    ▼                        ▼
-Linux (evdev/uinput,     Windows (pynput,     WSL (PowerShell bridge,  macOS (pynput, pbcopy,
- wl-copy/xclip/ydotool)   pyperclip, user32)   clip.exe interop)        osascript, afplay)
-```
-
-Platform detection lives in `src/platform/__init__.py`; override it with
-`VT_PLATFORM=linux|windows|wsl|macos` (an unknown value is a hard error by design).
 
 ---
 
