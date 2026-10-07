@@ -14,42 +14,39 @@ Features:
 
 import os
 import sys
-import time
 import threading
 import subprocess
 import logging
-import tempfile
-from pathlib import Path
+import importlib.util
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
 
-# Check for tkinter availability
-try:
-    import tkinter as tk
-    TKINTER_AVAILABLE = True
-except ImportError:
-    TKINTER_AVAILABLE = False
+# Check for tkinter availability. The overlay window itself runs in a child
+# process (`python -c ...`), so this is only an availability probe — there is
+# nothing to import into this process.
+TKINTER_AVAILABLE = importlib.util.find_spec("tkinter") is not None
+if not TKINTER_AVAILABLE:
     logger.debug("tkinter not available, falling back to other notification methods")
 
 
 class VisualNotification:
     """
     Enhanced visual notification system with cross-platform support.
-    
+
     Automatically detects the display environment and available tools,
     then uses the best available method for showing notifications.
-    
+
     Supports:
     - Tkinter-based overlays (cross-platform)
     - Zenity dialogs (Linux)
     - Terminal-based colored notifications
     """
-    
+
     def __init__(self, app_name="Application", enable_logging=True, tui=None):
         """
         Initialize the visual notification system.
-        
+
         Args:
             app_name (str): Name of the application for notification titles
             enable_logging (bool): Whether to enable debug logging
@@ -59,20 +56,23 @@ class VisualNotification:
         self.active = False
         self.tui = tui
         self.overlay_processes = []
+        # Overlays are spawned from worker threads and reaped from the main
+        # thread, so the list needs a lock.
+        self._overlay_lock = threading.Lock()
         self.display_env = self._detect_display_environment()
         self.available_tools = self._detect_available_tools()
         self.active_device = None
         self._notification_timers = []  # Track timers for cleanup
         self._cleanup_overlays()  # Clean up any leftover overlay processes from prior sessions
-        
+
         if enable_logging:
             logger.debug(f"Display environment: {self.display_env}")
             logger.debug(f"Available tools: {self.available_tools}")
-    
+
     def set_active_device(self, device_name):
         """Set the active audio device name for display in notifications."""
         self.active_device = device_name
-    
+
     def _detect_display_environment(self):
         """Detect the current display environment."""
         if os.environ.get('WAYLAND_DISPLAY'):
@@ -81,7 +81,7 @@ class VisualNotification:
             return 'x11'
         else:
             return 'terminal'
-    
+
     def _detect_available_tools(self):
         """Detect available system notification tools."""
         tools = []
@@ -89,64 +89,64 @@ class VisualNotification:
             try:
                 subprocess.run(['which', tool], capture_output=True, check=True)
                 tools.append(tool)
-            except:
+            except Exception:
                 pass
         return tools
-    
+
     def show_notification(self, text, color="#0066cc", persistent=False, emoji="i"):
         """Show a notification with the given text and color."""
-        
+
         if persistent:
             self.active = True
-        
+
         self._create_overlay(text, color, persistent)
         self._show_terminal_notification(text)
-    
+
     def show_recording(self, text="RECORDING"):
         """Show a recording notification."""
         if self.active and not self.tui:
             return
         self.active = True
-        
+
         if self.tui:
             self.tui.update_state("RECORDING")
-            
+
         display_text = "RECORDING"
         terminal_text = f"{text} - Recording in progress"
-        
+
         if self.active_device:
             terminal_text += f" (Device: {self.active_device})"
-            
+
         self._create_overlay(display_text, "#ff4444", persistent=True)
         if not self.tui:
             self._show_terminal_notification(terminal_text)
-    
+
     def show_processing(self, text="PROCESSING"):
         """Show a processing notification."""
         self._cleanup_overlays()
         self.active = True
-        
+
         if self.tui:
             self.tui.update_state("PROCESSING", text)
-        
+
         # Run overlay in background thread so it doesn't block
         def create_overlay_bg():
             try:
                 self._create_overlay(f"LOADING {text}", "#ffaa00", persistent=True)
-            except:
+            except Exception:
                 pass
-        
+
         overlay_thread = threading.Thread(target=create_overlay_bg, daemon=True)
         overlay_thread.start()
-        
+
         if not self.tui:
             self._show_terminal_notification(f"Loading {text}...")
-    
+
     def show_completed(self, text="COMPLETED", sub_text=None, elapsed_sec=None, rec_duration=None, proc_time=None, time_saved=0.0, session_time_saved=0.0, lifetime_time_saved=0.0, **kwargs):
         """Show a completion notification."""
         self._cleanup_overlays()
         self._create_overlay("COMPLETED", "#00aaff", persistent=False)
-        
+
         if self.tui and sub_text:
             import t2
             typed = getattr(t2, 'AUTO_TYPE', False)
@@ -169,7 +169,7 @@ class VisualNotification:
         timer = threading.Timer(2.0, self.hide_notification)
         timer.start()
         self._notification_timers.append(timer)
-    
+
     def show_error(self, text="ERROR"):
         """Show an error notification."""
         self._cleanup_overlays()
@@ -182,7 +182,7 @@ class VisualNotification:
         timer = threading.Timer(3.0, self.hide_notification)
         timer.start()
         self._notification_timers.append(timer)
-    
+
     def show_warning(self, text="WARNING"):
         """Show a warning notification."""
         self._cleanup_overlays()
@@ -195,7 +195,7 @@ class VisualNotification:
         timer = threading.Timer(3.0, self.hide_notification)
         timer.start()
         self._notification_timers.append(timer)
-    
+
     def _create_overlay(self, text, color, persistent=False):
         """Create a visual overlay using the best available method."""
         if TKINTER_AVAILABLE:
@@ -204,14 +204,14 @@ class VisualNotification:
                 return
             except Exception as e:
                 logger.debug(f"Tkinter overlay failed: {e}")
-        
+
         if 'zenity' in self.available_tools:
             try:
                 self._create_zenity_notification(text, persistent)
                 return
             except Exception as e:
                 logger.debug(f"Zenity overlay failed: {e}")
-    
+
     def _create_tkinter_overlay(self, text, color, persistent):
         """Create a tkinter-based overlay window."""
         overlay_script = f'''
@@ -222,12 +222,12 @@ import sys
 def create_overlay():
     try:
         root = tk.Tk()
-        root.title("{self.app_name}")
+        root.title({self.app_name!r})
         root.overrideredirect(True)
         root.attributes('-topmost', True)
         root.attributes('-alpha', 0.85)
-        root.configure(bg='{color}')
-        
+        root.configure(bg={color!r})
+
         # Make window thinner and less intrusive
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
@@ -235,15 +235,15 @@ def create_overlay():
         window_height = 60
         x = (screen_width - window_width) // 2
         y = max(80, (screen_height - window_height) // 6)  # Higher up on screen
-        
+
         root.geometry(f"{{window_width}}x{{window_height}}+{{x}}+{{y}}")
-        
+
         # Minimal border frame
         border_frame = tk.Frame(root, bg='#333333', bd=1)
         border_frame.pack(fill='both', expand=True, padx=1, pady=1)
-        
+
         # Create inner frame with more subtle colors
-        bg_color = '{color}'
+        bg_color = {color!r}
         if bg_color == '#ff4444':  # Recording red
             bg_color = '#ff6666'
         elif bg_color == '#ffaa00':  # Processing orange
@@ -254,15 +254,15 @@ def create_overlay():
             bg_color = '#ff4444'
         elif bg_color == '#ff8800':  # Warning orange
             bg_color = '#ffaa44'
-        
+
         inner_frame = tk.Frame(border_frame, bg=bg_color)
         inner_frame.pack(fill='both', expand=True, padx=1, pady=1)
-        
+
         # Create label with smaller, less bold font
         text_color = 'white' if bg_color in ['#ff6666', '#ff4444'] else '#333333'
         label = tk.Label(
             inner_frame,
-            text="{text}",
+            text={text!r},
             bg=bg_color,
             fg=text_color,
             font=('Arial', 12, 'normal'),  # Smaller, non-bold font
@@ -270,14 +270,14 @@ def create_overlay():
             wraplength=300
         )
         label.pack(expand=True)
-        
+
         # Handle persistence
-        if {'True' if persistent else 'False'}:
+        if {persistent!r}:
             root.mainloop()
         else:
             root.after(2500, root.quit)  # Slightly shorter display time
             root.mainloop()
-            
+
     except Exception as e:
         print(f"Overlay error: {{e}}")
         sys.exit(1)
@@ -285,14 +285,14 @@ def create_overlay():
 if __name__ == "__main__":
     create_overlay()
 '''
-        
+
         # Launch overlay process directly using the -c flag
-        import sys
-        process = subprocess.Popen([sys.executable, '-c', overlay_script], 
-                                 stderr=subprocess.DEVNULL, 
+        process = subprocess.Popen([sys.executable, '-c', overlay_script],
+                                 stderr=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL)
-        self.overlay_processes.append(process)
-    
+        with self._overlay_lock:
+            self.overlay_processes.append(process)
+
     def _create_zenity_notification(self, text, persistent):
         """Create a zenity-based notification."""
         cmd = [
@@ -303,13 +303,16 @@ if __name__ == "__main__":
         ]
         if not persistent:
             cmd.append('--timeout=2')  # Shorter timeout
-        
+
         process = subprocess.Popen(cmd, stderr=subprocess.DEVNULL)
-        self.overlay_processes.append(process)
-    
+        with self._overlay_lock:
+            self.overlay_processes.append(process)
+
     def _cleanup_overlays(self):
         """Clean up all active overlay child processes."""
-        for process in self.overlay_processes:
+        with self._overlay_lock:
+            processes, self.overlay_processes = self.overlay_processes, []
+        for process in processes:
             try:
                 process.terminate()
                 process.wait(timeout=0.2)
@@ -319,7 +322,7 @@ if __name__ == "__main__":
                 except Exception:
                     pass
         self.overlay_processes = []
-    
+
     def _show_terminal_notification(self, text, sub_text=None, elapsed_sec=None, rec_duration=None, proc_time=None):
         """Show a colorful terminal notification."""
         try:
@@ -342,7 +345,7 @@ if __name__ == "__main__":
             else:
                 color_code = "\033[92m"  # Green
                 symbol = "i"
-            
+
             # For completion with sub_text (transcription), use a cleaner, non-boxed output
             if sub_text:
                 print(f"\n{color_code}{symbol} {text}\033[0m")
@@ -362,35 +365,35 @@ if __name__ == "__main__":
                 # Create minimal notification line for status updates
                 box_width = 70
                 border = "─" * box_width
-                
+
                 print(f"\n{color_code}┌{border}┐")
                 # Center the main text
                 main_text = text[:box_width - 4]  # Ensure text fits
                 print(f"│ {symbol} {main_text:<{box_width-5}} │")
                 print(f"└{border}┘\033[0m")
-            
+
         except Exception as e:
             logger.debug(f"Terminal notification failed: {e}")
             # Fallback to simple print
             print(f"\n• {text}")
-    
+
     def hide_notification(self):
         """Hide all active notifications."""
         if self.tui:
             self.tui.update_state("READY")
         if not self.active:
             return
-        
+
         self.active = False
         self._cleanup_overlays()
 
-    
+
     def cleanup(self):
         """Clean up all resources and processes."""
         for timer in self._notification_timers:
             try:
                 timer.cancel()
-            except:
+            except Exception:
                 pass
         self._notification_timers = []
         self.hide_notification()

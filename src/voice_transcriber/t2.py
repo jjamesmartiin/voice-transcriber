@@ -39,14 +39,11 @@ if _is_wsl():
     os.environ["ALSA_CONFIG_PATH"] = alsa_conf_path
 
 import queue
-import pyperclip
 import threading
 import atexit
 import time
 import numpy as np
 import sounddevice as sd
-import soundfile as sf
-import warnings
 import logging
 logger = logging.getLogger(__name__)
 from transcribe2 import transcribe_audio, get_model
@@ -91,7 +88,7 @@ def get_data_dir():
         data_dir = Path.home() / '.local' / 'share' / 'vt'
     else:
         data_dir = Path.home() / 'AppData' / 'Local' / 'vt'
-    
+
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -485,7 +482,6 @@ def rescan_audio_devices():
 def get_wireplumber_bt_autoswitch():
     """Check if WirePlumber autoswitch to headset profile is enabled."""
     import shutil
-    import subprocess
     if not shutil.which('wpctl'):
         return None
     try:
@@ -503,7 +499,6 @@ def get_wireplumber_bt_autoswitch():
 def set_wireplumber_bt_autoswitch(enable_autoswitch: bool):
     """Enable or disable WirePlumber autoswitch to headset profile."""
     import shutil
-    import subprocess
     if not shutil.which('wpctl'):
         return False
     val_str = 'true' if enable_autoswitch else 'false'
@@ -598,20 +593,20 @@ def find_device_index(name):
 def get_active_device_name(include_model=True):
     """Return the name of the device that will be used or was last used"""
     global LAST_USED_DEVICE_NAME
-    
+
     prefix = f"{MODEL_BACKEND.capitalize()}: " if include_model else ""
-    
+
     if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
         return f"{prefix}Primary: {PRIMARY_DEVICE_NAME}"
     elif OVERRIDE_MODE == 'secondary' and SECONDARY_DEVICE_NAME:
         return f"{prefix}Secondary: {SECONDARY_DEVICE_NAME}"
-    
+
     # In auto mode, try to find what would be used
     if PRIMARY_DEVICE_NAME:
         idx = find_device_index(PRIMARY_DEVICE_NAME)
         if idx is not None:
             return f"{prefix}Primary: {PRIMARY_DEVICE_NAME}"
-    
+
     try:
         if INPUT_DEVICE_INDEX is not None:
             with silence_stderr():
@@ -624,7 +619,7 @@ def get_active_device_name(include_model=True):
                 return f"{prefix}{d['name']} (Default)"
     except Exception:
         pass
-            
+
     return f"{prefix}{LAST_USED_DEVICE_NAME}"
 
 def check_microphone_health():
@@ -633,21 +628,21 @@ def check_microphone_health():
     Returns: (is_healthy: bool, issues: list of str)
     """
     issues = []
-    
+
     # 1. PulseAudio source verification (WSL / Linux)
     if os.path.exists("/mnt/wslg") or os.environ.get("WSL_DISTRO_NAME"):
         try:
             import subprocess
             res = subprocess.run(["pactl", "list", "sources", "short"], capture_output=True, text=True, timeout=2)
             if res.returncode == 0:
-                lines = [l for l in res.stdout.strip().split("\n") if l]
-                sources = [l.split()[1] for l in lines if len(l.split()) >= 2]
+                lines = [line for line in res.stdout.strip().split("\n") if line]
+                sources = [line.split()[1] for line in lines if len(line.split()) >= 2]
                 real_mics = [s for s in sources if not s.endswith(".monitor")]
                 if not real_mics:
                     issues.append("WSLg audio bridge has no active microphone source (only speaker monitor was found).")
         except Exception:
             pass
-            
+
     # 2. SoundDevice device query
     try:
         devs = sd.query_devices()
@@ -683,7 +678,7 @@ def reset_terminal():
         # Only run external 'reset' command when NOT running inside vt-tui (which owns raw mode)
         if sys.platform != "win32" and not os.environ.get("VT_TUI_SOCKET") and not os.environ.get("VT_TUI_BIN"):
             os.system('reset')
-        
+
         # Kill stuck clipboard processes (Wayland)
         if sys.platform != "win32":
             try:
@@ -695,7 +690,7 @@ def reset_terminal():
         # Also re-initialize termios just in case (only if not in vt-tui)
         if sys.platform != "win32" and not os.environ.get("VT_TUI_SOCKET") and not os.environ.get("VT_TUI_BIN"):
             try:
-                import termios, sys
+                import termios
                 fd = sys.stdin.fileno()
                 termios.tcgetattr(fd)
             except Exception:
@@ -717,7 +712,6 @@ DEVICE = get_device()
 # Audio buffering
 stop_recording = threading.Event()
 
-import transcribe2
 
 def _normalize_number_mode(value) -> str:
     """Coerce bool / "1"/"0" / mode string into "auto" | "digits" | "words"."""
@@ -748,7 +742,7 @@ def _normalize_bool(value, default: bool = False) -> bool:
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, TYPING_WPM, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, TYPING_WPM, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -810,6 +804,10 @@ def load_audio_config(file_path=None):
             env_lang = os.environ.get("VT_LANGUAGE", "").strip().lower()
             if env_lang:
                 LANGUAGE = env_lang
+            # The acoustic backend reads the language from the environment, so
+            # publish the resolved value (config or env), the same way the SLM
+            # flag is published below.
+            os.environ["VT_LANGUAGE"] = LANGUAGE
 
             WAIT_FOR_MODEL_ON_STARTUP = config.get('wait_for_model_on_startup', True)
             env_wait = os.environ.get("VT_WAIT_FOR_MODEL_ON_STARTUP", "").strip().lower()
@@ -852,7 +850,7 @@ def load_audio_config(file_path=None):
                 MIDDLE_CLICK_ENABLED = True
             elif env_middle_click in ["0", "false", "no"]:
                 MIDDLE_CLICK_ENABLED = False
-            
+
             env_bt_handsfree = os.environ.get("VT_KEEP_BLUETOOTH_HANDSFREE", "").strip().lower()
             if env_bt_handsfree in ["1", "true", "yes"]:
                 KEEP_BLUETOOTH_HANDSFREE = True
@@ -864,7 +862,7 @@ def load_audio_config(file_path=None):
                 IS_MUTED = True
             elif env_muted in ["0", "false", "no"]:
                 IS_MUTED = False
-            
+
             env_auto_type = os.environ.get("VT_AUTO_TYPE", "").strip().lower()
             if env_auto_type in ["1", "true", "yes"]:
                 OUTPUT_MODE = "type"
@@ -886,10 +884,10 @@ def load_audio_config(file_path=None):
                 IS_MUTED = True
 
             COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
-            
+
             env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
             UI_THEME = env_theme or config.get('ui_theme', 'auto')
-            
+
             # If we have an override, try that first
             if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
                 idx = find_device_index(PRIMARY_DEVICE_NAME)
@@ -905,7 +903,7 @@ def load_audio_config(file_path=None):
                     logger.info(f"[Override] Using secondary device: {SECONDARY_DEVICE_NAME} (index {idx})")
                 else:
                     logger.warning(f"[Override] Secondary device not found: {SECONDARY_DEVICE_NAME}")
-            
+
             # If no override or override failed, try the standard auto logic
             if INPUT_DEVICE_INDEX is None:
                 # Attempt to find primary
@@ -929,9 +927,9 @@ def load_audio_config(file_path=None):
                                     logger.info(f"Falling back to saved device index {INPUT_DEVICE_INDEX}: {d['name']}")
                                 else:
                                     INPUT_DEVICE_INDEX = None
-                            except:
+                            except Exception:
                                 INPUT_DEVICE_INDEX = None
-            
+
             # Double check that the selected INPUT_DEVICE_INDEX actually exists and is valid
             if INPUT_DEVICE_INDEX is not None:
                 try:
@@ -951,7 +949,7 @@ def load_audio_config(file_path=None):
                         logger.info(f"Secondary audio device: {SECONDARY_DEVICE_NAME} (index {sec_idx})")
             else:
                 logger.info("No configured audio devices found. Using system default.")
-        
+
         # Apply Bluetooth hands-free policy on Linux / PipeWire
         apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
 
@@ -1034,7 +1032,7 @@ def save_audio_config(file_path=None):
                     existing_config = json.loads(content) if content.strip() else {}
             except Exception:
                 existing_config = {}
-                
+
         if not isinstance(existing_config, dict):
             existing_config = {}
 
@@ -1578,11 +1576,16 @@ def _read_key():
             ch = msvcrt.getwch()
             if ch in ('\x00', '\xe0'):
                 ch2 = msvcrt.getwch()
-                if ch2 == 'H': return 'UP'
-                elif ch2 == 'P': return 'DOWN'
-                elif ch2 == 'M': return 'RIGHT'
-                elif ch2 == 'K': return 'LEFT'
-                elif ch2 == '\x0f': return 'UP'  # Shift+Tab
+                if ch2 == 'H':
+                    return 'UP'
+                elif ch2 == 'P':
+                    return 'DOWN'
+                elif ch2 == 'M':
+                    return 'RIGHT'
+                elif ch2 == 'K':
+                    return 'LEFT'
+                elif ch2 == '\x0f':
+                    return 'UP'  # Shift+Tab
                 return ''
             elif ch == '\x1b':
                 return 'ESC'
@@ -1598,7 +1601,9 @@ def _read_key():
         except Exception:
             return sys.stdin.read(1)
 
-    import termios, tty, select
+    import termios
+    import tty
+    import select
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
@@ -1610,11 +1615,16 @@ def _read_key():
                 ch2 = sys.stdin.read(1)
                 if ch2 == '[':
                     ch3 = sys.stdin.read(1)
-                    if ch3 == 'A': return 'UP'
-                    elif ch3 == 'B': return 'DOWN'
-                    elif ch3 == 'C': return 'RIGHT'
-                    elif ch3 == 'D': return 'LEFT'
-                    elif ch3 == 'Z': return 'UP'  # Shift+Tab
+                    if ch3 == 'A':
+                        return 'UP'
+                    elif ch3 == 'B':
+                        return 'DOWN'
+                    elif ch3 == 'C':
+                        return 'RIGHT'
+                    elif ch3 == 'D':
+                        return 'LEFT'
+                    elif ch3 == 'Z':
+                        return 'UP'  # Shift+Tab
             return 'ESC'
         elif ch in ('\r', '\n'):
             return 'ENTER'
@@ -1707,7 +1717,7 @@ def select_theme_picker(current_theme=None):
         table.add_column("Description", width=42)
         table.add_column("Action", width=12)
 
-        for row_i, (orig_i, (name, label, desc)) in enumerate(matches):
+        for row_i, (_orig_i, (name, label, desc)) in enumerate(matches):
             is_sel = (row_i == selected_idx)
             is_active = (name == active)
             dot_color = "green" if name == "auto" else name
@@ -1828,7 +1838,7 @@ def select_microphone_picker():
         table.add_column("Name", ratio=1)
         table.add_column("Badges", justify="right", width=22)
 
-        for row_i, (orig_i, dev) in enumerate(matches):
+        for row_i, (_orig_i, dev) in enumerate(matches):
             is_sel = (row_i == selected_idx)
             is_active = dev.get('is_active', False)
             is_default = dev.get('is_default', False)
@@ -1950,7 +1960,7 @@ def select_preset_picker(current_preset=None):
             return list(enumerate(presets))
         q = q.strip().lower()
         scored = []
-        for i, (pid, name, badge, desc, preview, color) in enumerate(presets):
+        for i, (pid, name, _badge, desc, _preview, _color) in enumerate(presets):
             score = 0
             if pid == q or q in pid:
                 score += 500
@@ -1977,7 +1987,7 @@ def select_preset_picker(current_preset=None):
         table.add_column("Badge", justify="center", width=14)
         table.add_column("Preview / Description")
 
-        for row_idx, (orig_idx, (pid, name, badge, desc, preview, color)) in enumerate(matches):
+        for row_idx, (_orig_idx, (pid, name, badge, desc, preview, color)) in enumerate(matches):
             is_cursor = (row_idx == selected_idx)
             is_active = (pid == active_pid)
 
@@ -2256,7 +2266,7 @@ def select_settings_picker():
         table.add_column("Description", ratio=1)
         table.add_column("Badge", justify="right", width=12)
 
-        for row_i, (orig_i, item) in enumerate(matches):
+        for row_i, (_orig_i, item) in enumerate(matches):
             is_sel = (row_i == selected_idx)
             val_str, badge, badge_color = get_setting_state(item["id"])
 
@@ -2510,9 +2520,9 @@ def prewarm_input_stream():
 def record_audio_stream(interactive_mode=False, stream_callback=None):
     """Record audio using sounddevice with fallback and auto-recovery support"""
     global INPUT_DEVICE_INDEX, ACTUAL_RATE, LAST_USED_DEVICE_NAME
-    
+
     is_wsl = _is_wsl()
-    
+
     if is_wsl:
         # In WSL, we always rely on the single default ALSA-Pulse audio bridge
         INPUT_DEVICE_INDEX = None
@@ -2614,7 +2624,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                 with stream:
                     _consume()
             return frames
-        except Exception as e:
+        except Exception:
             # If it's specifically a sample rate error, we'll try a fallback in the parent
             return None
 
@@ -2623,11 +2633,11 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
         countdown_thread = threading.Thread(target=countdown_timer)
         countdown_thread.daemon = True
         countdown_thread.start()
-        
+
         input_thread = threading.Thread(target=check_for_stop_key)
         input_thread.daemon = True
         input_thread.start()
-        
+
         print("Recording... Press Space to stop")
 
     # Fast path: If INPUT_DEVICE_INDEX is already known, immediately record without
@@ -2685,11 +2695,11 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                         INPUT_DEVICE_INDEX = None
             except Exception:
                 INPUT_DEVICE_INDEX = None
-    
+
     # Try primary/current device
     frames = perform_recording(INPUT_DEVICE_INDEX, RATE)
     ACTUAL_RATE = 16000
-    
+
     # If it failed, try current device with its default sample rate
     if frames is None:
         try:
@@ -2701,7 +2711,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                 frames = perform_recording(INPUT_DEVICE_INDEX, default_rate)
                 if frames is not None:
                     ACTUAL_RATE = 16000
-        except:
+        except Exception:
             pass
 
     # If it still failed, try to find a fallback (only if not in manual override mode)
@@ -2710,11 +2720,11 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
         fallback_idx = find_device_index(SECONDARY_DEVICE_NAME)
         if fallback_idx is not None and fallback_idx != INPUT_DEVICE_INDEX:
             print(f"Primary device failed. Trying secondary: {SECONDARY_DEVICE_NAME} (index {fallback_idx})")
-            
+
             # Try secondary at standard rate
             frames = perform_recording(fallback_idx, RATE)
             ACTUAL_RATE = RATE
-            
+
             # If secondary standard rate fails, try its default rate
             if frames is None:
                 try:
@@ -2726,7 +2736,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
                         frames = perform_recording(fallback_idx, default_rate)
                         if frames is not None:
                             ACTUAL_RATE = default_rate
-                except:
+                except Exception:
                     pass
 
             if frames is not None:
@@ -2769,7 +2779,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
             with silence_stderr():
                 name = sd.query_devices(INPUT_DEVICE_INDEX)['name']
             LAST_USED_DEVICE_NAME = name
-    except:
+    except Exception:
         pass
 
     if not frames:
@@ -2785,7 +2795,8 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
 def countdown_timer():
     """Display countdown timer"""
     for i in range(RECORD_SECONDS, 0, -1):
-        if stop_recording.is_set(): break
+        if stop_recording.is_set():
+            break
         print(f'Recording: {i}s... (press space to stop)', end='\r')
         if stop_recording.wait(timeout=1.0):
             break
@@ -2808,7 +2819,8 @@ def check_for_stop_key():
 
     import select
     try:
-        import termios, tty
+        import termios
+        import tty
         old_settings = termios.tcgetattr(sys.stdin)
         tty.setcbreak(sys.stdin.fileno())
         while not stop_recording.is_set():
@@ -2819,14 +2831,14 @@ def check_for_stop_key():
                     stop_recording.set()
                     break
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-    except:
+    except Exception:
         pass
 
 def process_audio_stream(audio_data=None):
     """Process audio frames. If None, it's expected to be passed in."""
     if audio_data is None or len(audio_data) == 0:
         return "", 0
-        
+
     duration = len(audio_data) / ACTUAL_RATE
     if duration < 0.15: # Support short single-word utterances (0.2s - 0.5s)
         return "", 0
@@ -2834,7 +2846,7 @@ def process_audio_stream(audio_data=None):
     get_model(device=DEVICE)
 
     transcribe_start_time = time.time()
-    
+
     # Transcribe directly from numpy array (zero-copy flattening)
     try:
         if isinstance(audio_data, np.ndarray) and audio_data.dtype == np.float32 and audio_data.ndim == 1:
@@ -2845,9 +2857,9 @@ def process_audio_stream(audio_data=None):
     except Exception as e:
         print(f"Processing error: {e}")
         result = ""
-        
+
     transcribe_end_time = time.time()
-    
+
     return result, transcribe_end_time - transcribe_start_time
 
 def copy_text_to_clipboard(text):
@@ -2872,23 +2884,21 @@ def record_and_transcribe():
     """Record audio and transcribe it"""
     process_start_time = time.time()
     stop_recording.clear()
-    
+
     frames = record_audio_stream(interactive_mode=True)
-    
+
     # Transcribe using the optimized process_audio_stream
     result, transcribe_time = process_audio_stream(frames)
-    
+
     transcription = result.strip()
-    
+
     if transcription:
         # Copy to clipboard with retry mechanism
         max_retries = 3
-        copy_success = False
-        
+
         for attempt in range(max_retries):
             try:
                 if copy_text_to_clipboard(transcription):
-                    copy_success = True
                     print("Transcription copied to clipboard")
                     break
                 raise RuntimeError("clipboard backend returned failure")
@@ -2898,7 +2908,7 @@ def record_and_transcribe():
                     time.sleep(0.5)
                 else:
                     print(f"Failed to copy to clipboard after {max_retries} attempts: {e}")
-    
+
     print(f"Total time: {time.time() - process_start_time:.2f}s (Transcribe: {transcribe_time:.2f}s)")
     print(f"\nTranscription: {transcription}")
     return transcription
@@ -2913,7 +2923,8 @@ def getch():
             return sys.stdin.read(1)
 
     try:
-        import termios, tty
+        import termios
+        import tty
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         try:
@@ -2925,22 +2936,22 @@ def getch():
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch
-    except:
+    except Exception:
         return sys.stdin.read(1)
 
 def main():
     print("T2 Transcription Tool (Optimized)")
     print(f"Using device: {DEVICE}")
     load_audio_config()
-    
+
     # Preload model at startup
     preload_thread = preload_model(device=DEVICE)
-    
+
     if preload_thread.is_alive():
         print("Waiting for model...")
         preload_thread.join()
         print("Model ready!")
-        
+
     while True:
         try:
             print("> ", end="", flush=True)

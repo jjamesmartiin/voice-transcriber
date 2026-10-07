@@ -380,7 +380,7 @@ def process_verbal_retractions(text: str, text_lower: str | None = None) -> str:
     """
     if not text:
         return ""
-        
+
     if text_lower is None:
         text_lower = text.lower()
     has_0 = ("scratch" in text_lower or "strike" in text_lower or "never" in text_lower)
@@ -392,7 +392,7 @@ def process_verbal_retractions(text: str, text_lower: str | None = None) -> str:
     # 1. Handle "scratch that" tail deletion
     if has_0 and RETRACTION_REPLACEMENT_PATTERNS[0].search(cleaned):
         cleaned = RETRACTION_REPLACEMENT_PATTERNS[0].sub("", cleaned)
-    
+
     # 2. Handle verbal replacements ("X... actually Y", "X... I mean Y")
     if has_1 and RETRACTION_REPLACEMENT_PATTERNS[1].search(cleaned):
         def _replace_retraction(m):
@@ -401,7 +401,7 @@ def process_verbal_retractions(text: str, text_lower: str | None = None) -> str:
             if prep and not re.match(r"^(?:at|in|on|to|for|by|from|with|of|about)\b", target, re.I):
                 return f"{prep} {target}"
             return target
-            
+
         cleaned = RETRACTION_REPLACEMENT_PATTERNS[1].sub(_replace_retraction, cleaned)
     return cleaned.strip()
 
@@ -482,7 +482,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         word_count = len(text.split())
         # Dynamic scaling: allow extra time for longer paragraph CPU inference
         timeout_sec = max(base_timeout, 1.5 + word_count * 0.05)
-        
+
     model_name = os.environ.get("VT_SLM_MODEL", "")
     if not model_name:
         try:
@@ -521,7 +521,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
         "temperature": 0.0,
         "max_tokens": 150
     }
-    
+
     t0 = time.time()
     try:
         req = urllib.request.Request(
@@ -534,18 +534,18 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
             _SLM_OFFLINE_STREAK = 0
             clean_output = _sanitize_slm_output(text, res_data['choices'][0]['message']['content'])
             elapsed_ms = (time.time() - t0) * 1000
-            
+
             # Apply guardrail: reject refusal meta-chatter, text explosions, or word-overlap failures
             if _is_valid_speech_rewrite(text, clean_output):
                 print(f"🤖 [vLLM SLM Pass] Executed in {elapsed_ms:.1f}ms ({model_name}): '{text}' -> '{clean_output}'")
                 return clean_output
             else:
-                print(f"⚠️ [vLLM SLM Pass] Guardrail triggered (word-overlap or refusal failure): Bypassed -> Using ASR text")
+                print("⚠️ [vLLM SLM Pass] Guardrail triggered (word-overlap or refusal failure): Bypassed -> Using ASR text")
     except Exception as e:
         _SLM_LAST_OFFLINE_CHECK = time.time()
         _SLM_OFFLINE_STREAK += 1
         print(f"⚠️ [vLLM SLM Pass] Offline/Bypassed ({e}): Using ASR text")
-        
+
     return text
 
 def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: float = None) -> str:
@@ -557,13 +557,13 @@ def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: f
         return new_chunk or ""
     if not new_chunk:
         return prev_text
-        
+
     if os.environ.get("VT_ENABLE_SLM", "0") != "1":
         return f"{prev_text} {new_chunk}".strip()
 
     if timeout_sec is None:
         timeout_sec = float(os.environ.get("VT_SLM_TIMEOUT", "1.5"))
-        
+
     model_name = os.environ.get("VT_SLM_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
     payload = {
         "model": model_name,
@@ -580,7 +580,7 @@ def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: f
         "temperature": 0.0,
         "max_tokens": 200
     }
-    
+
     t0 = time.time()
     try:
         req = urllib.request.Request(
@@ -592,15 +592,15 @@ def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: f
             res_data = json.loads(response.read().decode('utf-8'))
             merged_output = _sanitize_slm_output(f"{prev_text} {new_chunk}", res_data['choices'][0]['message']['content'])
             elapsed_ms = (time.time() - t0) * 1000
-            
+
             if _is_valid_speech_rewrite(f"{prev_text} {new_chunk}", merged_output):
                 print(f"🤖 [vLLM Stream Merge] Executed in {elapsed_ms:.1f}ms: + '{new_chunk}' -> '{merged_output}'")
                 return merged_output
             else:
-                print(f"⚠️ [vLLM Stream Merge] Guardrail triggered: Using standard concat")
+                print("⚠️ [vLLM Stream Merge] Guardrail triggered: Using standard concat")
     except Exception as e:
         print(f"⚠️ [vLLM Stream Merge] Offline/Bypassed ({e}): Using standard concat")
-        
+
     return f"{prev_text} {new_chunk}".strip()
 
 def _preserve_i_casing(char: str, text: str = "", pos: int = 0) -> str:
@@ -1230,7 +1230,7 @@ _CARDINAL_BEFORE_GUARD = frozenset({
     "lot", "ps", "xbox", "series", "gen", "mark", "type", "class", "category",
     "tier", "round", "week", "sensor", "bank", "account", "speed",
     "usb", "hdmi", "pcie", "sata", "nvme", "displayport", "thunderbolt", "ethernet",
-    "pixel", "megapixel", "protocol", "frame", "wave", "layer", "phase", "draft",
+    "pixel", "megapixel", "protocol", "frame", "wave", "layer", "draft",
 })
 
 # Following tokens where digits are conventional (times, units, symbols).
@@ -2101,7 +2101,10 @@ def set_custom_dictionary(mapping: dict[str, str] | None) -> None:
         key = m.group(0).lower()
         return _CUSTOM_DICTIONARY.get(key, m.group(0))
 
-    _CUSTOM_DICT_REPLACER = lambda text: pattern.sub(_replace, text)
+    def _custom_dict_replacer(text):
+        return pattern.sub(_replace, text)
+
+    _CUSTOM_DICT_REPLACER = _custom_dict_replacer
 
 
 def get_custom_dictionary() -> dict[str, str]:
@@ -2135,7 +2138,7 @@ def load_custom_dictionary_from_file(
                 data = json.loads(content) if content.strip() else {}
         else:
             data = json.loads(content) if content.strip() else {}
-        
+
         file_mapping = {}
         file_rules = []
         if isinstance(data, dict):
@@ -2363,16 +2366,16 @@ def clean_speech_transcription(
 
     # Hot-reload dictionary if files were modified on disk (~1 us check)
     _check_and_reload_dictionary_if_changed()
-        
+
     cleaned = text
     cleaned_lower = text.lower()
-    
+
     # 0. Apply verbal edit self-correction pre-pass & hesitation filler removal
     new_cleaned = process_verbal_retractions(cleaned, cleaned_lower)
     if new_cleaned is not cleaned:
         cleaned = new_cleaned
         cleaned_lower = cleaned.lower()
-        
+
     if ("um" in cleaned_lower or "uh" in cleaned_lower or "ah" in cleaned_lower or
         " er" in cleaned_lower or "er " in cleaned_lower or cleaned_lower.startswith("er") or cleaned_lower.endswith("er")):
         if FILLER_WORDS_REGEX.search(cleaned):
@@ -2393,18 +2396,18 @@ def clean_speech_transcription(
     if "dressing" in cleaned_lower:
         cleaned = ADDRESSING_MISHEARINGS_REGEX.sub(r"\1 addressing", cleaned)
         cleaned_lower = cleaned.lower()
-    
+
     # 0. Apply optional vLLM / SLM rewrite pass (unless bypassed for intermediate streaming micro-chunks)
     if not skip_slm and os.environ.get("VT_ENABLE_SLM", "0") == "1":
         cleaned = process_slm_llm_rewrite(cleaned)
         cleaned_lower = cleaned.lower()
-    
+
     # 1. Hallucination and trailing muttering stripping
     if ("watching" in cleaned_lower or "subtitles" in cleaned_lower or "subscribe" in cleaned_lower or "==" in cleaned_lower):
         for pat in HALLUCINATION_PATTERNS:
             cleaned = pat.sub("", cleaned)
         cleaned_lower = cleaned.lower()
-        
+
     if ("oop" in cleaned_lower or "whoop" in cleaned_lower or "never" in cleaned_lower):
         if cleaned_lower.rstrip(" .?!,;:").endswith(("oops", "whoops", "oopsy", "whoopsy", "oop", "opps", "nevermind", "never mind")):
             while True:
@@ -2419,11 +2422,11 @@ def clean_speech_transcription(
         stripped_h = cleaned.strip(" .?!").lower()
         if stripped_h in ("you", "bye", "thank you", "thanks", "subtitles", "shh", "shhh", "ptl"):
             return ""
-    
+
     # If the text was reduced to only punctuation / whitespace, return empty
     if not cleaned.strip(".,!?;: \t\n\r"):
         return ""
-    
+
     # 2 & 3. Deduplicate repeated words across punctuation & direct filler stutters
     has_punct_cand, has_direct = _check_stutters(cleaned_lower)
     if has_punct_cand and any(p in cleaned for p in ".-"):
@@ -2432,7 +2435,7 @@ def clean_speech_transcription(
         cleaned = STUTTER_DIRECT_REGEX.sub(r"\1", cleaned)
     if "to" in cleaned_lower and ("into" in cleaned_lower or "onto" in cleaned_lower or "in to" in cleaned_lower or "on to" in cleaned_lower):
         cleaned = PREPOSITION_COMPOUND_STUTTER_REGEX.sub(lambda m: "into" if "into" in m.group(0).lower() else "onto", cleaned)
-    
+
     # 4-9. Sentence boundary & clause linking fixes
     if MID_SENTENCE_BOUNDARY_REGEX.search(cleaned):
         has_period = "." in cleaned
@@ -2445,7 +2448,7 @@ def clean_speech_transcription(
                 next_char = _preserve_i_casing(m.group(3), m.string, m.end())
                 return f"{prefix}{word}, {next_char}"
             cleaned = DISCOURSE_STARTERS_REGEX.sub(_fix_discourse, cleaned)
-        
+
         # 5. Dangling prepositions & determiners before period (e.g. "put a. period" -> "put a period")
         if DANGLING_WORDS_REGEX.search(cleaned):
             def _fix_dangling(m):
@@ -2453,26 +2456,26 @@ def clean_speech_transcription(
                 next_char = _preserve_i_casing(m.group(2), m.string, m.end())
                 return f"{w1} {next_char}"
             cleaned = DANGLING_WORDS_REGEX.sub(_fix_dangling, cleaned)
-        
+
         if has_period:
             # 6. Incomplete linking verbs followed by lowercase continuation (e.g. "thing was. something")
             if LINKING_VERB_LOWER_REGEX.search(cleaned):
                 cleaned = LINKING_VERB_LOWER_REGEX.sub(r"\1 \2", cleaned)
-            
+
             # 7. Coordinating conjunctions after period (e.g. "commit. and force push" -> "commit, and force push")
             if ("and" in cleaned_lower or "or" in cleaned_lower or "but" in cleaned_lower or
                 "so" in cleaned_lower or "yet" in cleaned_lower or "nor" in cleaned_lower):
                 cleaned = COORD_CONJUNCTIONS_REGEX.sub(lambda m: f", {m.group(1).lower()}", cleaned)
-            
+
             # 8. Subordinating conjunctions after period (e.g. ". because", ". which")
             if ("because" in cleaned_lower or "which" in cleaned_lower or "that" in cleaned_lower or
                 "though" in cleaned_lower or "although" in cleaned_lower):
                 cleaned = SUBORD_CONJUNCTIONS_REGEX.sub(lambda m: f" {m.group(1).lower()}", cleaned)
-            
+
             # 9. General lowercase continuation after period (e.g. ". something" -> " something")
             if LOWERCASE_AFTER_PERIOD_REGEX.search(cleaned):
                 cleaned = LOWERCASE_AFTER_PERIOD_REGEX.sub(r" \1", cleaned)
-    
+
     # 10. Clean up duplicate punctuation and normalize spacing
     if ",," in cleaned:
         cleaned = COMMA_DUP_REGEX.sub(",", cleaned)
@@ -2500,14 +2503,14 @@ def clean_speech_transcription(
             cleaned = STANDALONE_I_REGEX.sub("I", cleaned)
         if "i'" in cleaned:
             cleaned = CONTRACTION_I_REGEX.sub(r"I\1", cleaned)
-    
+
     # 12. Normalize mid-sentence random capitalizations
     cleaned = normalize_mid_sentence_casing(cleaned)
-    
+
     # 13. Scrub mid-phrase spurious question marks
     if "?" in cleaned:
         cleaned = MID_PHRASE_QUESTION_MARK_REGEX.sub(r"\1 \2", cleaned)
-    
+
     # 13c. Apply legacy homophone repair patterns if configured
     if HOMOPHONE_REPAIR_PATTERNS:
         for pat, repl in HOMOPHONE_REPAIR_PATTERNS:
@@ -2535,7 +2538,7 @@ def clean_speech_transcription(
     cleaned = cleaned.strip()
     if not cleaned or not cleaned.strip(".,!?;: \t\n\r"):
         return ""
-        
+
     # 14. Ensure complete statement utterances end with terminal punctuation
     eff_punc_mode = (punctuation_mode or _PUNCTUATION_MODE or "full").strip().lower().replace("-", "_")
     if not is_intermediate and eff_punc_mode in ("default", "full", "standard"):
@@ -2548,5 +2551,5 @@ def clean_speech_transcription(
     # 15. Apply punctuation mode formatting (if not intermediate chunk)
     if not is_intermediate:
         cleaned = apply_punctuation_mode(cleaned, mode=punctuation_mode)
-        
+
     return cleaned

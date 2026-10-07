@@ -6,7 +6,6 @@ and speech energy, transcribing chunks concurrently in the background.
 
 import os
 import sys
-import time
 import queue
 import threading
 import re
@@ -126,7 +125,7 @@ def deduplicate_text_overlap(prev_text: str, new_text: str, has_speech_overlap: 
 
         # Shared root morpheme suffix >= 5 chars ('autoregressive' / 'progressive' -> 'gressive')
         common_suf = 0
-        for c1, c2 in zip(reversed(w_prev), reversed(w_new)):
+        for c1, c2 in zip(reversed(w_prev), reversed(w_new), strict=False):
             if c1 == c2:
                 common_suf += 1
             else:
@@ -167,7 +166,7 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
     """
     if audio_pcm is None or len(audio_pcm) == 0:
         return audio_pcm
-        
+
     if isinstance(audio_pcm, np.ndarray) and audio_pcm.dtype == np.float32 and audio_pcm.ndim == 1:
         flat = audio_pcm
     else:
@@ -176,32 +175,32 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
     frame_size = int(frame_len_ms * sample_rate / 1000)
     if frame_size <= 0 or n < frame_size:
         return flat
-        
+
     cushion_size = int(min_speech_cushion_ms * sample_rate / 1000)
     decayed_thresh_sq = (silence_thresh * 0.35) ** 2
     silence_thresh_sq = silence_thresh * silence_thresh
     peak_thresh = silence_thresh * 2.0
-    
+
     # Vectorized 2D frame evaluation
     num_frames = (n - 1) // frame_size
     if num_frames <= 0:
         return flat
-        
+
     slice_len = num_frames * frame_size
     # frames_2d shape: (num_frames, frame_size), covering contiguous samples [n - slice_len : n]
     frames_2d = flat[n - slice_len : n].reshape(num_frames, frame_size)
-    
+
     # 1. RMS Energy calculation (mean of squares using vector SIMD)
     mean_sq = np.einsum('ij,ij->i', frames_2d, frames_2d) / frame_size
-    
+
     # 2. Peak calculation (fast per-frame max/min)
     peak = np.maximum(np.max(frames_2d, axis=1), -np.min(frames_2d, axis=1))
-    
+
     # Fast path: detect frames with definite speech energy (high RMS or peak)
     high_energy = (mean_sq >= silence_thresh_sq) | (peak >= peak_thresh)
     high_indices = np.nonzero(high_energy)[0]
     last_frame_j = high_indices[-1] if len(high_indices) > 0 else -1
-    
+
     # Check trailing candidate frames after last_frame_j for quiet unvoiced consonants via ZCR
     if last_frame_j < num_frames - 1:
         start_idx = last_frame_j + 1
@@ -222,7 +221,7 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
         last_speech_idx = min(n, i + frame_size + cushion_size)
         if last_speech_idx < n:
             return flat[:last_speech_idx]
-            
+
     return flat
 
 class StreamingMicroBatcher:
@@ -230,7 +229,7 @@ class StreamingMicroBatcher:
         self.sample_rate = sample_rate
         self.mode = mode or os.environ.get('VT_MICRO_BATCHING', 'auto').lower()
         self.tui = tui
-        
+
         # Configure thresholds based on mode
         if self.mode == 'always' or self.mode == '1' or self.mode == 'true':
             min_chunk_sec = 3.0
@@ -239,26 +238,26 @@ class StreamingMicroBatcher:
             # Disabled: large limit so it never triggers background chunks
             min_chunk_sec = 999999.0
             max_chunk_sec = 999999.0
-            
+
         self.min_chunk_len = int(min_chunk_sec * sample_rate)
         self.max_chunk_len = int(max_chunk_sec * sample_rate)
         self.silence_thresh = silence_thresh
         self.silence_thresh_sq = silence_thresh * silence_thresh
         self.min_silence_len = int(min_silence_sec * sample_rate)
         self.overlap_len = int(overlap_sec * sample_rate)
-        
+
         self.audio_buffer = []
         self.total_samples = 0
         self.silence_samples = 0
         self.next_chunk_idx = 0
-        
+
         self.chunk_queue = queue.Queue()
         self.results_lock = threading.Lock()
         self.transcribed_chunks = []
         self.accumulated_text = ''
         self.worker_thread = None
         self.running = False
-        
+
     def start(self):
         """Start the background worker"""
         self.audio_buffer = []
@@ -268,10 +267,10 @@ class StreamingMicroBatcher:
         self.transcribed_chunks = []
         self.next_chunk_idx = 0
         self.running = True
-        
+
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.worker_thread.start()
-        
+
     def _worker_loop(self):
         while self.running or not self.chunk_queue.empty():
             chunk_data = None
@@ -280,10 +279,10 @@ class StreamingMicroBatcher:
                     chunk_data = self.chunk_queue.get(timeout=0.2)
                 except queue.Empty:
                     continue
-                    
+
                 if chunk_data is None:
                     break
-                    
+
                 if len(chunk_data) == 5:
                     chunk_index, audio_chunk, is_tail, is_forced, has_overlap = chunk_data
                 elif len(chunk_data) == 3:
@@ -292,7 +291,7 @@ class StreamingMicroBatcher:
                 else:
                     chunk_index, audio_chunk = chunk_data[:2]
                     is_tail, is_forced, has_overlap = False, False, True
-                
+
                 # Check energy gate: is this chunk purely silence/background noise?
                 if isinstance(audio_chunk, np.ndarray) and audio_chunk.dtype == np.float32 and audio_chunk.ndim == 1:
                     flat = audio_chunk
@@ -319,7 +318,7 @@ class StreamingMicroBatcher:
                             text = clean_hallucinations(text.strip() if text else '', skip_slm=True, is_intermediate=is_inter)
                     if is_inter and is_forced and text:
                         text = text.rstrip('. \t\r\n')
-                
+
                 with self.results_lock:
                     self.transcribed_chunks.append((chunk_index, text, has_overlap))
             except Exception as e:
@@ -328,14 +327,14 @@ class StreamingMicroBatcher:
                 if chunk_data is not None:
                     try:
                         self.chunk_queue.task_done()
-                    except:
+                    except Exception:
                         pass
 
     def feed_audio(self, pcm_chunk):
         """Feed a live incoming block of PCM audio (float32, 16kHz)"""
         if not self.running or pcm_chunk is None:
             return
-            
+
         if isinstance(pcm_chunk, np.ndarray) and pcm_chunk.dtype == np.float32 and pcm_chunk.ndim == 1:
             flat = pcm_chunk
         else:
@@ -346,20 +345,20 @@ class StreamingMicroBatcher:
 
         self.audio_buffer.append(flat)
         self.total_samples += n_samples
-        
+
         # Calculate RMS energy of this block using SIMD dot product
         sum_sq = float(np.dot(flat, flat))
         mean_sq = sum_sq / n_samples
-        
+
         if self.tui:
             rms = np.sqrt(mean_sq)
             self.tui.update_vu_level(float(rms))
-            
+
         if mean_sq < self.silence_thresh_sq:
             self.silence_samples += n_samples
         else:
             self.silence_samples = 0
-            
+
         # Check if we should dispatch a micro-batch chunk
         if self.total_samples >= self.min_chunk_len and self.silence_samples >= self.min_silence_len:
             # The cut already sits in a detected pause. Re-adding the fixed overlap
@@ -375,12 +374,12 @@ class StreamingMicroBatcher:
     def _dispatch_current_chunk(self, keep_overlap=False, is_tail=False, overlap_len=None, is_forced=False):
         if not self.audio_buffer:
             return
-            
+
         if len(self.audio_buffer) == 1:
             full_chunk = self.audio_buffer[0]
         else:
             full_chunk = np.concatenate(self.audio_buffer)
-        
+
         # Trim dead silence from trailing tail chunk so the ASR decoder never sees room silence
         if is_tail:
             full_chunk = trim_trailing_silence(full_chunk, sample_rate=self.sample_rate)
@@ -415,10 +414,10 @@ class StreamingMicroBatcher:
                 self.next_chunk_idx += 1
                 self.chunk_queue.put((chunk_idx, full_chunk, False, True, False))
                 return
-            
+
         chunk_idx = self.next_chunk_idx
         self.next_chunk_idx += 1
-        
+
         if keep_overlap:
             eff_overlap = self.overlap_len if overlap_len is None else min(self.overlap_len, overlap_len)
         else:
@@ -436,7 +435,7 @@ class StreamingMicroBatcher:
             self.audio_buffer = []
             self.total_samples = 0
             has_speech_overlap = False
-            
+
         self.chunk_queue.put((chunk_idx, full_chunk, False, False, has_speech_overlap))
         self.silence_samples = 0
 
@@ -448,19 +447,19 @@ class StreamingMicroBatcher:
         # Dispatch any trailing audio in buffer
         if self.audio_buffer:
             self._dispatch_current_chunk(keep_overlap=False, is_tail=True)
-            
+
         self.running = False
-        
+
         # Put sentinel None to unblock worker loop
         self.chunk_queue.put(None)
-        
+
         if self.worker_thread and self.worker_thread.is_alive():
             self.worker_thread.join(timeout=25.0)
-            
+
         with self.results_lock:
             # Sort by chunk index and stitch full transcript with overlap deduplication
             self.transcribed_chunks.sort(key=lambda x: x[0])
-            
+
             raw_full = ''
             for item in self.transcribed_chunks:
                 if len(item) == 3:
@@ -471,11 +470,11 @@ class StreamingMicroBatcher:
                 if not t:
                     continue
                 raw_full = deduplicate_text_overlap(raw_full, t, has_speech_overlap=has_overlap)
-                
+
             raw_full = re.sub(r"\s+([.,!?;:])", r"\1", raw_full)
             raw_full = re.sub(r"([.!?])\s*\1+", r"\1", raw_full)
-            
+
             # Execute final cleaning pass (skip_slm=True for instant ASR, skip_slm=False for vLLM SLM)
             full_text = clean_hallucinations(raw_full, skip_slm=skip_slm, is_intermediate=False)
-            
+
         return full_text

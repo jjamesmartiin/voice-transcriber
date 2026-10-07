@@ -37,7 +37,7 @@ def detect_system_theme_color():
     env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
     if env_theme in COLOR_PALETTES and env_theme != "auto":
         return env_theme
-        
+
     accent = os.environ.get("ACCENT_COLOR", "").strip().lower()
     if accent in COLOR_PALETTES:
         return accent
@@ -51,7 +51,7 @@ def detect_system_theme_color():
         return "blue"
     elif "alacritty" in term_prog:
         return "yellow"
-        
+
     return "green"
 
 
@@ -97,7 +97,7 @@ class VoiceTranscriberTUI:
         self.console = Console(file=console_text.EncodingSafeStream())
         self.lock = threading.Lock()
         self.ui_theme = ui_theme
-        
+
         # State tracking for prompt line
         self.state = "READY"  # READY, RECORDING, PROCESSING, REWRITING, CONFIG
         self.sub_state_text = ""
@@ -105,10 +105,10 @@ class VoiceTranscriberTUI:
         self.elapsed_time = 0.0
         self.vu_level = 0.0
         self.spinner_index = 0
-        
+
         # Incremental transcription counter
         self.transcription_count = 0
-        
+
         # Audio & system metadata
         self.active_device = "Detecting..."
         self.secondary_device = None
@@ -127,7 +127,7 @@ class VoiceTranscriberTUI:
         self.copy_to_clipboard = True
         self.sound_theme = "proximity"
         self.last_transcription = ""
-        
+
         # Callbacks for terminal keypresses
         self.on_toggle_record = None
         self.on_change_device = None
@@ -153,7 +153,7 @@ class VoiceTranscriberTUI:
         self.on_reset_terminal = None
         self.on_rescan_mics = None
         self.on_quit = None
-        
+
         # Live display control
         self.live = None
         self.running = False
@@ -190,7 +190,7 @@ class VoiceTranscriberTUI:
                 next_idx = 1
             self.ui_theme = COLOR_PALETTES[next_idx]
             new_theme = self.ui_theme
-        
+
         effective = self.get_effective_color()
         self.print_event("THEME SWITCHED", f"UI Color Theme set to '{new_theme}' (Active: {effective.upper()})", level="info")
         return new_theme
@@ -210,13 +210,13 @@ class VoiceTranscriberTUI:
             self.active_device = device_name or "Default Microphone"
         if self.live and self.running:
             self.live.update(self._render_status_bar())
-            
+
     def set_secondary_device(self, device_name):
         with self.lock:
             self.secondary_device = device_name
         if self.live and self.running:
             self.live.update(self._render_status_bar())
-            
+
     def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None):
         with self.lock:
             if backend is not None:
@@ -286,7 +286,7 @@ class VoiceTranscriberTUI:
         color = self.get_effective_color()
         self.spinner_index = (self.spinner_index + 1) % len(SPINNER_FRAMES)
         spinner = SPINNER_FRAMES[self.spinner_index]
-        
+
         if self.start_time > 0:
             self.elapsed_time = time.time() - self.start_time
 
@@ -296,7 +296,7 @@ class VoiceTranscriberTUI:
         if self.state == "READY":
             prompt.append("ready ", style=f"bold {color}")
             prompt.append("│ ", style="dim white")
-            
+
             mic_short = self.active_device
             if len(mic_short) > 18:
                 mic_short = mic_short[:15] + "..."
@@ -304,7 +304,7 @@ class VoiceTranscriberTUI:
             prompt.append("│ ", style="dim white")
             prompt.append(f"model: {self.model_backend.lower()} ", style="cyan")
             prompt.append("│ ", style="dim white")
-            
+
             if self.is_muted:
                 prompt.append("sound: off ", style="dim red")
             else:
@@ -376,14 +376,14 @@ class VoiceTranscriberTUI:
             prompt.append(" ", style="reset")
             prompt.append(f"[{self.elapsed_time:04.1f}s] ", style="bold yellow")
             prompt.append("│ ", style="dim white")
-            
+
             # Dynamic VU bar
             bar_len = 16
             filled_len = int(min(1.0, self.vu_level * 3.5) * bar_len)
             filled_len = max(1 if self.vu_level > 0.01 else 0, filled_len)
             empty_len = bar_len - filled_len
             vu_str = "█" * filled_len + "░" * empty_len
-            
+
             if filled_len > 12:
                 prompt.append(vu_str[:9], style="green")
                 prompt.append(vu_str[9:13], style="yellow")
@@ -436,7 +436,7 @@ class VoiceTranscriberTUI:
             timestamp = datetime.now().strftime("%H:%M:%S")
             status_str = "Copied & Typed" if typed_success else ("Copied to Clipboard" if copy_success else "Clipboard Error")
             status_color = "green" if typed_success else ("cyan" if copy_success else "red")
-            
+
             top_rule = Text()
             top_rule.append("─" * 4, style=f"bold {color}")
             top_rule.append(f" ❯ #{count} ", style=f"bold {color}")
@@ -506,7 +506,7 @@ class VoiceTranscriberTUI:
             event_color = style_map.get(level, color)
             timestamp = datetime.now().strftime("%H:%M:%S")
             w = self._get_term_width()
-            
+
             top = Text()
             top.append("─" * 4, style=f"bold {event_color}")
             top.append(f" ⚙️ {title} ", style=f"bold {event_color}")
@@ -544,7 +544,7 @@ class VoiceTranscriberTUI:
         """Start the live refreshing TUI with prompt line"""
         if self.running:
             return
-        
+
         self.running = True
         self.print_header()
 
@@ -567,7 +567,7 @@ class VoiceTranscriberTUI:
             except Exception:
                 pass
             self.live = None
-            
+
         self._restore_terminal()
 
     def _start_stdin_listener(self):
@@ -583,7 +583,7 @@ class VoiceTranscriberTUI:
                 self.old_termios = termios.tcgetattr(fd)
                 tty.setcbreak(fd)
                 atexit.register(self._restore_terminal)
-                
+
                 self.stdin_thread = threading.Thread(target=self._stdin_loop, daemon=True)
                 self.stdin_thread.start()
         except Exception:

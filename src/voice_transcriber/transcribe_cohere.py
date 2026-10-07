@@ -65,13 +65,13 @@ def _configure_torch_runtime(device="cpu"):
             except RuntimeError:
                 pass
             _interop_configured = True
-            
+
         if hasattr(torch, "set_float32_matmul_precision"):
             try:
                 torch.set_float32_matmul_precision("high")
             except Exception:
                 pass
-        
+
         env_threads = os.environ.get("VT_CPU_THREADS", "").strip()
         if env_threads.isdigit():
             target_threads = max(1, min(int(env_threads), os.cpu_count() or 8))
@@ -98,7 +98,7 @@ def _configure_torch_runtime(device="cpu"):
                 target_threads = max(1, min(cpu_cnt, phys_cores or 8))
             else:
                 target_threads = max(1, min(cpu_cnt, 8))
-            
+
         if _cached_cpu_threads != target_threads:
             if hasattr(torch, "set_num_threads"):
                 torch.set_num_threads(target_threads)
@@ -170,10 +170,9 @@ def _optimize_cohere_runtime(model, processor):
         model.build_prompt = cached_build_prompt
 
     # 2. Tokenizer output memoization for repetitive prompts
-    if hasattr(processor, "tokenizer") and hasattr(processor, "__call__"):
+    if hasattr(processor, "tokenizer") and callable(processor):
         token_cache = {}
-        orig_processor_call = processor.__call__
-        
+
         def cached_processor_call(audio=None, text=None, sampling_rate=None, return_tensors=None, **kwargs):
             if audio is None:
                 raise ValueError("audio is required for CohereAsrProcessor.")
@@ -185,7 +184,7 @@ def _optimize_cohere_runtime(model, processor):
                     cache_key = (text, return_tensors, add_special_tokens)
                 elif isinstance(text, (list, tuple)) and all(isinstance(t, str) for t in text):
                     cache_key = (tuple(text), return_tensors, add_special_tokens)
-                
+
                 if cache_key is not None and cache_key in token_cache:
                     cached = token_cache[cache_key]
                     result["input_ids"] = cached["input_ids"].clone()
@@ -319,7 +318,7 @@ def _load_model_once(target_id, dtype, local_files_only, device):
         trust_remote_code=True,
         local_files_only=local_files_only,
     ).to(device)
-    
+
     # Put in evaluation mode and disable gradient computation
     model.eval()
     for param in model.parameters():
@@ -409,24 +408,24 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
 
 def get_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
     global _model, _processor
-    
+
     with _model_lock:
         if _model is None:
             start_time = time.time()
             _model, _processor = load_model(model_id, revision, device)
             elapsed = time.time() - start_time
             logger.info(f"Model loaded and ready in {elapsed:.2f} seconds")
-    
+
     return _model, _processor
 
 def preload_model(device="cpu"):
     def _preload():
         try:
             model, processor = get_model(device=device)
-            
+
             logger.info("Warming up model...")
             warmup_audio = np.zeros(int(16000 * 0.1), dtype=np.float32)
-            
+
             with torch.inference_mode():
                 model.transcribe(
                     processor=processor,
@@ -437,7 +436,7 @@ def preload_model(device="cpu"):
             logger.info("Warmup complete! Ready for instant transcription.")
         except Exception as e:
             logger.error(f"Preload/Warmup error: {e}")
-    
+
     thread = threading.Thread(target=_preload)
     thread.daemon = True
     thread.start()
@@ -457,15 +456,15 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
             eff_language, ", ".join(SUPPORTED_LANGUAGES)
         )
         eff_language = "en"
-        
+
     try:
         model, processor = get_model(device=device)
     except Exception as e:
         return f"Error loading model: {e}"
-    
+
     _configure_torch_runtime(device)
     start_time = time.time()
-    
+
     try:
         with torch.inference_mode():
             if audio_data is not None:
@@ -476,7 +475,7 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
                         audio_data = audio_data.astype(np.float32, copy=False)
                     if audio_data.ndim > 1:
                         audio_data = audio_data.ravel()
-                
+
                 results = model.transcribe(
                     processor=processor,
                     audio_arrays=[audio_data],
@@ -489,21 +488,21 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
                     audio_files=[audio_path],
                     language=eff_language
                 )
-            
+
             if isinstance(results, list):
                 transcription = " ".join(results)
             else:
                 transcription = str(results)
-            
+
             transcription = clean_speech_transcription(transcription, skip_slm=True)
-            
+
     except Exception as e:
         print(f"Transcription error: {e}")
         transcription = ""
-    
+
     elapsed = time.time() - start_time
     print(f"Transcription completed in {elapsed:.2f} seconds")
-    
+
     return transcription.strip()
 
 def unload_model():

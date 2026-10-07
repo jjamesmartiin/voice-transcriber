@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 import sys
 from typing import Any, Dict, List, Optional, Tuple
@@ -331,7 +330,7 @@ def add_entry(phrase: str, replacement: str, path: Optional[str | Path] = None, 
 def remove_entry(phrase: str, path: Optional[str | Path] = None, local: Optional[bool] = None) -> bool:
     """Remove an entry from the custom dictionary."""
     clean_key = " ".join(str(phrase).strip().split()).lower()
-    
+
     if path:
         target_path = Path(path)
         current = load_dictionary(target_path)

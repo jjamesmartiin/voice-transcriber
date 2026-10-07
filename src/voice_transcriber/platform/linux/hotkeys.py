@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import glob
 import logging
-import os
 import select
-import socket
 import threading
 import time
 

@@ -159,7 +159,7 @@ class RatatuiTui:
         try:
             self._conn, _ = self._server.accept()
         except socket.timeout:
-            raise RuntimeError("vt-tui did not connect within 10s")
+            raise RuntimeError("vt-tui did not connect within 10s") from None
         finally:
             self._server.settimeout(None)
 

@@ -28,7 +28,6 @@ _SRC_DIR = os.path.dirname(
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
-import t2  # noqa: E402
 from t2 import (  # noqa: E402
     preload_model,
     DEVICE,

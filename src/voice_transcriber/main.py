@@ -3,7 +3,6 @@
 Simple Voice Transcriber with Alt+Shift+K shortcut
 Enhanced with Wayland-compatible global hotkeys using evdev+uinput
 """
-import numpy as np
 import logging
 import threading
 import time
@@ -31,9 +30,8 @@ from tui import VoiceTranscriberTUI
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import t2
 from t2 import (
-    preload_model, DEVICE, record_audio_stream, process_audio_stream, 
-    stop_recording, load_audio_config, select_audio_device, 
-    reset_terminal, get_active_device_name, IS_MUTED
+    preload_model, DEVICE, record_audio_stream, process_audio_stream,
+    stop_recording, load_audio_config, get_active_device_name
 )
 
 logger = logging.getLogger(__name__)
@@ -56,7 +54,6 @@ def create_tui():
             logger.info("ratatui frontend unavailable (VT_TUI_BIN=%r)", binary)
         except Exception as e:
             logger.warning("ratatui frontend unavailable, using Rich TUI: %s", e)
-    from tui import VoiceTranscriberTUI
     return VoiceTranscriberTUI()
 
 def copy_to_clipboard_crossplatform(text, sink=None):
@@ -103,7 +100,7 @@ class SimpleVoiceTranscriber:
         self.lifetime_transcriptions = 0
         self.lifetime_sessions = 0
         self._refresh_lifetime_stats(record_session=True)
-        
+
         # Initialize the TUI frontend (ratatui if available, else Rich).
         self.tui = create_tui()
         self._wire_tui_callbacks()
@@ -112,12 +109,12 @@ class SimpleVoiceTranscriber:
         self.platform = hal.detect_platform()
         self.clipboard_sink = hal.get_clipboard_sink(self.platform)
         self.audio_cues = hal.get_audio_cue_player(self.platform)
-        
+
         # Load saved audio device configuration FIRST before starting TUI live display
         load_audio_config()
         self._sync_tui_state()
         self._safe_tui_start()
-        
+
         # Preload model in background with live loading spinner animation
         from t2 import MODEL_BACKEND
         self.tui.update_state("PROCESSING", f"Loading {MODEL_BACKEND.capitalize()} model weights...")
@@ -130,7 +127,7 @@ class SimpleVoiceTranscriber:
         self._model_ready_event = threading.Event()
         self.model_load_error = None
         self._load_started_at = time.time()
-        
+
         # Proactively check microphone health on startup. A *muted* default
         # source lands here too: the device is present, opens fine, and records
         # silence, so reporting it as missing hardware would be a lie.
@@ -139,17 +136,17 @@ class SimpleVoiceTranscriber:
             platform_name = self.platform.upper()
             warn_msg = f"⚠️ MICROPHONE PROBLEM DETECTED ({platform_name})!\n" + "\n".join([f" • {issue}" for issue in mic_issues])
             self.tui.print_warning("MICROPHONE WARNING", warn_msg)
-        
+
         # Initialize visual notification (platform-appropriate backend)
         self.visual_notification = hal.get_visual_notification(
             app_name="Voice Transcriber", tui=self.tui
         )
         self.visual_notification.set_active_device(get_active_device_name())
-        
+
         # State tracking for SLM On-Demand Quick-Tap retro-polishing
         self.last_transcription = ""
         self.last_finish_time = 0.0
-        
+
         # Surface first-run model-download progress (GitHub release assets) in the TUI.
         try:
             import model_download
@@ -782,7 +779,7 @@ class SimpleVoiceTranscriber:
             self.visual_notification.cleanup()
         if hasattr(self, 'hotkey_system') and self.hotkey_system:
             self.hotkey_system.cleanup()
-        
+
     def init_hotkeys(self):
         """Initialize the global hotkey system via the HAL."""
         import t2
@@ -794,7 +791,7 @@ class SimpleVoiceTranscriber:
                 callback_stop=self.stop_recording,
                 binds=getattr(t2, "HOTKEY_BINDS", None),
             )
-            
+
             if self.hotkey_system.devices:
                 logger.debug("Global hotkey system initialized")
                 theme = getattr(t2, 'SOUND_THEME', None)
@@ -814,7 +811,7 @@ class SimpleVoiceTranscriber:
             else:
                 logger.error("Failed to initialize global hotkey system")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error initializing hotkeys: {e}")
             return False
@@ -823,7 +820,7 @@ class SimpleVoiceTranscriber:
         """Start recording audio"""
         if self.recording:
             return
-            
+
         # NEVER block on the model here: audio capture is independent of the ASR
         # weights. If the model is still loading (slow first load, flaky network),
         # recording starts right away and transcription waits for the load in a
@@ -837,20 +834,20 @@ class SimpleVoiceTranscriber:
         self.start_time = time.time()
         stop_recording.clear()
         self.audio_frames = []
-        
+
         # Start streaming micro-batcher
         from micro_batcher import StreamingMicroBatcher
         self.micro_batcher = StreamingMicroBatcher(sample_rate=16000, tui=self.tui)
         self.micro_batcher.start()
-        
+
         # Start recording in background thread IMMEDIATELY
         self.record_thread = threading.Thread(target=self.record_audio)
         self.record_thread.daemon = True
         self.record_thread.start()
-        
+
         # Update notification
         self.visual_notification.show_recording()
-        
+
         # Play the platform start earcon (WSL forwards to the Windows host).
         try:
             if not t2.IS_MUTED:
@@ -862,12 +859,12 @@ class SimpleVoiceTranscriber:
         """Stop recording and start processing"""
         if not self.recording:
             return
-            
+
         self.release_time = time.time()
         self.recording = False
         self.copy_to_clipboard = copy_to_clipboard
         stop_recording.set()
-        
+
         # Start processing in a separate thread, joining the recording thread
         # there so the hotkey monitoring loop is never blocked.
         def _process_worker():
@@ -907,16 +904,16 @@ class SimpleVoiceTranscriber:
             # Final safety pass: strip any punctuation/quote artifacts the SLM may have added
             polished = clean_speech_transcription(polished, skip_slm=True).strip()
             slm_elapsed = (time.time() - t0_slm) * 1000
-            
+
             if polished and polished != last_text:
                 print(f"🤖 [vLLM SLM On-Demand Polish] Executed in {slm_elapsed:.1f}ms: '{last_text}' -> '{polished}'")
                 self.last_transcription = polished
                 self.last_finish_time = time.time()
-                
+
                 # Hide processing notification immediately before queueing clipboard
                 try:
                     self.visual_notification.hide_notification()
-                except Exception as e:
+                except Exception:
                     pass
 
                 def finalize_slm():
@@ -928,13 +925,13 @@ class SimpleVoiceTranscriber:
                             rec_duration=audio_rec_duration,
                             proc_time=(slm_elapsed / 1000.0)
                         )
-                
+
                 # Spawn background thread to queue up clipboard copy and notification
                 threading.Thread(target=finalize_slm, daemon=True).start()
-                
+
                 return
             else:
-                print(f"⚠️ [vLLM SLM On-Demand Polish] No changes made or guardrail triggered: Clipboard preserved.")
+                print("⚠️ [vLLM SLM On-Demand Polish] No changes made or guardrail triggered: Clipboard preserved.")
                 return
 
         micro_batcher = getattr(self, 'micro_batcher', None)
@@ -944,17 +941,17 @@ class SimpleVoiceTranscriber:
                 self.visual_notification.hide_notification()
             except Exception as e:
                 logger.warning(f"Visual notification error: {e}")
-                
+
             if rec_duration < 0.3:
                 pass
             else:
                 logger.info("No audio recorded")
                 self.offer_device_change()
             return
-            
+
         logger.info("Processing recording...")
         self.visual_notification.show_processing()
-        
+
         try:
             # Wait for the model on this background thread ONLY — never on the UI
             # or hotkey threads. If the load ultimately fails, report it clearly
@@ -979,11 +976,11 @@ class SimpleVoiceTranscriber:
                 from post_processor import clean_speech_transcription
                 transcription = clean_speech_transcription(result.strip(), skip_slm=True)
             proc_time = time.time() - t0_proc
-            
+
             # Explicitly free the audio data memory after processing
             del self.audio_frames
             self.audio_frames = []
-            
+
             if transcription:
                 import t2
                 effective_mode = getattr(t2, 'OUTPUT_MODE', 'clipboard')
@@ -1022,10 +1019,10 @@ class SimpleVoiceTranscriber:
                         had_modifiers = bool(self.hotkey_system and self.hotkey_system.are_modifiers_pressed())
                         while self.hotkey_system and self.hotkey_system.are_modifiers_pressed() and (time.time() - start_wait < timeout):
                             time.sleep(0.01 if is_fast else 0.02)
-                        
+
                         if had_modifiers:
                             time.sleep(0.01 if is_fast else 0.05)
-                        
+
                         add_space = getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True)
                         text_to_type = (transcription + ' ') if add_space else transcription
                         if self.hotkey_system and self.hotkey_system.type_text(text_to_type, fast=is_fast):
@@ -1036,21 +1033,21 @@ class SimpleVoiceTranscriber:
                     except Exception as e:
                         logger.error(f"Error typing transcription: {e}")
                         logger.warning("Typing failed, but it's available in your clipboard")
-                        
+
                 # Hide processing notification immediately so it doesn't linger while queued
                 try:
                     self.visual_notification.hide_notification()
                 except Exception as e:
                     logger.warning(f"Visual notification error: {e}")
-                    
+
                 def finalize_transcription():
                     # This blocking call queues up the copy until GNOME shell releases focus
                     copy_success = copy_to_clipboard_crossplatform(transcription, self.clipboard_sink)
-                    
+
                     if copy_success:
                         logger.info("Copied transcription to clipboard (%d chars)", len(transcription))
                         logger.debug("Copied text: %s", transcription)
-                        
+
                         # Show completion notification only after clipboard successfully copies
                         try:
                             post_release_latency = time.time() - getattr(self, 'release_time', time.time())
@@ -1065,7 +1062,7 @@ class SimpleVoiceTranscriber:
                             )
                         except Exception as e:
                             logger.warning(f"Visual notification error: {e}")
-                            
+
                         # Play the platform completion earcon.
                         try:
                             if not getattr(t2, 'IS_MUTED', False):
@@ -1077,28 +1074,28 @@ class SimpleVoiceTranscriber:
 
                 # Spawn background thread to wait for clipboard access
                 threading.Thread(target=finalize_transcription, daemon=True).start()
-                
+
             else:
                 # Hide processing notification
                 try:
                     self.visual_notification.hide_notification()
                 except Exception as e:
                     logger.warning(f"Visual notification error: {e}")
-                        
+
                 logger.info("No speech detected")
-                
+
                 # Offer to change audio device
                 self.offer_device_change()
-                
+
         except Exception as e:
             # Hide processing notification on error
             try:
                 self.visual_notification.hide_notification()
             except Exception as e2:
                 logger.warning(f"Visual notification error: {e2}")
-            
+
             logger.error(f"Transcription error: {e}")
-            
+
             # Also offer device change on error
             self.offer_device_change()
 
@@ -1304,7 +1301,7 @@ class SimpleVoiceTranscriber:
             try:
                 timeout = float(value) if value else 30.0
             except ValueError:
-                raise ValueError(f"wait expects seconds, got {value!r}")
+                raise ValueError(f"wait expects seconds, got {value!r}") from None
             deadline = time.monotonic() + max(0.0, timeout)
             while time.monotonic() < deadline:
                 if getattr(self.tui, "state", None) != "PROCESSING":
@@ -1440,7 +1437,7 @@ class SimpleVoiceTranscriber:
                     if val <= 0:
                         raise ValueError
                 except ValueError:
-                    raise ValueError(f"WPM must be a positive integer, got {value!r}")
+                    raise ValueError(f"WPM must be a positive integer, got {value!r}") from None
                 t2.set_typing_wpm(val)
                 t2.save_audio_config()
                 self._sync_tui_state()
@@ -1535,25 +1532,25 @@ def check_permissions():
     from hotkeys import is_running_in_wsl
     if is_running_in_wsl() or sys.platform.startswith("win") or sys.platform == "darwin" or hal.detect_platform() in (hal.WINDOWS, hal.MACOS):
         return True
-        
+
     import grp
     import pwd
-    
+
     # Check if running as root
     if os.geteuid() == 0:
         logger.debug("Running as root - full input device access available")
         return True
-    
+
     # Check if user is in input group
     try:
         current_user = pwd.getpwuid(os.getuid()).pw_name
-        
+
         # Get current groups using os.getgroups() which reflects actual active groups
         current_gids = os.getgroups()
-        
+
         # Get input group info
         input_group = grp.getgrnam('input')
-        
+
         # Check if user is in input group (by GID)
         if input_group.gr_gid in current_gids:
             logger.debug("User is in input group - input device access available")
@@ -1564,9 +1561,9 @@ def check_permissions():
             for gid in current_gids:
                 try:
                     group_names.append(grp.getgrgid(gid).gr_name)
-                except:
+                except Exception:
                     group_names.append(str(gid))
-            
+
             logger.error(f"User {current_user} is NOT in the 'input' group.")
             logger.error(f"Current groups: {', '.join(group_names)}")
             logger.error(f"Run: sudo usermod -aG input {current_user}")

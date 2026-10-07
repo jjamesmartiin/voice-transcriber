@@ -187,9 +187,7 @@ def preserve_default_source_mute():
         yield before
     finally:
         try:
-            if before is None:
-                return
-            if get_default_source_mute() != before:
+            if before is not None and get_default_source_mute() != before:
                 restored = set_default_source_mute(before)
                 logger.info(
                     "Restored default microphone mute state to %s%s",
