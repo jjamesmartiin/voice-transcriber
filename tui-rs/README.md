@@ -85,9 +85,20 @@ confirmed on a WSL host yet; see `TODO.md`.
 There is no global hotkey for settings; from outside the terminal use the
 control API (`python src/main.py status`, `toggle`, `output type_fast`, …).
 
-The settings menu is opened by **suspending** the TUI (`ratatui::restore()`),
-letting Python draw its own Rich menu, then resuming. Messages the engine emits
-while suspended are queued and replayed on resume, so nothing is lost.
+There are two settings paths, and they are not the same menu:
+
+- **In the TUI**, `s` / `S` / `,` runs Rust's own modal
+  (`settings_picker::run_settings_picker`) on the alternate screen. It toggles
+  settings in place and hosts the theme / microphone / mode-preset sub-pickers,
+  sending the resulting `{"t":"cmd",…}` messages back to the engine.
+  Transcription and event blocks that arrive while it (or any sub-picker) is
+  open are queued and flushed to the scrollback once it closes, so nothing is
+  lost.
+- **From the control API**, `python src/main.py settings` (and the `theme` /
+  `mic` / `preset` verbs) calls Python's `open_*_picker()`, which **suspends**
+  the TUI (`{"t":"suspend"}` / `ratatui::restore()`), lets Python draw its own
+  Rich menu, then resumes (`{"t":"resume"}`). The engine queues messages while
+  suspended and replays them on resume.
 
 ## IPC protocol
 
@@ -103,25 +114,47 @@ Python → Rust:
 {"t":"vu","level":0.42}                # scalar meter: recording + main VU bar
 {"t":"vu","level":0.42,"levels":[{"i":4,"level":0.0},{"i":5,"level":0.44}]}
                                      # per-device levels for the mic picker rows;
-                                     # an empty list blanks every row
+                                     # absent `levels` leaves the rows alone, an
+                                     # explicit empty list blanks every row
 {"t":"tx","text":"...","rec":3.2,"proc":1.35,"ready":0.62,"status":"typed"}
 {"t":"ev","title":"...","message":"...","level":"info"}
 {"t":"suspend"} / {"t":"resume"} / {"t":"quit"}
 ```
 
-Rust → Python:
+Rust → Python (every command the frontend emits; regenerate with
+`grep -rn 'send_cmd' src/`):
 
 ```
-{"t":"cmd","cmd":"toggle_record"}    # and: toggle_mute, toggle_autotype,
-                                     # toggle_numbers, cycle_theme,
-                                     # reset_terminal, quit
-{"t":"cmd","cmd":"reset_defaults"}  # restore shipped defaults (settings modal)
-{"t":"cmd","cmd":"rescan_mics"}      # re-enumerate audio devices (settings modal)
-{"t":"cmd","cmd":"get_devices"}     # ask for the audio input device list
+{"t":"cmd","cmd":"toggle_record"}          # Space / Enter
+{"t":"cmd","cmd":"quit"}                   # q / Esc / Ctrl+C
+{"t":"cmd","cmd":"reset_terminal"}         # r, and the settings action
+{"t":"cmd","cmd":"get_devices"}            # mic picker: ask for the device list
 {"t":"cmd","cmd":"start_mic_monitor","indices":[4,5]}
-                                     # open a level stream per visible picker row
-{"t":"cmd","cmd":"stop_mic_monitor"}
-{"t":"cmd","cmd":"set_device","device":"...","index":4}
+                                           # open a level stream per visible row
+{"t":"cmd","cmd":"stop_mic_monitor"}       # mic picker: close the meter streams
+{"t":"cmd","cmd":"set_device","device":"...","index":4}  # mic picker: select
+
+# Settings modal (toggles and actions):
+{"t":"cmd","cmd":"toggle_mute"}            # Sound Effects
+{"t":"cmd","cmd":"toggle_trailing_space"}
+{"t":"cmd","cmd":"toggle_auto_punctuate"}
+{"t":"cmd","cmd":"toggle_numbers"}         # Number Conversion
+{"t":"cmd","cmd":"toggle_serial_collapse"} # Serial/Codes
+{"t":"cmd","cmd":"toggle_spell_command"}   # Spell Command
+{"t":"cmd","cmd":"toggle_middle_click"}    # Mouse Hotkey
+{"t":"cmd","cmd":"cycle_output_mode"}      # Output Delivery (clipboard|type|type_fast)
+{"t":"cmd","cmd":"cycle_typing_wpm"}       # Typing Speed (cycle preset)
+{"t":"cmd","cmd":"set_typing_wpm","wpm":65} # Typing Speed (explicit)
+{"t":"cmd","cmd":"rescan_mics"}            # re-enumerate audio devices
+{"t":"cmd","cmd":"reset_defaults"}        # restore shipped defaults
+
+# Push-to-talk bind sub-picker:
+{"t":"cmd","cmd":"hotkey_add","chord":"rightctrl+shift"}
+{"t":"cmd","cmd":"hotkey_remove","chord":"alt+shift"}
+
+# Theme / mode-preset sub-pickers:
+{"t":"cmd","cmd":"set_theme","theme":"cyan"}
+{"t":"cmd","cmd":"set_punctuation","mode":"aesthetic_lowercase"}
 ```
 
 `start_mic_monitor` replaces the monitored set: devices missing from `indices`
@@ -169,9 +202,15 @@ integrating:
 
 | File | Purpose |
 | :-- | :-- |
-| `src/app.rs` | State machine mirroring `VoiceTranscriberTUI` (`RunState`, metrics, theme resolution) |
+| `src/app.rs` | State machine mirroring `VoiceTranscriberTUI` (`RunState`, metrics, theme resolution, VU decay, modal output queue) |
 | `src/ui.rs` | Status line, header, transcription/event block rendering |
 | `src/ipc.rs` | Socket client + wire message types |
+| `src/settings_picker.rs` | The `s`/`S`/`,` settings & configuration modal (in-place toggles) |
+| `src/bind_picker.rs` | Push-to-talk key bind editor (nested in the settings modal) |
+| `src/mic_picker.rs` | Microphone picker with per-row live meters (nested) |
+| `src/preset_picker.rs` | Punctuation/mode-preset picker (nested) |
+| `src/theme_picker.rs` | UI colour-theme picker (nested) |
+| `src/textfit.rs` | Width-exact fitting/centering helpers shared by the pickers |
 | `src/demo.rs` | Scripted "fake engine" timeline for standalone mode |
 | `src/main.rs` | Terminal setup, event loop, keyboard handling, suspend/resume |
 

@@ -186,7 +186,7 @@ fn fuzzy_subsequence(pattern: &str, target: &str) -> Option<usize> {
 
 /// Horizontal audio level bar graph.
 pub fn vu_bar_spans(level: f32, bar_len: usize) -> Vec<Span<'static>> {
-    let level_clamped = level.min(1.0).max(0.0);
+    let level_clamped = level.clamp(0.0, 1.0);
     let pct = (level_clamped * 100.0) as i32;
     let filled_len = ((level_clamped * 3.0 * bar_len as f32) as usize).min(bar_len);
     let empty_len = bar_len.saturating_sub(filled_len);
@@ -542,7 +542,9 @@ pub fn run_mic_picker(
     // Request fresh device list from Python backend. The monitored set is
     // derived from what is actually on screen, so the loop below commands it.
     if let Some(w) = writer {
-        ipc::send_cmd(w, "get_devices");
+        if ipc::send_cmd(w, "get_devices").is_err() {
+            app.should_quit = true;
+        }
     }
 
     let mut state = MicPickerState::new(app.audio_devices.len());
@@ -579,28 +581,19 @@ pub fn run_mic_picker(
             app.update_vu_levels(&demo);
         }
 
-        // Drain incoming messages
+        // Drain incoming messages. A device list also refreshes the picker's
+        // filter; everything else (including buffered `tx`/`ev`) is applied by
+        // the shared modal handler.
         if let Some(r) = rx {
             while let Ok(ev) = r.try_recv() {
                 match ev {
-                    IpcEvent::Wire(w) => match w {
-                        Wire::Devices { devices } => {
-                            app.update_devices(devices);
+                    IpcEvent::Wire(w) => {
+                        let was_devices = matches!(&*w, Wire::Devices { .. });
+                        app.handle_modal_wire(*w);
+                        if was_devices {
                             state.update_filter(&app.audio_devices);
                         }
-                        Wire::Vu { level, levels } => {
-                            app.apply_vu_wire(level, &levels);
-                        }
-                        Wire::State { state: s, sub } => {
-                            app.update_state(crate::app::RunState::from_wire(&s), sub);
-                        }
-                        Wire::Cfg { mic, .. } => {
-                            if let Some(m) = mic {
-                                app.active_device = m;
-                            }
-                        }
-                        _ => {}
-                    },
+                    }
                     IpcEvent::Closed => {
                         app.should_quit = true;
                         break;
@@ -608,13 +601,21 @@ pub fn run_mic_picker(
                 }
             }
         }
+        // The inner `break` only leaves the drain loop; leave the modal too.
+        if app.should_quit {
+            break;
+        }
 
         // Keep the engine metering exactly the rows on screen. This only fires
         // when scrolling or filtering actually changes the visible set.
         if visible != state.monitored {
             state.monitored = visible.clone();
             if let Some(w) = writer {
-                ipc::send_cmd_json(w, "start_mic_monitor", serde_json::json!({ "indices": visible }));
+                if ipc::send_cmd_json(w, "start_mic_monitor", serde_json::json!({ "indices": visible }))
+                    .is_err()
+                {
+                    app.should_quit = true;
+                }
             }
         }
 
@@ -632,14 +633,18 @@ pub fn run_mic_picker(
                                 let dev_index = dev.index;
                                 app.active_device = dev_name.clone();
                                 if let Some(w) = writer {
-                                    ipc::send_cmd_json(
+                                    if ipc::send_cmd_json(
                                         w,
                                         "set_device",
                                         serde_json::json!({
                                             "device": dev_name,
                                             "index": dev_index,
                                         }),
-                                    );
+                                    )
+                                    .is_err()
+                                    {
+                                        app.should_quit = true;
+                                    }
                                 }
                             }
                             break;
@@ -652,7 +657,9 @@ pub fn run_mic_picker(
 
     // Stop live mic monitoring stream on exit
     if let Some(w) = writer {
-        ipc::send_cmd(w, "stop_mic_monitor");
+        if ipc::send_cmd(w, "stop_mic_monitor").is_err() {
+            app.should_quit = true;
+        }
     }
 
     let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
@@ -716,7 +723,7 @@ mod tests {
             let inner_h = popup_h as usize - 2;
             let expected_rows = inner_h - POPUP_CHROME;
             assert_eq!(visible_rows(w, h), expected_rows.max(1));
-            assert!(popup_w >= POPUP_MIN_W && popup_w <= POPUP_MAX_W);
+            assert!((POPUP_MIN_W..=POPUP_MAX_W).contains(&popup_w));
         }
     }
 
@@ -733,11 +740,11 @@ mod tests {
         }];
 
         // Nothing is highlighted or active, yet the row still shows its own level.
-        app.apply_vu_wire(0.0, &[crate::ipc::VuLevel { i: 7, level: 0.5 }]);
+        app.apply_vu_wire(0.0, Some(&[crate::ipc::VuLevel { i: 7, level: 0.5 }]));
         assert_eq!(app.vu_levels.get(&7), Some(&0.5));
 
         // A snapshot that omits the device forgets it (levels are not cumulative).
-        app.apply_vu_wire(0.0, &[]);
+        app.apply_vu_wire(0.0, Some(&[]));
         assert!(app.vu_levels.is_empty());
     }
 

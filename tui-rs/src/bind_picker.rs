@@ -19,7 +19,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::ipc::{self, IpcEvent, Wire};
+use crate::ipc::{self, IpcEvent};
 
 /// Longest chord the prompt will accept, purely as a runaway guard. The engine
 /// does the real validation and reports its own errors.
@@ -419,67 +419,23 @@ pub fn run_bind_picker(
     let mut state = BindPickerState::new();
 
     loop {
-        // Drain incoming messages so the socket stays clean and apply the
-        // engine's authoritative chord list as soon as it re-sends it.
+        // Drain incoming messages and apply the engine's authoritative chord
+        // list as soon as it re-sends it. `tx`/`ev` are queued by
+        // `handle_modal_wire` for the main loop to flush on our return.
         if let Some(r) = rx {
             while let Ok(ev) = r.try_recv() {
                 match ev {
-                    IpcEvent::Wire(w) => match w {
-                        Wire::State { state: s, sub } => {
-                            app.update_state(crate::app::RunState::from_wire(&s), sub);
-                        }
-                        Wire::Vu { level, levels } => {
-                            app.apply_vu_wire(level, &levels);
-                        }
-                        Wire::Cfg {
-                            mic,
-                            secondary,
-                            backend,
-                            muted,
-                            auto_type,
-                            output_mode,
-                            sound_theme,
-                            ui_theme,
-                            punctuation_mode,
-                            trailing_space,
-                            auto_punctuate,
-                            number_digits,
-                            number_mode,
-                            serial_collapse,
-                            spell_command,
-                            middle_click_enabled,
-                            typing_wpm,
-                            hotkeys,
-                        } => {
-                            app.apply_config(
-                                mic,
-                                secondary,
-                                backend,
-                                muted,
-                                auto_type,
-                                output_mode,
-                                sound_theme,
-                                ui_theme,
-                                punctuation_mode,
-                                trailing_space,
-                                auto_punctuate,
-                                number_digits,
-                                number_mode,
-                                serial_collapse,
-                                spell_command,
-                                middle_click_enabled,
-                                typing_wpm,
-                                hotkeys,
-                            );
-                        }
-                        _ => {}
-                    },
+                    IpcEvent::Wire(w) => app.handle_modal_wire(*w),
                     IpcEvent::Closed => {
                         app.should_quit = true;
                         break;
                     }
                 }
             }
+        }
+        // The inner `break` only leaves the drain loop; leave the modal too.
+        if app.should_quit {
+            break;
         }
 
         state.clamp(app.hotkeys.len());
@@ -493,12 +449,18 @@ pub fn run_bind_picker(
                         BindPickerAction::Continue => {}
                         BindPickerAction::Add(chord) => {
                             if let Some(w) = writer {
-                                ipc::send_cmd_value(w, "hotkey_add", "chord", &chord);
+                                if ipc::send_cmd_value(w, "hotkey_add", "chord", &chord).is_err() {
+                                    app.should_quit = true;
+                                }
                             }
                         }
                         BindPickerAction::Remove(chord) => {
                             if let Some(w) = writer {
-                                ipc::send_cmd_value(w, "hotkey_remove", "chord", &chord);
+                                if ipc::send_cmd_value(w, "hotkey_remove", "chord", &chord)
+                                    .is_err()
+                                {
+                                    app.should_quit = true;
+                                }
                             }
                         }
                     }
@@ -656,7 +618,7 @@ mod tests {
             BindPickerAction::Add(c) => c,
             other => panic!("expected Add, got {other:?}"),
         };
-        ipc::send_cmd_value(&client, "hotkey_add", "chord", &chord);
+        ipc::send_cmd_value(&client, "hotkey_add", "chord", &chord).unwrap();
 
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
@@ -671,7 +633,7 @@ mod tests {
             BindPickerAction::Remove(c) => c,
             other => panic!("expected Remove, got {other:?}"),
         };
-        ipc::send_cmd_value(&client, "hotkey_remove", "chord", &chord);
+        ipc::send_cmd_value(&client, "hotkey_remove", "chord", &chord).unwrap();
 
         line.clear();
         reader.read_line(&mut line).unwrap();

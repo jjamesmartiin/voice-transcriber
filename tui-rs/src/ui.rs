@@ -328,6 +328,7 @@ fn format_optional_duration(value: Option<f32>) -> Option<String> {
     value.filter(|v| *v > 0.0).map(format_duration)
 }
 
+#[allow(clippy::too_many_arguments)] // one arg per wire/stat field; a struct would only move the noise
 pub fn transcription_block(
     app: &App,
     width: u16,

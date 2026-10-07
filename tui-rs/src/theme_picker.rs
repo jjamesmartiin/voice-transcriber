@@ -13,7 +13,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{App, Theme};
-use crate::ipc::{self, IpcEvent, Wire};
+use crate::ipc::{self, IpcEvent};
 use crate::textfit;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -517,68 +517,24 @@ pub fn run_theme_picker(
     terminal.hide_cursor()?;
 
     let mut state = PickerState::new(current_theme);
-    let result: Option<Theme>;
+    let mut result: Option<Theme> = None;
 
     loop {
+        // State/VU/config apply live; `tx`/`ev` are buffered for the main loop.
         if let Some(r) = rx {
             while let Ok(ev) = r.try_recv() {
                 match ev {
-                    IpcEvent::Wire(w) => match w {
-                        Wire::State { state: s, sub } => {
-                            app.update_state(crate::app::RunState::from_wire(&s), sub);
-                        }
-                        Wire::Vu { level, levels } => {
-                            app.apply_vu_wire(level, &levels);
-                            }
-                        Wire::Cfg {
-                            mic,
-                            secondary,
-                            backend,
-                            muted,
-                            auto_type,
-                            output_mode,
-                            sound_theme,
-                            ui_theme,
-                            punctuation_mode,
-                            trailing_space,
-                            auto_punctuate,
-                            number_digits,
-                            number_mode,
-                            serial_collapse,
-                            spell_command,
-                            middle_click_enabled,
-                            typing_wpm,
-                            hotkeys,
-                        } => {
-                            app.apply_config(
-                                mic,
-                                secondary,
-                                backend,
-                                muted,
-                                auto_type,
-                                output_mode,
-                                sound_theme,
-                                ui_theme,
-                                punctuation_mode,
-                                trailing_space,
-                                auto_punctuate,
-                                number_digits,
-                                number_mode,
-                                serial_collapse,
-                                spell_command,
-                                middle_click_enabled,
-                                typing_wpm,
-                                hotkeys,
-                            );
-                        }
-                        _ => {}
-                    },
+                    IpcEvent::Wire(w) => app.handle_modal_wire(*w),
                     IpcEvent::Closed => {
                         app.should_quit = true;
                         break;
                     }
                 }
             }
+        }
+        // The inner `break` only leaves the drain loop; leave the modal too.
+        if app.should_quit {
+            break;
         }
 
         terminal.draw(|f| render_picker(f, &state))?;
@@ -607,7 +563,9 @@ pub fn run_theme_picker(
     if let Some(theme) = result {
         app.ui_theme = theme;
         if let Some(w) = writer {
-            ipc::send_cmd_value(w, "set_theme", "theme", theme.name());
+            if ipc::send_cmd_value(w, "set_theme", "theme", theme.name()).is_err() {
+                app.should_quit = true;
+            }
         }
     }
 

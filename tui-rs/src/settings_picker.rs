@@ -13,7 +13,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::ipc::{self, IpcEvent, Wire};
+use crate::ipc::{self, IpcEvent};
 use crate::textfit;
 use crate::theme_picker;
 
@@ -275,8 +275,8 @@ impl SettingItem {
                 let (desc, badge) = match app.output_mode.as_str() {
                     "type_fast" => ("Auto-type, optimized", "[FAST]"),
                     "type" => ("Auto-type, safe speed", "[SLOW]"),
-                    "paste" => ("Copies, you press Ctrl+V", "[PASTE]"),
-                    "paste_terminal" => ("Copies for terminal paste", "[TERM]"),
+                    // The engine only ever reports the three modes in
+                    // `t2.OUTPUT_MODES`; clipboard is the fallback.
                     _ => ("Copies to clipboard only", "[CLIP]"),
                 };
                 (desc.to_string(), badge, Color::Cyan)
@@ -1032,66 +1032,25 @@ pub fn run_settings_picker(
     let mut state = SettingsPickerState::new();
 
     loop {
-        // Drain incoming messages so socket stays clean
+        // Drain incoming messages. State/VU/config updates apply live;
+        // transcription and event blocks are queued by `handle_modal_wire`
+        // because the alternate screen cannot render into the scrollback, and
+        // are flushed by the main loop once this modal returns.
         if let Some(r) = rx {
             while let Ok(ev) = r.try_recv() {
                 match ev {
-                    IpcEvent::Wire(w) => match w {
-                        Wire::State { state: s, sub } => {
-                            app.update_state(crate::app::RunState::from_wire(&s), sub);
-                        }
-                        Wire::Vu { level, levels } => {
-                            app.apply_vu_wire(level, &levels);
-                            }
-                        Wire::Cfg {
-                            mic,
-                            secondary,
-                            backend,
-                            muted,
-                            auto_type,
-                            output_mode,
-                            sound_theme,
-                            ui_theme,
-                            punctuation_mode,
-                            trailing_space,
-                            auto_punctuate,
-                            number_digits,
-                            number_mode,
-                            serial_collapse,
-                            spell_command,
-                            middle_click_enabled,
-                            typing_wpm,
-                            hotkeys,
-                        } => {
-                            app.apply_config(
-                                mic,
-                                secondary,
-                                backend,
-                                muted,
-                                auto_type,
-                                output_mode,
-                                sound_theme,
-                                ui_theme,
-                                punctuation_mode,
-                                trailing_space,
-                                auto_punctuate,
-                                number_digits,
-                                number_mode,
-                                serial_collapse,
-                                spell_command,
-                                middle_click_enabled,
-                                typing_wpm,
-                                hotkeys,
-                            );
-                        }
-                        _ => {}
-                    },
+                    IpcEvent::Wire(w) => app.handle_modal_wire(*w),
                     IpcEvent::Closed => {
                         app.should_quit = true;
                         break;
                     }
                 }
             }
+        }
+        // The inner `break` only leaves the drain loop; the engine is gone, so
+        // leave the modal loop too instead of hanging on a dead socket.
+        if app.should_quit {
+            break;
         }
 
         terminal.draw(|f| render_settings_picker(f, &state, app))?;
@@ -1105,7 +1064,11 @@ pub fn run_settings_picker(
                         SettingsPickerAction::SetWpm(val) => {
                             app.typing_wpm = val;
                             if let Some(w) = writer {
-                                ipc::send_cmd_value(w, "set_typing_wpm", "wpm", &val.to_string());
+                                if ipc::send_cmd_value(w, "set_typing_wpm", "wpm", &val.to_string())
+                                    .is_err()
+                                {
+                                    app.should_quit = true;
+                                }
                             }
                         }
                         SettingsPickerAction::Toggle(kind) => {
@@ -1113,13 +1076,17 @@ pub fn run_settings_picker(
                                 SettingKind::TrailingSpace => {
                                     app.trailing_space = !app.trailing_space;
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "toggle_trailing_space");
+                                        if ipc::send_cmd(w, "toggle_trailing_space").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                 }
                                 SettingKind::AutoPunctuate => {
                                     app.auto_punctuate = !app.auto_punctuate;
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "toggle_auto_punctuate");
+                                        if ipc::send_cmd(w, "toggle_auto_punctuate").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                 }
                                 SettingKind::NumberDigits => {
@@ -1130,31 +1097,41 @@ pub fn run_settings_picker(
                                     };
                                     app.number_digits = app.number_mode != "words";
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "toggle_numbers");
+                                        if ipc::send_cmd(w, "toggle_numbers").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                 }
                                 SettingKind::SerialCollapse => {
                                     app.serial_collapse = !app.serial_collapse;
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "toggle_serial_collapse");
+                                        if ipc::send_cmd(w, "toggle_serial_collapse").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                 }
                                 SettingKind::SpellCommand => {
                                     app.spell_command = !app.spell_command;
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "toggle_spell_command");
+                                        if ipc::send_cmd(w, "toggle_spell_command").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                 }
                                 SettingKind::TypingWpm => {
                                     app.cycle_typing_wpm();
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "cycle_typing_wpm");
+                                        if ipc::send_cmd(w, "cycle_typing_wpm").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                 }
                                 SettingKind::MiddleClick => {
                                     app.middle_click_enabled = !app.middle_click_enabled;
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "toggle_middle_click");
+                                        if ipc::send_cmd(w, "toggle_middle_click").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                 }
                                 SettingKind::Hotkeys => {
@@ -1166,21 +1143,17 @@ pub fn run_settings_picker(
                                 SettingKind::SoundMute => {
                                     app.is_muted = !app.is_muted;
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "toggle_mute");
+                                        if ipc::send_cmd(w, "toggle_mute").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                 }
                                 SettingKind::OutputMode => {
-                                    app.output_mode = match app.output_mode.as_str() {
-                                        "clipboard" => "type".to_string(),
-                                        "type" => "type_fast".to_string(),
-                                        "type_fast" => "paste".to_string(),
-                                        "paste" => "paste_terminal".to_string(),
-                                        _ => "clipboard".to_string(),
-                                    };
-                                    app.auto_type = app.output_mode == "type"
-                                        || app.output_mode == "type_fast";
+                                    app.cycle_output_mode();
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "cycle_output_mode");
+                                        if ipc::send_cmd(w, "cycle_output_mode").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                 }
                                 SettingKind::PunctuationMode => {
@@ -1215,13 +1188,17 @@ pub fn run_settings_picker(
                                     // reports what came back (including any mic
                                     // another app is still holding) as an event.
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "rescan_mics");
+                                        if ipc::send_cmd(w, "rescan_mics").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                     state.mic_rescan_done = true;
                                 }
                                 SettingKind::ResetTerminal => {
                                     if let Some(w) = writer {
-                                        ipc::send_cmd(w, "reset_terminal");
+                                        if ipc::send_cmd(w, "reset_terminal").is_err() {
+                                            app.should_quit = true;
+                                        }
                                     }
                                     state.reset_done = true;
                                     let _ = crossterm::terminal::enable_raw_mode();
@@ -1231,7 +1208,9 @@ pub fn run_settings_picker(
                                 SettingKind::ResetDefaults => {
                                     if state.confirm_reset_defaults() {
                                         if let Some(w) = writer {
-                                            ipc::send_cmd(w, "reset_defaults");
+                                            if ipc::send_cmd(w, "reset_defaults").is_err() {
+                                                app.should_quit = true;
+                                            }
                                         }
                                         let _ = crossterm::terminal::enable_raw_mode();
                                         let _ = crossterm::execute!(
@@ -1491,7 +1470,8 @@ mod tests {
             app.typing_wpm = wpm;
             check(&app, &idle, SettingKind::TypingWpm);
         }
-        for mode in ["clipboard", "type", "type_fast", "paste", "paste_terminal"] {
+        // Only the modes the engine round-trips (``t2.OUTPUT_MODES``).
+        for mode in ["clipboard", "type", "type_fast"] {
             app.output_mode = mode.to_string();
             check(&app, &idle, SettingKind::OutputMode);
         }

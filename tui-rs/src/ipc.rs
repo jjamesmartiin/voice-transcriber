@@ -55,7 +55,9 @@ pub struct VuLevel {
 pub enum Wire {
     #[serde(rename = "devices")]
     Devices {
-        devices: Vec<AudioDeviceInfo>,
+        /// Absent means no update; `Some([])` is a legitimate empty result.
+        #[serde(default)]
+        devices: Option<Vec<AudioDeviceInfo>>,
     },
     #[serde(rename = "state")]
     State {
@@ -66,10 +68,11 @@ pub enum Wire {
     #[serde(rename = "vu")]
     Vu {
         level: f32,
-        /// Per-device levels for the mic picker. Absent (empty) on a
-        /// scalar-only update, which the picker reads as "nothing monitored".
+        /// Per-device levels for the mic picker. Absent on a scalar-only update,
+        /// which the picker reads as "leave the per-device rows alone"; an
+        /// explicit empty list means "no device is monitored".
         #[serde(default)]
-        levels: Vec<VuLevel>,
+        levels: Option<Vec<VuLevel>>,
     },
     #[serde(rename = "cfg")]
     Cfg {
@@ -146,8 +149,11 @@ pub enum Wire {
     Quit,
 }
 
+#[allow(clippy::large_enum_variant)] // one `Wire` per channel message; the
+// channel holds at most a frame's worth, so boxing would only add an allocation
+// per message for negligible stack savings.
 pub enum IpcEvent {
-    Wire(Wire),
+    Wire(Box<Wire>),
     Closed,
 }
 
@@ -174,7 +180,7 @@ pub fn connect(path: &str) -> std::io::Result<(mpsc::Receiver<IpcEvent>, UnixStr
                     }
                     match serde_json::from_str::<Wire>(trimmed) {
                         Ok(w) => {
-                            if tx.send(IpcEvent::Wire(w)).is_err() {
+                            if tx.send(IpcEvent::Wire(Box::new(w))).is_err() {
                                 break;
                             }
                         }
@@ -193,26 +199,35 @@ pub fn connect(path: &str) -> std::io::Result<(mpsc::Receiver<IpcEvent>, UnixStr
     Ok((rx, stream))
 }
 
-/// Send a simple command with no payload.
-pub fn send_cmd(stream: &UnixStream, cmd: &str) {
+/// Send a simple command with no payload. Returns an error when the writer is
+/// dead (broken pipe / closed socket) so the caller can treat it as a
+/// disconnect instead of silently losing the command.
+pub fn send_cmd(stream: &UnixStream, cmd: &str) -> std::io::Result<()> {
     let line = format!("{{\"t\":\"cmd\",\"cmd\":\"{cmd}\"}}\n");
-    let mut w = stream;
-    let _ = w.write_all(line.as_bytes());
-    let _ = w.flush();
+    write_line(stream, &line)
 }
 
 /// Send a command with a string property.
-pub fn send_cmd_value(stream: &UnixStream, cmd: &str, key: &str, val: &str) {
+pub fn send_cmd_value(
+    stream: &UnixStream,
+    cmd: &str,
+    key: &str,
+    val: &str,
+) -> std::io::Result<()> {
     let mut extra = serde_json::Map::new();
     extra.insert(key.to_string(), serde_json::Value::String(val.to_string()));
-    send_cmd_json(stream, cmd, serde_json::Value::Object(extra));
+    send_cmd_json(stream, cmd, serde_json::Value::Object(extra))
 }
 
 /// Send a command object assembled by serde.
 ///
 /// Audio device names routinely contain quotes, backslashes and commas, so the
 /// payload must be escaped rather than interpolated into a format string.
-pub fn send_cmd_json(stream: &UnixStream, cmd: &str, extra: serde_json::Value) {
+pub fn send_cmd_json(
+    stream: &UnixStream,
+    cmd: &str,
+    extra: serde_json::Value,
+) -> std::io::Result<()> {
     let mut obj = serde_json::Map::new();
     obj.insert("t".to_string(), serde_json::Value::String("cmd".to_string()));
     obj.insert("cmd".to_string(), serde_json::Value::String(cmd.to_string()));
@@ -220,9 +235,13 @@ pub fn send_cmd_json(stream: &UnixStream, cmd: &str, extra: serde_json::Value) {
         obj.extend(extra);
     }
     let line = format!("{}\n", serde_json::Value::Object(obj));
+    write_line(stream, &line)
+}
+
+fn write_line(stream: &UnixStream, line: &str) -> std::io::Result<()> {
     let mut w = stream;
-    let _ = w.write_all(line.as_bytes());
-    let _ = w.flush();
+    w.write_all(line.as_bytes())?;
+    w.flush()
 }
 
 pub fn status_from_wire(s: Option<&str>) -> OutStatus {
@@ -291,7 +310,7 @@ mod tests {
         {
             Wire::Vu { level, levels } => {
                 assert_eq!(level, 0.42);
-                assert!(levels.is_empty(), "no per-device levels were supplied");
+                assert_eq!(levels, None, "no per-device levels were supplied");
             }
             other => panic!("expected Vu, got {other:?}"),
         }
@@ -305,10 +324,10 @@ mod tests {
                 assert_eq!(level, 0.42);
                 assert_eq!(
                     levels,
-                    vec![
+                    Some(vec![
                         VuLevel { i: 4, level: 0.0 },
                         VuLevel { i: 5, level: 0.44 },
-                    ]
+                    ])
                 );
             }
             other => panic!("expected Vu, got {other:?}"),
@@ -360,7 +379,7 @@ mod tests {
 
     #[test]
     fn tx_message_tolerates_only_the_required_text_field() {
-        /// Every numeric field is `#[serde(default)]`, so a minimal producer works.
+        // Every numeric field is `#[serde(default)]`, so a minimal producer works.
         let json = r#"{"t":"tx","text":"minimal"}"#;
         match serde_json::from_str::<Wire>(json).expect("minimal payload must parse") {
             Wire::Tx { lifetime_time_saved, time_saved, session_time_saved, .. } => {

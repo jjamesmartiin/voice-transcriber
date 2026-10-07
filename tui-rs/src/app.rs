@@ -8,6 +8,8 @@ use std::time::Instant;
 
 use ratatui::style::Color;
 
+use crate::ipc::Wire;
+
 /// UI colour palettes. Mirrors `COLOR_PALETTES` in `src/tui.py`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Theme {
@@ -160,9 +162,14 @@ pub struct App {
     pub rec_started: Option<Instant>,
     pub vu_level: f32,
     pub vu_peak: f32,
+    /// Timestamp of the last scalar VU update, used to decay the meter in real
+    /// time rather than once per message.
+    vu_last_update: Instant,
     /// Per-device live levels driving the mic picker's rows, keyed by PortAudio
     /// device index. Only populated while the picker is monitoring.
     pub vu_levels: HashMap<usize, f32>,
+    /// Timestamp of the last per-device VU snapshot (see `update_vu_levels`).
+    vu_levels_last_update: Instant,
     pub spinner: usize,
     pub transcription_count: usize,
     pub active_device: String,
@@ -190,6 +197,11 @@ pub struct App {
     pub ui_theme: Theme,
     pub should_quit: bool,
     pub tick: u64,
+    /// Transcription/event blocks received while a modal owned the screen.
+    /// The modal runs on the alternate screen, where `Terminal::insert_before`
+    /// cannot render them; they are queued here and flushed once the modal
+    /// returns to the main screen. Mirrors Python's `TUI._pending` queue.
+    pub pending_output: Vec<Wire>,
 }
 
 impl App {
@@ -202,7 +214,9 @@ impl App {
             rec_started: None,
             vu_level: 0.0,
             vu_peak: 0.0,
+            vu_last_update: Instant::now(),
             vu_levels: HashMap::new(),
+            vu_levels_last_update: Instant::now(),
             spinner: 0,
             transcription_count: 0,
             active_device: "HyperX QuadCast S".to_string(),
@@ -243,6 +257,7 @@ impl App {
             ui_theme,
             should_quit: false,
             tick: 0,
+            pending_output: Vec::new(),
         }
     }
 
@@ -254,8 +269,11 @@ impl App {
         detect_system_theme()
     }
 
-    pub fn update_devices(&mut self, devs: Vec<crate::ipc::AudioDeviceInfo>) {
-        if !devs.is_empty() {
+    /// Replace the device list. `None` means the producer omitted the field
+    /// (no update); `Some([])` is a legitimate "no microphones" result and must
+    /// clear the stale rows.
+    pub fn update_devices(&mut self, devs: Option<Vec<crate::ipc::AudioDeviceInfo>>) {
+        if let Some(devs) = devs {
             self.audio_devices = devs;
         }
     }
@@ -297,24 +315,45 @@ impl App {
 
     /// Synthesise a plausible mic level so the VU meter animates in the demo.
     pub fn update_vu(&mut self, level: f32) {
-        self.vu_level = level.max(self.vu_level * 0.7);
+        let decay = self.vu_decay();
+        self.vu_level = level.max(self.vu_level * decay);
         self.vu_peak = self.vu_peak.max(self.vu_level);
     }
 
+    /// Exponential decay over the time since the previous scalar update. The
+    /// old implementation multiplied by a fixed `0.7` per message, so the meter
+    /// fell faster the more frames arrived; tying it to elapsed time keeps the
+    /// visual fall-off independent of message cadence.
+    fn vu_decay(&mut self) -> f32 {
+        let now = Instant::now();
+        let dt = now.saturating_duration_since(self.vu_last_update).as_secs_f32();
+        self.vu_last_update = now;
+        decay_factor(dt)
+    }
+
     /// Apply one `vu` wire message: the scalar feeds the main meter and the
-    /// per-device list feeds the mic picker's rows.
-    pub fn apply_vu_wire(&mut self, level: f32, levels: &[crate::ipc::VuLevel]) {
+    /// optional per-device list feeds the mic picker's rows. A scalar-only
+    /// message (`None`) leaves the per-device map untouched.
+    pub fn apply_vu_wire(&mut self, level: f32, levels: Option<&[crate::ipc::VuLevel]>) {
         self.update_vu(level);
-        self.update_vu_levels(levels);
+        if let Some(levels) = levels {
+            self.update_vu_levels(levels);
+        }
     }
 
     /// Replace the per-device level map with a fresh snapshot, decaying any
     /// device that got quieter and forgetting devices that stopped reporting.
     /// An empty snapshot therefore clears every row.
     pub fn update_vu_levels(&mut self, levels: &[crate::ipc::VuLevel]) {
+        let now = Instant::now();
+        let dt = now
+            .saturating_duration_since(self.vu_levels_last_update)
+            .as_secs_f32();
+        self.vu_levels_last_update = now;
+        let decay = decay_factor(dt);
         let mut next: HashMap<usize, f32> = HashMap::with_capacity(levels.len());
         for l in levels {
-            let decayed = self.vu_levels.get(&l.i).copied().unwrap_or(0.0) * 0.7;
+            let decayed = self.vu_levels.get(&l.i).copied().unwrap_or(0.0) * decay;
             next.insert(l.i, l.level.max(decayed));
         }
         self.vu_levels = next;
@@ -352,6 +391,8 @@ impl App {
         self.ui_theme
     }
 
+    #[allow(dead_code)] // retained to mirror Python's `cycle_punctuation`; the
+    // preset modal owns punctuation selection on this frontend.
     pub fn cycle_punctuation(&mut self) {
         self.punctuation_mode = match self.punctuation_mode.as_str() {
             "full" | "default" => "no_terminal_period".to_string(),
@@ -360,6 +401,89 @@ impl App {
             "aesthetic_lowercase" | "aesthetic" => "lowercase_no_punctuation".to_string(),
             _ => "full".to_string(),
         };
+    }
+
+    /// Advance the output mode through the three modes the engine actually
+    /// knows (``t2.OUTPUT_MODES == ["clipboard", "type", "type_fast"]``,
+    /// ``src/voice_transcriber/t2.py:122``). The engine is authoritative and
+    /// replies with a `cfg` that overwrites this optimistic value, so we must
+    /// never invent a mode it cannot round-trip.
+    pub fn cycle_output_mode(&mut self) -> &str {
+        const OUTPUT_MODES: [&str; 3] = ["clipboard", "type", "type_fast"];
+        let idx = OUTPUT_MODES
+            .iter()
+            .position(|m| *m == self.output_mode)
+            .map(|i| (i + 1) % OUTPUT_MODES.len())
+            .unwrap_or(0);
+        self.output_mode = OUTPUT_MODES[idx].to_string();
+        self.auto_type = matches!(self.output_mode.as_str(), "type" | "type_fast");
+        &self.output_mode
+    }
+
+    /// Apply a wire message received while a modal owns the screen.
+    ///
+    /// State, VU, device and config updates are applied immediately so the
+    /// modal stays live. Transcription (`tx`) and event (`ev`) blocks need the
+    /// main screen's scrollback, which the modal's alternate screen cannot
+    /// write to; dropping them would lose output the engine already considers
+    /// delivered. Queue them instead and let the caller flush them once the
+    /// modal returns (`take_pending_output`).
+    pub fn handle_modal_wire(&mut self, wire: Wire) {
+        match wire {
+            Wire::Tx { .. } | Wire::Ev { .. } => self.pending_output.push(wire),
+            Wire::Devices { devices } => self.update_devices(devices),
+            Wire::State { state, sub } => {
+                self.update_state(RunState::from_wire(&state), sub)
+            }
+            Wire::Vu { level, levels } => self.apply_vu_wire(level, levels.as_deref()),
+            Wire::Cfg {
+                mic,
+                secondary,
+                backend,
+                muted,
+                auto_type,
+                output_mode,
+                sound_theme,
+                ui_theme,
+                punctuation_mode,
+                trailing_space,
+                auto_punctuate,
+                number_digits,
+                number_mode,
+                serial_collapse,
+                spell_command,
+                middle_click_enabled,
+                typing_wpm,
+                hotkeys,
+            } => self.apply_config(
+                mic,
+                secondary,
+                backend,
+                muted,
+                auto_type,
+                output_mode,
+                sound_theme,
+                ui_theme,
+                punctuation_mode,
+                trailing_space,
+                auto_punctuate,
+                number_digits,
+                number_mode,
+                serial_collapse,
+                spell_command,
+                middle_click_enabled,
+                typing_wpm,
+                hotkeys,
+            ),
+            Wire::Quit => self.should_quit = true,
+            Wire::Header | Wire::Suspend | Wire::Resume => {}
+        }
+    }
+
+    /// Return and clear the blocks buffered while a modal was open, so the main
+    /// loop can render them into the scrollback.
+    pub fn take_pending_output(&mut self) -> Vec<Wire> {
+        std::mem::take(&mut self.pending_output)
     }
 
     pub fn cycle_typing_wpm(&mut self) -> u32 {
@@ -377,6 +501,7 @@ impl App {
     }
 
     /// Apply a `cfg` message from the Python backend (authoritative config).
+    #[allow(clippy::too_many_arguments)] // protocol-shaped: mirrors the wire fields 1:1
     pub fn apply_config(
         &mut self,
         mic: Option<String>,
@@ -459,6 +584,17 @@ impl App {
     }
 }
 
+/// Per-message decay the meter used before it became time-based: the level was
+/// multiplied by `0.7` on every update, at a nominal 100 ms message cadence.
+/// `decay_factor` preserves that visual half-rate while scaling it by the real
+/// elapsed time, so a burst of frames cannot drain the bar and a stall cannot
+/// freeze it.
+fn decay_factor(dt_secs: f32) -> f32 {
+    const NOMINAL_DT_SECS: f32 = 0.1;
+    const PER_STEP: f32 = 0.7;
+    PER_STEP.powf(dt_secs / NOMINAL_DT_SECS)
+}
+
 fn detect_system_theme() -> Theme {
     if let Ok(t) = std::env::var("VT_UI_THEME") {
         if let Some(theme) = Theme::from_name(&t) {
@@ -485,4 +621,83 @@ fn detect_system_theme() -> Theme {
         }
     }
     Theme::Green
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ipc::VuLevel;
+
+    /// The engine only round-trips ``t2.OUTPUT_MODES``; the Rust cycle must
+    /// never drift outside it (it used to invent `paste`/`paste_terminal`).
+    #[test]
+    fn output_mode_cycle_stays_within_the_engine_modes() {
+        const ENGINE_MODES: [&str; 3] = ["clipboard", "type", "type_fast"];
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        for start in ENGINE_MODES {
+            app.output_mode = start.to_string();
+            for _ in 0..(ENGINE_MODES.len() * 3) {
+                app.cycle_output_mode();
+                assert!(
+                    ENGINE_MODES.contains(&app.output_mode.as_str()),
+                    "cycle produced {:?}",
+                    app.output_mode
+                );
+                assert_eq!(
+                    app.auto_type,
+                    matches!(app.output_mode.as_str(), "type" | "type_fast")
+                );
+            }
+        }
+    }
+
+    /// Decay is a function of elapsed time, not of how many frames arrived.
+    #[test]
+    fn vu_decay_is_time_based() {
+        // One nominal step reproduces the historical 0.7 per message...
+        assert!((decay_factor(0.1) - 0.7).abs() < 1e-6);
+        // ...while a longer gap decays strictly further than a short one.
+        assert!(decay_factor(0.5) < decay_factor(0.05));
+        assert!(decay_factor(2.0) < decay_factor(0.5));
+    }
+
+    /// A scalar-only VU message carries no per-device snapshot and must leave
+    /// the mic picker's rows alone; an explicit empty list clears them.
+    #[test]
+    fn scalar_vu_leaves_the_per_device_map_alone() {
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        app.update_vu_levels(&[VuLevel { i: 7, level: 0.5 }]);
+        app.apply_vu_wire(0.0, None);
+        assert_eq!(app.vu_levels.get(&7), Some(&0.5));
+        app.apply_vu_wire(0.0, Some(&[]));
+        assert!(app.vu_levels.is_empty());
+    }
+
+    /// `tx` received while a modal is open is queued, not dropped, and the
+    /// counter is not advanced until it is actually flushed.
+    #[test]
+    fn modal_buffers_transcription_until_flushed() {
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        let wire: Wire = serde_json::from_str(r#"{"t":"tx","text":"hello"}"#).unwrap();
+        app.handle_modal_wire(wire);
+        assert_eq!(app.transcription_count, 0, "not applied yet");
+        assert_eq!(app.pending_output.len(), 1);
+
+        let pending = app.take_pending_output();
+        assert_eq!(pending.len(), 1);
+        assert!(matches!(pending[0], Wire::Tx { .. }));
+        assert!(app.pending_output.is_empty(), "take clears the queue");
+    }
+
+    /// An empty device list is a real result (no microphones) and must clear
+    /// stale rows; an omitted list means "no update".
+    #[test]
+    fn empty_device_list_clears_rows_but_absent_does_not() {
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        assert!(!app.audio_devices.is_empty());
+        app.update_devices(None);
+        assert!(!app.audio_devices.is_empty(), "absent list is not an update");
+        app.update_devices(Some(Vec::new()));
+        assert!(app.audio_devices.is_empty(), "empty list clears the rows");
+    }
 }

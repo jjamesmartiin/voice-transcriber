@@ -166,11 +166,19 @@ impl Runtime {
     }
 
     fn handle_wire(&mut self, app: &mut App, wire: Wire) -> io::Result<()> {
+        // While suspended we cannot render into scrollback. A `tx`/`ev` emitted
+        // in the window between Python writing `suspend` and setting its own
+        // queue flag is not queued on the Python side either, so buffer it here
+        // instead of dropping it (and instead of counting it as delivered).
+        if self.suspended && matches!(&wire, Wire::Tx { .. } | Wire::Ev { .. }) {
+            app.pending_output.push(wire);
+            return Ok(());
+        }
         let width = self.width();
         match wire {
             Wire::Devices { devices } => app.update_devices(devices),
             Wire::State { state, sub } => app.update_state(RunState::from_wire(&state), sub),
-            Wire::Vu { level, levels } => app.apply_vu_wire(level, &levels),
+            Wire::Vu { level, levels } => app.apply_vu_wire(level, levels.as_deref()),
             Wire::Cfg {
                 mic,
                 secondary,
@@ -253,6 +261,18 @@ impl Runtime {
             Wire::Suspend => self.suspend()?,
             Wire::Resume => self.resume(app)?,
             Wire::Quit => app.should_quit = true,
+        }
+        Ok(())
+    }
+
+    /// Render transcription/event blocks that were buffered while the screen
+    /// was suspended or a modal was open. No-op while still suspended.
+    fn flush_pending(&mut self, app: &mut App) -> io::Result<()> {
+        if self.suspended {
+            return Ok(());
+        }
+        for wire in app.take_pending_output() {
+            self.handle_wire(app, wire)?;
         }
         Ok(())
     }
@@ -356,7 +376,7 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
         }
         for ev in incoming {
             match ev {
-                IpcEvent::Wire(w) => rt.handle_wire(&mut app, w)?,
+                IpcEvent::Wire(w) => rt.handle_wire(&mut app, *w)?,
                 IpcEvent::Closed => app.should_quit = true,
             }
         }
@@ -370,14 +390,24 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                         if let Some(intent) = key_intent(key) {
                             match intent {
                                 Intent::Quit => {
-                                    ipc::send_cmd(&writer, "quit");
+                                    // Best-effort: we are quitting regardless.
+                                    let _ = ipc::send_cmd(&writer, "quit");
                                     app.should_quit = true;
                                 }
-                                Intent::ToggleRecord => ipc::send_cmd(&writer, "toggle_record"),
+                                Intent::ToggleRecord => {
+                                    if ipc::send_cmd(&writer, "toggle_record").is_err() {
+                                        app.should_quit = true;
+                                    }
+                                }
                                 Intent::OpenSettingsPicker => {
                                     settings_picker::run_settings_picker(Some(&writer), Some(&rx), &mut app)?;
+                                    rt.flush_pending(&mut app)?;
                                 }
-                                Intent::ResetTerminal => ipc::send_cmd(&writer, "reset_terminal"),
+                                Intent::ResetTerminal => {
+                                    if ipc::send_cmd(&writer, "reset_terminal").is_err() {
+                                        app.should_quit = true;
+                                    }
+                                }
                             }
                         }
                     }
@@ -390,6 +420,7 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
             }
         }
 
+        rt.flush_pending(&mut app)?;
         rt.draw(&app)?;
         std::thread::sleep(TICK);
     }
