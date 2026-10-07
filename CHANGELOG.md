@@ -33,15 +33,40 @@ normally reuses the existing bundle. See
 
 ### Fixed
 
+- **Three settings in the config file were silently ignored.** `language`,
+  `wait_for_model_on_startup` and `enable_slm` are module globals, but the
+  config loader assigned to them without declaring them `global`, so it wrote to
+  throwaway locals. `language: fr` did nothing, and saving the config then wrote
+  `language: en` back over the file.
+- **`reset_terminal()` raised `UnboundLocalError` on every call** and was
+  swallowed by its enclosing `except`, so the terminal/clipboard reset did
+  nothing. It used `sys.platform` before a later `import sys` made `sys` local.
+- **The TUI's output-mode cycle invented modes the engine does not have**
+  (`paste`, `paste_terminal`), showing a setting that did not exist and then
+  snapping back.
+- **A transcription could be lost while a settings/mic/theme modal was open** in
+  the ratatui frontend, and the block counter could advance for a block that was
+  never shown. Modals now buffer pending output.
+- **The notification overlay could break or be injected into.** It built a
+  Python script by string interpolation and ran it with `python -c`; a `"` in
+  the text broke it. Values are now emitted as `repr()` literals. Its list of
+  child processes was also shared between threads without a lock.
 - `AGENTS.md` claimed a specific verb count for the control API while the same
   paragraph said not to hardcode it. The count is gone.
 
 ### Changed
 
+- **A linter now runs in CI.** `ruff` (configured in `pyproject.toml`) and
+  `shellcheck` gate the Linux job and ship in the dev shell, and the dev-shell
+  banner moved to `stderr` so `nix develop --command ... --json` produces clean
+  output. `ruff format` is deliberately not enforced.
 - Internal planning documents moved to `docs/archive/`.
 - CI now builds the Rust frontend (`nix build .#vt-tui`) in the Linux job. The
   crate is Unix-only and nothing else compiled it, so a broken frontend build or
   a failed `vu` parse previously stayed invisible until release.
+- Documentation: added `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
+  this changelog, issue/PR templates, and a companion blog post
+  (`docs/blog_post.md`).
 
 ## [1.2.1] — 2026-10-05
 

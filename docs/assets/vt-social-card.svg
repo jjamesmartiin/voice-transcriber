@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="Voice Transcriber — offline, ultra-low-latency voice dictation with global push-to-talk.">
+  <title>Voice Transcriber</title>
+  <desc>Offline, ultra-low-latency voice dictation with global push-to-talk, across Linux, Windows, WSL and macOS.</desc>
+
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="-12%" r="105%">
+      <stop offset="0%" stop-color="#13202b"/>
+      <stop offset="55%" stop-color="#0d141c"/>
+      <stop offset="100%" stop-color="#080b0f"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#3fb950"/>
+      <stop offset="100%" stop-color="#39c5cf"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3fb950"/>
+      <stop offset="100%" stop-color="#39c5cf" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="1279" height="639" fill="none" stroke="#1f2a37" stroke-width="1"/>
+
+  <!-- Audio waveform motif -->
+  <g fill="url(#wave)">
+    <rect x="608" y="118" width="8" height="24" rx="4"/>
+    <rect x="622" y="106" width="8" height="48" rx="4"/>
+    <rect x="636" y="92"  width="8" height="76" rx="4"/>
+    <rect x="650" y="100" width="8" height="60" rx="4"/>
+    <rect x="664" y="112" width="8" height="36" rx="4"/>
+  </g>
+
+  <text x="640" y="248" text-anchor="middle"
+        font-family="DejaVu Sans Mono, monospace" font-size="84" font-weight="bold"
+        letter-spacing="-2" fill="#f0f6fc">Voice Transcriber</text>
+
+  <rect x="560" y="278" width="160" height="6" rx="3" fill="url(#accent)"/>
+
+  <text x="640" y="348" text-anchor="middle"
+        font-family="DejaVu Sans, sans-serif" font-size="30" fill="#c9d1d9">Offline, ultra-low-latency voice dictation.</text>
+  <text x="640" y="390" text-anchor="middle"
+        font-family="DejaVu Sans, sans-serif" font-size="30" fill="#8b949e">Hold a global hotkey. Speak. Clean text lands in any window.</text>
+
+  <!-- Feature chips (monospace metrics: 0.60205em advance at 22px = 13.245px/char) -->
+  <g font-family="DejaVu Sans Mono, monospace" font-size="22" fill="#c9d1d9">
+    <rect x="121.5" y="440" width="349" height="52" rx="26" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <text x="296" y="473" text-anchor="middle">100% offline &amp; private</text>
+
+    <rect x="492.5" y="440" width="309" height="52" rx="26" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <text x="647" y="473" text-anchor="middle">global push-to-talk</text>
+
+    <rect x="823.5" y="440" width="335" height="52" rx="26" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <text x="991" y="473" text-anchor="middle">types into any window</text>
+  </g>
+
+  <text x="640" y="566" text-anchor="middle"
+        font-family="DejaVu Sans Mono, monospace" font-size="20" fill="#6e7681">Linux · Windows · WSL · macOS      ·      Cohere ASR      ·      no accounts, no telemetry</text>
+</svg>

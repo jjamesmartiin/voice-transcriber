@@ -1,4 +1,22 @@
-# Todo for voice-transcriber repo
+# Known limitations and verification log
+
+This is the project's engineering log, kept in the open rather than in a private
+notebook. It records two things: **what is verified on which platform** (and,
+just as importantly, what is *not*), and the open gaps with the evidence behind
+them.
+
+Read it when you want to know how much to trust a claim. Several entries say
+exactly what has and has not been proven — "verified end-to-end on Linux,
+expected but unconfirmed on macOS, unreachable on native Windows" — and say why.
+That honesty is deliberate: a feature that is unverified on your platform is
+different from one that is broken, and you deserve to be able to tell which you
+are looking at before you file an issue.
+
+`- [x]` items are kept for the record of *how* something was validated, not as a
+changelog; see [`CHANGELOG.md`](CHANGELOG.md) for what shipped in each release.
+
+---
+
 - [x] Move the pytest cache into tests/ (`pytest.ini` sets `cache_dir = tests/.pytest_cache`)
 - [x] Localize `.gitignore` per-directory (`src/`, `tests/`, `config/`) so the root stays flat
 - [x] Remove the root `HF_TOKEN` file — the runtime no longer needs a Hugging Face token (weights come from the GitHub release assets). The maintainer release tool (`scripts/prepare_model_release.py`) reads the local HF cache only and embeds no secrets.
