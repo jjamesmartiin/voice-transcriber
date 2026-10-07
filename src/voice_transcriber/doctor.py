@@ -175,6 +175,59 @@ def check_microphone_mute(fix: bool = False) -> Dict[str, Any]:
     return result
 
 
+def check_bluetooth_profile_policy() -> Dict[str, Any]:
+    """Advisory: WirePlumber's Bluetooth headset-profile autoswitch policy.
+
+    The app borrows this setting while recording (so a Bluetooth headset can serve
+    as a microphone) and restores the previous value on exit. Installs that ran a
+    version *before* that change left ``false`` recorded permanently — the app
+    cannot know whether the user or its former self set it, so this only reports,
+    with the command that resets it.
+
+    The symptom is a headset that never switches to hands-free, which some
+    applications surface as "no microphone at all". It never fails the run: a user
+    may have disabled autoswitch deliberately.
+    """
+    if not shutil.which("wpctl"):
+        return {
+            "ok": True,
+            "checked": False,
+            "value": None,
+            "detail": "Host has no wpctl (not a PipeWire platform); not checked.",
+        }
+
+    import t2
+
+    current = t2.get_wireplumber_bt_autoswitch()
+    if current is None:
+        return {
+            "ok": True,
+            "checked": False,
+            "value": None,
+            "detail": "Could not read the WirePlumber setting; not checked.",
+        }
+    if current:
+        return {
+            "ok": True,
+            "checked": True,
+            "value": True,
+            "detail": "Bluetooth headset-profile autoswitch is enabled.",
+        }
+    return {
+        "ok": True,  # advisory: disabling it may be deliberate
+        "checked": True,
+        "value": False,
+        "detail": (
+            "bluetooth.autoswitch-to-headset-profile is disabled, so a Bluetooth "
+            "headset will not switch to hands-free when an app opens its "
+            "microphone (some apps then report no microphone at all). Versions of "
+            "this app before 1.2.1 disabled it permanently; if you did not do that "
+            "on purpose, restore the WirePlumber default with:"
+        ),
+        "fix_command": "wpctl settings -s bluetooth.autoswitch-to-headset-profile true",
+    }
+
+
 def check_hotkeys_and_permissions(plat: str) -> Dict[str, Any]:
     status = {"ok": True, "details": [], "warnings": [], "errors": []}
 
@@ -347,6 +400,7 @@ def run_doctor(json_format: bool = False, stream=None, fix: bool = False) -> Dic
     torch_info = check_torch_acceleration()
     audio_info = check_audio_devices()
     mic_mute_info = check_microphone_mute(fix=fix)
+    bt_info = check_bluetooth_profile_policy()
     hotkey_info = check_hotkeys_and_permissions(plat)
     clip_info = check_clipboard_and_typing(plat)
     model_info = check_model_weights()
@@ -367,6 +421,7 @@ def run_doctor(json_format: bool = False, stream=None, fix: bool = False) -> Dic
         "acceleration": torch_info,
         "audio": audio_info,
         "microphone": mic_mute_info,
+        "bluetooth_profile": bt_info,
         "hotkeys": hotkey_info,
         "clipboard_and_typing": clip_info,
         "model_weights": model_info,
@@ -409,6 +464,13 @@ def run_doctor(json_format: bool = False, stream=None, fix: bool = False) -> Dic
         print(f"[{mark}] Microphone Mute: {mic_mute_info['detail']}", file=out)
         if not mic_mute_info["ok"]:
             print(f"    Fix: {mic_mute_info['fix_command']}   (or re-run: doctor --fix)", file=out)
+
+    # 3c. Bluetooth headset-profile policy — advisory, never fails the run.
+    if bt_info["checked"]:
+        mark = "✓" if bt_info["value"] else "!"
+        print(f"[{mark}] Bluetooth Headset: {bt_info['detail']}", file=out)
+        if not bt_info["value"]:
+            print(f"    Fix: {bt_info['fix_command']}", file=out)
 
     # 4. Hotkeys & Permissions
     if hotkey_info["ok"]:

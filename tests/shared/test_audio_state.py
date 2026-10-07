@@ -503,3 +503,75 @@ class TestUnlistedInputs:
 
         wpctl.broken = "crash"
         assert audio_state.active_source_holders() == {}
+
+
+class TestDoctorBluetoothProfile:
+    """Installs that ran a pre-1.2.1 build left autoswitch disabled forever.
+
+    The app cannot tell whether the user or its former self disabled it, so doctor
+    reports and suggests rather than failing — but it must not stay silent, because
+    the symptom (a headset that never switches to hands-free) looks like missing
+    hardware.
+    """
+
+    @pytest.fixture
+    def wpctl_bt(self, monkeypatch):
+        """Fake `wpctl settings` so the test never reads the host's real value."""
+        import t2
+
+        state = {"autoswitch": True}
+        monkeypatch.setattr(t2, "get_wireplumber_bt_autoswitch", lambda: state["autoswitch"])
+        return state
+
+    def test_enabled_autoswitch_passes(self, wpctl_bt):
+        import doctor
+
+        info = doctor.check_bluetooth_profile_policy()
+        assert info["checked"] is True
+        assert info["value"] is True
+        assert info["ok"] is True
+        assert "enabled" in info["detail"]
+
+    def test_disabled_autoswitch_is_advisory_not_a_failure(self, wpctl_bt):
+        import doctor
+
+        wpctl_bt["autoswitch"] = False
+        info = doctor.check_bluetooth_profile_policy()
+
+        # Advisory: disabling autoswitch can be deliberate.
+        assert info["ok"] is True
+        assert info["value"] is False
+        assert "bluetooth.autoswitch-to-headset-profile" in info["detail"]
+        assert "no microphone at all" in info["detail"]
+        assert "autoswitch-to-headset-profile true" in info["fix_command"]
+
+    def test_reports_unchecked_on_hosts_without_wpctl(self, monkeypatch):
+        import doctor
+
+        monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+        info = doctor.check_bluetooth_profile_policy()
+        assert info["checked"] is False
+        assert info["ok"] is True
+
+    def test_an_unreadable_setting_is_not_reported_as_disabled(self, wpctl_bt, monkeypatch):
+        import t2
+        import doctor
+
+        monkeypatch.setattr(t2, "get_wireplumber_bt_autoswitch", lambda: None)
+        info = doctor.check_bluetooth_profile_policy()
+        assert info["checked"] is False
+        assert info["value"] is None
+
+    def test_a_disabled_policy_is_surfaced_in_the_report(self, wpctl_bt):
+        import doctor
+        from io import StringIO
+
+        wpctl_bt["autoswitch"] = False
+        buf = StringIO()
+        report = doctor.run_doctor(stream=buf)
+
+        assert report["bluetooth_profile"]["value"] is False
+        # Advisory only: it must not flip the overall result.
+        assert report["ok"] is True
+        assert "Bluetooth Headset" in buf.getvalue()
+        assert "autoswitch-to-headset-profile true" in buf.getvalue()
