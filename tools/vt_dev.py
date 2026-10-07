@@ -16,8 +16,6 @@ before the project virtual environment exists.
 """
 from __future__ import annotations
 
-import argparse
-import importlib.util
 import os
 import shutil
 import subprocess
