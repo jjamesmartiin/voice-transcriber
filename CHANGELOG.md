@@ -28,7 +28,11 @@ normally reuses the existing bundle. See
   attached to releases — a self-contained bundle needing no Python install. It
   prompts to download the model on first launch, or reads a local
   `models\cohere\` folder.
-- **Presentation assets** in `docs/assets/`: a hero demo, terminal-UI and
+- **`model_backend` actually works.** The config option is now read (it was never read),
+  validated against a single backend registry, persisted, and reported clearly if you name a
+  backend that does not exist. `transcribe2.set_backend()` was a no-op that silently kept
+  Cohere. Cohere remains the only backend; adding another is one registry entry plus a
+  module. a hero demo, terminal-UI and
   settings renders, a system-architecture diagram, and a 1280x640 social card.
   The README now shows the terminal UI and the architecture diagram.
 

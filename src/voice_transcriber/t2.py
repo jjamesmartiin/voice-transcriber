@@ -194,6 +194,24 @@ def _load_hotkey_binds(raw):
         return list(keybinds.DEFAULT_BINDS)
 
 
+def _load_model_backend(raw):
+    """Resolve the configured ASR backend, falling back to the shipped one.
+
+    A hand-edited config with a typo must not take the app down, so an unknown
+    name logs and keeps the default -- and, because falling back silently could
+    leave someone believing they had switched models, the warning names both the
+    error and the backend that is actually in force.
+    """
+    try:
+        return transcribe2.set_backend(raw)
+    except transcribe2.UnknownBackendError as e:
+        logger.warning(
+            f"⚠️  Ignoring invalid model_backend config ({e}); "
+            f"using {transcribe2.DEFAULT_BACKEND}"
+        )
+        return transcribe2.set_backend(transcribe2.DEFAULT_BACKEND)
+
+
 GLOBAL_CONFIG_FILE = get_data_dir() / 'audio_device_config.json'
 
 _TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -791,6 +809,7 @@ def load_audio_config(file_path=None):
             SPELL_COMMAND = _normalize_bool(config.get('spell_command', True), default=True)
             MIDDLE_CLICK_ENABLED = config.get('middle_click_enabled', False)
             HOTKEY_BINDS = _load_hotkey_binds(config.get('hotkeys'))
+            MODEL_BACKEND = _load_model_backend(config.get('model_backend'))
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
 
             raw_punct = config.get('preset') or config.get('mode_preset') or config.get('punctuation_mode') or config.get('formatting_level') or 'full'
@@ -1069,6 +1088,7 @@ def save_audio_config(file_path=None):
             'wait_for_model_on_startup': WAIT_FOR_MODEL_ON_STARTUP,
             'typing_wpm': TYPING_WPM,
             'hotkeys': [b.to_config() for b in keybinds.parse_binds(HOTKEY_BINDS)],
+            'model_backend': MODEL_BACKEND,
         })
 
         if CONFIG_FILE.suffix == '.toml':
