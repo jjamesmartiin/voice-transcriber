@@ -15,27 +15,27 @@ Runbook for cutting a release of voice-transcriber on GitHub
 ## TL;DR checklist
 
 ```bash
-# 1. Bump the version in all three places (see "Version bump" below).
-#    flake.nix (x2) and src/tui.py (x1)
+# 1. Bump the version across all versioned surfaces (see "Version bump" below).
+#    flake.nix, src/voice_transcriber/tui.py, tui-rs/src/main.rs, pyproject.toml, packaging/nix/package.nix, packaging/linux/*.appdata.xml
 
 # 2. Verify the tree is green before tagging.
 ./test.sh
 nix build .#vt-tui --no-link --print-out-paths
 
 # 3. Commit, tag, push the tag. Pushing the tag is what creates the release.
-git add -A && git commit -m "release: v1.2.0"
-git tag v1.2.0
+git add -A && git commit -m "release: v1.2.1"
+git tag v1.2.1
 git push github main --tags        # remote 'github' == git@github.com:jjamesmartiin/voice-transcriber.git
 
 # 4. Wait for the `release` workflow to finish (it creates the Release and
-#    attaches vt.AppImage). Watch it, or just poll the release object:
-nix develop --command gh release view v1.2.0
+#    attaches vt-x86_64.AppImage and VoiceTranscriber-windows-x86_64.zip). Watch it, or poll the release object:
+nix develop --command gh release view v1.2.1
 
 # 5. NOTHING TO DO FOR THE WEIGHTS. They live in a revision-keyed model
 #    bundle and are re-published only when REVISION changes — see
 #    "Where the weights live".
 
-# 6. Verify the release carries exactly one asset (see "Verifying a release").
+# 6. Verify the release carries the release assets (see "Verifying a release").
 ```
 
 ---
@@ -43,23 +43,26 @@ nix develop --command gh release view v1.2.0
 ## Version bump
 
 The version string is duplicated and **not** derived from the git tag. Bump all
-four before tagging, or the AppImage/UI/catalogue metadata will report a stale
+surfaces before tagging, or the AppImage/Windows bundle/UI/catalogue metadata will report a stale
 version:
 
 | File | What |
 | :--- | :--- |
-| `flake.nix` | `version = "1.2.0";` in the flake `outputs` let-block |
-| `flake.nix` | `version = "1.2.0";` in the `pkgs.stdenv.mkDerivation` attrs |
-| `src/tui.py` | `def __init__(self, app_version="1.2.0", ...)` |
-| `packaging/linux/*.appdata.xml` | `<release version="1.2.0" date="YYYY-MM-DD"/>` |
+| `flake.nix` | `version = "1.2.1";` in the flake `outputs` let-block |
+| `flake.nix` | `version = "1.2.1";` in the `pkgs.stdenv.mkDerivation` attrs |
+| `src/voice_transcriber/tui.py` | `def __init__(self, app_version="1.2.1", ...)` |
+| `tui-rs/src/main.rs` | `const VERSION: &str = "1.2.1";` |
+| `pyproject.toml` | `version = "1.2.1"` |
+| `packaging/nix/package.nix` | `version = "1.2.1";` |
+| `packaging/linux/*.appdata.xml` | `<release version="1.2.1" date="YYYY-MM-DD"/>` |
 
-`tui-rs/Cargo.toml` tracks the Rust frontend (`vt-tui`) version independently
+`tui-rs/Cargo.toml` tracks the Rust frontend (`vt-tui`) internal crate version (`0.1.0`) independently
 and is not the app version.
 
 Sanity check that nothing was missed:
 
 ```bash
-grep -rn '[0-9]\+\.[0-9]\+\.[0-9]\+' flake.nix src/tui.py | grep -v '^\s*#'
+python -m pytest tests/shared/test_version_consistency.py
 ```
 
 ---
@@ -68,16 +71,14 @@ grep -rn '[0-9]\+\.[0-9]\+\.[0-9]\+' flake.nix src/tui.py | grep -v '^\s*#'
 
 `.github/workflows/release.yml` triggers on any pushed tag matching `v*`:
 
-1. runs on `ubuntu-latest`, installs Nix,
-2. `nix bundle --bundler github:ralismark/nix-appimage .#default` → one AppImage,
-3. `softprops/action-gh-release@v2` with `files: ./*.AppImage` and
-   `fail_on_unmatched_files: true` — this **creates the Release object** if one
-   does not exist, and attaches the AppImage.
+1. **Linux AppImage job (`ubuntu-latest`)**: installs Nix, runs `nix bundle --bundler github:ralismark/nix-appimage .#default` → `vt-x86_64.AppImage`.
+2. **Windows Standalone ZIP job (`windows-latest`)**: installs dependencies, executes `platforms/windows/build_offline.py --no-model`, and zips `dist/VoiceTranscriber` → `VoiceTranscriber-windows-x86_64.zip`.
+3. `softprops/action-gh-release@v2` attaches the assets to the GitHub Release with `fail_on_unmatched_files: true`.
 
 It uses no secrets. Its header comment states the weights are deliberately not
 fetched in CI.
 
-The AppImage is only accepted by the AppImage catalogue because `.#default`
+The AppImage is accepted by the AppImage catalogue because `.#default`
 installs a `.desktop` entry and icons from `packaging/linux/`. nix-appimage's
 `extra-files.sh` looks for `share/applications/*.desktop` whose `Exec=` basename
 matches the bundled program (`vt`), copies the `Icon=` file in from
@@ -87,7 +88,7 @@ AppImage with `FATAL: .DirIcon is missing` (see
 <https://github.com/AppImage/appimage.github.io/pull/8908>).
 `tests/linux/test_appimage_packaging.py` pins the pieces.
 
-`.github/workflows/ci.yml` is separate (push/PR only) and runs the three-OS test
+`.github/workflows/ci.yml` is separate (push/PR only) and runs the four-OS test
 matrix. It does not publish anything.
 
 **Consequences:**
@@ -100,9 +101,7 @@ matrix. It does not publish anything.
   runner has no Hugging Face cache and no `dist/model/`. Only the maintainer's
   machine does. (Widening the glob without also providing the files would make
   the release job fail on `fail_on_unmatched_files: true`.)
-- No prebuilt **Windows** binary is published. `dist/` is gitignored and
-  PyInstaller cannot cross-compile; see
-  [`platforms/windows/plan-to-compile.md`](../platforms/windows/plan-to-compile.md).
+- **Windows standalone ZIP** is built in CI on `windows-latest`. When building locally on Linux/POSIX, PyInstaller cannot cross-compile Windows EXEs, so local Windows builds must run on a Windows host via `build.bat`.
 
 ---
 

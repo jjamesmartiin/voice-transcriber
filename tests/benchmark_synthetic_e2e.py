@@ -2,7 +2,7 @@
 """
 Synthetic End-to-End Audio Benchmark & Integration Suite.
 Generates synthetic speech audio from text prompts, streams the audio through the
-Voice Transcriber pipeline (StreamingMicroBatcher + ASR + Wispr Flow Post-Processor),
+Voice Transcriber pipeline (StreamingMicroBatcher + ASR + Post-Processor),
 and measures latency intervals across Technique A, B, and C configurations.
 """
 
@@ -87,7 +87,7 @@ class TestSyntheticE2EBenchmark(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         print("\n" + "="*80)
-        print("  SYNTHETIC E2E AUDIO BENCHMARK SUITE (TTS -> ASR -> WISPR FLOW)")
+        print("  SYNTHETIC E2E AUDIO BENCHMARK SUITE (TTS -> ASR -> POST-PROCESSOR)")
         print("="*80)
 
     def test_synthetic_audio_end_to_end_benchmark(self):
@@ -146,13 +146,13 @@ class TestSyntheticE2EBenchmark(unittest.TestCase):
 
         # Print Benchmark Table
         print("\n" + "-"*80)
-        print(f"{'Benchmark Test Case':<28} | {'Audio Len':<9} | {'ASR Latency':<12} | {'Wispr Flow':<12} | {'Total E2E':<10} | {'Idempotent'}")
+        print(f"{'Benchmark Test Case':<28} | {'Audio Len':<9} | {'ASR Latency':<12} | {'Post-Proc':<12} | {'Total E2E':<10} | {'Idempotent'}")
         print("-"*80)
         for r in results_summary:
             total_e2e_ms = r["asr_ms"] + r["tech_c_ms"]
             print(f"{r['name']:<28} | {r['duration_sec']:>5.2f}s    | {r['asr_ms']:>7.1f} ms  | {r['tech_c_ms']:>7.1f} ms  | {total_e2e_ms:>6.1f} ms | {'✅ Yes' if r['idempotent'] else '❌ No'}")
             print(f"   ├─ Raw ASR Output:  \"{r['asr_text']}\"")
-            print(f"   └─ Final Wispr Flow: \"{r['final_output']}\"")
+            print(f"   └─ Final Post-Processor: \"{r['final_output']}\"")
         print("-"*80 + "\n")
 
 if __name__ == "__main__":

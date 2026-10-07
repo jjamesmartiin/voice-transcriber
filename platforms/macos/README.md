@@ -87,9 +87,9 @@ Voice Transcriber can be queried and controlled programmatically from another te
 
 ---
 
-## Apple Silicon Hardware Acceleration (MPS)
+## Apple Silicon Performance
 
-On Apple Silicon (M1/M2/M3/M4), PyTorch automatically uses the **Metal Performance Shaders (MPS)** backend for fast, on-device neural network inference with low power consumption.
+On Apple Silicon (M1/M2/M3/M4), PyTorch runs dynamic INT8 quantized CPU inference leveraging high-performance Performance-cores and Apple Accelerate/NEON SIMD vector extensions, delivering ultra-low-latency transcription (~0.15x RTF) without requiring dedicated GPU memory allocations.
 
 ---
 

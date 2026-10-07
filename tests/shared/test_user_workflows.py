@@ -321,9 +321,9 @@ class TestMiddleClickWorkflow:
 
 
 # ===========================================================================
-# 4. Wispr Flow Real Dictation Workflows (Speech-to-Text Post Processing)
+# 4. Real Dictation Workflows (Speech-to-Text Post Processing)
 # ===========================================================================
-class TestWisprFlowDictationWorkflows:
+class TestPostProcessorDictationWorkflows:
     """Verifies that the speech patterns users actually say get cleaned properly."""
 
     def test_verbal_self_correction_retraction(self):

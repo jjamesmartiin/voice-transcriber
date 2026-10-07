@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Simple Voice Transcriber with Alt+Shift+K shortcut
-Enhanced with Wayland-compatible global hotkeys using evdev+uinput
+Voice Transcriber main entry point and runtime orchestrator.
+Cross-platform voice dictation with global hotkeys, streaming VAD, and instant text injection.
 """
 import logging
 import threading

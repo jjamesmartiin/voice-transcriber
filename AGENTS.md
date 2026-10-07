@@ -88,8 +88,9 @@ nix build .#vt-tui --no-link --print-out-paths
 - **`result/` is stale until rebuilt.** It is a symlink to the last `nix build`;
   a binary there can predate the current source. Rebuild, don't trust it.
 - **`models/` and `dist/` are gitignored.** No weights in a fresh clone; they are
-  auto-downloaded on first launch (~2.8 GB down, ~4 GB on disk). No prebuilt
-  Windows EXE is published — PyInstaller cannot cross-compile.
+  auto-downloaded on first launch (~2.8 GB down, ~4 GB on disk). Release assets
+  include `VoiceTranscriber-windows-x86_64.zip` built in CI (`windows-latest`);
+  locally on Linux/POSIX, PyInstaller cannot cross-compile Windows EXEs.
 - **`config/config.yaml` is a real user config** (untracked). Tests must
   monkeypatch `t2.CONFIG_FILE`; never let a test or a manual command write the
   user's live settings. If you drive the app by hand, restore what you changed.

@@ -1,7 +1,7 @@
 # Voice Transcriber (VT) - WSL Guide
 
-> **Verification status.** This platform is unit-tested (the suite runs green on a
-> `Ubuntu with `VT_PLATFORM=wsl`` CI runner) but has **not** been run end-to-end on real hardware by the
+> **Verification status.** This platform is unit-tested (the suite runs green on an
+> Ubuntu CI runner with `VT_PLATFORM=wsl`) but has **not** been run end-to-end on real hardware by the
 > maintainer — only Linux has. Please treat a first-run problem here as a
 > WSL bug to report rather than as something you did wrong, and include the
 > output of `run_wsl.bat doctor` in an issue. [`TODO.md`](../../TODO.md) lists the exact steps
