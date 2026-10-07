@@ -1,9 +1,21 @@
 # Voice Transcriber
 
-A modular, low-latency voice transcription engine with global push-to-talk
-hotkeys and real-time text injection. One shared core engine, four supported
-host environments: **Linux (Wayland/X11)**, **Windows (native)**,
-**Windows via WSL2 (NixOS)**, and **macOS (Darwin)**.
+[![Release](https://img.shields.io/github/v/release/jjamesmartiin/voice-transcriber?color=blue&style=flat-square)](https://github.com/jjamesmartiin/voice-transcriber/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/jjamesmartiin/voice-transcriber/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/jjamesmartiin/voice-transcriber/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20WSL2%20%7C%20macOS-lightgrey.svg?style=flat-square)](#platform-support)
+
+**Voice Transcriber** is a private, ultra-low-latency voice dictation engine with system-wide push-to-talk hotkeys and instant text injection. Hold a global shortcut anywhere on your desktop, speak naturally, and clean formatted text types directly into your focused window — browser, IDE, terminal, or chat.
+
+![Voice Transcriber Demo](docs/assets/vt-demo.gif)
+
+### Why Voice Transcriber?
+
+- **100% Offline & Private**: Powered by local Cohere Transcribe weights (`cohere-transcribe-03-2026`). Zero API keys, zero cloud subscriptions, zero telemetry.
+- **Microsecond Post-Processing (~16 µs)**: Removes verbal retractions (*"no wait, make that Wednesday"*), parses spoken ordinals/dates (*"October 20th"*), converts numbers to digits, and applies personal developer dictionaries with homophone guards (*"push to Gitea"* vs *"cup of tea"*).
+- **Push-to-Talk + Hands-Free Space Latch**: Hold `Alt+Shift` (or middle mouse button) anywhere on the desktop to talk. Tap `Space` while holding to latch hands-free. `Alt+Shift` is just the default — the settings modal (or `vt hotkey add`) binds as many chords as you like.
+- **Direct OS Keystroke Injection**: Types natively into any focused window across Linux (Wayland `uinput`/`ydotool`, X11), Windows (Win32 `SendInput`), and WSL2.
+- **Ratatui Terminal REPL**: High-performance inline Rust TUI with live status, all-time time-saved tracking, and simultaneous multi-device microphone VU metering.
 
 ---
 
@@ -192,8 +204,8 @@ run.bat doctor --fix      # Windows (no PipeWire: reported as unchecked, not fai
 
 | Gesture | Action |
 | :--- | :--- |
-| **`Alt+Shift`** (hold) | **Push-to-Talk.** Hold while speaking; release to transcribe and paste/type into the active window. |
-| **`Space`** (tap while holding `Alt+Shift`) | **Hands-Free Latch.** Release the keys and keep speaking; tap `Alt+Shift` again when finished. |
+| **Your bound chords** (hold) — default **`Alt+Shift`** | **Push-to-Talk.** Hold while speaking; release to transcribe and paste/type into the active window. Any number of chords can be bound, including remapped and single keys (`f13`); see [Push-to-talk bindings](#push-to-talk-bindings). |
+| **`Space`** (tap while holding a bound chord) | **Hands-Free Latch.** Release the keys and keep speaking; tap your chord again when finished. |
 | **Middle-click** (hold) | **Mouse Push-to-Talk.** A press is buffered for a ~250 ms hold delay: releasing before it leaves the click a normal middle click, holding past it starts recording and the release stops it. On Linux a tap under ~100 ms is replayed untouched; a longer hold is swallowed so no primary-selection paste leaks. |
 | **Left+right click** (within ~50 ms) | **Enter.** While mouse mode is on, a near-simultaneous left+right click is swallowed and replayed as one `Enter` keystroke. |
 | **`Ctrl`** (held at release) | **Clipboard override.** Forces clipboard output for this utterance even when auto-type is enabled. |
@@ -208,11 +220,58 @@ were typing in another application. Everything else (microphone, theme, mode
 presets) is a sub-picker inside that modal. From outside the terminal, drive the
 same actions with the [Control API](#control-api).
 
-> **Two ways to record, one of them hands-free.** Hold `Alt+Shift` — or the
+> **Two ways to record, one of them hands-free.** Hold a bound chord — or the
 > middle mouse button — for push-to-talk anywhere on the desktop, and release to
 > finish. Or tap `Space` in the terminal to start and tap it again to stop. While
-> holding `Alt+Shift`, tapping `Space` *latches* the recording: let go of both
-> keys and keep talking, then tap `Alt+Shift` again to finish.
+> holding your chord, tapping `Space` *latches* the recording: let go of both
+> keys and keep talking, then tap your chord again to finish.
+
+### Push-to-talk bindings
+
+`Alt+Shift` is only the shipped default. Binds are a list, edited three ways:
+
+```bash
+vt hotkey                          # list what is bound
+vt hotkey add ctrl+shift           # add a chord (as many as you like)
+vt hotkey add f13                  # a single key works too
+vt hotkey remove alt+shift         # drop one
+vt hotkey reset                    # back to Alt+Shift
+```
+
+…or with `a` / `d` inside **Settings → Push-to-Talk Keys**, or by hand:
+
+```yaml
+hotkeys:
+  - keys: [alt, shift]
+    action: dictate
+  - keys: [f13]
+    action: dictate
+```
+
+Key names are OS-neutral. **`vt hotkey keys`** is the authoritative list (it is
+served straight from the one table the backends resolve through, so it cannot
+drift), grouped and with aliases:
+
+```bash
+vt hotkey keys            # human-readable
+vt hotkey keys --json     # [{name, group, aliases}, ...]
+```
+
+In short: modifiers (`ctrl` / `leftctrl` / `rightctrl`, `alt`, `shift`, `meta` —
+also spelled `super` / `win` / `cmd`), `f1`–`f24`, letters, digits,
+`space`/`tab`/`esc`/`enter`, `backspace`/`delete`/`insert`, the arrows plus
+`home`/`end`/`pageup`/`pagedown`, and `capslock`/`printscreen`/`scrolllock`/
+`pause`/`menu`. A bare modifier matches **either** side; `rightctrl+shift`
+matches only the right one. Aliases resolve to the same chord, so `option+shift`
+and `alt+shift` are one bind, not two.
+
+Chords are evaluated against the *remapped* key stream, so a keyboard remapper
+(`kanata`, `input-remapper`) can be the thing that produces your chord — hold
+`s`+`f` and bind `alt+shift` to match what kanata emits, not the physical keys
+underneath it.
+
+The middle mouse button is deliberately *not* bindable: it already has its own
+toggle with tap-vs-hold semantics.
 
 Push-to-talk, the hands-free latch, and the ~250 ms middle-click hold delay are
 portable across all three platforms. The only platform extra is the sub-100 ms
@@ -319,7 +378,7 @@ sub-pickers reached from inside the settings modal:
 ## Architecture
 
 > **Planning a port to another language?** Read
-> [`docs/java-fork-plan.md`](docs/java-fork-plan.md). It maps what is reusable
+> [`docs/archive/java-fork-plan.md`](docs/archive/java-fork-plan.md). It maps what is reusable
 > as-is (the `vt-tui` protocol, the control API, the revision-keyed weights
 > bundle) and why the ASR re-host, not the port, is the critical path.
 
