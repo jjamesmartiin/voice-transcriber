@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = REPO_ROOT / "src"

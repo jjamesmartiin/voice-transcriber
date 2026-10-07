@@ -1,19 +1,17 @@
 import os
 import time
-import pytest
 import numpy as np
 import transcribe2
-import t2
 
 def compute_wer(reference: str, hypothesis: str) -> float:
     """Calculate Word Error Rate (WER) between reference and hypothesis text."""
     import re
     clean_ref = re.sub(r'[^\w\s]', '', reference.lower()).strip()
     clean_hyp = re.sub(r'[^\w\s]', '', hypothesis.lower()).strip()
-    
+
     ref_words = clean_ref.split()
     hyp_words = clean_hyp.split()
-    
+
     if not ref_words:
         return 0.0 if not hyp_words else 1.0
 
@@ -64,7 +62,7 @@ def test_transcription_performance_time(sample_audio_file):
     audio_path, expected_text, sample_rate, duration = sample_audio_file
 
     start_time = time.time()
-    result = transcribe2.transcribe_audio(audio_path=audio_path, language="en")
+    transcribe2.transcribe_audio(audio_path=audio_path, language="en")
     transcribe_time = time.time() - start_time
 
     rtf = transcribe_time / max(duration, 0.1)

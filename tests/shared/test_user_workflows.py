@@ -11,7 +11,6 @@ Unit tests testing the primary user workflows:
 8. Micro-Batching Text Overlap Deduplication & Silence Rejection
 """
 
-import os
 import sys
 import time
 from pathlib import Path
@@ -28,7 +27,6 @@ import hal
 import t2
 import post_processor as pp
 from micro_batcher import (
-    StreamingMicroBatcher,
     deduplicate_text_overlap,
     trim_trailing_silence,
     has_speech_activity,

@@ -17,8 +17,7 @@ import soundfile as sf
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from post_processor import clean_speech_transcription, process_verbal_retractions, process_slm_llm_rewrite
-from micro_batcher import StreamingMicroBatcher, trim_trailing_silence
+from post_processor import clean_speech_transcription, process_verbal_retractions
 from transcribe_cohere import transcribe_audio as transcribe_cohere_audio
 
 TEST_CASES = [
@@ -113,7 +112,7 @@ class TestSyntheticE2EBenchmark(unittest.TestCase):
 
             # Step 3: Technique A (Instant 0ms Pre-pass)
             t0_tech_a = time.time()
-            tech_a_output = process_verbal_retractions(asr_transcript)
+            process_verbal_retractions(asr_transcript)
             tech_a_latency_ms = (time.time() - t0_tech_a) * 1000
 
             # Step 4: Technique C (Hybrid Pass with vLLM SLM)

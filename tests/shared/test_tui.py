@@ -5,12 +5,10 @@ Unit tests for VoiceTranscriberTUI module with color theme customization
 
 import sys
 import os
-import time
-import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from tui import VoiceTranscriberTUI, detect_system_theme_color, COLOR_PALETTES
+from tui import VoiceTranscriberTUI, COLOR_PALETTES
 
 def test_tui_initialization():
     tui = VoiceTranscriberTUI(app_version="1.0.0")

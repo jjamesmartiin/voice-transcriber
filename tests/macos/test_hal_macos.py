@@ -5,13 +5,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-import threading
 import time
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = REPO_ROOT / "src"

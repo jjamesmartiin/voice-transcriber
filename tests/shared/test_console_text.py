@@ -139,7 +139,7 @@ class TestEncodingSafeStream:
         assert wrapper.encoding == "ascii"
         assert wrapper.isatty() is False
         with pytest.raises(AttributeError):
-            wrapper.fileno  # not provided by AsciiStream; must not recurse
+            _ = wrapper.fileno  # not provided by AsciiStream; must not recurse
 
     def test_resolves_sys_stdout_lazily(self, monkeypatch):
         """A later sys.stdout replacement (pytest, pager) must still be honoured."""

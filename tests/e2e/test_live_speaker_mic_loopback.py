@@ -2,7 +2,7 @@
 """
 Live Speaker-to-Microphone Acoustic Loopback Integration Test Suite.
 
-Plays reference audio clips through the system speakers while simultaneously recording 
+Plays reference audio clips through the system speakers while simultaneously recording
 from the system microphone, transcribing the captured audio in real time, and evaluating
 accuracy and end-to-end latency.
 
@@ -16,9 +16,7 @@ Supports:
 import os
 import sys
 import time
-import glob
 import re
-import threading
 import numpy as np
 import soundfile as sf
 import sounddevice as sd
@@ -99,16 +97,16 @@ def _words_match_fuzzy(w1, w2, threshold=0.80):
 def score_transcription(expected, actual):
     if not actual:
         return 0.0, "FAIL"
-    
+
     normal_expected = re.sub(r'[^\w\s]', '', expected.lower()).split()
     normal_actual = re.sub(r'[^\w\s]', '', actual.lower()).split()
-    
+
     if not normal_expected:
         return 0.0, "FAIL"
-        
+
     matched_count = 0
     actual_pool = list(normal_actual)
-    
+
     for ew in normal_expected:
         match_idx = None
         for i, aw in enumerate(actual_pool):
@@ -118,9 +116,9 @@ def score_transcription(expected, actual):
         if match_idx is not None:
             matched_count += 1
             actual_pool.pop(match_idx)
-            
+
     match_ratio = matched_count / len(normal_expected)
-    
+
     if match_ratio >= 0.80:
         return match_ratio, "PASS"
     elif match_ratio >= 0.50:
@@ -133,7 +131,7 @@ def run_single_test(sample_id, transcriber, out_device=None, in_device=None):
     test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests", "test_transcribe")
     audio_path = os.path.join(test_dir, f"{sample_id}.mp3")
     md_path = os.path.join(test_dir, f"{sample_id}.md")
-    
+
     if not os.path.exists(audio_path) or not os.path.exists(md_path):
         print(f"Error: Sample file '{sample_id}' not found in {test_dir}")
         return None
@@ -177,7 +175,7 @@ def run_single_test(sample_id, transcriber, out_device=None, in_device=None):
 
     print(f"CAPTURED: \"{actual_text}\"")
     print(f"RESULT  : {score * 100:.1f}% [{status}] in {processing_time:.2f}s")
-    
+
     return {
         "sample_id": sample_id,
         "duration": duration_sec,

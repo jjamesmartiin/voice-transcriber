@@ -37,10 +37,8 @@ import argparse
 import io
 import json
 import os
-import re
 import sys
 import time
-import wave
 
 import numpy as np
 
@@ -169,7 +167,7 @@ def _pink(n: int, rng: np.random.Generator) -> np.ndarray:
 def _babble(n: int, rng: np.random.Generator, n_voices: int = 6) -> np.ndarray:
     """Babble-ish: sum of several band-limited, slow-AM noise sources."""
     out = np.zeros(n, dtype=np.float32)
-    for i in range(n_voices):
+    for _ in range(n_voices):
         base = rng.standard_normal(n).astype(np.float32)
         # crude band-limit via a short moving average (low-pass) + differencing
         k = int(rng.integers(20, 120))
@@ -244,7 +242,6 @@ def collect_stream(name, config, split, target_ids, accept, limit, scan_cap=6000
 def build_clean(pinned):
     log("=== slice: clean (LibriSpeech test-clean) ===")
     target = pinned.get("clean", [])
-    import soundfile as sf
 
     results = []
     dir_ = os.path.join(DATA_DIR, "clean")
@@ -281,7 +278,7 @@ def build_clean(pinned):
                     break
 
     manifest = []
-    for i, (key, spk, chap, text, a) in enumerate(results):
+    for i, (key, _spk, _chap, text, a) in enumerate(results):
         cid = f"clean-{i:04d}"
         path = os.path.join(dir_, f"{cid}.wav")
         dur = write_wav(path, a)

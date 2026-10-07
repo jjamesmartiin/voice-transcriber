@@ -14,12 +14,10 @@ import os
 import sys
 import subprocess
 import shutil
-import threading
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 import numpy as np
 
 # Ensure src is on sys.path
@@ -28,7 +26,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import hal
-from hal import WSL, LINUX, WINDOWS
+from hal import WSL
 import t2
 
 

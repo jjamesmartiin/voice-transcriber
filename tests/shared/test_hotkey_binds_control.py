@@ -159,7 +159,6 @@ class TestHotkeyVerb:
         ``hotkeys.create_global_hotkeys`` through the shim; this engine builds
         its own straight from the HAL, so the push has to be explicit.
         """
-        import t2
 
         engine.hotkey_system = MagicMock()
         engine.handle_control("hotkey", {"value": "add rightctrl+shift"})

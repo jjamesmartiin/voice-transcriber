@@ -261,7 +261,6 @@ def test_linux_middle_click_quick_click_cancels():
 
 def test_middle_click_toggle_disabled():
     """When middle click mode is toggled off, middle clicks are ignored for push-to-talk."""
-    import t2
     LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
     cb_stop = MagicMock()

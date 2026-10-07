@@ -11,7 +11,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 if str(SRC_DIR) not in sys.path:

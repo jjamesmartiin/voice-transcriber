@@ -13,7 +13,6 @@ Three things are pinned here:
    the ratatui settings modal) show the spec's strings, not their own drift.
 """
 
-import os
 import re
 import sys
 from pathlib import Path
@@ -225,7 +224,7 @@ def test_documented_derivations():
 
 def test_rich_switcher_shows_the_spec():
     seen = set()
-    for switcher_id, name, badge, desc, preview, color in t2.PRESET_PRESENTATIONS:
+    for switcher_id, name, badge, desc, preview, _color in t2.PRESET_PRESENTATIONS:
         canon = SWITCHER_IDS[switcher_id]
         _, spec_badge, spec_preview = SPEC_PRESETS[canon]
         assert preview == spec_preview, f"switcher preview drifted for {canon}"

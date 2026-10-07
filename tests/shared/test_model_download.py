@@ -13,11 +13,9 @@ import lzma
 import os
 import sys
 import tarfile
-import tempfile
 import urllib.error
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 

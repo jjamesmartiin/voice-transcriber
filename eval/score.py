@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import io
 import json
 import os
 import re
@@ -312,13 +311,18 @@ def main():
     for r in results:
         s = per_slice[r["slice"]]
         s["n"] += 1
-        s["we"] += r["word_edits"]; s["wr"] += r["ref_words"]
-        s["ce"] += r["char_edits"]; s["cr"] += r["ref_chars"]
-        s["clean_we"] += r["clean_word_edits"]; s["clean_wr"] += r["clean_ref_words"]
-        s["id_hits"] += r["id_hits"]; s["id_total"] += r["id_total"]
+        s["we"] += r["word_edits"]
+        s["wr"] += r["ref_words"]
+        s["ce"] += r["char_edits"]
+        s["cr"] += r["ref_chars"]
+        s["clean_we"] += r["clean_word_edits"]
+        s["clean_wr"] += r["clean_ref_words"]
+        s["id_hits"] += r["id_hits"]
+        s["id_total"] += r["id_total"]
         s["exact"] += 1 if r["exact"] else 0
         s["empty"] += 1 if r["empty"] else 0
-        s["latency"] += r["latency_s"]; s["dur"] += r["duration_s"]
+        s["latency"] += r["latency_s"]
+        s["dur"] += r["duration_s"]
 
     # speech slices exclude silence from WER (empty ref)
     speech = [r for r in results if r["slice"] != "silence"]

@@ -28,7 +28,7 @@ def reset_dict():
 def test_empty_dictionary_noop():
     post_processor.set_custom_dictionary(None)
     assert post_processor.get_custom_dictionary() == {}
-    
+
     text = "Testing clean speech transcription without dictionary."
     cleaned = post_processor.clean_speech_transcription(text)
     assert "Testing clean speech transcription without dictionary." in cleaned
@@ -42,7 +42,7 @@ def test_single_word_replacements():
         "deepseq": "Deepseek",
         "deep seq": "Deepseek",
     })
-    
+
     d = post_processor.get_custom_dictionary()
     assert d["pr"] == "PR"
     assert d["k8s"] == "Kubernetes"
@@ -158,7 +158,7 @@ def test_dictionary_execution_latency():
     post_processor.set_custom_dictionary(test_dict)
 
     sample_sentence = "i opened a pull request on github and tested vllm service"
-    
+
     for _ in range(10):
         post_processor.clean_speech_transcription(sample_sentence)
 

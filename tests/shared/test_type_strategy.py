@@ -5,7 +5,6 @@ The pure decision helper is tested on every platform; the window-class lookup
 uses a fake ``user32`` so no Windows session is required.
 """
 import sys
-import types
 from pathlib import Path
 
 import pytest

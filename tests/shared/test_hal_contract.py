@@ -6,7 +6,6 @@ module imports cleanly on any host. These run on Linux, Windows, and WSL.
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import textwrap

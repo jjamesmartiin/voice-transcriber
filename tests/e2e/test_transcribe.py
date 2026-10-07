@@ -91,7 +91,7 @@ def _run_backend(backend_id, backend_name):
         audio = load_audio(test_file)
 
         start_load = time.time()
-        backend = transcribe2.get_backend()
+        transcribe2.get_backend()
         load_time = time.time() - start_load
 
         start_transcribe = time.time()
@@ -143,7 +143,6 @@ def _spawn_backend_subprocess(backend_id, backend_name):
 
 
 def run_all_tests():
-    import time
 
     test_files = sorted(glob.glob(os.path.join(test_dir, "*.mp3")))
 
