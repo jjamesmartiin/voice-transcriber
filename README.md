@@ -422,22 +422,26 @@ Platform detection lives in `src/platform/__init__.py`; override it with
 
 ## Testing & CI
 
-GitHub Actions runs a three-OS matrix on every push and PR
+GitHub Actions runs a four-job matrix on every push and PR
 (`.github/workflows/ci.yml`). Each job runs the **shared** tier plus its own
 platform tier:
 
 | CI job | Runner | Command |
 | :--- | :--- | :--- |
 | **Unit tests (Linux)** | `ubuntu-latest` | `pytest tests/shared tests/linux` (Nix dev shell) |
+| **Unit tests (macOS)** | `macos-latest` | `pytest tests/shared tests/macos` |
 | **Unit tests (Windows)** | `windows-latest` | `pytest tests/shared tests/windows` (no PyTorch needed) |
 | **Unit tests (WSL)** | `ubuntu-latest` | `pytest tests/shared tests/wsl` (Nix, `VT_PLATFORM=wsl`) |
+
+The Linux job also lints (`ruff check`, `shellcheck`) and builds the Rust
+frontend (`nix build .#vt-tui`, which runs the crate's `cargo test`).
 
 ### Test tiers
 
 | Tier | Directory | Needs model? | Runs where |
 | :--- | :--- | :--- | :--- |
-| **Shared** | `tests/shared/` | No | All three OSes, every push |
-| **Platform** | `tests/linux/`, `tests/windows/`, `tests/wsl/` | No | That OS only, every push |
+| **Shared** | `tests/shared/` | No | Every OS, every push |
+| **Platform** | `tests/linux/`, `tests/macos/`, `tests/windows/`, `tests/wsl/` | No | That OS only, every push |
 | **End-to-end** | `tests/e2e/` | Yes | Local only (never CI) |
 
 ### Running the tests locally
