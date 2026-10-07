@@ -508,18 +508,49 @@ class TestUnlistedInputs:
 class TestDoctorBluetoothProfile:
     """Installs that ran a pre-1.2.1 build left autoswitch disabled forever.
 
-    The app cannot tell whether the user or its former self disabled it, so doctor
-    reports and suggests rather than failing — but it must not stay silent, because
-    the symptom (a headset that never switches to hands-free) looks like missing
-    hardware.
+    The app cannot tell whether the user or its former self disabled the setting,
+    so doctor reports and suggests rather than failing — but it must not stay
+    silent, because the symptom (a headset that never switches to hands-free)
+    looks like missing hardware.
     """
 
     @pytest.fixture
+    def other_checks(self, monkeypatch):
+        """Stub every other check so the result reflects only this one."""
+        import doctor
+
+        monkeypatch.setattr(doctor, "check_platform", lambda: {
+            "ok": True, "platform": "linux", "system": "Linux",
+            "release": "1", "machine": "x86_64", "python": "3.11"})
+        monkeypatch.setattr(doctor, "check_torch_acceleration", lambda: {
+            "ok": True, "version": "2.0", "device": "cpu", "device_name": "CPU"})
+        monkeypatch.setattr(doctor, "check_audio_devices", lambda: {
+            "ok": True, "count": 1, "devices": [{"name": "Built-in", "is_default": True}]})
+        monkeypatch.setattr(doctor, "check_microphone_mute", lambda fix=False: {
+            "ok": True, "checked": True, "muted": False, "source": "Built-in",
+            "fixed": False, "fix_command": "", "detail": "live"})
+        monkeypatch.setattr(doctor, "check_hotkeys_and_permissions", lambda plat: {
+            "ok": True, "details": [], "warnings": [], "errors": []})
+        monkeypatch.setattr(doctor, "check_clipboard_and_typing", lambda plat: {
+            "ok": True, "tools": {}})
+        monkeypatch.setattr(doctor, "check_model_weights", lambda: {
+            "ok": True, "cached": True, "path": "/m", "size_mb": 1.0})
+        monkeypatch.setattr(doctor, "check_daemon", lambda: {
+            "running": False, "pid": None, "socket": None})
+
+    @pytest.fixture
     def wpctl_bt(self, monkeypatch):
-        """Fake `wpctl settings` so the test never reads the host's real value."""
+        """Fake both the `wpctl` presence probe and the value read.
+
+        The presence probe matters: CI runners have no `wpctl`, so without faking
+        it the check correctly reports "unchecked" and these tests would be
+        asserting a different code path from the one a developer's machine takes.
+        """
+        import doctor
         import t2
 
         state = {"autoswitch": True}
+        monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/usr/bin/{name}")
         monkeypatch.setattr(t2, "get_wireplumber_bt_autoswitch", lambda: state["autoswitch"])
         return state
 
@@ -551,18 +582,21 @@ class TestDoctorBluetoothProfile:
         monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
         info = doctor.check_bluetooth_profile_policy()
         assert info["checked"] is False
+        assert info["value"] is None
         assert info["ok"] is True
 
     def test_an_unreadable_setting_is_not_reported_as_disabled(self, wpctl_bt, monkeypatch):
-        import t2
         import doctor
+        import t2
 
         monkeypatch.setattr(t2, "get_wireplumber_bt_autoswitch", lambda: None)
         info = doctor.check_bluetooth_profile_policy()
         assert info["checked"] is False
         assert info["value"] is None
 
-    def test_a_disabled_policy_is_surfaced_in_the_report(self, wpctl_bt):
+    def test_a_disabled_policy_is_surfaced_but_does_not_fail_the_run(
+        self, wpctl_bt, other_checks
+    ):
         import doctor
         from io import StringIO
 
@@ -571,7 +605,16 @@ class TestDoctorBluetoothProfile:
         report = doctor.run_doctor(stream=buf)
 
         assert report["bluetooth_profile"]["value"] is False
-        # Advisory only: it must not flip the overall result.
-        assert report["ok"] is True
+        assert report["bluetooth_profile"]["ok"] is True
+        assert report["ok"] is True, "an advisory must not flip the overall result"
         assert "Bluetooth Headset" in buf.getvalue()
         assert "autoswitch-to-headset-profile true" in buf.getvalue()
+
+    def test_an_enabled_policy_does_not_print_a_fix(self, wpctl_bt, other_checks):
+        import doctor
+        from io import StringIO
+
+        buf = StringIO()
+        doctor.run_doctor(stream=buf)
+        assert "Bluetooth Headset" in buf.getvalue()
+        assert "autoswitch-to-headset-profile true" not in buf.getvalue()
