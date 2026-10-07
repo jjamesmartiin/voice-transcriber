@@ -6,7 +6,6 @@
 # Bootstraps only (find a Python); PyInstaller install-on-demand and the build
 # script invocation live in tools/vt_dev.py.
 $ErrorActionPreference = "Stop"
-$VtTag = "BUILD"
 . (Join-Path $PSScriptRoot "..\common\common.ps1")
 
 $RepoRoot = Get-RepoRoot -StartDir $PSScriptRoot

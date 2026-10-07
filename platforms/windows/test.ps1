@@ -10,7 +10,6 @@
 # Bootstraps only (find a Python); tier selection + pytest live in
 # tools/vt_dev.py, shared with macOS/Linux.
 $ErrorActionPreference = "Stop"
-$VtTag = "TEST"
 . (Join-Path $PSScriptRoot "..\common\common.ps1")
 
 $RepoRoot = Get-RepoRoot -StartDir $PSScriptRoot

@@ -9,7 +9,6 @@
 # Bootstraps only (find a Python); the launch logic lives in tools/vt_dev.py,
 # shared with macOS/Linux. If the environment is not ready, run setup.bat first.
 $ErrorActionPreference = "Stop"
-$VtTag = "RUN"
 . (Join-Path $PSScriptRoot "..\common\common.ps1")
 
 $RepoRoot = Get-RepoRoot -StartDir $PSScriptRoot

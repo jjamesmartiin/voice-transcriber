@@ -8,16 +8,14 @@
 #
 #     . "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/common/common.sh"
 #
-# Set VT_TAG before calling vt_step() to label output (e.g. VT_TAG=SETUP).
 
 if [ -t 1 ]; then
-    VT_CYAN='\033[0;36m'; VT_GREEN='\033[0;32m'; VT_YELLOW='\033[1;33m'
-    VT_RED='\033[0;31m'; VT_BOLD='\033[1m'; VT_NC='\033[0m'
+    VT_GREEN='\033[0;32m'; VT_YELLOW='\033[1;33m'
+    VT_RED='\033[0;31m'; VT_NC='\033[0m'
 else
-    VT_CYAN=''; VT_GREEN=''; VT_YELLOW=''; VT_RED=''; VT_BOLD=''; VT_NC=''
+    VT_GREEN=''; VT_YELLOW=''; VT_RED=''; VT_NC=''
 fi
 
-vt_step() { printf '\n%s[%s]%s %s\n' "$VT_CYAN$VT_BOLD" "${VT_TAG:-VT}" "$VT_NC" "$1"; }
 vt_ok()   { printf '%s[OK]%s %s\n'    "$VT_GREEN"  "$VT_NC" "$1"; }
 vt_warn() { printf '%s[WARN]%s %s\n'  "$VT_YELLOW" "$VT_NC" "$1"; }
 vt_err()  { printf '%s[ERROR]%s %s\n' "$VT_RED"    "$VT_NC" "$1" >&2; }

@@ -6,7 +6,6 @@
 # the venv / dependencies / model logic lives in tools/vt_dev.py so one fix
 # lands on every platform. `run` only launches - it never installs.
 $ErrorActionPreference = "Stop"
-$VtTag = "SETUP"
 . (Join-Path $PSScriptRoot "..\common\common.ps1")
 
 $NoDev = $false

@@ -12,7 +12,6 @@ param(
     [string]$Distro
 )
 $ErrorActionPreference = "Stop"
-$VtTag = "WSL"
 . (Join-Path $PSScriptRoot "..\common\common.ps1")
 
 $ProjectRoot = Get-RepoRoot -StartDir $PSScriptRoot

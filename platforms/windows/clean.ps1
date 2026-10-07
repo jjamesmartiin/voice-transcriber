@@ -7,7 +7,6 @@
 # Bootstraps only (find a Python); the target list + prompt live in
 # tools/vt_dev.py, shared with macOS/Linux.
 $ErrorActionPreference = "Stop"
-$VtTag = "CLEAN"
 . (Join-Path $PSScriptRoot "..\common\common.ps1")
 
 $RepoRoot = Get-RepoRoot -StartDir $PSScriptRoot

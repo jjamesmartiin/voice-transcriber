@@ -10,7 +10,6 @@ param(
     [string]$Distro
 )
 $ErrorActionPreference = "Stop"
-$VtTag = "BRIDGE"
 . (Join-Path $PSScriptRoot "..\common\common.ps1")
 
 $ProjectRoot = Get-RepoRoot -StartDir $PSScriptRoot

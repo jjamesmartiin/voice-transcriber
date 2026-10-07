@@ -13,7 +13,6 @@ param(
     [string]$Distro
 )
 $ErrorActionPreference = "Stop"
-$VtTag = "SETUP"
 . (Join-Path $PSScriptRoot "..\common\common.ps1")
 
 Write-Host @"
