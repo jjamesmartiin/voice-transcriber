@@ -33,13 +33,14 @@ normally reuses the existing bundle. See
   back to a loopback TCP transport: `127.0.0.1` only, an OS-assigned port, a per-run token
   required on every request, and host/port/token published to a `0600` per-user endpoint
   file. The verbs and reply shapes are unchanged. The ratatui frontend remains Unix-only,
-  so Windows keeps the Rich TUI. The config option is now read (it was never read),
+  so Windows keeps the Rich TUI.
+- **Pluggable backend registry.** The `model_backend` config option is now read,
   validated against a single backend registry, persisted, and reported clearly if you name a
-  backend that does not exist. `transcribe2.set_backend()` was a no-op that silently kept
-  Cohere. Cohere remains the only backend; adding another is one registry entry plus a
-  module. a hero demo, terminal-UI and
+  backend that does not exist. `transcribe2.set_backend()` now properly switches backends
+  with zero overhead on startup.
+- **Launch visual assets & interactive showcase.** Added a hero demo GIF, terminal-UI and
   settings renders, a system-architecture diagram, and a 1280x640 social card.
-  The README now shows the terminal UI and the architecture diagram.
+  The README now showcases a 30-second quickstart, quantitative benchmarks, and formatting mode presets.
 
 ### Fixed
 
