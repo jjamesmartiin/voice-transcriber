@@ -1,27 +1,34 @@
 import os
+
+# Configure OpenBLAS and MKL single-threading before NumPy/PyTorch are imported:
+# a multithreaded OpenBLAS can abort in its static destructor while the
+# interpreter is finalizing. These must be set before the first BLAS import to
+# take effect, hence the placement above the remaining imports.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import sys
 import time
 import tempfile
-import signal
 import pytest
 import numpy as np
 import soundfile as sf
 from pathlib import Path
 
-# Configure OpenBLAS and MKL single-threading to prevent teardown SIGFPE signal crash
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-
-# Reset SIGFPE handler to default to prevent C-library exit teardown crash
-try:
-    signal.signal(signal.SIGFPE, signal.SIG_DFL)
-except Exception:
-    pass
-
 # Add src directory to sys.path
 src_dir = Path(__file__).parent.parent / "src"
 if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
+
+# NOTE: there is deliberately no pytest_unconfigure/pytest_sessionfinish that
+# calls os._exit(). That hack was added to dodge a PyTorch/OpenBLAS static
+# destructor abort during Py_FinalizeEx, but it skipped every finalizer, atexit
+# handler and plugin teardown (hiding real failures). The single-threaded BLAS
+# settings above, applied before the first import, are what actually keep the
+# model-free tier exiting cleanly; verified over repeated full runs on Linux and
+# with the real Cohere model loaded. tests/e2e is the only tier that loads the
+# model.
+
 
 # src/main.py configures logging the moment it is imported, and several test
 # modules import it - which would create and write the developer's real per-user
@@ -51,16 +58,15 @@ class PowerCpuMonitor:
         Measure process CPU utilization percentage over a specified duration in seconds.
         Returns average CPU percent across samples.
         """
-        import psutil
         start_time = time.time()
         cpu_samples = []
         # Prime the psutil cpu_percent calculation
         self.process.cpu_percent(interval=None)
-        
+
         while time.time() - start_time < duration:
             time.sleep(self.sample_interval)
             cpu_samples.append(self.process.cpu_percent(interval=None))
-            
+
         return float(np.mean(cpu_samples)) if cpu_samples else 0.0
 
     def measure_system_power_watts(self):
@@ -165,22 +171,6 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         tr.write_line(line, **status_color)
     tr.write_sep("=", "", cyan=True)
 
-
-def pytest_sessionfinish(session, exitstatus):
-    session.config._exitstatus = exitstatus
-
-def pytest_unconfigure(config):
-    """
-    Bypass buggy C-library (PyTorch/OpenBLAS) static destructors during Py_FinalizeEx
-    by performing a clean os._exit using pytest's exit status after all reporting.
-    """
-    try:
-        sys.stdout.flush()
-        sys.stderr.flush()
-    except Exception:
-        pass
-    exitstatus = getattr(config, "_exitstatus", 0)
-    os._exit(exitstatus)
 
 @pytest.fixture(scope="session")
 def sample_audio_file(tmp_path_factory):

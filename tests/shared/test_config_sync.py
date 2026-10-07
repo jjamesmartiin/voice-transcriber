@@ -6,15 +6,12 @@ Unit tests for configuration loading, saving, and TUI status bar synchronization
 import os
 import subprocess
 import sys
-import tempfile
 import json
 import pytest
-from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
 import t2
-import transcribe2
 
 
 def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
@@ -28,7 +25,7 @@ def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
         "ui_theme": "auto",
         "keep_bluetooth_handsfree": True,
     }
-    
+
     import yaml
     yaml_config.write_text(yaml.dump(initial_data))
 
@@ -96,23 +93,45 @@ def test_keep_bluetooth_handsfree_env_override(tmp_path, monkeypatch):
 
 
 def test_set_default_input_device_preserves_output_device(monkeypatch):
-    import sounddevice as sd
-    # Record starting output device
-    initial_dev = sd.default.device
-    out_dev = initial_dev[1] if isinstance(initial_dev, (list, tuple)) and len(initial_dev) > 1 else None
+    """The setter must rewrite only the input slot of the host default.
 
-    # Set input device to index 3
+    ``t2.sd`` is faked rather than importing the real ``sounddevice``: the real
+    setter mutates the process-global PortAudio default, which would disturb the
+    developer's actual audio setup and violates the hermetic shared-tier
+    contract. This pins the tuple arithmetic in ``t2.set_default_input_device``.
+    """
+
+    class _FakeDefault:
+        device = [0, 7]
+
+    class _FakeSoundDevice:
+        default = _FakeDefault()
+
+    fake = _FakeSoundDevice()
+    monkeypatch.setattr(t2, "sd", fake)
+
     t2.set_default_input_device(3)
-    curr = sd.default.device
-    assert curr[0] == 3
-    if out_dev is not None:
-        assert curr[1] == out_dev
+    assert list(fake.default.device) == [3, 7]
 
-    # Reset input device to None
     t2.set_default_input_device(None)
-    curr_reset = sd.default.device
-    if out_dev is not None:
-        assert curr_reset[1] == out_dev
+    assert list(fake.default.device) == [None, 7]
+
+
+def test_set_default_input_device_handles_scalar_default(monkeypatch):
+    """A scalar/absent ``sd.default.device`` must not raise; input is set and
+    the output slot degrades to ``None``."""
+
+    class _FakeDefault:
+        device = None
+
+    class _FakeSoundDevice:
+        default = _FakeDefault()
+
+    fake = _FakeSoundDevice()
+    monkeypatch.setattr(t2, "sd", fake)
+
+    t2.set_default_input_device(3)
+    assert list(fake.default.device) == [3, None]
 
 
 class FakeWirePlumberSettings:
@@ -323,7 +342,7 @@ def test_punctuation_modes_in_post_processor():
     from post_processor import clean_speech_transcription, set_punctuation_mode
 
     sample = "Hello world, this is Voice Transcriber."
-    
+
     # 1. Full mode
     set_punctuation_mode("full")
     assert clean_speech_transcription(sample, punctuation_mode="full") == "Hello world, this is voice transcriber."
@@ -448,7 +467,6 @@ def test_auto_type_auto_punctuate_config_and_toggle(tmp_path, monkeypatch):
 
 def test_main_typing_formatting_options(monkeypatch):
     """Test that disabling trailing space and auto-punctuate works in main._do_process_recording."""
-    import main
     from main import SimpleVoiceTranscriber
     from unittest.mock import MagicMock
     import numpy as np
