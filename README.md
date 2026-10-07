@@ -19,6 +19,51 @@
 
 ---
 
+## ⚡ 30-Second Quickstart
+
+| Platform | Quick Start Command | Artifact / Details |
+| :--- | :--- | :--- |
+| **Linux (AppImage)** | `chmod +x vt-x86_64.AppImage && ./vt-x86_64.AppImage` | [Download AppImage](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) (Standalone bundle, no setup) |
+| **Linux / macOS (Nix)** | `nix run github:jjamesmartiin/voice-transcriber` | Builds & runs in one command via Nix Flakes |
+| **Windows (Standalone ZIP)** | Download `VoiceTranscriber-windows-x86_64.zip` → Run `VoiceTranscriber.exe` | [Download Windows ZIP](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) (Self-contained Python runtime) |
+| **macOS / Source (Git)** | `git clone https://github.com/jjamesmartiin/voice-transcriber.git && cd voice-transcriber`<br>`./setup.sh && ./run.sh` | Sets up venv, installs dependencies & downloads weights |
+
+---
+
+## 📊 Benchmark & Accuracy
+
+Voice Transcriber is evaluated with a reproducible test suite in `eval/` across 154 speech and silence clips, scoring the real streaming pipeline with dynamic INT8 quantization on CPU:
+
+| Dataset Slice | Sample Count (N) | Word Error Rate (WER) | Character Error Rate (CER) | Exact Match Rate | Silence Hallucination |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| **Clean read speech** | 44 | **2.81%** | 1.43% | 70.5% | — |
+| **Noisy speech (5–20 dB SNR)** | 24 | **3.01%** | 1.24% | 70.8% | — |
+| **Long-form speech (15–40s)** | 12 | **1.78%** | 0.87% | 50.0% | — |
+| **Technical vocabulary** | 28 | **8.44%** | 5.46% | 50.0% | — |
+| **Technical + background noise** | 12 | 8.12% | 4.52% | 50.0% | — |
+| **Accented meeting speech** | 22 | 12.32% | 7.66% | 13.6% | — |
+| **Overall Speech Pipeline** | **142** | **5.10%** | **2.97%** | **54.2%** | — |
+| **Silence / Quiet Room Gate** | **12** | — | — | — | **0 / 12 (0.0%)** |
+
+> **Latency Breakdown**: Streaming VAD: `0 ms` · Post-Processor: `~16 µs` · Cohere CPU Inference: `~0.15x RTF` (~0.7s on 5s audio) · End-to-End Delivery: `< 1.0 s`.  
+> *Read the engineering deep dive in the [Technical Blog Post](docs/blog_post.md).*
+
+---
+
+## 📝 Formatting Mode Presets
+
+Voice Transcriber supports 5 instant punctuation & formatting styles (switchable via `s` in the TUI or `python src/main.py punctuation <mode>`):
+
+| Preset | Switcher ID | Sample Output (`"Hey, how are you? I'm good."`) | Best For |
+| :--- | :--- | :--- | :--- |
+| **Default (Standard)** | `full` | `"Hey, how are you? I'm good."` | Professional documents, code comments, emails |
+| **Casual (No Period)** | `no_terminal_period` | `"Hey, how are you? I'm good"` | Slack, Discord, chat messages without trailing period |
+| **Autocorrect (Phone)** | `no_punctuation` | `"Hey how are you I'm good"` | Search queries, fast notes, terminal commands |
+| **Aesthetic Lowercase** | `aesthetic_lowercase` | `"hey, how are you? i'm good"` | Aesthetic notes, lowercase prose |
+| **Pure Gen Z** | `gen_z` | `"hey how are you i'm good"` | Unpunctuated casual chat |
+
+---
+
 ## Platform Support
 
 | Platform | Status | Hotkeys | Output injection | Audio capture | Guide | Quick run |
@@ -130,13 +175,11 @@ for the platform you are targeting.
 | **Audio server** | macOS CoreAudio default input microphone. |
 | **Accessibility permissions** | Required for global hotkeys and synthetic typing: *System Settings → Privacy & Security → Accessibility* (enable your Terminal / app). |
 | **Microphone permissions** | Allow microphone access when prompted on first recording. |
-| **Hardware Acceleration** | Apple Silicon MPS (Metal Performance Shaders) supported automatically. |
+| **Hardware Performance** | Apple Silicon CPU vector acceleration (NEON / Accelerate SIMD) with dynamic INT8 quantization (~0.15x RTF). |
 
 ---
 
-## Quick Start
-
-### Quick Start by Platform
+## Detailed Platform Setup & Guides
 
 #### 🐧 Linux (Wayland / X11)
 
@@ -666,27 +709,27 @@ You can add, list, remove, or test dictionary entries directly from the terminal
 
 ```bash
 # Add to your personal dictionary (default, gitignored)
-python -m src.dictionary add "home dash james m5" "home-jamesm5"
-python -m src.dictionary add "john doe" "John Doe"
+python src/dictionary.py add "home dash james m5" "home-jamesm5"
+python src/dictionary.py add "john doe" "John Doe"
 
 # Add to the common dictionary (tracked in git)
-python -m src.dictionary add --common "cube ctl" "kubectl"
-python -m src.dictionary add --common "deep seq" "Deepseek"
+python src/dictionary.py add --common "cube ctl" "kubectl"
+python src/dictionary.py add --common "deep seq" "Deepseek"
 
 # Test how a sentence is transformed by the combined dictionaries
-python -m src.dictionary test "i deployed on home dash james m5 using cube ctl"
+python src/dictionary.py test "i deployed on home dash james m5 using cube ctl"
 # Output: "I deployed on home-jamesm5 using kubectl."
 
 # List current dictionary entries (shows [common] vs [local] tags)
-python -m src.dictionary list
-python -m src.dictionary list james
-python -m src.dictionary list --local
+python src/dictionary.py list
+python src/dictionary.py list james
+python src/dictionary.py list --local
 
 # Check dictionary file paths and status
-python -m src.dictionary path
+python src/dictionary.py path
 
 # Remove an entry
-python -m src.dictionary remove "home dash james m5"
+python src/dictionary.py remove "home dash james m5"
 ```
 
 ### Manual YAML Editing
@@ -728,7 +771,7 @@ contextual_rules:
 #### Managing Contextual Rules via CLI
 ```bash
 # Add a contextual rule
-python -m src.dictionary add-contextual \
+python src/dictionary.py add-contextual \
   --target "Gitea" \
   --spoken "get tea, git tea" \
   --before "push to, pull from, clone from, hosted on" \
@@ -736,10 +779,10 @@ python -m src.dictionary add-contextual \
   --guards "cup of, drink, iced, green, with, like to"
 
 # List configured contextual rules
-python -m src.dictionary list-contextual
+python src/dictionary.py list-contextual
 
 # Remove a contextual rule
-python -m src.dictionary remove-contextual "Gitea"
+python src/dictionary.py remove-contextual "Gitea"
 ```
 
 #### Prompting an LLM to Generate Rules
