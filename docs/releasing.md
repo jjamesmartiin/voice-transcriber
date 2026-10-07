@@ -23,13 +23,13 @@ Runbook for cutting a release of voice-transcriber on GitHub
 nix build .#vt-tui --no-link --print-out-paths
 
 # 3. Commit, tag, push the tag. Pushing the tag is what creates the release.
-git add -A && git commit -m "release: v1.2.1"
-git tag v1.2.1
+git add -A && git commit -m "release: v1.3.0"
+git tag v1.3.0
 git push github main --tags        # remote 'github' == git@github.com:jjamesmartiin/voice-transcriber.git
 
 # 4. Wait for the `release` workflow to finish (it creates the Release and
 #    attaches vt-x86_64.AppImage and VoiceTranscriber-windows-x86_64.zip). Watch it, or poll the release object:
-nix develop --command gh release view v1.2.1
+nix develop --command gh release view v1.3.0
 
 # 5. NOTHING TO DO FOR THE WEIGHTS. They live in a revision-keyed model
 #    bundle and are re-published only when REVISION changes — see
@@ -48,13 +48,13 @@ version:
 
 | File | What |
 | :--- | :--- |
-| `flake.nix` | `version = "1.2.1";` in the flake `outputs` let-block |
-| `flake.nix` | `version = "1.2.1";` in the `pkgs.stdenv.mkDerivation` attrs |
-| `src/voice_transcriber/tui.py` | `def __init__(self, app_version="1.2.1", ...)` |
-| `tui-rs/src/main.rs` | `const VERSION: &str = "1.2.1";` |
-| `pyproject.toml` | `version = "1.2.1"` |
-| `packaging/nix/package.nix` | `version = "1.2.1";` |
-| `packaging/linux/*.appdata.xml` | `<release version="1.2.1" date="YYYY-MM-DD"/>` |
+| `flake.nix` | `version = "1.3.0";` in the flake `outputs` let-block |
+| `flake.nix` | `version = "1.3.0";` in the `pkgs.stdenv.mkDerivation` attrs |
+| `src/voice_transcriber/tui.py` | `def __init__(self, app_version="1.3.0", ...)` |
+| `tui-rs/src/main.rs` | `const VERSION: &str = "1.3.0";` |
+| `pyproject.toml` | `version = "1.3.0"` |
+| `packaging/nix/package.nix` | `version = "1.3.0";` |
+| `packaging/linux/*.appdata.xml` | `<release version="1.3.0" date="YYYY-MM-DD"/>` |
 
 `tui-rs/Cargo.toml` tracks the Rust frontend (`vt-tui`) internal crate version (`0.1.0`) independently
 and is not the app version.

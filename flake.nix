@@ -11,7 +11,7 @@
         pkgs = import inputs.nixpkgs { inherit system; };
       });
 
-      version = "1.2.1";
+      version = "1.3.0";
     in
     {
       packages = forEachSupportedSystem ({ system, pkgs }:
@@ -96,7 +96,7 @@
 
           default = pkgs.stdenv.mkDerivation {
             pname = "vt";
-            version = "1.2.1";
+            version = "1.3.0";
             src = ./.;
             
             installPhase = ''

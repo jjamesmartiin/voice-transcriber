@@ -14,7 +14,7 @@
 }:
 
 let
-  version = "1.2.1";
+  version = "1.3.0";
 
   # In nixpkgs this will be fetchFromGitHub or src from root
   vt-tui = rustPlatform.buildRustPackage {

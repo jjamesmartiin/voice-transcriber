@@ -36,7 +36,7 @@ use ipc::{IpcEvent, Wire};
 /// ``src/tui.py`` (pinned by tests/shared/test_version_consistency.py): this
 /// used to be a stale 0.1.0, so the default frontend reported the wrong
 /// version to users.
-const VERSION: &str = "1.2.1";
+const VERSION: &str = "1.3.0";
 const TICK: Duration = Duration::from_millis(100);
 
 fn safe_restore() {

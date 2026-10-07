@@ -9,7 +9,7 @@ name: release
 # bundle tag (model-cohere-<rev12>), and the application auto-installs them on
 # first run from the release assets or loads them from a local models/cohere directory.
 #
-# Trigger: push a tag like v1.2.1 -> AppImage and Windows EXE are built and attached.
+# Trigger: push a tag like v1.3.0 -> AppImage and Windows EXE are built and attached.
 # Manual trigger: workflow_dispatch -> specify target tag.
 
 on:
@@ -18,9 +18,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag to attach assets to (e.g. v1.2.1)"
+        description: "Release tag to attach assets to (e.g. v1.3.0)"
         required: false
-        default: "v1.2.1"
+        default: "v1.3.0"
       build_appimage:
         description: "Build Linux AppImage (true/false)"
         required: false
