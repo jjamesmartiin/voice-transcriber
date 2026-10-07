@@ -97,8 +97,10 @@ class TestFrontendsAreInterchangeable:
         import re
         from pathlib import Path
 
-        main_src = (Path(__file__).resolve().parents[2]
-                    / "src" / "voice_transcriber" / "main.py").read_text()
+        main_src = (
+            Path(__file__).resolve().parents[2]
+            / "src" / "voice_transcriber" / "main.py"
+        ).read_text(encoding="utf-8")  # the default is cp1252 on Windows
         called = sorted(set(re.findall(r"self\.tui\.([a-z_]+)\(", main_src)))
         assert called, "no TUI calls found — did main.py move?"
 

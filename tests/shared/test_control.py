@@ -64,6 +64,17 @@ def sock_path():
         shutil.rmtree(directory, ignore_errors=True)
 
 
+def _router(engine=None):
+    """A server for *routing* tests only.
+
+    The transport is pinned to AF_UNIX so these tests exercise the request
+    protocol regardless of what the host would actually bind. On native Windows
+    the default is loopback TCP, which correctly demands a token — and that is a
+    transport concern, not a routing one.
+    """
+    return control.ControlServer(engine or _FakeEngine(), transport=control.UNIX)
+
+
 def _server(sock_path, engine=None):
     return control.ControlServer(engine or _FakeEngine(), socket_path=str(sock_path))
 
@@ -75,20 +86,20 @@ class TestDispatch:
     def test_bare_verb_is_accepted(self):
         """Hand-typed clients may send a bare verb instead of JSON."""
         engine = _FakeEngine()
-        response = control.ControlServer(engine).dispatch("toggle")
+        response = _router(engine).dispatch("toggle")
         assert response == {"ok": True, "cmd": "toggle"}
         assert engine.calls == [("toggle", {"cmd": "toggle"})]
 
     def test_json_request_fields_reach_the_handler(self):
         engine = _FakeEngine()
-        control.ControlServer(engine).dispatch('{"cmd": "output", "value": "type"}')
+        _router(engine).dispatch('{"cmd": "output", "value": "type"}')
         cmd, request = engine.calls[0]
         assert cmd == "output"
         assert request["value"] == "type"
 
     def test_surrounding_whitespace_is_tolerated(self):
         engine = _FakeEngine()
-        control.ControlServer(engine).dispatch("  \n status \n ")
+        _router(engine).dispatch("  \n status \n ")
         assert engine.calls[0][0] == "status"
 
     @pytest.mark.parametrize(

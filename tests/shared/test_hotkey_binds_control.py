@@ -48,7 +48,11 @@ def _binds(engine):
 
 def _dispatch(engine, value, cmd="hotkey"):
     """Round-trip through the socket layer: a bad request must never raise."""
-    return control.ControlServer(engine).dispatch(json.dumps({"cmd": cmd, "value": value}))
+    # Pin the transport: these are routing tests, and on native Windows the
+    # default is loopback TCP, which (correctly) requires a token.
+    return control.ControlServer(engine, transport=control.UNIX).dispatch(
+        json.dumps({"cmd": cmd, "value": value})
+    )
 
 
 class TestHotkeyVerb:

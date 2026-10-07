@@ -279,6 +279,10 @@ def default_transport() -> str:
     explicit = (os.environ.get(CONTROL_TRANSPORT_ENV) or "").strip().lower()
     if explicit in (UNIX, TCP):
         return explicit
+    if os.environ.get(CONTROL_SOCKET_ENV):
+        # An explicit socket *path* can only mean AF_UNIX, so honour it rather
+        # than silently ignoring it in favour of the TCP transport.
+        return UNIX
     return UNIX if unix_sockets_supported() else TCP
 
 
