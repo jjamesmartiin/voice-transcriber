@@ -33,6 +33,11 @@ normally reuses the existing bundle. See
 
 ### Fixed
 
+- **macOS: `doctor` crashed when checking Accessibility permissions.**
+  `check_hotkeys_and_permissions` did `from platform.macos.hotkeys import ...`,
+  an absolute import that resolves to the *stdlib* `platform` module ("'platform'
+  is not a package"). It is now loaded through the HAL, like every other backend
+  access. Linux never hit it because the branch is `darwin`-only.
 - **Three settings in the config file were silently ignored.** `language`,
   `wait_for_model_on_startup` and `enable_slm` are module globals, but the
   config loader assigned to them without declaring them `global`, so it wrote to

@@ -146,7 +146,10 @@ class TestResetTerminal:
         t2.reset_terminal()
 
         assert "reset" not in ran, "the TUI owns the terminal; do not reset it"
-        assert ran, "stuck clipboard processes should still be cleaned up"
+        if sys.platform == "win32":
+            assert ran == [], "there is no wl-copy to reap on Windows"
+        else:
+            assert ran, "stuck clipboard processes should still be cleaned up"
 
 
 # ---------------------------------------------------------------------------

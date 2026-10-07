@@ -212,3 +212,75 @@ class TestWindowsTuiCompatibility:
         app_tui.update_state("RECORDING", "Testing")
         assert app_tui.state == "RECORDING"
 
+
+
+class TestNoStalePlatformImports:
+    """The HAL package is loaded under the private name ``vt_platform`` precisely so
+    it cannot shadow the stdlib :mod:`platform` module. An absolute import written
+    against the old layout — ``from platform.macos.hotkeys import ...`` — resolves
+    to the *stdlib* module and dies with "No module named 'platform.macos';
+    'platform' is not a package".
+
+    That shipped in ``doctor.py`` and only macOS CI caught it, because the branch
+    is darwin-only. Nothing static prevented a repeat, so this does.
+    """
+
+    def test_no_module_imports_the_hal_by_the_bare_stdlib_name(self):
+        import re
+
+        stale = re.compile(r"^\s*(?:from|import)\s+platform\.(linux|macos|windows|wsl)\b")
+        offenders = []
+        for path in sorted(SRC_DIR.rglob("*.py")):
+            for lineno, line in enumerate(
+                path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+            ):
+                if stale.match(line):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
+
+        assert not offenders, (
+            "import the backend through hal.load_backend() instead:\n  "
+            + "\n  ".join(offenders)
+        )
+
+
+class TestDoctorLoadsMacBackendsThroughTheHal:
+    """``doctor`` is the one place outside the HAL that needs a specific backend."""
+
+    def test_macos_hotkey_check_goes_through_the_hal(self, monkeypatch):
+        import doctor
+
+        class FakeMacHotkeys:
+            called = False
+
+            @classmethod
+            def check_accessibility_permissions(cls):
+                cls.called = True
+                return True
+
+        seen = []
+        monkeypatch.setattr(
+            doctor.hal,
+            "load_backend",
+            lambda plat, name: seen.append((plat, name)) or FakeMacHotkeys,
+        )
+
+        status = doctor.check_hotkeys_and_permissions(doctor.hal.MACOS)
+
+        assert seen == [("macos", "hotkeys")]
+        assert FakeMacHotkeys.called is True
+        assert status["ok"] is True
+
+    def test_a_denied_macos_permission_fails_the_check(self, monkeypatch):
+        import doctor
+
+        class Denied:
+            @staticmethod
+            def check_accessibility_permissions():
+                return False
+
+        monkeypatch.setattr(doctor.hal, "load_backend", lambda plat, name: Denied)
+
+        status = doctor.check_hotkeys_and_permissions(doctor.hal.MACOS)
+
+        assert status["ok"] is False
+        assert any("Accessibility" in err for err in status["errors"])

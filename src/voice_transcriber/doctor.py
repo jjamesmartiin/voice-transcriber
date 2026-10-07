@@ -204,7 +204,14 @@ def check_hotkeys_and_permissions(plat: str) -> Dict[str, Any]:
             )
 
     elif plat == hal.MACOS:
-        from platform.macos.hotkeys import check_accessibility_permissions
+        # Load the backend through the HAL, which registers the package under the
+        # private name `vt_platform`. A bare `from platform.macos.hotkeys import
+        # ...` resolved to the *stdlib* `platform` module instead and raised
+        # "No module named 'platform.macos'; 'platform' is not a package" —
+        # invisible on Linux, because this branch is darwin-only.
+        check_accessibility_permissions = hal.load_backend(
+            "macos", "hotkeys"
+        ).check_accessibility_permissions
 
         trusted = check_accessibility_permissions()
         if trusted:
