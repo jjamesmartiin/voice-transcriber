@@ -138,7 +138,7 @@ To change settings from outside the terminal, use the control API:
 .venv\Scripts\python.exe src\main.py status
 .venv\Scripts\python.exe src\main.py mute
 ```
-See [Control API](../README.md#control-api).
+See [Control API](../../README.md#control-api).
 
 ---
 

@@ -64,7 +64,7 @@ nix develop                       # dev shell (python -m pytest tests/shared)
 - `r` (in the terminal): Reset the terminal and clipboard bridge.
 - `q`, `Esc`, or `Ctrl+C` (in the terminal): Quit.
 
-There is no global hotkey for settings; use the [Control API](../README.md#control-api)
+There is no global hotkey for settings; use the [Control API](../../README.md#control-api)
 to drive it from outside the terminal.
 
 ## Verification
