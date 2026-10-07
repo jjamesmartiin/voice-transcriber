@@ -36,9 +36,9 @@ graph TD
         Cohere -->|Raw Transcript| ChunkQueue["Background Transcribed Chunks"]
     end
 
-    subgraph Wispr Flow Post-Processing Subsystem
+    subgraph Post-Processing Subsystem
         ChunkQueue -->|Key Release| TextStitcher["deduplicate_text_overlap (Word N-Gram Join)"]
-        TextStitcher -->|Stitched Text| PostProcessor["post_processor.py (Wispr Flow)"]
+        TextStitcher -->|Stitched Text| PostProcessor["post_processor.py"]
         
         PostProcessor -->|Pass 0a| HomophoneRepair["Zero-Overhead Homophone Repair (<0.02ms)"]
         HomophoneRepair -->|Pass 0b| RetractionParser["Verbal Edit Self-Correction ('actually', 'scratch that')"]
@@ -95,7 +95,7 @@ flowchart TD
     P --> Q["trim_trailing_silence (150ms Cushion)"]
 
     Q --> R["Stitch Audio Chunks via deduplicate_text_overlap()"]
-    R --> S["Wispr Flow Post-Processing Pipeline"]
+    R --> S["Post-Processing Pipeline"]
 
     S --> T{"Quick-Tap SLM On-Demand Triggered? (<0.45s rec & <15s since last)"}
     T -- Yes --> U["Execute vLLM SLM Polish on Last Transcription"]
@@ -126,7 +126,7 @@ flowchart TD
 | **Audio Hardware** | [`src/voice_transcriber/t2.py`](../src/voice_transcriber/t2.py) | Configures PortAudio / sounddevice streams at 16kHz 16-bit PCM. Manages primary and secondary audio device failover (`override_mode`). Loads `config.yaml`. |
 | **Streaming Micro-Batcher** | [`src/voice_transcriber/micro_batcher.py`](../src/voice_transcriber/micro_batcher.py) | Slices audio streams into micro-batches based on speech energy gating (`peak >= 0.015`, `rms >= 0.0035`). Trims trailing silence (`trim_trailing_silence`). Performs N-gram overlap deduplication (`deduplicate_text_overlap`). |
 | **ASR Engine** | [`src/voice_transcriber/transcribe2.py`](../src/voice_transcriber/transcribe2.py) | Runs the Cohere Transcribe2 model. Uses HuggingFace local snapshot resolution for sub-1.5s cold starts. |
-| **Wispr Flow Post-Processor** | [`src/voice_transcriber/post_processor.py`](../src/voice_transcriber/post_processor.py) | Multi-stage text cleanup pipeline: verbal retraction parsing, stutter removal, dangling clause linking, mid-sentence casing normalization, acronym preservation (`TECHNICAL_ACRONYMS_AND_PROPER_NOUNS`), and optional `vLLM` SLM polish. |
+| **Post-Processor** | [`src/voice_transcriber/post_processor.py`](../src/voice_transcriber/post_processor.py) | Multi-stage text cleanup pipeline: verbal retraction parsing, stutter removal, dangling clause linking, mid-sentence casing normalization, acronym preservation (`TECHNICAL_ACRONYMS_AND_PROPER_NOUNS`), and optional `vLLM` SLM polish. |
 | **Notifications & UI** | [`src/voice_transcriber/notifications.py`](../src/voice_transcriber/notifications.py) | Floating Tkinter status pill overlay displaying real-time pipeline state (`RECORDING`, `PROCESSING`, `COMPLETED`) and total post-release latency timers. |
 | **Lifetime Stats** | [`src/voice_transcriber/stats.py`](../src/voice_transcriber/stats.py) | Persistent all-time dictation totals (`time_saved_sec`, `words`, `transcriptions`, `sessions`) for the `⚡ saved` badge. Atomic read-modify-write JSON in the data dir, updated after every dictation; fail-soft so a bad file can never break recording. |
 | **Console Encoding Safety** | [`src/voice_transcriber/console_text.py`](../src/voice_transcriber/console_text.py) | Keeps every output path from raising `UnicodeEncodeError` on a stream that cannot encode the UI's glyphs (legacy Windows code page, `LANG=C`, `PYTHONIOENCODING=ascii`). Installs `errors="replace"` on stdout/stderr, and downgrades `⚡ │ · ✓` to ASCII stand-ins per encoding (`EncodingSafeStream` wraps the Rich console). `VT_ASCII=1` forces ASCII. |

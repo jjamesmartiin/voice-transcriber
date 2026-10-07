@@ -6,7 +6,7 @@ This document defines the mandatory validation rules and performance SLA gates t
 
 ## 1. Quality Control SLA Gates
 
-Any modifications to the audio capture, micro-batcher, ASR decoding engine, or Wispr Flow post-processor must pass the following quantitative benchmarks:
+Any modifications to the audio capture, micro-batcher, ASR decoding engine, or post-processor must pass the following quantitative benchmarks:
 
 | Metric Gate | Target SLA Threshold | Mandatory Rule |
 | :--- | :--- | :--- |

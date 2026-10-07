@@ -392,7 +392,7 @@ Voice Transcriber Architecture
 │                                                             │
 │  - Audio Pipeline & Streaming VAD (t2.py, micro_batcher.py) │
 │  - ASR Engine (Cohere Transcribe)                           │
-│  - Wispr Flow Post-Processor (post_processor.py)            │
+│  - Post-Processor (post_processor.py)                       │
 │    * Trie-compacted dictionary replacer                     │
 │    * Filler-word and stutter removal                        │
 │    * Verbal retraction parser ("no wait", "scratch that")   │
