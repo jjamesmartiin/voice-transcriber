@@ -221,7 +221,7 @@ demand: 6 devices listed in a fresh process, 5 in the one that started while
 another process held `hw:4,0`. The settings modal now has a **Reset Microphones**
 action that drops the warm stream cache, re-initialises PortAudio, and re-resolves
 your selected microphone *by name* — because device indices are list positions and
-they shift whenever the list changes (I watched `default` move 8 → 9 → 8 in one
+they shift whenever the list changes (I watched `default` move 9 → 8 → 9 in one
 session).
 
 ## The dragons, part 2: a terminal that corrupts itself
@@ -276,11 +276,14 @@ a bug report against my own keyboard to find.
 
 Typing text into another application is where the platforms diverge most.
 
-**Linux.** Under Wayland, there is deliberately no supported way for one
-application to synthesize keystrokes into another — so the app creates a virtual
-input device through `/dev/uinput`, which the kernel treats as a real keyboard.
-On X11 it uses `xdotool`/`xclip`. Clipboard output goes through `wl-copy` on
-Wayland and `xclip` on X11, chosen at runtime.
+**Linux.** Under Wayland there is deliberately no supported protocol for one
+application to synthesize keystrokes into another, so typing goes out through
+`ydotool` (which itself drives `/dev/uinput`) on Wayland or `xdotool` on X11, and
+clipboard output through `wl-copy` or `xclip`, chosen at runtime. The *hotkey*
+side reads raw kernel events from `/dev/input/event*`, and the mouse features —
+middle-click push-to-talk, and left+right within 50 ms as `Enter` — mirror the
+real mouse through a `/dev/uinput` virtual device, so the original clicks can be
+swallowed and replayed untouched.
 
 **Windows.** `SendInput` with `KEYEVENTF_UNICODE`, which types emoji and non-ASCII
 correctly where the old scancode approach cannot.
