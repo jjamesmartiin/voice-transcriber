@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="100%" height="100%">
+  <defs>
+    <style>
+      .bg { fill: #12151c; }
+      .box { rx: 8px; stroke-width: 1.5px; }
+      .box-core { fill: #1a202c; stroke: #3182ce; }
+      .box-audio { fill: #1c2321; stroke: #38a169; }
+      .box-nlp { fill: #231c28; stroke: #9f7aea; }
+      .box-ui { fill: #26211a; stroke: #dd6b20; }
+      .box-hal { fill: #1f242d; stroke: #4299e1; }
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: bold; fill: #e2e8f0; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; fill: #a0aec0; }
+      .header-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 18px; font-weight: bold; fill: #63b3ed; }
+      .header-sub { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; fill: #718096; }
+      .badge { font-family: monospace; font-size: 10px; font-weight: bold; fill: #e2e8f0; }
+      .arrow { stroke: #4a5568; stroke-width: 1.5px; fill: none; marker-end: url(#arrowhead); }
+      .arrow-hl { stroke: #63b3ed; stroke-width: 2px; fill: none; marker-end: url(#arrowhead-hl); }
+    </style>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#4a5568" />
+    </marker>
+    <marker id="arrowhead-hl" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#63b3ed" />
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="540" class="bg" rx="12" />
+
+  <!-- Header -->
+  <text x="40" y="42" class="header-title">Voice Transcriber System Architecture</text>
+  <text x="40" y="62" class="header-sub">Modular, low-latency speech pipeline with sub-millisecond post-processing and OS abstraction</text>
+
+  <!-- 1. AUDIO & VAD PIPELINE -->
+  <rect x="40" y="85" width="260" height="200" class="box box-audio" />
+  <text x="55" y="110" class="title" fill="#68d391">1. Audio Capture &amp; Streaming VAD</text>
+  <text x="55" y="128" class="subtitle">Hardware stream &amp; energy thresholding</text>
+
+  <rect x="55" y="145" width="230" height="34" rx="4" fill="#141c18" stroke="#276749" stroke-width="1" />
+  <text x="65" y="166" class="subtitle">PortAudio (16 kHz Float32 Stream)</text>
+
+  <rect x="55" y="188" width="230" height="34" rx="4" fill="#141c18" stroke="#276749" stroke-width="1" />
+  <text x="65" y="209" class="subtitle">Dynamic VAD Energy Decay (Silence Cut)</text>
+
+  <rect x="55" y="231" width="230" height="34" rx="4" fill="#141c18" stroke="#276749" stroke-width="1" />
+  <text x="65" y="252" class="subtitle">PipeWire State / Mic Mute Guard (wpctl)</text>
+
+  <!-- 2. ASR INFERENCE -->
+  <rect x="350" y="85" width="260" height="200" class="box box-core" />
+  <text x="365" y="110" class="title" fill="#63b3ed">2. Acoustic Model (ASR)</text>
+  <text x="365" y="128" class="subtitle">CPU-only offline neural inference</text>
+
+  <rect x="365" y="145" width="230" height="34" rx="4" fill="#101926" stroke="#2b6cb0" stroke-width="1" />
+  <text x="375" y="166" class="subtitle">Cohere Transcribe (03-2026 weights)</text>
+
+  <rect x="365" y="188" width="230" height="34" rx="4" fill="#101926" stroke="#2b6cb0" stroke-width="1" />
+  <text x="375" y="209" class="subtitle">Micro-Batching (0.5s–3.0s chunks)</text>
+
+  <rect x="365" y="231" width="230" height="34" rx="4" fill="#101926" stroke="#2b6cb0" stroke-width="1" />
+  <text x="375" y="252" class="subtitle">Hallucination &amp; Noise Token Gate</text>
+
+  <!-- 3. POST-PROCESSOR -->
+  <rect x="660" y="85" width="260" height="200" class="box box-nlp" />
+  <text x="675" y="110" class="title" fill="#b794f4">3. Post-Processor (~16 µs)</text>
+  <text x="675" y="128" class="subtitle">Wispr Flow conversational formatting</text>
+
+  <rect x="675" y="145" width="230" height="34" rx="4" fill="#1b1422" stroke="#6b46c1" stroke-width="1" />
+  <text x="685" y="166" class="subtitle">Verbal Retractions ("no wait, make that")</text>
+
+  <rect x="675" y="188" width="230" height="34" rx="4" fill="#1b1422" stroke="#6b46c1" stroke-width="1" />
+  <text x="685" y="209" class="subtitle">Trie Dictionary + Homophone Guards</text>
+
+  <rect x="675" y="231" width="230" height="34" rx="4" fill="#1b1422" stroke="#6b46c1" stroke-width="1" />
+  <text x="685" y="252" class="subtitle">Spoken Numbers to Digits &amp; Ordinal Dates</text>
+
+  <!-- Arrows row 1 -->
+  <path d="M 300 185 L 350 185" class="arrow-hl" />
+  <path d="M 610 185 L 660 185" class="arrow-hl" />
+
+  <!-- 4. FRONTEND / UI -->
+  <rect x="40" y="320" width="380" height="180" class="box box-ui" />
+  <text x="55" y="345" class="title" fill="#f6ad55">4. Presentation &amp; Control Interfaces</text>
+  <text x="55" y="363" class="subtitle">Pure view devices decoupled from authoritative engine</text>
+
+  <rect x="55" y="380" width="165" height="48" rx="4" fill="#1e1812" stroke="#c05621" stroke-width="1" />
+  <text x="65" y="401" class="title" font-size="11px">Ratatui Rust TUI</text>
+  <text x="65" y="418" class="subtitle" font-size="10px">Inline scrollback + VU meters</text>
+
+  <rect x="235" y="380" width="170" height="48" rx="4" fill="#1e1812" stroke="#c05621" stroke-width="1" />
+  <text x="245" y="401" class="title" font-size="11px">Rich (Python) Fallback</text>
+  <text x="245" y="418" class="subtitle" font-size="10px">Windows / headless terminals</text>
+
+  <rect x="55" y="438" width="350" height="48" rx="4" fill="#1e1812" stroke="#c05621" stroke-width="1" />
+  <text x="65" y="458" class="title" font-size="11px">Control API (UNIX Socket IPC / 25 verbs)</text>
+  <text x="65" y="474" class="subtitle" font-size="10px">Scriptable toggles, device switching, doctor, status JSON</text>
+
+  <!-- 5. HAL / OS INJECTION -->
+  <rect x="460" y="320" width="460" height="180" class="box box-hal" />
+  <text x="475" y="345" class="title" fill="#63b3ed">5. Hardware &amp; OS Abstraction Layer (HAL)</text>
+  <text x="475" y="363" class="subtitle">Platform-native global hotkeys &amp; zero-latency text injection</text>
+
+  <rect x="475" y="380" width="105" height="106" rx="4" fill="#151b24" stroke="#2b6cb0" stroke-width="1" />
+  <text x="485" y="402" class="title" font-size="11px">Linux</text>
+  <text x="485" y="420" class="subtitle" font-size="10px">• evdev / uinput</text>
+  <text x="485" y="438" class="subtitle" font-size="10px">• wl-copy / xclip</text>
+  <text x="485" y="456" class="subtitle" font-size="10px">• ydotool auto-type</text>
+  <text x="485" y="474" class="subtitle" font-size="10px">• Space latch</text>
+
+  <rect x="590" y="380" width="105" height="106" rx="4" fill="#151b24" stroke="#2b6cb0" stroke-width="1" />
+  <text x="600" y="402" class="title" font-size="11px">Windows</text>
+  <text x="600" y="420" class="subtitle" font-size="10px">• pynput / Win32</text>
+  <text x="600" y="438" class="subtitle" font-size="10px">• SendInput Unicode</text>
+  <text x="600" y="456" class="subtitle" font-size="10px">• Direct clipboard</text>
+  <text x="600" y="474" class="subtitle" font-size="10px">• Alt+Shift hotkey</text>
+
+  <rect x="705" y="380" width="105" height="106" rx="4" fill="#151b24" stroke="#2b6cb0" stroke-width="1" />
+  <text x="715" y="402" class="title" font-size="11px">WSL2 Bridge</text>
+  <text x="715" y="420" class="subtitle" font-size="10px">• Host PowerShell</text>
+  <text x="715" y="438" class="subtitle" font-size="10px">• Socket IPC proxy</text>
+  <text x="715" y="456" class="subtitle" font-size="10px">• Synthetic Ctrl+V</text>
+  <text x="715" y="474" class="subtitle" font-size="10px">• WSLg audio</text>
+
+  <rect x="820" y="380" width="85" height="106" rx="4" fill="#151b24" stroke="#2b6cb0" stroke-width="1" />
+  <text x="828" y="402" class="title" font-size="11px">macOS</text>
+  <text x="828" y="420" class="subtitle" font-size="10px">• Accessibility</text>
+  <text x="828" y="438" class="subtitle" font-size="10px">• pbcopy / type</text>
+  <text x="828" y="456" class="subtitle" font-size="10px">• AppleScript</text>
+  <text x="828" y="474" class="subtitle" font-size="10px">• CoreAudio</text>
+
+  <!-- Connectors between core and interfaces/HAL -->
+  <path d="M 790 285 L 790 320" class="arrow-hl" />
+  <path d="M 230 285 L 230 320" class="arrow" />
+</svg>

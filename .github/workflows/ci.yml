@@ -34,6 +34,9 @@ jobs:
       - name: Run shared + Linux tests
         run: nix develop --command python -m pytest tests/shared tests/linux -q
 
+      - name: Build Rust Ratatui frontend (vt-tui)
+        run: nix build .#vt-tui --no-link
+
   unit-tests-windows:
     name: Unit tests (Windows)
     runs-on: windows-latest
