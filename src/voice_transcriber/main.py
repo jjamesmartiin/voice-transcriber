@@ -9,8 +9,15 @@ import time
 import os
 import sys
 
-# Ensure local source directory is in sys.path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Put the ``src/`` directory on sys.path so the compatibility shims there resolve
+# bare imports like ``import t2``. Deliberately the *shim* directory, not this
+# package's own directory: adding ``src/voice_transcriber`` let a bare
+# ``import hal`` load ``voice_transcriber/hal.py`` a second time under the plain
+# name ``hal``, so one file became two module objects whose ``isinstance`` and
+# ``except`` checks silently missed across the pair. See TODO.md.
+_SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 
 # Configure logging before importing the app modules so that their import-time
 # messages are captured as well. Writes a per-user log file in addition to the
@@ -25,9 +32,15 @@ import stats
 import console_text
 from tui import VoiceTranscriberTUI
 
-# Import transcription functionality
-# Ensure we can find t2
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Import transcription functionality.
+#
+# Deliberately no ``sys.path`` mutation here. This file's own directory is
+# already on the path: Python puts a script's directory at ``sys.path[0]``, and
+# the Nix wrapper puts ``share/vt`` on ``PYTHONPATH``. Appending
+# ``voice_transcriber/`` as well let a later bare ``import hal`` load
+# ``voice_transcriber/hal.py`` a *second* time under the plain name ``hal``, so
+# one file became two module objects and ``isinstance``/``except`` checks
+# silently missed across the pair. See the note in TODO.md.
 import t2
 from t2 import (
     preload_model, DEVICE, record_audio_stream, process_audio_stream,
@@ -187,20 +200,40 @@ class SimpleVoiceTranscriber:
         self.init_hotkeys()
 
     def _safe_tui_start(self):
-        """Start the selected TUI; if the ratatui frontend fails, fall back to Rich."""
+        """Start the selected TUI; if the ratatui frontend fails, fall back to Rich.
+
+        The fallback is guarded too. A TUI that cannot start at all — a console
+        whose encoding rejects the UI's glyphs, an unusable stdout — used to
+        propagate out of ``__init__`` and exit 1 with a traceback the user could
+        not act on. A frontend that cannot start is a problem to report, not a
+        reason to crash: the engine and the control API still work.
+        """
         try:
             self.tui.start()
+            return
         except Exception as e:
             logger.warning("ratatui frontend failed to start (%s); using Rich TUI", e)
             try:
                 self.tui.stop()
             except Exception:
                 pass
-            from tui import VoiceTranscriberTUI
-            self.tui = VoiceTranscriberTUI()
-            self._wire_tui_callbacks()
-            self._sync_tui_state()
+
+        from tui import VoiceTranscriberTUI
+
+        self.tui = VoiceTranscriberTUI()
+        self._wire_tui_callbacks()
+        self._sync_tui_state()
+        try:
             self.tui.start()
+        except Exception as e:
+            logger.error("Could not start any terminal UI: %s", e)
+            console_text.safe_print(
+                f"✗ Voice Transcriber could not start its terminal UI "
+                f"({type(e).__name__}: {e}).",
+                "  The engine is running and still reachable over the control API.",
+                "  To fix the UI, try a UTF-8 terminal: `chcp 65001` on Windows, or",
+                "  `VT_ASCII=1` to replace the box-drawing and emoji glyphs with ASCII.",
+            )
 
     def _sync_tui_state(self):
         """Sync t2 configuration state with TUI badges and visual notification"""

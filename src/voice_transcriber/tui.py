@@ -94,7 +94,18 @@ class VoiceTranscriberTUI:
         # Wrapped so a stream that cannot encode our glyphs (legacy codepage,
         # LANG=C, PYTHONIOENCODING=ascii) gets ASCII stand-ins instead of Rich
         # re-raising UnicodeEncodeError and losing the output entirely.
-        self.console = Console(file=console_text.EncodingSafeStream())
+        #
+        # ``legacy_windows=False`` is part of that guarantee, not a style choice:
+        # Rich's legacy win32 renderer writes through the console handle (via
+        # colorama) rather than through this file, so on a cp1252 console it
+        # raised UnicodeEncodeError on glyphs like ``❯`` *despite* the wrapper.
+        # Windows 10+ understands ANSI escape sequences, so routing everything
+        # through the stream costs nothing there and lets an un-encodable glyph
+        # degrade to ``?`` instead of taking the UI down.
+        self.console = Console(
+            file=console_text.EncodingSafeStream(),
+            legacy_windows=False,
+        )
         self.lock = threading.Lock()
         self.ui_theme = ui_theme
 

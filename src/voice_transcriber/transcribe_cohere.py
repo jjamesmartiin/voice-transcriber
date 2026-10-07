@@ -1,6 +1,11 @@
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# ``src/`` — the shim directory — rather than this package's own directory, which
+# double-loaded ``voice_transcriber/*`` under bare names. See TODO.md.
+_SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 
 import logging
 import warnings

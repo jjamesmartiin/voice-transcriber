@@ -11,8 +11,12 @@ import threading
 import re
 import numpy as np
 
-# Ensure src is in sys.path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Put ``src/`` — the shim directory — on sys.path, not this package's own
+# directory, which double-loaded every ``voice_transcriber`` module under its
+# bare name. See TODO.md.
+_SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 import transcribe2
 
 from post_processor import clean_speech_transcription, STUTTER_PROTECTED_WORDS

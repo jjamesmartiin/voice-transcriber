@@ -21,9 +21,13 @@ import subprocess
 import sys
 import threading
 
-# Ensure the ``src`` directory (two levels up) is importable so ``t2`` resolves.
+# Ensure the ``src`` directory is importable so the ``t2`` shim resolves. From
+# src/voice_transcriber/platform/wsl/bridge_server.py that is four levels up. The
+# comment used to say "two levels up" while the code went three, which put the
+# *package* directory on the path and double-loaded every ``voice_transcriber``
+# module under its bare name.
 _SRC_DIR = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)

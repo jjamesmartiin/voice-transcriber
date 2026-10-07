@@ -28,8 +28,9 @@ normally reuses the existing bundle. See
   attached to releases — a self-contained bundle needing no Python install. It
   prompts to download the model on first launch, or reads a local
   `models\cohere\` folder.
-- **Tests:** a launch/readiness plan (`docs/blog_launch_plan.md`) and
-  presentation assets (`docs/assets/`).
+- **Presentation assets** in `docs/assets/`: a hero demo, terminal-UI and
+  settings renders, a system-architecture diagram, and a 1280x640 social card.
+  The README now shows the terminal UI and the architecture diagram.
 
 ### Fixed
 
@@ -65,7 +66,9 @@ normally reuses the existing bundle. See
   `shellcheck` gate the Linux job and ship in the dev shell, and the dev-shell
   banner moved to `stderr` so `nix develop --command ... --json` produces clean
   output. `ruff format` is deliberately not enforced.
-- Internal planning documents moved to `docs/archive/`.
+- Internal planning documents moved to `docs/archive/` (including the launch
+  and readiness plan, which is a record of how this was validated rather than a
+  user-facing document).
 - CI now builds the Rust frontend (`nix build .#vt-tui`) in the Linux job. The
   crate is Unix-only and nothing else compiled it, so a broken frontend build or
   a failed `vu` parse previously stayed invisible until release.

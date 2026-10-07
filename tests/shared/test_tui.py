@@ -277,3 +277,83 @@ def test_read_key_windows_simulation(monkeypatch):
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# The Rich fallback must not take the process down with it.
+# ---------------------------------------------------------------------------
+class TestTuiStartFallbackIsGuarded:
+    """``_safe_tui_start`` used to guard the ratatui attempt but not the Rich
+    fallback, so a console that could not encode the UI's glyphs (a stock
+    ``cmd.exe`` on cp437/cp1252) raised ``UnicodeEncodeError`` straight out of
+    the engine's constructor: exit 1, no window, a traceback the user cannot act
+    on. See the "Rich TUI crashes on a non-UTF-8 Windows console" note in
+    TODO.md.
+    """
+
+    @staticmethod
+    def _engine_with(tui_obj):
+        import main as main_mod
+
+        engine = main_mod.SimpleVoiceTranscriber.__new__(main_mod.SimpleVoiceTranscriber)
+        engine.tui = tui_obj
+        engine._wire_tui_callbacks = lambda: None
+        engine._sync_tui_state = lambda: None
+        return engine
+
+    def test_a_ratatui_failure_falls_back_to_rich(self, monkeypatch):
+        import tui as tui_mod
+
+        started = []
+
+        class BrokenRatatui:
+            def start(self):
+                raise RuntimeError("no vt-tui binary")
+
+            def stop(self):
+                pass
+
+        class RecordingRich(tui_mod.VoiceTranscriberTUI):
+            def start(self):
+                started.append(True)
+
+        monkeypatch.setattr(tui_mod, "VoiceTranscriberTUI", RecordingRich)
+
+        self._engine_with(BrokenRatatui())._safe_tui_start()
+
+        assert started == [True]
+
+    def test_a_failing_rich_fallback_reports_instead_of_raising(self, monkeypatch, capsys):
+        import tui as tui_mod
+
+        class BrokenRatatui:
+            def start(self):
+                raise RuntimeError("no vt-tui binary")
+
+            def stop(self):
+                pass
+
+        class UnencodableTui:
+            def start(self):
+                raise UnicodeEncodeError(
+                    "cp1252", "❯", 0, 1, "character maps to <undefined>"
+                )
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr(tui_mod, "VoiceTranscriberTUI", UnencodableTui)
+
+        # Must not raise: this is the regression.
+        self._engine_with(BrokenRatatui())._safe_tui_start()
+
+        printed = capsys.readouterr()
+        combined = printed.out + printed.err
+        assert "could not start its terminal UI" in combined
+        # The message has to be actionable, not just a traceback.
+        assert "VT_ASCII=1" in combined or "chcp 65001" in combined
+
+    def test_the_rich_console_does_not_use_the_legacy_win32_renderer(self):
+        """The legacy renderer writes through the console handle, bypassing the
+        encoding-safe stream that is supposed to make this impossible."""
+        assert VoiceTranscriberTUI().console.legacy_windows is False

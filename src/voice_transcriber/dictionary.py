@@ -272,7 +272,9 @@ def save_dictionary(mapping: Dict[str, str], path: Optional[str | Path] = None, 
     dict_path.write_text(yaml_text, encoding="utf-8")
 
     try:
-        src_dir = Path(__file__).resolve().parent
+        # ``src/`` — the shim directory — rather than this package's own
+        # directory, which double-loaded ``voice_transcriber/*`` under bare names.
+        src_dir = Path(__file__).resolve().parent.parent
         if str(src_dir) not in sys.path:
             sys.path.insert(0, str(src_dir))
         import post_processor
@@ -301,7 +303,9 @@ def save_contextual_rules(rules: List[Dict[str, Any]], path: Optional[str | Path
     dict_path.write_text(yaml_text, encoding="utf-8")
 
     try:
-        src_dir = Path(__file__).resolve().parent
+        # ``src/`` — the shim directory — rather than this package's own
+        # directory, which double-loaded ``voice_transcriber/*`` under bare names.
+        src_dir = Path(__file__).resolve().parent.parent
         if str(src_dir) not in sys.path:
             sys.path.insert(0, str(src_dir))
         import post_processor
@@ -477,7 +481,9 @@ def remove_contextual_rule(target: str, path: Optional[str | Path] = None, local
 def test_phrase(text: str) -> str:
     """Run text through post_processor's dictionary replacer and return the result."""
     try:
-        src_dir = Path(__file__).resolve().parent
+        # ``src/`` — the shim directory — rather than this package's own
+        # directory, which double-loaded ``voice_transcriber/*`` under bare names.
+        src_dir = Path(__file__).resolve().parent.parent
         if str(src_dir) not in sys.path:
             sys.path.insert(0, str(src_dir))
         import post_processor

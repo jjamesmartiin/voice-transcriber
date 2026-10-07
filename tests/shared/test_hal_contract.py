@@ -301,3 +301,57 @@ class TestDoctorLoadsMacBackendsThroughTheHal:
 
         assert status["ok"] is False
         assert any("Accessibility" in err for err in status["errors"])
+
+
+class TestOneFileIsOneModule:
+    """A bare import must not create a second module object for the same file.
+
+    ``main.py`` (and ``micro_batcher``/``transcribe_cohere``/``dictionary``/
+    ``bridge_server``) used to put the *package* directory ``src/voice_transcriber``
+    on ``sys.path``. That made a later bare ``import hal`` load
+    ``voice_transcriber/hal.py`` a second time under the plain name ``hal``, so
+    one file became two module objects: ``isinstance`` and ``except`` checks
+    silently miss across the pair, and mutable module state exists twice. It has
+    already caused one real bug (a stale ``from platform.macos...`` import that
+    only macOS CI caught).
+
+    Every ``sys.path`` insert now points at ``src/`` — the directory holding the
+    compatibility shims — which is what makes bare names resolve to the package
+    modules. Run in a subprocess, because what matters is the *first* import.
+    """
+
+    def test_bare_imports_are_the_package_modules(self, tmp_path):
+        import os
+
+        script = textwrap.dedent(
+            f"""
+            import importlib
+            import sys
+            sys.path.insert(0, {str(SRC_DIR)!r})
+
+            # Import the engine first, exactly as the app does.
+            import voice_transcriber.main
+
+            names = ("hal", "t2", "keybinds", "control", "post_processor",
+                     "micro_batcher", "transcribe2", "notifications", "doctor")
+            doubled = [
+                n for n in names
+                if importlib.import_module(n)
+                is not importlib.import_module("voice_transcriber." + n)
+            ]
+            assert not doubled, f"double-loaded modules: {{doubled}}"
+            assert not any(
+                p.rstrip("/").endswith("/voice_transcriber") for p in sys.path
+            ), "the package directory must never be on sys.path"
+            print("OK")
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+            env={**os.environ, "VT_LOG_FILE": str(tmp_path / "vt.log")},
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "OK", result.stdout
