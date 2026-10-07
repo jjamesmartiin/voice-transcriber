@@ -34,6 +34,11 @@ jobs:
       - name: Run shared + Linux tests
         run: nix develop --command python -m pytest tests/shared tests/linux -q
 
+      - name: Lint (ruff, shellcheck)
+        run: |
+          nix develop --command ruff check src tests tools eval
+          nix develop --command shellcheck --severity=warning $(git ls-files '*.sh')
+
       - name: Build Rust Ratatui frontend (vt-tui)
         run: nix build .#vt-tui --no-link
 

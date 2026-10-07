@@ -71,3 +71,34 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["voice_transcriber*"]
+
+# ---------------------------------------------------------------------------
+# Linting
+# ---------------------------------------------------------------------------
+# This gate is about correctness, not cosmetics: it catches undefined and
+# unused names, bare excepts and the bugbear footguns. It is deliberately
+# narrow, because the alternative — turning on every rule and rewriting the
+# tree — buries real fixes in noise.
+#
+# `ruff format` is NOT enforced. It would rewrite most of this codebase (the
+# long lines here are mostly hand-aligned tables and message strings), which is
+# a large, risky diff that has nothing to do with behaviour. Run it on a file
+# you are already rewriting if you like; CI will not ask you to.
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["build", "dist", "models", "result", ".venv"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "W", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# The root compatibility shims put src/ on sys.path before importing the real
+# module, and re-export it wholesale.
+"src/*.py" = ["E402"]
+# Tests put src/ on sys.path before importing the app (conftest.py does it for
+# the tiers that need it, and a few tests do it themselves).
+"tests/**" = ["E402"]
+# Module-level `__getattr__` resolves these lazily through the HAL; ruff cannot
+# see that they exist.
+"src/voice_transcriber/hotkeys.py" = ["F822"]

@@ -332,14 +332,29 @@
               hyperfine
               flamegraph
               gh
+              # Linters. CI runs exactly these, so a clean local run means a
+              # clean CI run.
+              ruff
+              shellcheck
+              # The Rust frontend. `nix build .#vt-tui` stays the sanctioned
+              # build (it runs `cargo test` via doCheck); these just make
+              # cargo/clippy/rustfmt usable directly while developing.
+              cargo
+              clippy
+              rustfmt
             ] ++ (pkgs.lib.optionals isLinux [ perf ]));
 
             shellHook = ''
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
               export PS1='\[\033[1;32m\][VT-dev:\w]\$\[\033[0m\] '
-              echo "⚡ VT Development Environment Ready!"
-              echo "To run the app: python src/main.py"
-              echo "To run tests: python -m pytest tests/shared"
+              # Send the banner to stderr: `nix develop --command ... --json`
+              # is a documented way to drive the app, and a banner on stdout
+              # corrupts that output.
+              {
+                echo "⚡ VT Development Environment Ready!"
+                echo "To run the app: python src/main.py"
+                echo "To run tests: python -m pytest tests/shared"
+              } >&2
             '';
           };
         });
