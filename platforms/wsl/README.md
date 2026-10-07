@@ -1,5 +1,13 @@
 # Voice Transcriber (VT) - WSL Guide
 
+> **Verification status.** This platform is unit-tested (the suite runs green on a
+> `Ubuntu with `VT_PLATFORM=wsl`` CI runner) but has **not** been run end-to-end on real hardware by the
+> maintainer — only Linux has. Please treat a first-run problem here as a
+> WSL bug to report rather than as something you did wrong, and include the
+> output of `run_wsl.bat doctor` in an issue. [`TODO.md`](../../TODO.md) lists the exact steps
+> still to confirm on this platform.
+
+
 > **Any WSL distribution works.** The recommended guest is **NixOS-WSL** (Nix
 > provides every dependency reproducibly), but a plain **Ubuntu** guest is
 > supported too: the guest runs its own `./setup.sh` / `./run.sh`, which uses

@@ -1,5 +1,13 @@
 # Voice Transcriber - Native Windows Guide
 
+> **Verification status.** This platform is unit-tested (the suite runs green on a
+> `windows-latest` CI runner) but has **not** been run end-to-end on real hardware by the
+> maintainer — only Linux has. Please treat a first-run problem here as a
+> Windows bug to report rather than as something you did wrong, and include the
+> output of `run.bat doctor` in an issue. [`TODO.md`](../../TODO.md) lists the exact steps
+> still to confirm on this platform.
+
+
 Run Voice Transcriber natively on Windows with global hotkeys, Windows audio cues, and active-window clipboard pasting.
 
 ---

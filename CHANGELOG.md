@@ -62,6 +62,14 @@ normally reuses the existing bundle. See
 
 ### Changed
 
+- **The platform table now says what is actually proven.** Linux is marked
+  *Verified* (run end-to-end on real hardware, daily); Windows, WSL2 and macOS are
+  marked *Supported, unit-tested*. A short "what verified means here" section
+  states per platform what is and is not exercised — including that the WSL
+  PowerShell bridge has never executed, because CI has no `powershell.exe` — and
+  the same note sits at the top of the Windows, WSL and macOS guides. It also says
+  what to send in an issue, so a first-run failure is treated as a bug in the claim
+  rather than as user error.
 - **A linter now runs in CI.** `ruff` (configured in `pyproject.toml`) and
   `shellcheck` gate the Linux job and ship in the dev shell, and the dev-shell
   banner moved to `stderr` so `nix develop --command ... --json` produces clean

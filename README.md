@@ -23,14 +23,42 @@
 
 | Platform | Status | Hotkeys | Output injection | Audio capture | Guide | Quick run |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Linux (Wayland / X11)** | Supported | `evdev` + `uinput` | `wl-copy`/`xclip` (copy) · `ydotool`/`xdotool` (type) | PulseAudio / PipeWire | [Linux guide](platforms/linux/README.md) | `vt-x86_64.AppImage`, or `nix run .` |
-| **Windows (native)** | Supported | `pynput` + `keyboard` | Win32 `SendInput` (Unicode/emoji) | WASAPI / DirectSound | [Windows guide](platforms/windows/README.md) | EXE folder, or `run.bat` from source |
-| **Windows (WSL2, any distro)** | Supported | Windows-host bridge (PowerShell ⇄ socket IPC) | Host-side synthetic paste (`clip.exe` + `Ctrl+V`) | WSLg PulseAudio (`RDPSource`) | [WSL guide](platforms/wsl/README.md) | Double-click `run_wsl.bat` |
-| **macOS (Apple Silicon / Intel)** | Supported | `pynput` (Accessibility) | `pbcopy` (copy) · AppleScript / Quartz (type) | CoreAudio | [macOS guide](platforms/macos/README.md) | `nix run .`, or `./setup.sh` + `./run.sh` |
+| **Linux (Wayland / X11)** | **Verified** — used daily | `evdev` + `uinput` | `wl-copy`/`xclip` (copy) · `ydotool`/`xdotool` (type) | PulseAudio / PipeWire | [Linux guide](platforms/linux/README.md) | `vt-x86_64.AppImage`, or `nix run .` |
+| **Windows (native)** | Supported, unit-tested | `pynput` + `keyboard` | Win32 `SendInput` (Unicode/emoji) | WASAPI / DirectSound | [Windows guide](platforms/windows/README.md) | EXE folder, or `run.bat` from source |
+| **Windows (WSL2, any distro)** | Supported, unit-tested | Windows-host bridge (PowerShell ⇄ socket IPC) | Host-side synthetic paste (`clip.exe` + `Ctrl+V`) | WSLg PulseAudio (`RDPSource`) | [WSL guide](platforms/wsl/README.md) | Double-click `run_wsl.bat` |
+| **macOS (Apple Silicon / Intel)** | Supported, unit-tested | `pynput` (Accessibility) | `pbcopy` (copy) · AppleScript / Quartz (type) | CoreAudio | [macOS guide](platforms/macos/README.md) | `nix run .`, or `./setup.sh` + `./run.sh` |
 
 All four share the same engine, ASR backend, post-processor, and config format.
 Only the HAL backends differ: **hotkeys**, **clipboard/typing**,
 **audio cues**, and **notifications** (`src/platform/<os>/`).
+
+### What "verified" means here — please read this
+
+This is a one-maintainer project, and only **Linux** has been run end-to-end on
+real hardware (a daily driver, with a real microphone and real dictation).
+
+**Windows, WSL2 and macOS are unit-tested, not end-to-end verified.** Concretely:
+
+| | What is proven | What is *not* |
+| :--- | :--- | :--- |
+| **Linux** | Everything: capture, hotkeys, injection, the packaged AppImage | — |
+| **Windows (native)** | The suite runs green on a `windows-latest` CI runner; the code path is exercised with fakes | Never launched on a Windows machine by the maintainer. No real global hotkey, `SendInput`, or microphone has been exercised |
+| **Windows (WSL2)** | The suite runs green on an Ubuntu CI runner with `VT_PLATFORM=wsl` | The PowerShell host bridge has never executed — CI has no `powershell.exe` |
+| **macOS** | The suite runs green on a `macos-latest` CI runner | Never launched on a Mac by the maintainer. No real Accessibility permission or CoreAudio device has been exercised |
+
+That means the platform code is written, reviewed and pinned structurally, but a
+first-run problem on Windows or macOS is plausible.
+[`TODO.md`](TODO.md) lists exactly what needs confirming on each platform, with the
+steps to do it — it is a real checklist, not a formality. If you hit something
+there, an issue with the output of `./run.sh doctor` (or `run.bat doctor`) is the
+most useful thing you can send, and it will be treated as a bug in the claim
+above rather than as user error.
+
+> **Native Windows has no control API and no ratatui frontend.** Stock CPython on
+> Windows never exposes `socket.AF_UNIX` ([bpo-33408](https://bugs.python.org/issue33408)),
+> so the engine does not bind a socket there and the Rich TUI is used instead of
+> the Rust one. Linux, WSL2 and macOS are unaffected. See
+> [`docs/control_api.md`](docs/control_api.md).
 
 ---
 

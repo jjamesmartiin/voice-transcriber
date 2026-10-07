@@ -1,5 +1,13 @@
 # Voice Transcriber - macOS Guide
 
+> **Verification status.** This platform is unit-tested (the suite runs green on a
+> `macos-latest` CI runner) but has **not** been run end-to-end on real hardware by the
+> maintainer — only Linux has. Please treat a first-run problem here as a
+> macOS bug to report rather than as something you did wrong, and include the
+> output of `./run.sh doctor` in an issue. [`TODO.md`](../../TODO.md) lists the exact steps
+> still to confirm on this platform.
+
+
 Voice Transcriber runs natively on macOS (both Apple Silicon M-series and Intel Macs) with global hotkeys, CoreAudio recording, PyTorch MPS hardware acceleration, and active-window text injection.
 
 ---
