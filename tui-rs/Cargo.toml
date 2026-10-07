@@ -2,7 +2,16 @@
 name = "vt-tui"
 version = "0.1.0"
 edition = "2021"
-description = "Ratatui frontend for Voice Transcriber"
+# Not published: this binary is built by the flake (`nix build .#vt-tui`) and
+# shipped inside the app bundle, so it is versioned with the app rather than
+# with crates.io. `version` here tracks the crate's own interface, not the
+# product version — the product version lives in `src/main.rs` (VERSION) and is
+# pinned against the Python side by tests/shared/test_version_consistency.py.
+description = "Terminal (ratatui) frontend for Voice Transcriber"
+license = "MIT"
+repository = "https://github.com/jjamesmartiin/voice-transcriber"
+readme = "README.md"
+rust-version = "1.75"
 publish = false
 
 [[bin]]
