@@ -14,6 +14,27 @@ normally reuses the existing bundle. See
 
 ## [Unreleased]
 
+### Changed
+
+- **Repository layout / developer experience.** The five verb entry points moved
+  out of the repo root into `scripts/`: `./scripts/setup.sh`, `run.sh`, `test.sh`,
+  `build.sh`, `clean.sh`, plus the Windows `.bat`/`.ps1` equivalents (including
+  `run_wsl.bat` / `setup_wsl.bat`). `TODO.md` moved to `docs/TODO.md` and
+  `icon.ico` to `packaging/icon.ico`. The repo root now opens on the README
+  instead of ~40 loose files.
+- **Dependencies consolidated into `pyproject.toml`.** The root
+  `requirements.txt`, `requirements-dev.txt` and `pytest.ini` were removed; the
+  dependency list already lived in `pyproject.toml`. POSIX setups now install the
+  project (`pip install -e ".[dev]"`), while Windows keeps its offline
+  `platforms/windows/requirements*.txt` for the bundle build.
+
+### Fixed
+
+- **Hero demo GIF regenerated from the real UI.** The previous `vt-demo.gif` had
+  drifted into a hand-drawn mock (badge chips, a fictitious title bar) that
+  matched nothing in the app. It is now rendered from the actual ratatui layout in
+  `tui-rs/src/ui.rs`, with a build-time assertion that no line is clipped.
+
 ## [1.3.0] — 2026-10-07
 
 ### Added

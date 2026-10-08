@@ -29,7 +29,7 @@ Noise is generated locally (white, 1/f "pink", and a 6-voice amplitude-modulated
 ## Rebuild
 
 ```bash
-cd /home/jamesm/gitprojects/voice-transcriber
+cd /path/to/voice-transcriber    # the repo root
 VTOUT=$(nix build .#default --print-out-paths --no-link | tail -1)
 PY=$(grep -oE '/nix/store/[^ "]*python3[^ "]*/bin/python' "$VTOUT/bin/vt" | head -1)
 PYTHONPATH=$PWD/src "$PY" eval/build_eval.py
