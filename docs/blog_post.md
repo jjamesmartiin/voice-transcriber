@@ -150,15 +150,26 @@ conversational speed:
 A dictation engine that types that verbatim is a novelty. The post-processor
 turns it into:
 
-> "Remind me Wednesday. Also add a note to the GitHub issue."
+> "Remind me Wednesday and also add a note to the GitHub issue."
+
+The correction is resolved, the filler is gone, and every remaining word is the
+one that was spoken. Note what it does *not* do: it does not reflow that into two
+sentences. This stage never adds punctuation that was not spoken, which is what
+keeps it predictable — no model, no network, no surprises. A model-backed polish
+pass does exist as an opt-in (`enable_slm`, off by default, needs a local vLLM),
+but it is not what makes this example work: everything above is regex and tries.
 
 It does this in **13–35 microseconds** — measured, not estimated. The whole thing
 is regex and tries, no model, no network, and that is a deliberate design
 constraint: this stage runs on every single utterance, so it must be
 effectively free, and it must be predictable. It handles:
 
-- **Verbal retraction** — `"no wait"`, `"scratch that"`, `"make that"` trim the
-  preceding clause.
+- **Verbal retraction** — `"no wait"`, `"make that"` and `"I mean"` replace the
+  retracted value (`"Tuesday, no, Wednesday"` → `"Wednesday"`, `"at 5 PM,
+  actually 6 PM"` → `"at 6 PM"`), and `"scratch that"` trims the preceding
+  clause. A marker inside ordinary speech is left alone: `"please make that
+  happen"` and `"there is no Wednesday meeting"` are not retractions, so neither
+  is rewritten.
 - **Filler and stutter collapse** — `"uh"`, `"um"`, and `"the the"`.
 - **Spoken numbers and dates** — `"October twentieth"` → `"October 20th"`,
   `"October twentieth twenty twenty five"` → `"October 20th, 2025"`, with three

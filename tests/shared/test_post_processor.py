@@ -796,3 +796,88 @@ def test_digit_string_guards_unit(number_mode):
     # Unambiguous chains are untouched by the guards.
     assert pp._DIGIT_STRING_REGEX.sub(pp._expand_digit_string, "seven oh two") == "702"
     assert pp._DIGIT_STRING_REGEX.sub(pp._expand_digit_string, "oh seven") == "07"
+
+
+# ---------------------------------------------------------------------------
+# Verbal self-corrections (Workstream B / M1)
+# ---------------------------------------------------------------------------
+# A retraction is only resolved when its marker is followed by a replacement of
+# the *same kind of value* (both weekdays, both clock times, both amounts), or
+# when the marker is "I mean" — never a verb phrase, and names have no category
+# to compare. The first case below is the demo advertised in README.md and
+# docs/blog_post.md, so it is pinned verbatim: v1.3.1 turned it into "remind
+# make that wednesday and also add a note to the GitHub issue.", losing
+# "me tuesday" and leaving the marker "make that" in the text.
+
+@pytest.mark.parametrize("spoken,expected", [
+    ("Remind me Tuesday no wait make that Wednesday", "Remind me Wednesday."),
+    ("Remind me Tuesday, actually make that Wednesday", "Remind me Wednesday."),
+    ("Let's make it on Tuesday, no, Wednesday", "Let's make it on Wednesday."),
+    ("Let's make it Tuesday no Wednesday", "Let's make it Wednesday."),
+    ("Let's make it on Tuesday. No. Wednesday.", "Let's make it on Wednesday."),
+    ("The meeting is on Monday no Tuesday", "The meeting is on Tuesday."),
+    ("Let's meet at 5 PM... actually 6 PM", "Let's meet at 6 PM."),
+    ("We should deploy on Tuesday... no wait Wednesday", "We should deploy on Wednesday."),
+    ("Send the report to John... I mean Alice", "Send the report to Alice."),
+    ("Add the class definition... scratch that", "Add the class definition."),
+])
+def test_verbal_self_corrections_are_resolved(spoken, expected):
+    assert pp.clean_speech_transcription(spoken, skip_slm=True, punctuation_mode="full") == expected
+
+
+def test_the_advertised_demo_is_pinned():
+    """The README/blog demo: the correction resolves and nothing is lost."""
+    # The utterance ends with the shipped dictionary's "github" -> "GitHub", so
+    # install it explicitly: this test must not depend on what an earlier test
+    # happened to leave in the dictionary globals.
+    saved = pp.get_custom_dictionary()
+    pp.set_custom_dictionary({**saved, "github": "GitHub"})
+    try:
+        out = pp.clean_speech_transcription(
+            "remind me tuesday no wait make that wednesday uh and uh also add a note to the github issue",
+            skip_slm=True, punctuation_mode="full")
+    finally:
+        pp.set_custom_dictionary(saved if saved else None)
+    assert out == "remind me wednesday also add a note to the GitHub issue."
+    # Guards for the three parts of the v1.3.1 corruption specifically.
+    assert "make that" not in out, "the marker leaked into the text"
+    assert "tuesday" not in out, "the retracted value survived"
+    assert " me " in f" {out} ", "the word 'me' was eaten along with the retracted value"
+
+
+@pytest.mark.parametrize("text", [
+    "please make that happen with the new build",
+    "the deploy actually works now",
+    "I have no idea what happened",
+    "there is no Wednesday meeting this week",
+    "I never said that to anyone",
+])
+def test_marker_phrases_that_are_not_retractions(text):
+    """A marker word inside ordinary speech must not be rewritten into nonsense."""
+    assert pp.process_verbal_retractions(text) == text
+
+
+def test_weekday_capitalisation_is_preserved_mid_sentence():
+    """"on Tuesday, no, Wednesday" must not lose the capital on Wednesday.
+
+    Weekdays are always capitalised in English and the ASR is the only source of
+    that casing, so a capitalised weekday survives mid-sentence — while lowercase
+    ASR output stays lowercase, exactly like the existing month rule.
+    """
+    assert pp.normalize_mid_sentence_casing("we met on Tuesday, no, Wednesday") == \
+        "we met on Tuesday, no, Wednesday"
+    assert pp.clean_speech_transcription("The build ran on Wednesday and Thursday", skip_slm=True) == \
+        "The build ran on Wednesday and Thursday."
+
+
+def test_slm_output_sanitizer_exists_and_scrubs():
+    """The optional SLM path's sanitiser is reachable and does its documented job.
+
+    Regression: the function is only called when the SLM path is live (needs a
+    local vLLM, and the tests disable it with ``VT_ENABLE_SLM=0``), so a whole
+    function could be deleted from between the retraction patterns without a
+    single test failing. ``ruff`` caught it; this pins it from the test side too.
+    """
+    assert pp._sanitize_slm_output("hi", "<cleaned_text>hi there.</cleaned_text>") == "hi there."
+    assert pp._sanitize_slm_output("hi", '"hi there."') == "hi there."
+    assert pp._sanitize_slm_output("hi", "<b>hi</b> there") == "hi there"

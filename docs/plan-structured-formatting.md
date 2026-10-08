@@ -264,16 +264,32 @@ text. `README.md:15` and `docs/blog_post.md:147-153` both advertise this exact
 utterance resolving to `Remind me Wednesday. Also add a note to the GitHub
 issue.` — so the shipped demo is broken, not merely imperfect.
 
-Full measured table (`mode=full`):
+Full measured table (`mode=full`), before and after M1:
 
-| Spoken | Today | Wanted |
+| Spoken | Before (v1.3.1) | After (M1) |
 | --- | --- | --- |
-| `remind me tuesday no wait make that wednesday...` | `remind make that wednesday and also add a note to the GitHub issue.` | `Remind me Wednesday. Also add a note to the GitHub issue.` |
-| `remind me Tuesday, actually make that Wednesday` | `remind make that wednesday.` | `Remind me Wednesday.` |
-| `let's make it on Tuesday, no, Wednesday` | `let's make it on Tuesday, no, wednesday.` | `Let's make it Wednesday.` |
-| `let's make it Tuesday no Wednesday` | `let's make it tuesday no wednesday.` | `Let's make it Wednesday.` |
-| `let's make it on Tuesday. No. Wednesday.` | `let's make it on Tuesday. No, wednesday.` | `Let's make it Wednesday.` |
-| `the meeting is on Monday no Tuesday` | `the meeting is on Monday no tuesday.` | `The meeting is on Tuesday.` |
+| `Remind me Tuesday no wait make that Wednesday` | `remind make that wednesday.` | `Remind me Wednesday.` |
+| `Remind me Tuesday, actually make that Wednesday` | `remind make that wednesday.` | `Remind me Wednesday.` |
+| `Let's make it on Tuesday, no, Wednesday` | `let's make it on Tuesday, no, wednesday.` | `Let's make it on Wednesday.` |
+| `Let's make it Tuesday no Wednesday` | `let's make it tuesday no wednesday.` | `Let's make it Wednesday.` |
+| `Let's make it on Tuesday. No. Wednesday.` | `let's make it on Tuesday. No, wednesday.` | `Let's make it on Wednesday.` |
+| `The meeting is on Monday no Tuesday` | `the meeting is on Monday no tuesday.` | `The meeting is on Tuesday.` |
+| `Let's meet at 5 PM... actually 6 PM` | `Let's meet at 6 PM.` | unchanged (already worked) |
+| `Please make that happen with the new build` | unchanged | unchanged (the guard refuses it) |
+
+The README/blog utterance now yields `remind me wednesday also add a note to the
+GitHub issue.` — the correction resolves and every word survives. It is **not**
+two sentences, and no code path can produce two: the optional SLM prompt forbids
+adding punctuation that was not spoken. `docs/blog_post.md` advertised
+`"Remind me Wednesday. Also add a note to the GitHub issue."`, so the doc was
+corrected rather than the claim preserved.
+
+**Status: M1 implemented.** `process_verbal_retractions()` was rewritten with a
+chained-trigger regex (`no wait make that` is one retraction), a value-category
+guard, and a kept span for pronouns/determiners so `me` is not eaten with the
+date. Weekday capitals are preserved by `normalize_mid_sentence_casing()` (the
+month rule's sibling), and the five false positives above are refused by two
+independent checks. `tests/shared` is green with these cases pinned.
 
 ### Causes
 

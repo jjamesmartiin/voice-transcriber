@@ -149,7 +149,6 @@ SPOKEN_IP_REGEX = re.compile(
 # Bare CIDR suffix already attached to a digit ("10.0.0.0 slash 24").
 SPOKEN_SUBNET_REGEX = re.compile(r'(?<=\d)\s+slash\s+(\d{1,2})\b', re.IGNORECASE)
 
-
 def _path_repl(m: re.Match) -> str:
     segments = re.findall(r'slash\s+([a-zA-Z0-9_.-]+)', m.group(0), flags=re.IGNORECASE)
     # Path segments are case-sensitive and dictated lowercase; the dictionary has
@@ -207,6 +206,11 @@ _MONTH_NAMES = (
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
 )
+
+_WEEKDAYS = (
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "tues", "thurs", "weds",
+)
 _MONTH_DAY_FOLLOW_REGEX = re.compile(r"\d{1,2}(?:st|nd|rd|th)?$", re.IGNORECASE)
 
 # Common technical acronyms & proper nouns to preserve casing mid-sentence
@@ -262,6 +266,12 @@ def normalize_mid_sentence_casing(text: str) -> str:
             return m.group(0)
         # A month that names a date keeps its capitalization ("my birthday is June 23rd").
         if word.lower() in _MONTH_NAMES and _MONTH_DAY_FOLLOW_REGEX.match(_next_token_after(text, m.end())):
+            return m.group(0)
+
+        # A weekday keeps its capitalization wherever it appears: English always
+        # capitalizes them, and the ASR is the only source of that casing ("on
+        # Tuesday, no, Wednesday" must not lose the capital on Wednesday).
+        if word.lower() in _WEEKDAYS:
             return m.group(0)
         # Preserve plural acronyms mid-sentence ("LLMs", "VMs", "GPUs", "APIs", "SSDs"):
         # all-caps stem + trailing plural 's'. The base-length guard keeps "Is"/"As"/"Us"
@@ -320,16 +330,214 @@ STANDALONE_MUTTERINGS_REGEX = re.compile(
     re.IGNORECASE
 )
 
-# Verbal retractions and self-corrections (e.g. "5 PM... actually 6 PM", "John... I mean Alice", "scratch that")
+# ---------------------------------------------------------------------------
+# Verbal self-corrections ("on Tuesday, no, Wednesday" -> "on Wednesday")
+# ---------------------------------------------------------------------------
+# Spoken retractions arrive in two shapes:
+#
+#   1. A phrase trigger: "X actually Y", "X no wait Y", "X I mean Y",
+#      "X make that Y", "X or rather Y". Chained triggers collapse into one
+#      retraction ("no wait make that Y"). "scratch that" / "strike that"
+#      delete the preceding clause and supply no replacement, so they are
+#      handled by their own pattern.
+#   2. A bare "no": "X no Y" — the most common spoken form, and the one the
+#      project's own demo exercises ("Tuesday, no, Wednesday").
+#
+# A trigger phrase alone does not justify a rewrite: "please make that happen"
+# and "the deploy actually works" both contain one, and rewriting either
+# destroys the sentence. A retraction is therefore only resolved when the
+# retracted and replacement spans are the *same kind of value* — both weekdays,
+# both clock times, both amounts. "I mean" is exempt from that check: it is
+# never a verb phrase, and names ("send it to bob I mean alice") have no
+# recognisable category.
+_NUMBER_WORDS = frozenset((
+    "zero one two three four five six seven eight nine ten eleven twelve "
+    "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty "
+    "thirty forty fifty sixty seventy eighty ninety hundred thousand million "
+    "billion trillion dozen couple pair"
+).split())
+_ORDINAL_REGEX = re.compile(r"\d{1,2}(?:st|nd|rd|th)", re.IGNORECASE)
+_CLOCK_REGEX = re.compile(
+    r"\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\d{1,2}:\d{2}|noon|midnight|o'?clock",
+    re.IGNORECASE,
+)
+_MONEY_REGEX = re.compile(
+    r"^\s*(?:[$€£]\s*\d+(?:[.,]\d+)?"
+    r"|\d+(?:[.,]\d+)?\s*(?:dollars?|bucks?|euros?|pounds?|cents?|percent|%))\s*$",
+    re.IGNORECASE,
+)
+_RELATIVE_DAYS = ("today", "tomorrow", "tonight", "yesterday", "tonite")
+
+#: Words that can never be a retracted or a replacement value. The pronouns and
+#: determiners double as the span that must be *kept*: in "remind me tuesday no
+#: wait make that wednesday", "me" belongs to the sentence, not to the date.
+#: The trigger words themselves are here too, so a retracted span can never be
+#: mistaken for the marker that follows it.
+_RETRACTION_STOPWORDS = frozenset((
+    "a an the this that these those it me my mine us our ours you your yours "
+    "him his her hers them their theirs i we he she they "
+    "and or but nor yet so then than as if because though although while "
+    "is are was were am be been being do does did done have has had "
+    "will would shall should can could might must "
+    "to for at in on of with by from about into onto over under "
+    "uh um er ah eh oh okay ok well just very really quite also too "
+    "not actually mean rather make wait scratch strike"
+).split())
+
+#: End-of-phrase deletions: the marker stands alone and removes what precedes it.
+_RETRACTION_DELETE_PHRASES = ("scratch that", "strike that", "never mind that", "never mind")
+#: Markers that introduce a replacement value.
+_RETRACTION_PHRASE_TRIGGERS = ("actually", "make that", "no wait", "i mean", "or rather")
+
+_RETRACTION_TOKEN = r"[A-Za-z0-9$€£%.:'\-]+"
+_RETRACTION_TRIGGER_ALT = r"(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)"
+#: One or more chained markers: "no wait make that Wednesday" is one retraction.
+_RETRACTION_TRIGGER_CHAIN = (
+    _RETRACTION_TRIGGER_ALT + r"(?:\s*,?\s*" + _RETRACTION_TRIGGER_ALT + r")*"
+)
+#: Sentence content that must survive a retraction ("remind **me** …").
+_RETRACTION_KEEP = r"(?P<keep>(?:(?:me|us|you|him|her|them|it|the|my|your|our|their)\s+)*)"
+_RETRACTION_PREP = r"(?:(?P<pre>\b(?:at|in|on|to|for|by|from|with|of|about)\s+))?"
+
+# Verbal retractions and self-corrections (e.g. "5 PM... actually 6 PM",
+# "John... I mean Alice", "on Tuesday... no wait Wednesday", "scratch that")
 RETRACTION_REPLACEMENT_PATTERNS = [
     # "scratch that" / "strike that" / "never mind that" at end of phrase
     re.compile(r"(?:[,.]*\s*)(?:scratch\s+that|strike\s+that|never\s+mind\s+that)[.!?,;:]*\s*$", re.IGNORECASE),
-    # "X... actually Y" / "X... make that Y" / "X... no wait Y" / "X... I mean Y" / "X... or rather Y"
-    re.compile(r"(?:\b(at|in|on|to|for|by|from|with|of|about)\s+)?\b([a-zA-Z0-9$%.\:]+(?:\s+[a-zA-Z0-9$%.\:]+){0,1})\s*[,.]*\s*(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)\s+([a-zA-Z0-9$%.\:]+(?:\s+[a-zA-Z0-9$%.\:]+){0,2})\b", re.IGNORECASE),
+    # "X... actually Y" / "X... make that Y" / "X... no wait Y" / "X... I mean Y"
+    re.compile(
+        _RETRACTION_KEEP + _RETRACTION_PREP
+        + r"(?P<old>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r")?)"
+        + r"\s*[,.;:]*\s*"
+        + r"(?P<trig>" + _RETRACTION_TRIGGER_CHAIN + r")"
+        + r"\s*[,.;:]*\s*"
+        + r"(?P<new>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r"){0,2})",
+        re.IGNORECASE,
+    ),
 ]
+#: Bare "no" as a retraction marker ("on Tuesday, no, Wednesday"). It lives
+#: outside RETRACTION_REPLACEMENT_PATTERNS because it *always* requires the
+#: value-category guard below: the marker alone is never evidence enough.
+_RETRACTION_BARE_NO_PATTERN = re.compile(
+    _RETRACTION_KEEP + _RETRACTION_PREP
+    + r"(?P<old>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r")?)"
+    + r"\s*[,.;:]*\s*\bno\b(?!\s+wait)\s*[,.;:]*\s*"
+    + r"(?P<new>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r"){0,2})",
+    re.IGNORECASE,
+)
 
-_RETRACTION_TRIGGER_0 = ("scratch", "strike", "never")
-_RETRACTION_TRIGGER_1 = ("actually", "make that", "no wait", "mean", "rather")
+
+def _value_category(span: str) -> str | None:
+    """Classify a retracted/replacement span so like can replace like.
+
+    Returns a category name (``weekday``, ``month``, ``relative_day``, ``time``,
+    ``money``, ``ordinal``, ``number``, ``code``) or ``None`` when the span is
+    not a recognisable value.
+    """
+    low = span.strip().lower().rstrip(".,;:!?")
+    if not low:
+        return None
+    tokens = [t.strip(".,;:!?") for t in low.split()]
+    if any(t in _WEEKDAYS for t in tokens):
+        return "weekday"
+    if any(t in _MONTH_NAMES for t in tokens):
+        return "month"
+    if any(t in _RELATIVE_DAYS for t in tokens):
+        return "relative_day"
+    if _CLOCK_REGEX.search(low):
+        return "time"
+    if _MONEY_REGEX.match(low):
+        return "money"
+    if tokens and all(_ORDINAL_REGEX.fullmatch(t) for t in tokens):
+        return "ordinal"
+    if tokens and all(t in _NUMBER_WORDS or t.isdigit() for t in tokens):
+        return "number"
+    if any(c.isdigit() for c in low) and any(c.isalpha() for c in low):
+        return "code"
+    return None
+
+
+def _retraction_replacement(match, require_category: bool) -> str:
+    """Rebuild a matched retraction, or hand the matched text back untouched."""
+    keep = match.group("keep") or ""
+    prep = match.group("pre") or ""
+    old = match.group("old")
+    raw_new = match.group("new")
+
+    if any(t.strip(".,;:!?").lower() in _RETRACTION_STOPWORDS for t in old.split()):
+        # The pattern consumed sentence content ("please make that happen"), not a
+        # retracted value. Leave the text alone.
+        return match.group(0)
+
+    # The replacement ends at the first function word: "wednesday uh and uh also"
+    # is just "wednesday" — the rest of the sentence follows the retraction.
+    tokens = []
+    for token in raw_new.split():
+        if token.strip(".,;:!?").lower() in _RETRACTION_STOPWORDS:
+            break
+        tokens.append(token)
+    if not tokens:
+        return match.group(0)
+    new = " ".join(tokens)
+
+    if require_category:
+        old_category = _value_category(old)
+        if old_category is None or old_category != _value_category(new):
+            return match.group(0)
+
+    if prep and re.match(r"(?:at|in|on|to|for|by|from|with|of|about)\b", new, re.IGNORECASE):
+        prep = ""
+    return f"{keep}{prep}{new}"
+
+
+def process_verbal_retractions(text: str, text_lower: str | None = None) -> str:
+    """Resolve spoken self-corrections, replacing the retracted value in place.
+
+    ``"on Tuesday, no, Wednesday"`` -> ``"on Wednesday"``,
+    ``"at 5 PM... actually 6 PM"`` -> ``"at 6 PM"``,
+    ``"send it to Bob... I mean Alice"`` -> ``"send it to Alice"``,
+    ``"cancel the deploy, scratch that"`` -> ``"cancel the deploy"``.
+
+    A rewrite needs a marker (a phrase trigger or a bare "no") *and*, for
+    everything except "I mean", a retracted and a replacement value of the same
+    kind. Anything ambiguous is returned unchanged.
+    """
+    if not text:
+        return ""
+
+    if text_lower is None:
+        text_lower = text.lower()
+
+    has_delete = any(p in text_lower for p in _RETRACTION_DELETE_PHRASES)
+    has_trigger = any(p in text_lower for p in _RETRACTION_PHRASE_TRIGGERS)
+    # "no" is common in ordinary speech ("no idea", "no problem"), so only pay for
+    # the regex when the word is present at all.
+    has_bare_no = "no" in text_lower and re.search(r"\bno\b(?!\s+wait)", text_lower) is not None
+    if not (has_delete or has_trigger or has_bare_no):
+        return text
+
+    cleaned = text
+
+    # 1. End-of-phrase deletions ("…, scratch that")
+    if has_delete and RETRACTION_REPLACEMENT_PATTERNS[0].search(cleaned):
+        cleaned = RETRACTION_REPLACEMENT_PATTERNS[0].sub("", cleaned)
+
+    # 2. Phrase-triggered replacements ("X actually Y", "X no wait make that Y")
+    if has_trigger and RETRACTION_REPLACEMENT_PATTERNS[1].search(cleaned):
+        def _phrase_repl(m):
+            trigger = m.group("trig").lower()
+            # "I mean" is never a verb phrase, and names have no category.
+            return _retraction_replacement(m, require_category="i mean" not in trigger)
+
+        cleaned = RETRACTION_REPLACEMENT_PATTERNS[1].sub(_phrase_repl, cleaned)
+
+    # 3. Bare "no" replacements, always category-guarded ("Tuesday, no, Wednesday")
+    if has_bare_no and _RETRACTION_BARE_NO_PATTERN.search(cleaned):
+        cleaned = _RETRACTION_BARE_NO_PATTERN.sub(
+            lambda m: _retraction_replacement(m, require_category=True), cleaned
+        )
+
+    return cleaned.strip()
 
 def _sanitize_slm_output(input_text: str, output_text: str) -> str:
     """
@@ -371,39 +579,6 @@ def _sanitize_slm_output(input_text: str, output_text: str) -> str:
     clean_output = re.sub(r'([,.;:])\s*([,.;:])', r'\1', clean_output)
     return clean_output.strip()
 
-
-def process_verbal_retractions(text: str, text_lower: str | None = None) -> str:
-    """
-    Applies zero-latency verbal self-correction parsing:
-    Replaces retracted phrases ('5 PM... actually 6 PM' -> '6 PM')
-    and handles voice deletions ('scratch that').
-    """
-    if not text:
-        return ""
-
-    if text_lower is None:
-        text_lower = text.lower()
-    has_0 = ("scratch" in text_lower or "strike" in text_lower or "never" in text_lower)
-    has_1 = ("actually" in text_lower or "mean" in text_lower or "rather" in text_lower or "make that" in text_lower or "no wait" in text_lower)
-    if not has_0 and not has_1:
-        return text
-
-    cleaned = text
-    # 1. Handle "scratch that" tail deletion
-    if has_0 and RETRACTION_REPLACEMENT_PATTERNS[0].search(cleaned):
-        cleaned = RETRACTION_REPLACEMENT_PATTERNS[0].sub("", cleaned)
-
-    # 2. Handle verbal replacements ("X... actually Y", "X... I mean Y")
-    if has_1 and RETRACTION_REPLACEMENT_PATTERNS[1].search(cleaned):
-        def _replace_retraction(m):
-            prep = m.group(1)
-            target = m.group(3)
-            if prep and not re.match(r"^(?:at|in|on|to|for|by|from|with|of|about)\b", target, re.I):
-                return f"{prep} {target}"
-            return target
-
-        cleaned = RETRACTION_REPLACEMENT_PATTERNS[1].sub(_replace_retraction, cleaned)
-    return cleaned.strip()
 
 VLLM_API_URL = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/completions")
 
