@@ -113,11 +113,29 @@ def have_module(py: Path, name: str) -> bool:
 
 
 def requirements_files() -> tuple[Path, Path]:
-    """(runtime, dev) requirements for this OS, matching the old scripts."""
+    """(runtime, dev) requirements for Windows.
+
+    POSIX dropped the root ``requirements.txt`` files: the dependency list now
+    lives in ``pyproject.toml`` (``[project.dependencies]`` and the ``dev``
+    extra), so the POSIX path installs the project instead of reading a file.
+    Windows keeps its own files because the offline build consumes them.
+    """
+    win = REPO_ROOT / "platforms" / "windows"
+    return win / "requirements.txt", win / "requirements-dev.txt"
+
+
+def install_project_deps(py: Path, no_dev: bool) -> int:
+    """Install runtime (and, unless ``no_dev``, dev) dependencies."""
     if IS_WINDOWS:
-        win = REPO_ROOT / "platforms" / "windows"
-        return win / "requirements.txt", win / "requirements-dev.txt"
-    return REPO_ROOT / "requirements.txt", REPO_ROOT / "requirements-dev.txt"
+        req, dev_req = requirements_files()
+        if not no_dev and dev_req.is_file():
+            return sh([py, "-m", "pip", "install", "--quiet", "-r", str(dev_req)])
+        if not req.is_file():
+            raise SystemExit(f"requirements file not found: {req}")
+        return sh([py, "-m", "pip", "install", "--quiet", "-r", str(req)])
+    spec = "." if no_dev else ".[dev]"
+    return sh([py, "-m", "pip", "install", "--quiet", "-e", spec],
+              cwd=str(REPO_ROOT))
 
 
 # --------------------------------------------------------------------------- #
@@ -159,18 +177,13 @@ def install_torch(py: Path) -> None:
 
 
 def install_requirements(py: Path, no_dev: bool) -> None:
-    req, dev_req = requirements_files()
     sh([py, "-m", "pip", "install", "--quiet", "--upgrade",
         "pip", "setuptools", "wheel"])
-    if not no_dev and dev_req.is_file():
+    if no_dev:
+        step("SETUP installing project dependencies")
+    else:
         step("SETUP installing project + development dependencies")
-        if sh([py, "-m", "pip", "install", "--quiet", "-r", str(dev_req)]) != 0:
-            raise SystemExit("dependency installation failed")
-        return
-    step("SETUP installing project dependencies")
-    if not req.is_file():
-        raise SystemExit(f"requirements file not found: {req}")
-    if sh([py, "-m", "pip", "install", "--quiet", "-r", str(req)]) != 0:
+    if install_project_deps(py, no_dev) != 0:
         raise SystemExit("dependency installation failed")
 
 
@@ -412,12 +425,15 @@ def ensure_dev_tool(py: Path, module: str, label: str, no_dev: bool) -> bool:
     if no_dev:
         err(f"{label} is not installed and --no-dev was passed.")
         return False
-    _, dev_req = requirements_files()
-    if not dev_req.is_file():
-        err(f"{label} is missing and {dev_req} was not found.")
-        return False
     step(f"TEST installing {label}")
-    return sh([py, "-m", "pip", "install", "-r", str(dev_req)]) == 0
+    if IS_WINDOWS:
+        _, dev_req = requirements_files()
+        if not dev_req.is_file():
+            err(f"{label} is missing and {dev_req} was not found.")
+            return False
+        return sh([py, "-m", "pip", "install", "-r", str(dev_req)]) == 0
+    return sh([py, "-m", "pip", "install", "--quiet", "-e", ".[dev]"],
+              cwd=str(REPO_ROOT)) == 0
 
 
 def cmd_test(args: list[str]) -> int:
@@ -493,7 +509,7 @@ def cmd_build(args: list[str]) -> int:
         return sh([py, str(BUILD_OFFLINE), *extra])
     if not shutil.which("nix"):
         err("Nix is required to package on Linux/macOS.")
-        print("Install Nix, or run from source: ./run.sh", file=sys.stderr)
+        print("Install Nix, or run from source: ./scripts/run.sh", file=sys.stderr)
         return 1
     if bundle:
         return sh(["nix", "bundle", "--bundler",

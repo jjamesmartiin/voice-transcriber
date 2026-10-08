@@ -54,7 +54,7 @@ Build the app **without** the weights — the model bundle supplies them.
 
 ```bash
 # Windows
-build.bat --no-model                        # -> dist/VoiceTranscriber/  (~1.1 GB)
+scripts\build.bat --no-model                        # -> dist/VoiceTranscriber/  (~1.1 GB)
 
 # Linux
 nix build .                                  # -> result/bin/vt (AppImage via nix bundle)
@@ -118,7 +118,7 @@ If you would rather not carry a separate model bundle at all, bake the weights
 into the app for that OS:
 
 ```cmd
-build.bat            # Windows, bundles models/cohere (~6.8 GB)
+scripts\build.bat            # Windows, bundles models/cohere (~6.8 GB)
 ```
 
 The trade-off is size and per-OS duplication: the weights are re-copied into

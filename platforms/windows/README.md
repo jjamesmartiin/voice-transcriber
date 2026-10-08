@@ -4,7 +4,7 @@
 > `windows-latest` CI runner) but has **not** been run end-to-end on real hardware by the
 > maintainer — only Linux has. Please treat a first-run problem here as a
 > Windows bug to report rather than as something you did wrong, and include the
-> output of `run.bat doctor` in an issue. [`TODO.md`](../../TODO.md) lists the exact steps
+> output of `scripts\run.bat doctor` in an issue. [`TODO.md`](../../docs/TODO.md) lists the exact steps
 > still to confirm on this platform.
 
 
@@ -17,57 +17,57 @@ Run Voice Transcriber natively on Windows with global hotkeys, Windows audio cue
 There are **two ways to run Voice Transcriber on Windows**: from source (below),
 or from the prebuilt self-contained EXE (see
 [Building a Standalone Offline EXE](#building-a-standalone-offline-exe)). Running
-from source needs Python and a one-time `setup.bat`; the EXE needs neither.
+from source needs Python and a one-time `scripts\setup.bat`; the EXE needs neither.
 
 ### 1. Prerequisites
 - Python 3.10+ installed on Windows (from https://www.python.org/downloads/ with "Add python.exe to PATH" checked).
 - PowerShell 5.1+ or PowerShell 7+ (or Command Prompt).
 
-> If Python is missing, `setup.bat` offers to install Python 3.13 for you with
+> If Python is missing, `scripts\setup.bat` offers to install Python 3.13 for you with
 > `winget` (included with Windows 10/11) before it continues.
 
 ### 2. One-Click Setup & Launch (Recommended)
 From the repository root, you can simply run the batch launchers (by double-clicking them in File Explorer, or running from Command Prompt / PowerShell):
 ```cmd
 # Run setup (creates venv and installs dependencies):
-setup.bat
+scripts\setup.bat
 
 # Launch Voice Transcriber:
-run.bat
+scripts\run.bat
 ```
 
 > **Note:** The `.bat` launchers automatically bypass PowerShell's script execution policy (`-ExecutionPolicy Bypass`), so you will not run into digital signature or `PSSecurityException` errors on downloaded scripts.
 
-> **Setup and run are separate.** `setup.bat` prepares the machine (Python,
-> `.venv`, dependencies, and the model). `run.bat` only launches — it never
-> installs anything. `test.bat` / `build.bat` / `clean.bat` are their own entry
+> **Setup and run are separate.** `scripts\setup.bat` prepares the machine (Python,
+> `.venv`, dependencies, and the model). `scripts\run.bat` only launches — it never
+> installs anything. `scripts\test.bat` / `scripts\build.bat` / `scripts\clean.bat` are their own entry
 > points.
 
 ### 2a. The five entry points
 
 ```cmd
-setup.bat                  :: prepare: venv + deps + model (drop weights in models\)
-setup.bat --no-dev         :: skip pytest / PyInstaller (faster)
-setup.bat --no-model       :: do not acquire the model (weights placed later)
+scripts\setup.bat                  :: prepare: venv + deps + model (drop weights in models\)
+scripts\setup.bat --no-dev         :: skip pytest / PyInstaller (faster)
+scripts\setup.bat --no-model       :: do not acquire the model (weights placed later)
 
-run.bat                    :: launch the app
-run.bat doctor             :: forward a control verb (start/stop/status/doctor/...)
-run.bat --model-dir D:\vt\models\cohere   :: load weights from another location
-run.bat --venv C:\py\vt-venv               :: use a venv outside the repo
-run.bat --no-model                         :: do not auto-download the model
+scripts\run.bat                    :: launch the app
+scripts\run.bat doctor             :: forward a control verb (start/stop/status/doctor/...)
+scripts\run.bat --model-dir D:\vt\models\cohere   :: load weights from another location
+scripts\run.bat --venv C:\py\vt-venv               :: use a venv outside the repo
+scripts\run.bat --no-model                         :: do not auto-download the model
 
-test.bat                   :: environment check + shared & Windows test tiers
-test.bat verify            :: environment check only (test == verify)
-test.bat shared -k tui -v  :: one tier (all|shared|windows|platform|e2e|model)
+scripts\test.bat                   :: environment check + shared & Windows test tiers
+scripts\test.bat verify            :: environment check only (test == verify)
+scripts\test.bat shared -k tui -v  :: one tier (all|shared|windows|platform|e2e|model)
 
-build.bat                  :: build the standalone EXE (weights included)
-build.bat --no-model       :: build the ~1 GB model-free bundle
+scripts\build.bat                  :: build the standalone EXE (weights included)
+scripts\build.bat --no-model       :: build the ~1 GB model-free bundle
 
-clean.bat                  :: remove .venv / build / dist / caches
-clean.bat --models --yes   :: ...plus the downloaded weights, no prompt
+scripts\clean.bat                  :: remove .venv / build / dist / caches
+scripts\clean.bat --models --yes   :: ...plus the downloaded weights, no prompt
 ```
 
-`--help` works on every script (`setup.bat --help`, `run.bat --help`, ...).
+`--help` works on every script (`scripts\setup.bat --help`, `scripts\run.bat --help`, ...).
 
 **Where the model lives.** Drop weights in `<repo>\models\`:
 
@@ -75,18 +75,18 @@ clean.bat --models --yes   :: ...plus the downloaded weights, no prompt
 - a split bundle in `models\` (`*.partN.xz` + `SHA256SUMS`, or a `.zip`/`.tar`)
   — assembled offline by the app's own installer, no extra tools.
 
-`setup.bat` checks that folder first, assembles a bundle if present, and only
-downloads (~2.8 GB, one time) if neither is there. `test.bat verify` reports
+`scripts\setup.bat` checks that folder first, assembles a bundle if present, and only
+downloads (~2.8 GB, one time) if neither is there. `scripts\test.bat verify` reports
 whether a complete model is present without changing anything. To relocate an
-existing copy instead, pass `run.bat --model-dir <path>` (or set `VT_MODEL_DIR`).
+existing copy instead, pass `scripts\run.bat --model-dir <path>` (or set `VT_MODEL_DIR`).
 See [`docs/offline_install.md`](../../docs/offline_install.md).
 
-**Dev tooling** — if pytest / PyInstaller are already in the venv, `test.bat` and
-`build.bat` use them and install nothing.
+**Dev tooling** — if pytest / PyInstaller are already in the venv, `scripts\test.bat` and
+`scripts\build.bat` use them and install nothing.
 
 **When something goes wrong.** Output is also written to a per-user log at
 `%LOCALAPPDATA%\vt\vt.log` — override the path with `VT_LOG_FILE`, raise the
-detail with `VT_LOG_LEVEL=INFO`. A `run.bat` started by double-click keeps its
+detail with `VT_LOG_LEVEL=INFO`. A `scripts\run.bat` started by double-click keeps its
 window open on error so the message is readable.
 
 **Legacy code pages.** When the console (or a redirected pipe/file) cannot encode
@@ -166,30 +166,30 @@ See [Control API](../../README.md#control-api).
 
 From the repo root, one command per tier:
 ```powershell
-.\test.ps1              # shared + Windows tiers (all)
-.\test.ps1 shared       # cross-platform, model-free
-.\test.ps1 windows      # Windows-specific
-.\test.ps1 e2e          # model/audio end-to-end (local only)
+.\scripts\test.ps1              # shared + Windows tiers (all)
+.\scripts\test.ps1 shared       # cross-platform, model-free
+.\scripts\test.ps1 windows      # Windows-specific
+.\scripts\test.ps1 e2e          # model/audio end-to-end (local only)
 ```
 
 The test runner is a separate entry point:
 ```cmd
-test.bat            :: environment check + shared & Windows tiers
-test.bat verify     :: environment check only (test == verify)
+scripts\test.bat            :: environment check + shared & Windows tiers
+scripts\test.bat verify     :: environment check only (test == verify)
 ```
 or via PowerShell:
 ```powershell
-.\test.ps1
+.\scripts\test.ps1
 powershell -ExecutionPolicy Bypass -File .\platforms\windows\test.ps1
 ```
 
 > The shared/platform tiers are PyTorch-free, so they run on a bare Python
 > install. The end-to-end tier (`tests/e2e/`) needs the model weights and is run
-> separately with `.\test.ps1 e2e`.
+> separately with `.\scripts\test.ps1 e2e`.
 
-> **pytest is installed by `setup.bat`** (via
-> `platforms\windows\requirements-dev.txt`), so `.\test.ps1` works on a fresh
-> clone with no manual `pip install`. `test.bat` (and `test.ps1`) install the
+> **pytest is installed by `scripts\setup.bat`** (via
+> `platforms\windows\requirements-dev.txt`), so `.\scripts\test.ps1` works on a fresh
+> clone with no manual `pip install`. `scripts\test.bat` (and `scripts\test.ps1`) install the
 > test tooling on demand if it is missing.
 
 ---
@@ -207,7 +207,7 @@ Every GitHub release attaches a prebuilt **`VoiceTranscriber-windows-x86_64.zip`
 
 To package Voice Transcriber into a self-contained `.exe`:
 ```cmd
-build.bat
+scripts\build.bat
 ```
 or via PowerShell:
 ```powershell
@@ -219,7 +219,7 @@ python platforms\windows\build_offline.py
 ```
 This produces an offline distribution in `dist/` that requires no Python installation on the target Windows machine.
 
-> PyInstaller is installed by `setup.bat`; if it is missing, `build.bat`
+> PyInstaller is installed by `scripts\setup.bat`; if it is missing, `scripts\build.bat`
 > installs it from `platforms\windows\requirements-dev.txt` before building.
 
 ### Model-free build (airgapped / small)
@@ -228,7 +228,7 @@ To produce a ~1.1 GB bundle that installs the weights on first run instead of
 bundling them:
 
 ```cmd
-build.bat --no-model
+scripts\build.bat --no-model
 ```
 
 On first run the app installs the Cohere weights either from the release assets
@@ -250,7 +250,7 @@ setup.ps1 cannot be loaded. The file is not digitally signed. You cannot run thi
 ```
 **Cause:** Windows restricts running downloaded `.ps1` scripts by default ("Mark of the Web").  
 **Fix:**
-- Use the batch file: **`setup.bat`** (or **`run.bat`**). It automatically bypasses the execution policy for that run.
+- Use the batch file: **`scripts\setup.bat`** (or **`scripts\run.bat`**). It automatically bypasses the execution policy for that run.
 - Or pass `-ExecutionPolicy Bypass` in PowerShell:
   ```powershell
   powershell -ExecutionPolicy Bypass -File .\platforms\windows\setup.ps1
@@ -267,25 +267,25 @@ ERROR: Could not install packages due to an OSError: [WinError 206] The filename
 ```
 **Cause:** Windows enforces a legacy 260-character maximum path limit (`MAX_PATH`) by default. Downloading a GitHub zip extracts by default into deeply nested directories (e.g. `Downloads\voice-transcriber-<hash>\voice-transcriber-<hash>\`), which exceeds 260 characters when `pip` installs package dependencies.  
 **Fix:**
-- **Automated (Zero manual typing):** Run **`setup.bat`** and click **Yes** when Windows prompts for permission to enable long path support. `setup.bat` will enable `LongPathsEnabled` and resume setup automatically.
+- **Automated (Zero manual typing):** Run **`scripts\setup.bat`** and click **Yes** when Windows prompts for permission to enable long path support. `scripts\setup.bat` will enable `LongPathsEnabled` and resume setup automatically.
 - **Alternative:** Move or rename the extracted project folder to a shorter path (e.g. `C:\voice-transcriber`), or enable long paths manually in an Administrator PowerShell window:
   ```powershell
   New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
   ```
 
 ### 3. The Window Closes Immediately (App Fails to Start)
-**Symptom:** Double-clicking `run.bat` flashes a console and nothing else happens, or the app quits right after starting.
-**Cause:** The launcher exits non-zero before or during launch (missing Python, a pip failure, or a startup crash). A double-clicked `run.bat` now keeps its window open on error, but the full detail is in the log.
+**Symptom:** Double-clicking `scripts\run.bat` flashes a console and nothing else happens, or the app quits right after starting.
+**Cause:** The launcher exits non-zero before or during launch (missing Python, a pip failure, or a startup crash). A double-clicked `scripts\run.bat` now keeps its window open on error, but the full detail is in the log.
 **Fix:**
 - Read the log: `%LOCALAPPDATA%\vt\vt.log` (override with `VT_LOG_FILE`, add detail with `VT_LOG_LEVEL=INFO`).
-- Run `test.bat verify` for a status report, or run `run.bat` from an already-open Command Prompt so the output stays visible.
+- Run `scripts\test.bat verify` for a status report, or run `scripts\run.bat` from an already-open Command Prompt so the output stays visible.
 
 ### 4. Model Download Is Slow, or You Want to Skip It
 **Symptom:** The first launch seems to hang while the ~2.8 GB Cohere model downloads.
 **Fix:**
-- `setup.bat` acquires the model on its own: it checks `models\`, assembles a split bundle if one is present, and only downloads as a last resort.
-- `test.bat verify` reports whether a complete model is already present. Drop one into `<repo>\models\cohere` (or a split bundle into `models\`), or pass `run.bat --model-dir <path>`.
-- `run.bat --no-model` launches without downloading one (useful only if a model is already installed).
+- `scripts\setup.bat` acquires the model on its own: it checks `models\`, assembles a split bundle if one is present, and only downloads as a last resort.
+- `scripts\test.bat verify` reports whether a complete model is already present. Drop one into `<repo>\models\cohere` (or a split bundle into `models\`), or pass `scripts\run.bat --model-dir <path>`.
+- `scripts\run.bat --no-model` launches without downloading one (useful only if a model is already installed).
 
 ### 5. Microphone Captures Silence While in Discord or Communication Apps
 **Symptom:** Voice Transcriber records silence when Discord, a game, or a browser call is open.  
@@ -301,7 +301,7 @@ ERROR: Could not install packages due to an OSError: [WinError 206] The filename
 
 ### 6. Emoji or Box Characters Appear as ASCII (`*`, `|`) or Question Marks
 **Symptom:** The transcript divider shows `* saved: +12s` instead of `⚡ saved: +12s`, or stray `?` characters appear.  
-**Cause:** The output stream cannot encode those glyphs — a legacy console code page (e.g. a redirected `run.bat > log.txt`), or `PYTHONIOENCODING=ascii` in the environment. The app downgrades them on purpose: Rich otherwise raises `UnicodeEncodeError` and the divider disappears entirely.  
+**Cause:** The output stream cannot encode those glyphs — a legacy console code page (e.g. a redirected `scripts\run.bat > log.txt`), or `PYTHONIOENCODING=ascii` in the environment. The app downgrades them on purpose: Rich otherwise raises `UnicodeEncodeError` and the divider disappears entirely.  
 **Fix:**
 1. This is safe and lossless — every glyph has an ASCII stand-in.  
 2. For the full glyph set, use Windows Terminal (UTF-8 by default), or set `PYTHONIOENCODING=utf-8`.  

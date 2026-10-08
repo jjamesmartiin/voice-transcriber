@@ -56,6 +56,7 @@ dev = [
     "pytest-timeout",
     "pytest-mock",
     "ruff",
+    "pyinstaller",
 ]
 gui = [
     "gtts",
@@ -102,3 +103,10 @@ select = ["E4", "E7", "E9", "F", "W", "B"]
 # Module-level `__getattr__` resolves these lazily through the HAL; ruff cannot
 # see that they exist.
 "src/voice_transcriber/hotkeys.py" = ["F822"]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+# Keep the cache inside tests/ so the repo root stays flat. (Was pytest.ini.)
+[tool.pytest.ini_options]
+cache_dir = "tests/.pytest_cache"

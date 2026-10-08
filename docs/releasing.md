@@ -19,7 +19,7 @@ Runbook for cutting a release of voice-transcriber on GitHub
 #    flake.nix, src/voice_transcriber/tui.py, tui-rs/src/main.rs, pyproject.toml, packaging/nix/package.nix, packaging/linux/*.appdata.xml
 
 # 2. Verify the tree is green before tagging.
-./test.sh
+./scripts/test.sh
 nix build .#vt-tui --no-link --print-out-paths
 
 # 3. Commit, tag, push the tag. Pushing the tag is what creates the release.
@@ -101,7 +101,7 @@ matrix. It does not publish anything.
   runner has no Hugging Face cache and no `dist/model/`. Only the maintainer's
   machine does. (Widening the glob without also providing the files would make
   the release job fail on `fail_on_unmatched_files: true`.)
-- **Windows standalone ZIP** is built in CI on `windows-latest`. When building locally on Linux/POSIX, PyInstaller cannot cross-compile Windows EXEs, so local Windows builds must run on a Windows host via `build.bat`.
+- **Windows standalone ZIP** is built in CI on `windows-latest`. When building locally on Linux/POSIX, PyInstaller cannot cross-compile Windows EXEs, so local Windows builds must run on a Windows host via `scripts\build.bat`.
 
 ---
 

@@ -13,7 +13,7 @@ import numpy as np
 
 # Put ``src/`` — the shim directory — on sys.path, not this package's own
 # directory, which double-loaded every ``voice_transcriber`` module under its
-# bare name. See TODO.md.
+# bare name. See docs/TODO.md.
 _SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)

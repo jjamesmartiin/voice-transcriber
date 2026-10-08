@@ -1,7 +1,7 @@
 """Logging configuration: console plus an optional per-user log file.
 
 Why a file at all: on Windows the app is usually started by double-clicking
-``run.bat``, and a crash closes that console before anyone can read it. Keeping
+``scripts\run.bat``, and a crash closes that console before anyone can read it. Keeping
 the same output in a per-user log file makes those failures diagnosable after
 the fact (see ``platforms/windows/README.md``).
 

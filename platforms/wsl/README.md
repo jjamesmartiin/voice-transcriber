@@ -4,13 +4,13 @@
 > Ubuntu CI runner with `VT_PLATFORM=wsl`) but has **not** been run end-to-end on real hardware by the
 > maintainer — only Linux has. Please treat a first-run problem here as a
 > WSL bug to report rather than as something you did wrong, and include the
-> output of `run_wsl.bat doctor` in an issue. [`TODO.md`](../../TODO.md) lists the exact steps
+> output of `scripts\run_wsl.bat doctor` in an issue. [`TODO.md`](../../docs/TODO.md) lists the exact steps
 > still to confirm on this platform.
 
 
 > **Any WSL distribution works.** The recommended guest is **NixOS-WSL** (Nix
 > provides every dependency reproducibly), but a plain **Ubuntu** guest is
-> supported too: the guest runs its own `./setup.sh` / `./run.sh`, which uses
+> supported too: the guest runs its own `./scripts/setup.sh` / `./scripts/run.sh`, which uses
 > the native apt + venv path. Pass `-Distro <name>` to `run_wsl.ps1`,
 > `run_wsl_bridge.ps1` or `setup_wsl.ps1`; without it NixOS is auto-picked when
 > registered. Only the Windows-host hotkey/clipboard bridge is distro-specific,
@@ -67,7 +67,7 @@ If the Windows Virtual Machine Platform feature is not yet active:
 ### Step 2: Register NixOS-WSL (If not already installed)
 To register NixOS in WSL2, simply double-click or run:
 ```cmd
-setup_wsl.bat
+scripts\setup_wsl.bat
 ```
 *(Or via PowerShell: `powershell -ExecutionPolicy Bypass -File platforms\wsl\setup_wsl.ps1`)*
 
@@ -93,7 +93,7 @@ Ensure Windows privacy settings allow WSL to access your microphone:
 
 ### The settings microphone picker shows several identical levels
 **Expected, not a bug** (and not yet confirmed on a real WSL host — see
-`TODO.md`). The picker in the settings modal meters every visible device at once
+`../../docs/TODO.md`). The picker in the settings modal meters every visible device at once
 by opening one capture stream per row. On WSL those streams all reach the same
 place: WSLg publishes your Windows default input as a single PulseAudio source
 (`RDPSource`), so `default`, `pipewire` and the `RDPSource`-backed entries
@@ -109,7 +109,7 @@ On Linux, where each `hw:` device is its own source, the rows usually differ.
 ### Option A: Launch from Windows (1-Click)
 Double-click or run from the repo root:
 ```cmd
-run_wsl.bat
+scripts\run_wsl.bat
 ```
 *(Or in PowerShell: `powershell -ExecutionPolicy Bypass -File platforms\wsl\run_wsl.ps1`)*
 
@@ -143,16 +143,16 @@ to drive it from outside the terminal.
 
 ### Run Test Suite
 
-From the repo root — `./test.sh` auto-detects WSL and runs `tests/shared` + `tests/wsl`:
+From the repo root — `./scripts/test.sh` auto-detects WSL and runs `tests/shared` + `tests/wsl`:
 ```bash
-./test.sh
+./scripts/test.sh
 ```
 
 Targeted tiers:
 ```bash
-./test.sh shared     # cross-platform, model-free
-./test.sh platform   # tests/wsl
-./test.sh e2e        # model/audio end-to-end (local only)
+./scripts/test.sh shared     # cross-platform, model-free
+./scripts/test.sh platform   # tests/wsl
+./scripts/test.sh e2e        # model/audio end-to-end (local only)
 ```
 
 ### Run Synthetic End-to-End Benchmark
@@ -184,9 +184,9 @@ Tested on NixOS WSL2 with sample audio (3.80s speech, 16000Hz 1ch PCM):
 **Causes & Fixes:**
 - **Windows Host Privacy Settings:** On the Windows host, open **Settings → Privacy & security → Microphone**. Ensure **Microphone access** and **Let desktop apps access your microphone** are both toggled **ON**.
 - **WSLg PulseAudio Socket:** WSLg routes the Windows default microphone into WSL as `RDPSource`. Ensure the socket exists at `/mnt/wslg/PulseServer`.
-- **Diagnostics:** Run `./run.sh doctor` inside WSL to verify audio device enumeration and permissions.
+- **Diagnostics:** Run `./scripts/run.sh doctor` inside WSL to verify audio device enumeration and permissions.
 
 ### 2. Windows Global Hotkeys Not Triggering
 **Symptom:** Pressing `Alt+Shift` inside a Windows application does not trigger recording in WSL.  
 **Fix:**
-- Ensure the background bridge is running. Launch via `run_wsl.bat` on the Windows host, which spawns `src/voice_transcriber/platform/wsl/wsl_win_hotkeys.ps1` to listen for global hotkeys and forward them across the WSL boundary.
+- Ensure the background bridge is running. Launch via `scripts\run_wsl.bat` on the Windows host, which spawns `src/voice_transcriber/platform/wsl/wsl_win_hotkeys.ps1` to listen for global hotkeys and forward them across the WSL boundary.

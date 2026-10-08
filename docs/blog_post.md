@@ -452,11 +452,11 @@ say exactly that. I would rather a user knows what has not been proven.
 
 - **Linux:** `vt-x86_64.AppImage` from [releases], or `nix run github:jjamesmartiin/voice-transcriber`
 - **Windows:** `VoiceTranscriber-windows-x86_64.zip` — self-contained, no Python needed
-- **macOS / from source:** `./setup.sh` then `./run.sh`, or `nix run .`
+- **macOS / from source:** `./scripts/setup.sh` then `./scripts/run.sh`, or `nix run .`
 
 Hold **Alt+Shift**, talk, release. Tap **Space** while holding it to latch
 hands-free. Bind anything you like with `vt hotkey add …` — including a single key
-such as `f13`, or a chord your keyboard remapper produces. Run `./run.sh doctor`
+such as `f13`, or a chord your keyboard remapper produces. Run `./scripts/run.sh doctor`
 if your microphone is being difficult; there is a decent chance it is the muted-
 source bug above.
 

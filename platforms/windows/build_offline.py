@@ -196,7 +196,7 @@ def build_exe():
         "--upx-dir=NONE",
     ]
     
-    icon_path = PROJECT_ROOT / "icon.ico"
+    icon_path = PROJECT_ROOT / "packaging" / "icon.ico"
     if icon_path.exists():
         pyinstaller_args.append(f"--icon={icon_path}")
     

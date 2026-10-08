@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # ==============================================================================
-# Voice Transcriber - root entry point: TEST
+# Voice Transcriber - entry point: TEST
 #
-# ./test.sh [all|shared|platform|e2e|perf|verify] [pytest args]
+# ./scripts/test.sh [all|shared|platform|e2e|perf|verify] [pytest args]
 #
 # One verb = one script. This dispatcher picks the platform toolchain and execs
 # platforms/<toolchain>/test.sh, which uses that OS's native tooling (apt/brew/
@@ -16,11 +16,11 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=platforms/common/common.sh
-. "$HERE/platforms/common/common.sh"
+. "$HERE/../platforms/common/common.sh"
 
 case "${1:-}" in
     -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
 esac
 
 TOOLCHAIN="$(vt_detect_toolchain)"
-exec "$HERE/platforms/$TOOLCHAIN/test.sh" "$@"
+exec "$HERE/../platforms/$TOOLCHAIN/test.sh" "$@"

@@ -143,10 +143,10 @@ class TestIcons:
             assert _png_size(path) == tuple(int(n) for n in size.split("x")), path
 
     def test_icons_have_transparent_corners_and_a_visible_glyph(self):
-        # The icons come from icon.ico, whose frames are an opaque rounded tile
+        # The icons come from packaging/icon.ico, whose frames are an opaque rounded tile
         # painted on white: white corners look broken as a catalogue thumbnail on
         # dark backgrounds, so packaging/linux keeps the outside transparent.
-        # A regression here (re-deriving from icon.ico without the flood fill) is
+        # A regression here (re-deriving from packaging/icon.ico without the flood fill) is
         # invisible to every other test.
         for path in sorted(HICOLOR.glob("*x*/apps/*.png")):
             width, rows = _png_rgba_rows(path)

@@ -41,8 +41,8 @@ Python 3.10+ and the platform dependencies.
 ```bash
 git clone https://github.com/jjamesmartiin/voice-transcriber
 cd voice-transcriber
-./setup.sh          # venv + dependencies + the model weights (~2.8 GB, once)
-./run.sh            # launch
+./scripts/setup.sh          # venv + dependencies + the model weights (~2.8 GB, once)
+./scripts/run.sh            # launch
 ```
 
 The model is ~2.8 GB and downloads on first launch. It is not in the repo
@@ -58,9 +58,9 @@ Tests are tiered. The shared tier is hermetic and model-free, so it runs
 anywhere in seconds — that is the loop you want while developing.
 
 ```bash
-./test.sh                                  # shared + this platform (auto-detects WSL)
-./test.sh shared                           # shared only — fastest real signal
-./test.sh e2e                              # needs the model + audio hardware, local only
+./scripts/test.sh                                  # shared + this platform (auto-detects WSL)
+./scripts/test.sh shared                           # shared only — fastest real signal
+./scripts/test.sh e2e                              # needs the model + audio hardware, local only
 
 # The same thing explicitly, which is what CI runs:
 nix develop --command python -m pytest tests/shared tests/linux -q
@@ -74,7 +74,7 @@ nix develop --command python -m pytest tests/shared tests/linux -q
 
 CI runs the shared tier plus each platform tier on Linux, macOS, Windows and a
 simulated WSL job, and builds the Rust frontend
-(`.github/workflows/ci.yml`). Please make sure `./test.sh` is green before
+(`.github/workflows/ci.yml`). Please make sure `./scripts/test.sh` is green before
 opening a pull request.
 
 ### The Rust frontend
@@ -130,7 +130,7 @@ trusting a list in a document. `tests/shared/test_control.py` shows the pattern.
 - Prefer reusing an existing setter in `t2.py` over assigning a global — the
   setters keep the post-processor in sync and persist config.
 - Keep user-facing messages honest and specific. If a feature is unverified on a
-  platform, say so in the docs and in `TODO.md` rather than implying it works.
+  platform, say so in the docs and in `docs/TODO.md` rather than implying it works.
 
 ## Invariants worth knowing before you touch things
 
@@ -182,7 +182,7 @@ Common scopes: `hotkeys`, `audio`, `tui`, `windows`, `wsl`, `linux`, `macos`,
 A good pull request:
 
 1. **Explains the problem**, not just the diff — what broke, or what was missing.
-2. **Says how you verified it.** "`./test.sh` passes" is fine for a trivial
+2. **Says how you verified it.** "`./scripts/test.sh` passes" is fine for a trivial
    change; a behaviour change should say what you actually ran or exercised.
 3. **Be honest about what you could not test.** If you have no Windows machine,
    say so. An unverified claim is worse than a known gap.
@@ -198,8 +198,8 @@ bug template asks for the things that actually determine the answer — platform
 how you installed it, and the output of the built-in diagnostic:
 
 ```bash
-./run.sh doctor     # Linux / macOS
-run.bat doctor      # Windows
+./scripts/run.sh doctor     # Linux / macOS
+scripts\run.bat doctor      # Windows
 ```
 
 `doctor` checks the microphone, permissions, hardware acceleration and the model

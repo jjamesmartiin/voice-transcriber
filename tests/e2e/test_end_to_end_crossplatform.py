@@ -875,12 +875,12 @@ class TestSilenceHallucinationRejection:
 
 
 # ===========================================================================
-# 14. Post-processor terminal punctuation (TODO.md regression guard)
+# 14. Post-processor terminal punctuation (docs/TODO.md regression guard)
 # ===========================================================================
 class TestPostProcessorTerminalPunctuation:
     """
     The post-processor now terminates complete multi-word statements with a
-    period. This locks the behaviour that TODO.md flagged as a stale test
+    period. This locks the behaviour that docs/TODO.md flagged as a stale test
     expectation (``test_post_processor_artifacts``).
     """
 

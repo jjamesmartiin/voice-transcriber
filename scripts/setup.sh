@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # ==============================================================================
-# Voice Transcriber - root entry point: SETUP
+# Voice Transcriber - entry point: SETUP
 #
-# ./setup.sh [--no-dev] [--no-model]   prepare venv + deps + model
+# ./scripts/setup.sh [--no-dev] [--no-model]   prepare venv + deps + model
 #
 # One verb = one script. This dispatcher picks the platform toolchain and execs
 # platforms/<toolchain>/setup.sh, which uses that OS's native tooling (apt/brew/
@@ -16,11 +16,11 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=platforms/common/common.sh
-. "$HERE/platforms/common/common.sh"
+. "$HERE/../platforms/common/common.sh"
 
 case "${1:-}" in
     -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
 esac
 
 TOOLCHAIN="$(vt_detect_toolchain)"
-exec "$HERE/platforms/$TOOLCHAIN/setup.sh" "$@"
+exec "$HERE/../platforms/$TOOLCHAIN/setup.sh" "$@"

@@ -94,7 +94,7 @@ the file permissions the `AF_UNIX` socket would have used.
 > requires `socket.AF_UNIX`, and the `tui-rs` crate imports `std::os::unix`, so
 > native Windows gets the Rich TUI and is driven with terminal keys. That is a
 > separate gate from the control API, which now works everywhere. See
-> [`TODO.md`](../TODO.md).
+> [`TODO.md`](TODO.md).
 
 The socket is created by the engine at startup and removed on clean shutdown. It
 is bound after every attribute a verb can touch exists, so commands work from the

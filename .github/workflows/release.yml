@@ -46,7 +46,7 @@ jobs:
             --extra-experimental-features "nix-command flakes" \
             ".#default"
           # Name the asset by architecture. Only x86_64-linux is built today
-          # (see TODO.md); the arch suffix lets a future aarch64 job attach to
+          # (see docs/TODO.md); the arch suffix lets a future aarch64 job attach to
           # the same release without colliding.
           appimage="$(ls -1 *.AppImage | head -n1)"
           mv "$appimage" vt-x86_64.AppImage

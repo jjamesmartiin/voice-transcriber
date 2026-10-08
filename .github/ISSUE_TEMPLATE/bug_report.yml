@@ -35,7 +35,7 @@ body:
         - Linux AppImage (vt-x86_64.AppImage)
         - Windows release ZIP (VoiceTranscriber.exe)
         - Nix (`nix run`)
-        - From source (`./setup.sh` / `setup.bat`)
+        - From source (`./scripts/setup.sh` / `scripts\setup.bat`)
         - Other (describe below)
     validations:
       required: true
@@ -73,7 +73,7 @@ body:
     attributes:
       label: Output of the built-in doctor check
       description: |
-        Run `./run.sh doctor` (Linux/macOS) or `run.bat doctor` (Windows) and
+        Run `./scripts/run.sh doctor` (Linux/macOS) or `scripts\run.bat doctor` (Windows) and
         paste the output. This is the single most useful thing in the report —
         it reports microphone state, permissions, hardware acceleration and the
         model cache.

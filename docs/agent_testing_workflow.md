@@ -26,7 +26,7 @@ Before finalizing any changes, the AI Agent must execute the acoustic loopback i
 nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
 
 # 2. Run fast unit test suite (micro-batching, VAD, casing, post-processor)
-./test.sh shared
+./scripts/test.sh shared
 
 # 3. Run synthetic end-to-end latency benchmarks
 nix develop --command python tests/benchmark_synthetic_e2e.py

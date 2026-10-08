@@ -14,7 +14,7 @@ import sys
 # package's own directory: adding ``src/voice_transcriber`` let a bare
 # ``import hal`` load ``voice_transcriber/hal.py`` a second time under the plain
 # name ``hal``, so one file became two module objects whose ``isinstance`` and
-# ``except`` checks silently missed across the pair. See TODO.md.
+# ``except`` checks silently missed across the pair. See docs/TODO.md.
 _SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
@@ -40,7 +40,7 @@ from tui import VoiceTranscriberTUI
 # ``voice_transcriber/`` as well let a later bare ``import hal`` load
 # ``voice_transcriber/hal.py`` a *second* time under the plain name ``hal``, so
 # one file became two module objects and ``isinstance``/``except`` checks
-# silently missed across the pair. See the note in TODO.md.
+# silently missed across the pair. See the note in docs/TODO.md.
 import t2
 from t2 import (
     preload_model, DEVICE, record_audio_stream, process_audio_stream,

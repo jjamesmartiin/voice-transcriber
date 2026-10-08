@@ -33,7 +33,7 @@ This guide covers common issues and resolutions for **Voice Transcriber (VT)** o
      ```
   3. Reopen your WSL terminal and run:
      ```bash
-     ./run.sh
+     ./scripts/run.sh
      ```
   4. Verify Windows Microphone Privacy: Go to **Windows Settings ➔ Privacy & Security ➔ Microphone** and ensure **"Let desktop apps access your microphone"** is enabled.
 
@@ -110,11 +110,11 @@ This guide covers common issues and resolutions for **Voice Transcriber (VT)** o
 ## 4. Audio & Sound Themes
 
 ### Customizing Audio Cues
-You can customize or mute sound effects directly in `run.sh` or via environment variables:
+You can customize or mute sound effects directly in `scripts/run.sh` or via environment variables:
 ```bash
 # Available themes: proximity (default), speech, notify, navigation, classic, silent
-VT_SOUND_THEME=speech ./run.sh
+VT_SOUND_THEME=speech ./scripts/run.sh
 
 # Or run completely silent:
-VT_SOUND_THEME=silent ./run.sh
+VT_SOUND_THEME=silent ./scripts/run.sh
 ```

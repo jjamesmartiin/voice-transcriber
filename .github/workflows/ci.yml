@@ -11,8 +11,8 @@ name: ci
 #
 # tests/e2e (real model / audio devices) is intentionally NOT run here. Run it
 # locally with the model present:
-#   ./test.sh e2e                 (Linux / WSL)
-#   .\test.ps1 e2e                (Windows)
+#   ./scripts/test.sh e2e                 (Linux / WSL)
+#   .\scripts\test.ps1 e2e                (Windows)
 #   python tests/e2e/test_live_speaker_mic_loopback.py all   (needs a mic)
 # See the README "Testing" section and docs/agent_testing_workflow.md.
 

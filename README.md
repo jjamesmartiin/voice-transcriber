@@ -26,7 +26,7 @@
 | **Linux (AppImage)** | `chmod +x vt-x86_64.AppImage && ./vt-x86_64.AppImage` | [Download AppImage](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) (Standalone bundle, no setup) |
 | **Linux / macOS (Nix)** | `nix run github:jjamesmartiin/voice-transcriber` | Builds & runs in one command via Nix Flakes |
 | **Windows (Standalone ZIP)** | Download `VoiceTranscriber-windows-x86_64.zip` → Run `VoiceTranscriber.exe` | [Download Windows ZIP](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) (Self-contained Python runtime) |
-| **macOS / Source (Git)** | `git clone https://github.com/jjamesmartiin/voice-transcriber.git && cd voice-transcriber`<br>`./setup.sh && ./run.sh` | Sets up venv, installs dependencies & downloads weights |
+| **macOS / Source (Git)** | `git clone https://github.com/jjamesmartiin/voice-transcriber.git && cd voice-transcriber`<br>`./scripts/setup.sh && ./scripts/run.sh` | Sets up venv, installs dependencies & downloads weights |
 
 ---
 
@@ -69,9 +69,9 @@ Voice Transcriber supports 5 instant punctuation & formatting styles (switchable
 | Platform | Status | Hotkeys | Output injection | Audio capture | Guide | Quick run |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Linux (Wayland / X11)** | **Verified** — used daily | `evdev` + `uinput` | `wl-copy`/`xclip` (copy) · `ydotool`/`xdotool` (type) | PulseAudio / PipeWire | [Linux guide](platforms/linux/README.md) | `vt-x86_64.AppImage`, or `nix run .` |
-| **Windows (native)** | Supported, unit-tested | `pynput` + `keyboard` | Win32 `SendInput` (Unicode/emoji) | WASAPI / DirectSound | [Windows guide](platforms/windows/README.md) | EXE folder, or `run.bat` from source |
-| **Windows (WSL2, any distro)** | Supported, unit-tested | Windows-host bridge (PowerShell ⇄ socket IPC) | Host-side synthetic paste (`clip.exe` + `Ctrl+V`) | WSLg PulseAudio (`RDPSource`) | [WSL guide](platforms/wsl/README.md) | Double-click `run_wsl.bat` |
-| **macOS (Apple Silicon / Intel)** | Supported, unit-tested | `pynput` (Accessibility) | `pbcopy` (copy) · AppleScript / Quartz (type) | CoreAudio | [macOS guide](platforms/macos/README.md) | `nix run .`, or `./setup.sh` + `./run.sh` |
+| **Windows (native)** | Supported, unit-tested | `pynput` + `keyboard` | Win32 `SendInput` (Unicode/emoji) | WASAPI / DirectSound | [Windows guide](platforms/windows/README.md) | EXE folder, or `scripts\run.bat` from source |
+| **Windows (WSL2, any distro)** | Supported, unit-tested | Windows-host bridge (PowerShell ⇄ socket IPC) | Host-side synthetic paste (`clip.exe` + `Ctrl+V`) | WSLg PulseAudio (`RDPSource`) | [WSL guide](platforms/wsl/README.md) | Double-click `scripts\run_wsl.bat` |
+| **macOS (Apple Silicon / Intel)** | Supported, unit-tested | `pynput` (Accessibility) | `pbcopy` (copy) · AppleScript / Quartz (type) | CoreAudio | [macOS guide](platforms/macos/README.md) | `nix run .`, or `./scripts/setup.sh` + `./scripts/run.sh` |
 
 All four share the same engine, ASR backend, post-processor, and config format.
 Only the HAL backends differ: **hotkeys**, **clipboard/typing**,
@@ -93,9 +93,9 @@ real hardware (a daily driver, with a real microphone and real dictation).
 
 That means the platform code is written, reviewed and pinned structurally, but a
 first-run problem on Windows or macOS is plausible.
-[`TODO.md`](TODO.md) lists exactly what needs confirming on each platform, with the
+[`docs/TODO.md`](docs/TODO.md) lists exactly what needs confirming on each platform, with the
 steps to do it — it is a real checklist, not a formality. If you hit something
-there, an issue with the output of `./run.sh doctor` (or `run.bat doctor`) is the
+there, an issue with the output of `./scripts/run.sh doctor` (or `scripts\run.bat doctor`) is the
 most useful thing you can send, and it will be treated as a bug in the claim
 above rather than as user error.
 
@@ -146,9 +146,9 @@ for the platform you are targeting.
 | **OS** | Windows 10 or 11, 64-bit. |
 | **Running from source** | Python 3.10+ installed from python.org with **"Add python.exe to PATH"** checked. |
 | **Running the prebuilt EXE** | None of the above — the bundle is fully self-contained. |
-| **Shell** | PowerShell 5.1+ (or PowerShell 7+). `setup.bat` / `run.bat` bypass the execution policy for you; invoking a raw `.ps1` needs `-ExecutionPolicy Bypass`. |
+| **Shell** | PowerShell 5.1+ (or PowerShell 7+). `scripts\setup.bat` / `scripts\run.bat` bypass the execution policy for you; invoking a raw `.ps1` needs `-ExecutionPolicy Bypass`. |
 | **Microphone** | Windows Settings → Privacy & security → Microphone → allow **microphone access** and **let desktop apps access your microphone**. |
-| **Path length** | Keep the checkout at a short path (e.g. `C:\voice-transcriber`) or enable `LongPathsEnabled`, otherwise `pip` fails with `[WinError 206]`. `setup.bat` offers to enable it via one UAC prompt. |
+| **Path length** | Keep the checkout at a short path (e.g. `C:\voice-transcriber`) or enable `LongPathsEnabled`, otherwise `pip` fails with `[WinError 206]`. `scripts\setup.bat` offers to enable it via one UAC prompt. |
 | **Admin** | Not normally required. Only the optional long-path registry change prompts for elevation. |
 | **Frontend** | The Rich (Python) frontend is the default on native Windows; the ratatui TUI is opt-in via `VT_TUI_BIN`. |
 
@@ -208,17 +208,17 @@ chmod +x vt-x86_64.AppImage
 >   the host copy — `ALSA_CONFIG_PATH=/nix/store/...-alsa-lib-*/share/alsa/alsa.conf`,
 >   or just use `nix run .` on NixOS, which is the better fit anyway.
 >
-> Only **x86_64-linux** is built today (see `TODO.md`).
+> Only **x86_64-linux** is built today (see `docs/TODO.md`).
 
 **Running from a git checkout** (contributors / no AppImage):
 ```bash
 # 1. One-time setup (venv + dependencies + model):
-./setup.sh
+./scripts/setup.sh
 
 # 2. Launch every time:
-./run.sh
+./scripts/run.sh
 ```
-> **Note:** If you are not yet in the `input` group for global hotkeys, run `sudo usermod -aG input $USER` and log back in. Run `./run.sh doctor` to test permissions and audio devices anytime. With Nix installed, `nix run .` is the recommended path (it needs no venv).
+> **Note:** If you are not yet in the `input` group for global hotkeys, run `sudo usermod -aG input $USER` and log back in. Run `./scripts/run.sh doctor` to test permissions and audio devices anytime. With Nix installed, `nix run .` is the recommended path (it needs no venv).
 
 #### 🪟 Windows (Native)
 **Option A: Prebuilt Standalone EXE (no Python or build tools required)**
@@ -229,18 +229,18 @@ chmod +x vt-x86_64.AppImage
 **Option B: From Source (with local venv)**
 From File Explorer or Command Prompt in the repo root:
 ```cmd
-setup.bat     :: One-time: create .venv, install dependencies, get the model
-run.bat       :: Launch (or: run.bat doctor)
+scripts\setup.bat     :: One-time: create .venv, install dependencies, get the model
+scripts\run.bat       :: Launch (or: scripts\run.bat doctor)
 ```
-> `setup.bat` also works offline: drop weights in `models\` and it uses them.
+> `scripts\setup.bat` also works offline: drop weights in `models\` and it uses them.
 
 #### 🐧 Windows via WSL2 (any distro)
 From File Explorer or Command Prompt in the repo root:
 ```cmd
-setup_wsl.bat                :: one-time: register/configure a guest (NixOS default)
-run_wsl.bat                  :: 1-click launcher (auto-picks NixOS if registered)
-run_wsl.bat -Distro Ubuntu   :: use a specific WSL distribution
-run_wsl.bat setup            :: install the app + model inside the guest
+scripts\setup_wsl.bat                :: one-time: register/configure a guest (NixOS default)
+scripts\run_wsl.bat                  :: 1-click launcher (auto-picks NixOS if registered)
+scripts\run_wsl.bat -Distro Ubuntu   :: use a specific WSL distribution
+scripts\run_wsl.bat setup            :: install the app + model inside the guest
 ```
 > The guest runs its own platform dispatcher, so **NixOS-WSL, Ubuntu-WSL, or any
 distro with Nix** all work — it picks Nix or its native apt/venv path exactly
@@ -248,10 +248,10 @@ like bare Linux. Host hotkeys/clipboard go through the Windows PowerShell bridge
 
 #### 🍎 macOS (Apple Silicon / Intel)
 ```bash
-./setup.sh    # one-time: venv + deps + model (checks brew portaudio)
-./run.sh      # launch
+./scripts/setup.sh    # one-time: venv + deps + model (checks brew portaudio)
+./scripts/run.sh      # launch
 ```
-> **Permissions note:** When prompted or in *System Settings → Privacy & Security*, allow **Accessibility** and **Microphone** access for your terminal app. Run `./run.sh doctor` to verify status.
+> **Permissions note:** When prompted or in *System Settings → Privacy & Security*, allow **Accessibility** and **Microphone** access for your terminal app. Run `./scripts/run.sh doctor` to verify status.
 
 ---
 
@@ -261,17 +261,17 @@ Voice Transcriber includes a built-in diagnostic tool to verify microphones, sys
 
 ```bash
 # Linux / macOS:
-./run.sh doctor
+./scripts/run.sh doctor
 
 # Windows:
-run.bat doctor
+scripts\run.bat doctor
 ```
 
 It also reports whether your **default microphone is muted**, which no other check can see: a muted source opens fine, reports sane channels and sample rate, and then records pure silence (Discord calls it *"no audio input detected"*). `doctor` fails loudly on it, and `--fix` unmutes it for you:
 
 ```bash
-./run.sh doctor --fix     # Linux / macOS
-run.bat doctor --fix      # Windows (no PipeWire: reported as unchecked, not failed)
+./scripts/run.sh doctor --fix     # Linux / macOS
+scripts\run.bat doctor --fix      # Windows (no PipeWire: reported as unchecked, not failed)
 ```
 
 ---
@@ -515,17 +515,17 @@ One command per tier, from the repo root:
 
 | Tier | Linux / WSL | Windows |
 | :--- | :--- | :--- |
-| **All (shared + platform)** | `./test.sh` | `.\test.ps1` |
-| **Shared only** | `./test.sh shared` | `.\test.ps1 shared` |
-| **Platform only** | `./test.sh platform` | `.\test.ps1 windows` |
-| **End-to-end (model)** | `./test.sh e2e` | `.\test.ps1 e2e` |
+| **All (shared + platform)** | `./scripts/test.sh` | `.\scripts\test.ps1` |
+| **Shared only** | `./scripts/test.sh shared` | `.\scripts\test.ps1 shared` |
+| **Platform only** | `./scripts/test.sh platform` | `.\scripts\test.ps1 windows` |
+| **End-to-end (model)** | `./scripts/test.sh e2e` | `.\scripts\test.ps1 e2e` |
 
-`./test.sh` auto-detects Linux vs WSL and runs the matching platform tier. Both
-scripts forward extra args to pytest, e.g. `.\test.ps1 shared -k tui -v`. On
-Windows the same thing is `test.bat` (or
+`./scripts/test.sh` auto-detects Linux vs WSL and runs the matching platform tier. Both
+scripts forward extra args to pytest, e.g. `.\scripts\test.ps1 shared -k tui -v`. On
+Windows the same thing is `scripts\test.bat` (or
 `powershell -ExecutionPolicy Bypass -File .\platforms\windows\test.ps1`).
-`setup.bat` installs pytest (from `platforms\windows\requirements-dev.txt`), and
-`test.bat` / `test.ps1` install it on demand if it is missing.
+`scripts\setup.bat` installs pytest (from `platforms\windows\requirements-dev.txt`), and
+`scripts\test.bat` / `scripts\test.ps1` install it on demand if it is missing.
 
 ### Mouse-mode coverage
 
@@ -598,9 +598,9 @@ access.
 
 | Target | Command | Output |
 | :--- | :--- | :--- |
-| **Linux (Nix)** | `nix build .` (or `./build.sh`) | `result/bin/vt` |
-| **Windows (offline EXE)** | `build.bat` (or `powershell -ExecutionPolicy Bypass -File .\platforms\windows\build.ps1`) | `dist/VoiceTranscriber/` (PyInstaller `--onedir`, bundles the model) |
-| **Windows (model-free)** | `build.bat --no-model` | `dist/VoiceTranscriber/` (~1.1 GB; weights installed on first run) |
+| **Linux (Nix)** | `nix build .` (or `./scripts/build.sh`) | `result/bin/vt` |
+| **Windows (offline EXE)** | `scripts\build.bat` (or `powershell -ExecutionPolicy Bypass -File .\platforms\windows\build.ps1`) | `dist/VoiceTranscriber/` (PyInstaller `--onedir`, bundles the model) |
+| **Windows (model-free)** | `scripts\build.bat --no-model` | `dist/VoiceTranscriber/` (~1.1 GB; weights installed on first run) |
 
 The Windows build is self-contained (~6 GB: Python + PyTorch + the 3.9 GB Cohere
 model) and needs no Python install on the target machine. See
@@ -618,8 +618,8 @@ model) and needs no Python install on the target machine. See
 > to every release on GitHub. It contains a self-contained Python runtime, PyTorch,
 > and `VoiceTranscriber.exe`. Model weights are either auto-downloaded on first run
 > or loaded from a `models\cohere\` folder placed next to the executable. You can
-> also build a standalone bundle locally on Windows using `build.bat` (or
-> `build.bat --no-model`). Once built, the whole `dist/VoiceTranscriber/` folder is
+> also build a standalone bundle locally on Windows using `scripts\build.bat` (or
+> `scripts\build.bat --no-model`). Once built, the whole `dist/VoiceTranscriber/` folder is
 > portable to any compatible x64 Windows machine.
 
 > **Stale `result/` symlink:** the `result/` symlink in a checkout points at the

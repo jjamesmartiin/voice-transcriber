@@ -80,7 +80,7 @@ narrows what gets opened:
 On WSL, WSLg's PulseAudio server normally exposes a single real capture source
 (`RDPSource`), so expect several rows to show the *same* level — the meters are
 reading what WSLg gives Linux, which is one source behind several entries. Not
-confirmed on a WSL host yet; see `TODO.md`.
+confirmed on a WSL host yet; see `../docs/TODO.md`.
 
 There is no global hotkey for settings; from outside the terminal use the
 control API (`python src/main.py status`, `toggle`, `output type_fast`, …).

@@ -288,7 +288,7 @@ class TestTuiStartFallbackIsGuarded:
     ``cmd.exe`` on cp437/cp1252) raised ``UnicodeEncodeError`` straight out of
     the engine's constructor: exit 1, no window, a traceback the user cannot act
     on. See the "Rich TUI crashes on a non-UTF-8 Windows console" note in
-    TODO.md.
+    docs/TODO.md.
     """
 
     @staticmethod

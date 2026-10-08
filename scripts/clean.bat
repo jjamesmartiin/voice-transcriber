@@ -1,7 +1,7 @@
 @echo off
 setlocal
-cd /d "%~dp0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0platforms\windows\clean.ps1" %*
+cd /d "%~dp0.."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\platforms\windows\clean.ps1" %*
 if errorlevel 1 (
     echo.
     echo [!] Clean exited with an error - see the messages above.

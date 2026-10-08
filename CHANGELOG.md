@@ -130,8 +130,8 @@ Platform unification, package namespacing, and audio resilience.
 - **Package namespacing:** the codebase now lives under
   `src/voice_transcriber/`, which eliminates the stdlib `platform` shadowing for
   good; the previous flat module paths remain as backward-compatible shims.
-- **One verb = one script:** `./setup.sh`, `./run.sh`, `./test.sh`, `./build.sh`
-  and `./clean.sh` (plus Windows `.bat`/`.ps1` equivalents) dispatch to a single
+- **One verb = one script:** `./scripts/setup.sh`, `./scripts/run.sh`, `./scripts/test.sh`, `./scripts/build.sh`
+  and `./scripts/clean.sh` (plus Windows `.bat`/`.ps1` equivalents) dispatch to a single
   shared runner, `tools/vt_dev.py`.
 - Live kernel modifier resolution on Linux, and spoken-date formatting.
 

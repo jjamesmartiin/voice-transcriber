@@ -10,7 +10,7 @@ Design (see AGENTS.md / docs/offline_install.md): the five verbs are separate
 entry points, but the *body* of each lives in one shared, stdlib-only runner
 (`tools/vt_dev.py`). The PowerShell scripts bootstrap only (find a Python,
 enable long paths, force UTF-8) and dispatch to it. Real end-to-end verification
-still requires a Windows host (see TODO.md).
+still requires a Windows host (see docs/TODO.md).
 """
 from pathlib import Path
 
@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WIN_DIR = REPO_ROOT / "platforms" / "windows"
 COMMON_PS1 = REPO_ROOT / "platforms" / "common" / "common.ps1"
 VT_DEV = REPO_ROOT / "tools" / "vt_dev.py"
-ROOT_TEST_PS1 = REPO_ROOT / "test.ps1"
+SCRIPT_TEST_PS1 = REPO_ROOT / "scripts" / "test.ps1"
 
 VERBS = ("setup", "run", "test", "build", "clean")
 
@@ -99,9 +99,9 @@ class TestTestVerb:
         assert '$env:PYTHONIOENCODING = "utf-8"' in _read(WIN_DIR / "test.ps1")
 
 
-class TestRootShims:
-    def test_root_test_ps1_forwards_to_the_windows_verb(self):
-        text = _read(ROOT_TEST_PS1)
+class TestScriptShims:
+    def test_script_test_ps1_forwards_to_the_windows_verb(self):
+        text = _read(SCRIPT_TEST_PS1)
         assert "platforms\\windows\\test.ps1" in text
         assert "@args" in text
 
@@ -111,13 +111,13 @@ class TestBatchPauseOnFailure:
 
     def test_error_batches_pause_on_nonzero_exit(self):
         for name in ("run.bat", "test.bat", "build.bat", "clean.bat"):
-            text = (REPO_ROOT / name).read_text(encoding="utf-8").lower()
+            text = (REPO_ROOT / "scripts" / name).read_text(encoding="utf-8").lower()
             assert "if errorlevel 1" in text, name
             assert "pause" in text, name
 
     def test_batch_error_banner_avoids_parentheses(self):
         # "(if enabled)" closed the `if errorlevel 1 (` block early, leaving a
         # stray `:` command; cmd aborted the batch and never reached `pause`.
-        text = _read(REPO_ROOT / "run.bat")
+        text = _read(REPO_ROOT / "scripts" / "run.bat")
         assert "Log [if enabled]:" in text
         assert "(if enabled)" not in text

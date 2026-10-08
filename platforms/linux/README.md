@@ -30,20 +30,20 @@ next to the `.AppImage` for a fully offline install. See the
 prerequisites (all host-level, none Nix-related).
 
 ### Running from a git checkout
-One verb = one script: `./setup.sh`, `./run.sh`, `./test.sh`, `./build.sh`,
-`./clean.sh`. Each root script detects the toolchain and dispatches to
+One verb = one script: `./scripts/setup.sh`, `./scripts/run.sh`, `./scripts/test.sh`, `./scripts/build.sh`,
+`./scripts/clean.sh`. Each root script detects the toolchain and dispatches to
 `platforms/<toolchain>/`:
 
 - **Nix** (recommended): `nix run .` builds and launches with no venv.
-- **Native** (apt + venv): `./setup.sh` then `./run.sh`.
+- **Native** (apt + venv): `./scripts/setup.sh` then `./scripts/run.sh`.
 
 Force one over auto-detection with `VT_USE_VENV=1` (native venv) or
 `VT_TOOLCHAIN=nix|linux`.
 
 ```bash
-./setup.sh        # venv + dependencies + model (~2.8 GB, one time)
-./run.sh          # launch
-./run.sh doctor   # system diagnostics
+./scripts/setup.sh        # venv + dependencies + model (~2.8 GB, one time)
+./scripts/run.sh          # launch
+./scripts/run.sh doctor   # system diagnostics
 ```
 
 ### With Nix directly
@@ -72,14 +72,14 @@ to drive it from outside the terminal.
 Run the shared + Linux tiers (no audio devices or model weights required),
 from the repo root:
 ```bash
-./test.sh
+./scripts/test.sh
 ```
 
 Targeted tiers:
 ```bash
-./test.sh shared     # cross-platform, model-free
-./test.sh platform   # tests/linux
-./test.sh e2e        # model/audio end-to-end (local only)
+./scripts/test.sh shared     # cross-platform, model-free
+./scripts/test.sh platform   # tests/linux
+./scripts/test.sh e2e        # model/audio end-to-end (local only)
 ```
 
 The live speaker→microphone acoustic suite needs real audio hardware:
@@ -99,7 +99,7 @@ nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
   wpctl get-volume @DEFAULT_AUDIO_SOURCE@     # prints [MUTED] when muted
   wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 0     # unmute it
   ```
-  `./run.sh doctor` reports this explicitly (it is the one check that can see it), and `./run.sh doctor --fix` unmutes it for you.
+  `./scripts/run.sh doctor` reports this explicitly (it is the one check that can see it), and `./scripts/run.sh doctor --fix` unmutes it for you.
   - **Why it keeps coming back:** WirePlumber *persists* per-route mute state in `~/.local/state/wireplumber/default-routes`, so the mute is re-applied every time the device re-enumerates — replug, reboot, resume from sleep. It never clears itself. If your USB mic flaps, expect a previously muted mic to return muted:
     ```bash
     journalctl -k | grep -i "Product:"            # device arrivals
@@ -115,8 +115,8 @@ nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
 - **Direct ALSA Hardware Device (`hw:X,Y`):** Raw ALSA hardware devices enforce exclusive single-app access. If Discord or PipeWire opens `hw:X,Y`, Voice Transcriber will fail with `EBUSY`.
   - In Voice Transcriber's settings (`s`), always select **`default`** or **`pipewire`** instead of raw `hw:X,Y` devices.
 - **A plugged-in mic is missing from the device list entirely:** PortAudio builds its device list *once*, at startup, and **omits** any device it cannot open at that moment rather than listing it as unavailable. A mic that something was holding when the engine started — a `hw:X,Y` in Discord, the GNOME Sound panel's level meter, a browser — therefore never appears in the list, no matter how often you reconnect it. The mic and cable are fine.
-  - Fix it from the app: **`s` → Reset Microphones** re-enumerates the devices and re-resolves your selection (device indices shift whenever the list changes). Scriptable form: `./run.sh rescan-mics`.
-  - If a mic is *still* absent, the app names whatever is holding it, and `./run.sh rescan-mics --json` reports it as `missing[].holder`. Close that app and re-scan.
+  - Fix it from the app: **`s` → Reset Microphones** re-enumerates the devices and re-resolves your selection (device indices shift whenever the list changes). Scriptable form: `./scripts/run.sh rescan-mics`.
+  - If a mic is *still* absent, the app names whatever is holding it, and `./scripts/run.sh rescan-mics --json` reports it as `missing[].holder`. Close that app and re-scan.
   - Re-scanning re-initialises PortAudio, which closes open capture streams, so it is refused while recording.
   - Selecting `default`/`pipewire` up front avoids the whole problem: the PipeWire PCM is shareable, so it is never held exclusively and never missing.
 - **Find out which mic is actually live:** open the microphone picker (`s` → **Microphone**) and speak. Every visible row carries its own live level meter, so you can see at a glance which device is hearing you — typically the `default`/`pipewire` row is silent while a specific `hw:` device is the one picking up sound, which means the system default input is routed elsewhere (fix with `wpctl set-default`, above).
@@ -132,11 +132,11 @@ nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
   Then log out and log back in.
 - Run diagnostics to check device permissions:
   ```bash
-  ./run.sh doctor
+  ./scripts/run.sh doctor
   ```
 
 ### 3. Keystrokes Not Appearing in Wayland Applications
 **Symptom:** The notification shows "COMPLETED", but no text is typed into the focused window.  
 **Fix:**
-- Ensure `/dev/uinput` is writable (verified by `./run.sh doctor`).
-- If using an application that rejects synthetic keystrokes, switch to clipboard mode (`./run.sh output clipboard`), which pastes via `wl-copy`.
+- Ensure `/dev/uinput` is writable (verified by `./scripts/run.sh doctor`).
+- If using an application that rejects synthetic keystrokes, switch to clipboard mode (`./scripts/run.sh output clipboard`), which pastes via `wl-copy`.

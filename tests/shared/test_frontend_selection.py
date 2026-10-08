@@ -7,7 +7,7 @@ the whole `tui-rs` crate imports `std::os::unix`. That gate is what keeps
 Linux/WSL-only frontend work (e.g. the mic picker's per-device level meters) from
 reaching native Windows, so it is pinned here rather than assumed. Note this is a
 separate gate from the control API, which now works on native Windows over
-loopback TCP. See the frontend note in TODO.md.
+loopback TCP. See the frontend note in docs/TODO.md.
 """
 import socket
 import sys

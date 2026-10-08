@@ -4,7 +4,7 @@
 > `macos-latest` CI runner) but has **not** been run end-to-end on real hardware by the
 > maintainer — only Linux has. Please treat a first-run problem here as a
 > macOS bug to report rather than as something you did wrong, and include the
-> output of `./run.sh doctor` in an issue. [`TODO.md`](../../TODO.md) lists the exact steps
+> output of `./scripts/run.sh doctor` in an issue. [`TODO.md`](../../docs/TODO.md) lists the exact steps
 > still to confirm on this platform.
 
 
@@ -26,12 +26,12 @@ From the repository root, run the setup script (it creates `.venv`, installs
 dependencies, and acquires the model):
 
 ```bash
-./setup.sh
+./scripts/setup.sh
 ```
 
 To skip the model for now (and place weights in `models/` yourself):
 ```bash
-./setup.sh --no-model
+./scripts/setup.sh --no-model
 ```
 
 ### 3. Permissions (Important)
@@ -54,20 +54,20 @@ macOS security controls require granting specific permissions in **System Settin
 Launch the application:
 
 ```bash
-./run.sh
+./scripts/run.sh
 ```
 
 ### Controlling a Running Instance
 Voice Transcriber can be queried and controlled programmatically from another terminal:
 
 ```bash
-./run.sh status              # Report engine state and current settings
-./run.sh toggle              # Toggle recording on/off
-./run.sh start               # Start recording
-./run.sh stop                # Stop recording and transcribe
-./run.sh output clipboard    # Switch delivery mode to clipboard
-./run.sh output type         # Switch delivery mode to auto-type
-./run.sh help --json         # Machine-readable verb catalogue
+./scripts/run.sh status              # Report engine state and current settings
+./scripts/run.sh toggle              # Toggle recording on/off
+./scripts/run.sh start               # Start recording
+./scripts/run.sh stop                # Stop recording and transcribe
+./scripts/run.sh output clipboard    # Switch delivery mode to clipboard
+./scripts/run.sh output type         # Switch delivery mode to auto-type
+./scripts/run.sh help --json         # Machine-readable verb catalogue
 ```
 
 ---
@@ -98,8 +98,8 @@ On Apple Silicon (M1/M2/M3/M4), PyTorch runs dynamic INT8 quantized CPU inferenc
 - **Microphone not capturing audio**:
   - Verify that PortAudio is installed: `brew install portaudio`
   - Ensure microphone permission is enabled for your terminal app in `System Settings -> Privacy & Security -> Microphone`.
-  - Check available microphones with: `./run.sh mics`
-  - Switch active microphone with: `./run.sh set-mic "<device-name>"`
+  - Check available microphones with: `./scripts/run.sh mics`
+  - Switch active microphone with: `./scripts/run.sh set-mic "<device-name>"`
 
 - **Global hotkeys not responding**:
   - Ensure your terminal emulator is checked under `System Settings -> Privacy & Security -> Accessibility`.
@@ -107,4 +107,4 @@ On Apple Silicon (M1/M2/M3/M4), PyTorch runs dynamic INT8 quantized CPU inferenc
 
 - **Auto-type text injection not working**:
   - Ensure Accessibility permissions are granted so AppleScript System Events / pynput can send keystrokes to active windows.
-  - As a fallback, switch to clipboard delivery: `./run.sh output clipboard` (which automatically places transcriptions on the macOS clipboard via `pbcopy`).
+  - As a fallback, switch to clipboard delivery: `./scripts/run.sh output clipboard` (which automatically places transcriptions on the macOS clipboard via `pbcopy`).

@@ -44,7 +44,7 @@ works with no engine running. Do not hardcode the verb list or its length in doc
 > published to a per-user endpoint file) and the verbs are identical. The
 > **ratatui frontend** remains Unix-only — the `tui-rs` crate imports
 > `std::os::unix` — so a Windows instance uses the Rich TUI. See
-> `docs/control_api.md` and `TODO.md`.
+> `docs/control_api.md` and `docs/TODO.md`.
 
 Use this for tests too. `tests/shared/test_control.py` shows the pattern.
 
@@ -54,9 +54,9 @@ Tiers: `tests/shared/` (all platforms, model-free), `tests/{linux,windows,wsl}/`
 (one platform each), `tests/e2e/` (needs model weights + audio, local only).
 
 ```bash
-./test.sh                      # shared + this platform (auto-detects WSL)
-./test.sh shared
-./test.sh e2e
+./scripts/test.sh                      # shared + this platform (auto-detects WSL)
+./scripts/test.sh shared
+./scripts/test.sh e2e
 nix develop --command env VT_PLATFORM=linux python -m pytest tests/shared tests/linux tests/wsl tests/windows -q
 nix develop --command python -m pytest tests/shared/test_control.py -q   # fastest loop
 ```
@@ -129,10 +129,11 @@ nix build .#vt-tui --no-link --print-out-paths
 ## Conventions
 
 - **One verb = one script.** The five verbs (`setup`, `run`, `test`, `build`,
-  `clean`) each have one root entry point: `./<verb>.sh` (POSIX) and `./<verb>.bat`
-  (Windows). A root `.sh` detects the toolchain (`nix` | `linux` | `macos`) and
-  execs `platforms/<toolchain>/<verb>.sh`. The verb **body** lives once in
-  `tools/vt_dev.py` (stdlib-only, shared by Linux/macOS/Windows); the Nix toolchain
+  `clean`) each have one entry point under `scripts/`: `scripts/<verb>.sh` (POSIX)
+  and `scripts/<verb>.bat` (Windows). The `.sh` detects the toolchain
+  (`nix` | `linux` | `macos`) and execs `platforms/<toolchain>/<verb>.sh`. The verb
+  **body** lives once in `tools/vt_dev.py` (stdlib-only, shared by
+  Linux/macOS/Windows); the Nix toolchain
   uses the flake (`nix run` / `nix develop` / `nix build`). Windows `.ps1` scripts
   bootstrap only (find Python, long paths, UTF-8) and call the same runner. Do not
   add venv/pip/model logic to a platform script. Structural pins:
@@ -147,4 +148,4 @@ nix build .#vt-tui --no-link --print-out-paths
   behaviour that tests may pin. Stale docs are treated as bugs here.
 - The WSL PowerShell bridge cannot run in CI (no `powershell.exe`); pin changes
   to it structurally, as `tests/wsl/*.py` do, and note untested host behaviour in
-  `TODO.md`.
+  `docs/TODO.md`.

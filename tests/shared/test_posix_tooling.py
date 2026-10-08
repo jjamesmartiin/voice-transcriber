@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Structural pins for the POSIX verb entry points (Linux / macOS / Nix).
 
-One verb = one root script. The root script detects the toolchain and execs
-`platforms/<toolchain>/<verb>.sh`. The Nix toolchain uses the flake; the native
+One verb = one script under `scripts/`. The script detects the toolchain and
+execs `platforms/<toolchain>/<verb>.sh`. The Nix toolchain uses the flake; the native
 toolchains (linux/macos) bootstrap with the OS's package manager and dispatch to
 the one shared runner, `tools/vt_dev.py`.
 
@@ -43,16 +43,16 @@ class TestSharedCore:
         assert "python -m venv" not in text
 
 
-class TestRootDispatchers:
-    def test_one_root_script_per_verb(self):
+class TestScriptDispatchers:
+    def test_one_script_per_verb(self):
         for verb in VERBS:
-            assert (REPO_ROOT / f"{verb}.sh").is_file(), verb
+            assert (REPO_ROOT / "scripts" / f"{verb}.sh").is_file(), verb
 
     def test_each_dispatches_by_toolchain(self):
         for verb in VERBS:
-            text = _read(REPO_ROOT / f"{verb}.sh")
+            text = _read(REPO_ROOT / "scripts" / f"{verb}.sh")
             assert "vt_detect_toolchain" in text, verb
-            assert f"platforms/$TOOLCHAIN/{verb}.sh" in text, verb
+            assert f"../platforms/$TOOLCHAIN/{verb}.sh" in text, verb
 
 
 class TestPlatformVerbs:

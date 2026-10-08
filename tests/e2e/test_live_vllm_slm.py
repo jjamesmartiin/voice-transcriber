@@ -9,7 +9,7 @@ runs in every CI job. The test skips cleanly when nothing is listening.
 Run directly:
     python tests/e2e/test_live_vllm_slm.py
 Or as part of the e2e tier:
-    ./test.sh e2e
+    ./scripts/test.sh e2e
 """
 
 import os

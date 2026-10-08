@@ -382,7 +382,7 @@ class RatatuiTui:
         are opened, so scrolling or filtering the picker diffs the set instead of
         tearing every device down and re-opening it on each keystroke.
 
-        Platform notes (see TODO.md, "Multi-device mic levels"):
+        Platform notes (see docs/TODO.md, "Multi-device mic levels"):
 
         * **Linux** — verified end-to-end in a real terminal.
         * **WSL** — *unconfirmed*, but shares this exact code path. Audio arrives
