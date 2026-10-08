@@ -2,6 +2,10 @@
 
 *Draft — for review before publishing.*
 
+![Voice Transcriber's terminal UI: transcriptions stream into scrollback above a live inline prompt showing the microphone level, delivery mode and formatting preset.](assets/vt-demo.gif)
+
+*The real terminal UI — transcriptions scroll above a live prompt line.*
+
 ---
 
 ## The problem with dictation in 2026
@@ -50,6 +54,10 @@ to accept synthetic keystrokes is where the dragons are.**
 The engine has to run on Linux (Wayland and X11), native Windows, Windows via
 WSL2, and macOS. Those four environments disagree about almost everything that
 matters here.
+
+![Voice Transcriber's architecture: one shared core and engine, with four OS-specific seams — global hotkeys, clipboard and typing, audio capture, and notifications.](assets/vt-architecture.svg)
+
+*One core, four hosts: only the hotkey, injection, audio and notification backends differ.*
 
 The organising rule is that everything cross-platform is shared, and exactly
 four things are per-OS:
@@ -316,6 +324,10 @@ virtualisation boundary.
 The frontend is a Rust binary built on [ratatui](https://ratatui.rs). It is
 launched by the engine and connects back over a UNIX socket with
 newline-delimited JSON.
+
+![The ratatui frontend: an inline prompt at the bottom, with transcription and event blocks streaming into terminal scrollback above it.](assets/vt-tui-demo.svg)
+
+*The Rust frontend owns no state — it renders what the engine tells it and sends commands back.*
 
 The split exists because the two halves want different things. The engine wants
 PyTorch and PortAudio and is naturally Python. A terminal UI wants sub-frame
