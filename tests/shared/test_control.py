@@ -113,12 +113,12 @@ class TestDispatch:
         ],
     )
     def test_malformed_requests_are_rejected_not_raised(self, line):
-        response = control.ControlServer(_FakeEngine()).dispatch(line)
+        response = _router().dispatch(line)
         assert response["ok"] is False
         assert "error" in response
 
     def test_handler_exception_becomes_an_error_reply(self):
-        response = control.ControlServer(_FakeEngine(explode=True)).dispatch("toggle")
+        response = _router(_FakeEngine(explode=True)).dispatch("toggle")
         assert response["ok"] is False
         assert "boom" in response["error"]
 
@@ -126,7 +126,7 @@ class TestDispatch:
         class NoHandler:
             pass
 
-        response = control.ControlServer(NoHandler()).dispatch("toggle")
+        response = _router(NoHandler()).dispatch("toggle")
         assert response["ok"] is False
         assert "control handler" in response["error"]
 
