@@ -322,7 +322,8 @@ not belong in the post-processor or in this branch — it needs its own plan
 covering model support (Cohere Transcribe exposes none today), an optional
 diarization pass (e.g. a pyannote-style model) plus assignment of ASR segments to
 speakers, the `[Speaker 1]` output convention, the latency budget, and the
-toggle. Tracked in `docs/TODO.md`; plan to follow in a sibling document.
+toggle. Tracked in `docs/TODO.md`. **Plan written: [`docs/plan-diarization.md`](plan-diarization.md)**
+(not started; its first step is a product decision, not code).
 
 ## 11. Design principle: everything is a toggle
 
