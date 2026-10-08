@@ -48,8 +48,8 @@ Three defects, all in `src/voice_transcriber/post_processor.py`:
 | # | Symptom | Where |
 | --- | --- | --- |
 | D1 | `like: Thing` -> `like: thing` — a colon legitimately introduces a capital, but the mid-sentence-casing pass lowercases it | `normalize_mid_sentence_casing()` (~:251) |
-| D2 | `. Thing two.` -> ` Thing two` — the "false ASR break" rule swallows a *real* boundary because a short capitalised sentence looks like an artifact | `LOWERCASE_AFTER_PERIOD_REGEX`, step 9 in `clean_speech_transcription()` |
-| D3 | Spoken quotes disappear: `I can say, "X," and` loses the quotation; the comma inside the quote is also dropped | no quote handling anywhere |
+| D2 | `. Thing two.` -> ` Thing two` — the "dangling word before a period" repair listed the cardinals `two/three/four/five`, deleted the period, and handed the joined text to the serial-number collapser (`One. Two. Three.` -> `One. 23.`) | `DANGLING_WORDS_REGEX` + `process_serial_numbers()` |
+| D3 | *Premise corrected by measurement:* literal quotes already survive intact (`I can say, "X," and` round-trips). The real gap was **spoken** quotation marks — `quote ... unquote` stayed as words | no spoken-quote handling anywhere |
 
 Structural limits (not bugs — missing machinery):
 
@@ -91,14 +91,19 @@ the preset and must not be clobbered by that side effect.
 No newlines, no new settings, no behaviour change for anyone not hitting these
 patterns. Safe as a standalone patch.
 
-- **D1:** in `normalize_mid_sentence_casing()`, treat `:` as a boundary that
-  *permits* a capital (list cue / label), i.e. exclude it from the
-  "lowercase this" decision.
-- **D2:** add an enumeration guard to the step-9 collapse: do not delete a
-  boundary when the following token is capitalised **and** the sentence it
-  starts is short **and** the pattern is repeated/parallel (>=2 occurrences).
-- **D3:** restore spoken quotes: re-wrap quoted speech (`I can say X and ...`
-  where X is a full clause) and keep the comma inside the closing quote.
+- **D1 (done):** a colon or dash (`:` `-` `\u2013` `\u2014`) before a capital is a
+  list cue, so `normalize_mid_sentence_casing()` keeps that capital. Implemented
+  by capturing the character preceding the match *before* the previous-word scan
+  reuses the loop index — the first attempt read the clobbered index and silently
+  did nothing.
+- **D2 (done):** `DANGLING_WORDS_REGEX` no longer lists the cardinals
+  `two/three/four/five`. A cardinal is not a dangling preposition, and deleting
+  the period after it both joined real sentences and triggered the serial-number
+  collapse.
+- **D3 (done, reframed):** literal quotes turned out to be fine, so the work was
+  spoken quotation marks: `process_spoken_quotes()` rewraps a matched
+  `quote ... unquote` / `end quote` pair. A lone "quote" ("this quote is great",
+  "and I quote", "I quoted him") is never touched.
 
 Tests: extend `tests/shared/test_post_processor.py`. Regression pins encode the
 user's sentence as a whole (input -> exact expected output), plus negative cases
@@ -238,8 +243,8 @@ one-size-fits-all key for "new line". Therefore:
 | M | Content | Exit criteria |
 | --- | --- | --- |
 | M0 | Worktree fix (`da67cf6`) | `find_repo_root()` finds a worktree; `tests/shared` green in the worktree — **done** |
-| M1 | Workstream B: error correction (B1–B5) | The README/blog demo resolves as advertised; negative cases unchanged |
-| M2 | Phase A1 (D1–D3) | The motivating sentence round-trips |
+| M1 | Workstream B: error correction (B1–B5) | **done** — the advertised demo resolves, the five false positives are refused |
+| M2 | Phase A1 (D1–D3) | **done** — enumerations survive, list cues keep their capital, spoken quotes are rewrapped |
 | M3 | Phase A2 + eval cases | Table-driven structure tests green; `off` byte-identical to today |
 | M4 | Phase A3 (sentinel + boundaries) | Pause-separated items list without cue words |
 | M5 | Phase A4 (setting end-to-end) | Control API, both TUI modals, docs, `CHANGELOG.md`; `nix build .#vt-tui` green |

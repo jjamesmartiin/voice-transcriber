@@ -881,3 +881,62 @@ def test_slm_output_sanitizer_exists_and_scrubs():
     assert pp._sanitize_slm_output("hi", "<cleaned_text>hi there.</cleaned_text>") == "hi there."
     assert pp._sanitize_slm_output("hi", '"hi there."') == "hi there."
     assert pp._sanitize_slm_output("hi", "<b>hi</b> there") == "hi there"
+
+
+# ---------------------------------------------------------------------------
+# Enumerations, list cues and spoken quotes (Phase A1)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "Thing one. Thing two. Thing three.",
+    "Deploy alpha. Deploy beta. Deploy gamma.",
+    "Item one. Item two. Item three.",
+    "One. Two. Three.",
+])
+def test_short_parallel_sentences_keep_their_boundaries(text):
+    """An enumeration is not a false ASR break: every '.' must survive.
+
+    Regression: the "dangling word before a period" repair listed the cardinals
+    two/three/four/five, so it deleted the period after them and handed the
+    result to the serial-number collapser. "Thing one. Thing two. Thing three."
+    became "Thing one. Thing two thing three." and "One. Two. Three." became
+    "One. 23." — an enumeration dictated as a list was rewritten into nonsense.
+    """
+    pp.set_number_digits_mode("auto")
+    assert pp.clean_speech_transcription(text, skip_slm=True, punctuation_mode="full") == text
+
+
+@pytest.mark.parametrize("spoken,expected", [
+    ("I can list them like: Thing one. Thing two.", "I can list them like: Thing one. Thing two."),
+    ("Note: Remember this", "Note: Remember this."),
+    ("Three things - Alpha, Beta", "Three things - Alpha, beta."),
+])
+def test_a_list_cue_keeps_the_capital_after_it(spoken, expected):
+    """A colon or dash introduces a list or label, so the capital is the writer's.
+
+    Regression: the mid-sentence decapitaliser only knew about sentence-enders
+    (its lookbehind covers . ! ? and newline), so "like: Thing one" lost the
+    capital that marks the list.
+    """
+    assert pp.clean_speech_transcription(spoken, skip_slm=True, punctuation_mode="full") == expected
+
+
+@pytest.mark.parametrize("spoken,expected", [
+    ("He said quote hello unquote to me.", 'He said "hello" to me.'),
+    ("She said quote I am going to do three things end quote and left.",
+     'She said "I am going to do three things" and left.'),
+])
+def test_spoken_quotation_marks_become_real_quotes(spoken, expected):
+    """ASR emits words, not quote characters, so a matched pair is rewrapped."""
+    assert pp.clean_speech_transcription(spoken, skip_slm=True, punctuation_mode="full") == expected
+
+
+@pytest.mark.parametrize("text", [
+    "this quote is great",
+    "and I quote the docs are wrong",
+    "I quoted him yesterday",
+    "we should quote the price and move on",
+])
+def test_a_lone_quote_word_is_left_alone(text):
+    """Only a matched pair is a quotation; a single "quote" is ordinary speech."""
+    assert pp.process_spoken_quotes(text) == text

@@ -46,7 +46,7 @@ DANGLING_WORDS_REGEX = re.compile(
     r"of|to|in|for|with|on|at|from|by|about|into|through|during|below|between|under|without|"
     r"and|or|but|because|if|while|since|until|unless|"
     r"very|too|quite|really|such|more|less|most|least|"
-    r"two|three|four|five|several|multiple|few|many|some|another|each|every|"
+    r"several|multiple|few|many|some|another|each|every|"
     r"different|similar|same|other|next|previous|main|"
     r"is|are|was|were|be|been|being|have|has|had|can|could|would|should|shall|will|might|must"
     r")\s*[.?!]\s+([a-zA-Z])",
@@ -285,12 +285,18 @@ def normalize_mid_sentence_casing(text: str) -> str:
         idx = start_idx - 1
         while idx >= 0 and text[idx] in " \t\r\n":
             idx -= 1
+        boundary_char = text[idx] if idx >= 0 else ""
         end_prev = idx + 1
         while idx >= 0 and text[idx] not in " \t\r\n":
             idx -= 1
         start_prev = idx + 1
         prev_word = text[start_prev:end_prev].rstrip(".,;:!?") if end_prev > start_prev else ""
         if prev_word.lower() in PROPER_NOUN_PRECEDERS and word.lower() not in COMMON_MID_SENTENCE_WORDS:
+            return m.group(0)
+        # A colon or dash introduces a list or a label, so the capital after it
+        # is the writer's, not ASR over-capitalisation ("I can list them like:
+        # Thing one"). The regex lookbehind only knows about sentence ends.
+        if boundary_char in ":-\u2013\u2014":
             return m.group(0)
         lowercased = word[0].lower() + word[1:]
         return " " + lowercased
@@ -2526,6 +2532,39 @@ _MUTTERING_KEYWORDS = ("oop", "whoop", "never")
 _FILLER_KEYWORDS = ("um", "uh", "er", "ah")
 
 
+# ---------------------------------------------------------------------------
+# Spoken quotation marks
+# ---------------------------------------------------------------------------
+# ASR essentially never emits literal quote characters, so quoted speech arrives
+# as words. Both markers must be present in the same span before anything is
+# rewritten: a lone "quote" is ordinary speech ("this quote is great", "and I
+# quote", "I quoted him") and must survive untouched.
+_SPOKEN_QUOTE_PATTERN = re.compile(
+    r"\b(?:quote|open\s+quote|begin\s+quote)\b\s*[:,]?\s+"
+    r"(?P<body>.{2,400}?)"
+    r"\s*\b(?:unquote|end\s+quote|close\s+quote)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def process_spoken_quotes(text: str) -> str:
+    """Wrap speech dictated with spoken quotation marks in real quotes.
+
+    ``"he said quote hello unquote to me"`` -> ``'he said "hello" to me'``. A
+    "quote" with no matching "unquote"/"end quote" is never rewritten.
+    """
+    if "quote" not in text.lower():
+        return text
+
+    def _wrap(match) -> str:
+        body = match.group("body").strip()
+        if not body:
+            return match.group(0)
+        return f'"{body}"'
+
+    return _SPOKEN_QUOTE_PATTERN.sub(_wrap, text)
+
+
 def clean_speech_transcription(
     text: str,
     skip_slm: bool = False,
@@ -2709,6 +2748,9 @@ def clean_speech_transcription(
 
     # 13h. Process serial numbers, model codes, and NATO phonetic strings ("X K 9 4 J" -> "XK94J")
     cleaned = process_serial_numbers(cleaned)
+
+    # 13i. Convert spoken quotation marks ("he said quote hello unquote" -> 'he said "hello"')
+    cleaned = process_spoken_quotes(cleaned)
 
     cleaned = cleaned.strip()
     if not cleaned or not cleaned.strip(".,!?;: \t\n\r"):
