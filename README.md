@@ -659,6 +659,7 @@ Supported options:
 - `spell_command`: `true` (default) enables the verbal spell command (`"spell C A T"` → `CAT`); `false` leaves `"spell ..."` phrases untouched.
 - `keep_bluetooth_handsfree`: `true` keeps Bluetooth devices in hands-free mode so media does not pause when recording ends.
 - `punctuation_mode`: `full`, `no_terminal_period`, `no_punctuation`, or `lowercase_no_punctuation` (legacy alias `semi-formal` → `no_terminal_period`).
+- `structure_mode`: spoken-list formatting — `off` (default), `inline` (markers only: `"- one. - two."`), or `blocks` (real bullets and paragraph breaks). Typed output is automatically downgraded to `inline`, because a newline is an Enter keypress in whatever window has focus; `blocks` is for the clipboard/paste path. See [`docs/formatting.md`](docs/formatting.md).
 - `enable_slm`: `true` to enable the optional local vLLM grammar-polish pass (default `false`).
 - `sound_theme`: audio cue pack — `proximity` (default), `pop`, `chime`, or `silent`.
 - `ui_theme`: `auto` (follow the terminal) or one of `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white`.

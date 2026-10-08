@@ -91,17 +91,31 @@ def get_data_dir():
     return d
 
 
+def _has_repo_marker(directory):
+    """True when *directory* holds a checkout marker.
+
+    The marker is a `.git` directory in a normal clone and a `.git` file holding
+    ``gitdir: <path>`` in a linked worktree (``git worktree add``) or a
+    submodule. An absent marker is normal for the Nix store, an AppImage and a
+    pip-style install, which are read-only and use a per-user data dir instead.
+    """
+    return os.path.isdir(os.path.join(directory, ".git")) or os.path.isfile(
+        os.path.join(directory, ".git")
+    )
+
+
 def find_repo_root():
     """Return the voice-transcriber checkout root when running from one.
 
-    Walks up from this file looking for the repository marker (`.git`). When the
-    app runs from the Nix store, an AppImage, or a pip-style install there is no
-    marker, so this returns None and the installer falls back to the per-user
-    data dir (those install locations are read-only).
+    Walks up from this file looking for the repository marker (`.git`: a
+    directory in a clone, a file in a linked worktree). When the app runs from
+    the Nix store, an AppImage, or a pip-style install there is no marker, so
+    this returns None and the installer falls back to the per-user data dir
+    (those install locations are read-only).
     """
     d = os.path.dirname(os.path.abspath(__file__))
     for _ in range(8):
-        if os.path.isdir(os.path.join(d, ".git")):
+        if _has_repo_marker(d):
             return d
         parent = os.path.dirname(d)
         if parent == d:

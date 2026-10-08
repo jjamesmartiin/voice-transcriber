@@ -151,6 +151,8 @@ Every reply is a JSON object with at least `ok`:
   "output_mode": "type_fast",
   "number_mode": "auto",
   "punctuation_mode": "full",
+  "structure_mode": "inline",
+  "structure_setting": "blocks",
   "ui_theme": "red",
   "middle_click": false,
   "last_transcription": "I deployed on NixOS using kubectl.",
@@ -221,7 +223,7 @@ regardless of the console's encoding.
 
 `start`, `stop`, `toggle`, `wait`, `status`, `mics`, `set-mic`, `rescan-mics`,
 `settings`,
-`mic`, `theme`, `output`, `numbers`, `punctuation`, `trailing-space`,
+`mic`, `theme`, `output`, `numbers`, `punctuation`, `structure`, `trailing-space`,
 `auto-punctuate`, `serial`, `spell`, `middle-click`, `hotkey`, `mute`, `reset-defaults`,
 `reset-terminal`, `ping`, `doctor`, `help`, `quit`.
 
@@ -280,6 +282,7 @@ the settings modal would.
 | `output` | mode | `clipboard`, `type`, `type_fast` |
 | `numbers` | mode | `auto`, `digits`, `words` |
 | `punctuation` | mode | `full`, `no_terminal_period`, `no_punctuation`, `aesthetic_lowercase`, `gen_z` |
+| `structure` | mode | `off`, `inline`, `blocks` — turns spoken lists into bullets. `blocks` emits real line breaks, so **typing downgrades it to `inline`**: read `structure_setting` for what the user chose and `structure_mode` for what is in force |
 | `theme` | theme | `auto`, `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white` |
 | `trailing-space` | state | `on`, `off` (omit to toggle) |
 | `auto-punctuate` | state | `on`, `off` (omit to toggle) |

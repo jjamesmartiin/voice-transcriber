@@ -353,6 +353,7 @@ class TestPostProcessorDictationWorkflows:
             "vllm": "vLLM",
             "tailscale": "Tailscale",
         }
+        saved = pp.get_custom_dictionary()
         pp.set_custom_dictionary(custom_dict)
         try:
             text = "push the commit to github and mirror it to gitea on nixos using pytorch and vllm"
@@ -363,7 +364,10 @@ class TestPostProcessorDictationWorkflows:
             assert "PyTorch" in cleaned
             assert "vLLM" in cleaned
         finally:
-            pp.set_custom_dictionary({})
+            # Restore rather than wipe: the merged dictionary is process state that
+            # later tests legitimately depend on. Wiping it made the suite
+            # order-dependent (a later test lost "github" -> "GitHub").
+            pp.set_custom_dictionary(saved if saved else None)
 
     def test_spoken_numbers_to_digits(self):
         """Spoken numbers are converted to digits in natural contexts."""

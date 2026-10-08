@@ -249,6 +249,7 @@ class SimpleVoiceTranscriber:
             sound_theme=t2.SOUND_THEME,
             ui_theme=getattr(t2, 'UI_THEME', 'auto'),
             punctuation_mode=getattr(t2, 'PUNCTUATION_MODE', 'full'),
+            structure_mode=getattr(t2, 'get_structure_mode', lambda: 'off')(),
             trailing_space=getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True),
             auto_punctuate=getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True),
             number_digits=getattr(t2, 'NUMBER_DIGITS', True),
@@ -282,6 +283,7 @@ class SimpleVoiceTranscriber:
         self.tui.on_hotkey_remove = self._on_tui_hotkey_remove
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
         self.tui.on_set_punctuation = self._on_tui_set_punctuation_mode
+        self.tui.on_cycle_structure = self._on_tui_cycle_structure_mode
         self.tui.on_reset_defaults = self._on_tui_reset_defaults
         self.tui.on_open_preset_picker = self.open_preset_picker
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
@@ -575,6 +577,18 @@ class SimpleVoiceTranscriber:
         self._sync_tui_state()
         disp = t2.get_preset_display_name(new_mode)
         self.tui.print_event("✨ Mode Preset", f"Active preset set to {disp}", level="success")
+
+    def _on_tui_cycle_structure_mode(self):
+        import t2
+        new_mode = t2.toggle_structure_mode()
+        self._sync_tui_state()
+        effective = t2.get_effective_structure_mode()
+        detail = new_mode
+        if effective != new_mode:
+            # Say why the setting is not what is in force, rather than silently
+            # typing something other than what the modal shows.
+            detail = f"{new_mode} (typed text uses {effective} — a newline is an Enter keypress)"
+        self.tui.print_event("📋 List Formatting", f"Structure mode: {detail}", level="info")
 
     def _on_tui_reset_defaults(self):
         """Restore every user-tunable setting to its shipped default."""
@@ -1156,6 +1170,8 @@ class SimpleVoiceTranscriber:
             "output_mode": getattr(t2, "OUTPUT_MODE", "clipboard"),
             "number_mode": getattr(t2, "NUMBER_MODE", "auto"),
             "punctuation_mode": getattr(t2, "PUNCTUATION_MODE", "full"),
+            "structure_mode": getattr(t2, "get_effective_structure_mode", lambda: "off")(),
+            "structure_setting": getattr(t2, "get_structure_mode", lambda: "off")(),
             "ui_theme": getattr(t2, "UI_THEME", "auto"),
             "middle_click": bool(getattr(t2, "MIDDLE_CLICK_ENABLED", False)),
             "last_transcription": getattr(self, "last_transcription", ""),
@@ -1425,6 +1441,13 @@ class SimpleVoiceTranscriber:
         if verb in ("punctuation", "preset", "punctuation-mode"):
             need_value()
             t2.set_punctuation_mode(value)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb)
+
+        if verb in ("structure", "structure-mode"):
+            need_value()
+            t2.set_structure_mode(value)
             t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)

@@ -14,6 +14,41 @@ normally reuses the existing bundle. See
 
 ## [Unreleased]
 
+### Added
+
+- **List formatting (`structure_mode`).** Spoken enumerations become real
+  lists: "I can list them like: Thing one. Thing two. Thing three." now comes out
+  as a bulleted list, and spoken "new line" / "new paragraph" / "bullet point"
+  become the layout they name. Three modes — `off` (default), `inline` (markers
+  only, never a newline) and `blocks` (real bullets, for pasting) — set from the
+  settings modal in either frontend, the `structure` control verb, or the config
+  file. Typed output is automatically downgraded from `blocks` to `inline`,
+  because a newline is an Enter keypress in whatever window has focus.
+- **Microphone pauses are no longer thrown away.** The micro-batcher cuts a chunk
+  in silence (a real pause) or at an energy trough (a weaker one) and used to
+  lose that boundary when stitching. The boundary now travels with the text as an
+  in-band control character: in `blocks` mode a clean silence cut is a paragraph
+  break and a forced cut is a line break, while `off` and `inline` flatten both to
+  a space, so the default output is byte-identical to before.
+
+### Fixed
+
+- **Verbal self-corrections no longer corrupt the sentence.** The demo the README
+  and blog advertise — "remind me tuesday no wait make that wednesday …" — came
+  out as "remind make that wednesday …", losing "me tuesday" and leaving the
+  marker "make that" in the text. Chained markers now resolve as one retraction,
+  the words around a retracted value are preserved, and a bare "no" ("Tuesday,
+  no, Wednesday") is supported but only when both values are the same kind of
+  thing, so "please make that happen" and "there is no Wednesday meeting" are
+  left alone.
+- **Enumerations survive.** "Thing one. Thing two. Thing three." was rewritten to
+  "Thing one. Thing two thing three." because the cardinals `two/three/four/five`
+  were listed as dangling prepositions; "One. Two. Three." became "One. 23.".
+- **A list cue keeps its capital.** The colon in "I can list them like: Thing
+  one" no longer lowercases the first item.
+- **Spoken quotation marks are rewrapped.** "he said quote hello unquote" becomes
+  `he said "hello"`; a lone "quote" is never touched.
+
 ## [1.3.1] — 2026-10-08
 
 ### Changed

@@ -29,6 +29,7 @@ _VALUE_VERBS = {
     "output": "clipboard",
     "numbers": "auto",
     "punctuation": "full",
+    "structure": "inline",
 }
 
 
@@ -652,6 +653,7 @@ class TestVerbCatalogue:
         assert control.VERBS["output"]["choices"] == ["clipboard", "type", "type_fast"]
         assert control.VERBS["numbers"]["choices"] == ["auto", "digits", "words"]
         assert control.VERBS["middle-click"]["choices"] == ["on", "off"]
+        assert control.VERBS["structure"]["choices"] == ["off", "inline", "blocks"]
         # A free-text value must not claim a closed set.
         assert "choices" not in control.VERBS["set-mic"]
         assert "choices" not in control.VERBS["theme"] or "auto" in control.VERBS["theme"]["choices"]
@@ -662,6 +664,18 @@ class TestVerbCatalogue:
         assert "required" not in control.VERBS["start"]
         assert control.VERBS["mute"]["toggles"] is True
         assert control.VERBS["spell"]["toggles"] is True
+        assert control.VERBS["structure"]["required"] is True
+
+    def test_structure_verb_reports_both_modes(self):
+        """The reply distinguishes the configured mode from the effective one.
+
+        They differ while typing: "blocks" emits real line breaks, and a newline
+        is an Enter keypress, so the engine types "inline" instead.
+        """
+        spec = control.VERBS["structure"]
+        assert spec["returns"] == ["structure_mode", "structure_setting"]
+        assert "structure_mode" in control.VERBS["status"]["returns"]
+        assert "structure_setting" in control.VERBS["status"]["returns"]
 
     def test_normalize_verb_is_forgiving(self):
         assert control.normalize_verb("  SET_MIC ") == "set-mic"

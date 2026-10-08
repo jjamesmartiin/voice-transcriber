@@ -465,6 +465,74 @@ def test_auto_type_auto_punctuate_config_and_toggle(tmp_path, monkeypatch):
     assert t2.PUNCTUATION_MODE == "full"
 
 
+def test_structure_mode_defaults_off_and_round_trips(tmp_path, monkeypatch):
+    """The list-formatting setting persists, and "off" is the shipped default."""
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    t2.load_audio_config()
+    assert t2.get_structure_mode() == "off"
+    assert t2.get_effective_structure_mode() == "off"
+
+    t2.set_structure_mode("blocks")
+    assert t2.get_structure_mode() == "blocks"
+    saved = yaml.safe_load(config.read_text())
+    assert saved["structure_mode"] == "blocks"
+
+    # A fresh load reads it back.
+    t2.STRUCTURE_MODE = "off"
+    t2.load_audio_config()
+    assert t2.get_structure_mode() == "blocks"
+
+
+def test_structure_mode_is_unknown_value_safe(tmp_path, monkeypatch):
+    """An unrecognised value falls back to "off" rather than guessing."""
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"structure_mode": "wat"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    t2.load_audio_config()
+    assert t2.get_structure_mode() == "off"
+
+
+def test_typing_downgrades_blocks_to_inline(tmp_path, monkeypatch):
+    """A newline is an Enter keypress, so typed output never gets real breaks.
+
+    The configured mode stays "blocks" (it is what the user chose, and what the
+    settings modal shows); the *effective* mode is what reaches the
+    post-processor, and it is "inline" whenever the text is being typed.
+    """
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    t2.load_audio_config()
+
+    import post_processor
+    try:
+        t2.set_structure_mode("blocks")
+
+        t2.set_output_mode("type_fast")
+        assert t2.get_structure_mode() == "blocks"
+        assert t2.get_effective_structure_mode() == "inline"
+        assert post_processor.get_structure_mode() == "inline"
+
+        t2.set_output_mode("clipboard")
+        assert t2.get_effective_structure_mode() == "blocks"
+        assert post_processor.get_structure_mode() == "blocks"
+
+        # Switching to a typing mode through the cycle path downgrades too.
+        t2.cycle_output_mode()  # clipboard -> type
+        assert t2.get_effective_structure_mode() == "inline"
+        assert post_processor.get_structure_mode() == "inline"
+    finally:
+        t2.set_structure_mode("off")
+        t2.set_output_mode("clipboard")
+
+
 def test_main_typing_formatting_options(monkeypatch):
     """Test that disabling trailing space and auto-punctuate works in main._do_process_recording."""
     from main import SimpleVoiceTranscriber

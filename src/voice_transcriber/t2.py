@@ -135,6 +135,9 @@ SOUND_THEME = "proximity"
 UI_THEME = "auto"
 PUNCTUATION_MODE = "full"
 PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "aesthetic_lowercase", "gen_z"]
+#: Structured output (spoken lists -> bullets). "off" is the shipped default.
+STRUCTURE_MODE = "off"
+STRUCTURE_MODES = ["off", "inline", "blocks"]
 LANGUAGE = "en"
 WAIT_FOR_MODEL_ON_STARTUP = True
 ENABLE_SLM = False
@@ -165,6 +168,7 @@ DEFAULT_SETTINGS = {
     'SOUND_THEME': "proximity",
     'UI_THEME': "red",
     'PUNCTUATION_MODE': "no_punctuation",
+    'STRUCTURE_MODE': "off",
     'LANGUAGE': "en",
     'WAIT_FOR_MODEL_ON_STARTUP': True,
     'ENABLE_SLM': False,
@@ -760,7 +764,7 @@ def _normalize_bool(value, default: bool = False) -> bool:
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, TYPING_WPM, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, TYPING_WPM, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -818,6 +822,11 @@ def load_audio_config(file_path=None):
             env_punct = os.environ.get("VT_PRESET", "").strip().lower() or os.environ.get("VT_PUNCTUATION_MODE", "").strip().lower()
             if env_punct:
                 PUNCTUATION_MODE = get_canonical_preset_name(env_punct)
+
+            STRUCTURE_MODE = normalize_structure_mode(config.get('structure_mode', 'off'))
+            env_structure = os.environ.get("VT_STRUCTURE_MODE", "").strip().lower()
+            if env_structure:
+                STRUCTURE_MODE = normalize_structure_mode(env_structure)
 
             LANGUAGE = config.get('language', 'en')
             env_lang = os.environ.get("VT_LANGUAGE", "").strip().lower()
@@ -1010,6 +1019,9 @@ def load_audio_config(file_path=None):
         # Keep post-processor punctuation mode in sync
         set_punctuation_mode(PUNCTUATION_MODE)
 
+        # Publish the effective structured-output mode (never saves: this is a load)
+        _push_structure_mode()
+
         # Sync custom word/phrase dictionary if configured in config or external file
         dict_setting = config.get('dictionary')
         dict_file = config.get('dictionary_file')
@@ -1083,6 +1095,7 @@ def save_audio_config(file_path=None):
             'keep_bluetooth_handsfree': KEEP_BLUETOOTH_HANDSFREE,
             'punctuation_mode': PUNCTUATION_MODE,
             'preset': PUNCTUATION_MODE,
+            'structure_mode': STRUCTURE_MODE,
             'language': LANGUAGE,
             'enable_slm': ENABLE_SLM,
             'wait_for_model_on_startup': WAIT_FOR_MODEL_ON_STARTUP,
@@ -1122,6 +1135,7 @@ def reset_to_defaults() -> dict:
         globals()[name] = value
     NUMBER_DIGITS = (NUMBER_MODE != "words")
     set_number_digits(NUMBER_MODE)
+    _push_structure_mode()
     try:
         import hotkeys
 
@@ -1142,6 +1156,7 @@ def cycle_output_mode() -> str:
     COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
     if AUTO_TYPE and AUTO_TYPE_AUTO_PUNCTUATE:
         set_punctuation_mode("full")
+    _push_structure_mode()
     return OUTPUT_MODE
 
 
@@ -1159,6 +1174,7 @@ def set_output_mode(mode: str) -> str:
         COPY_TO_CLIPBOARD = False
     if AUTO_TYPE and AUTO_TYPE_AUTO_PUNCTUATE:
         set_punctuation_mode("full")
+    _push_structure_mode()
     return OUTPUT_MODE
 
 
@@ -1425,6 +1441,67 @@ def cycle_punctuation_mode() -> str:
     next_mode = PUNCTUATION_MODES[(idx + 1) % len(PUNCTUATION_MODES)]
     set_punctuation_mode(next_mode)
     return next_mode
+
+
+def normalize_structure_mode(value) -> str:
+    """Canonicalise a structure mode; anything unrecognised means "off".
+
+    The post-processor owns the behaviour and the alias table, so this delegates
+    to it rather than keeping a second copy that could drift.
+    """
+    try:
+        from post_processor import normalize_structure_mode as post_normalize
+        return post_normalize(value)
+    except Exception:
+        return "off"
+
+
+def get_structure_mode() -> str:
+    """The configured structure mode ("off"/"inline"/"blocks")."""
+    return STRUCTURE_MODE
+
+
+def get_effective_structure_mode() -> str:
+    """The structure mode that is safe for the current output path.
+
+    "blocks" emits real line breaks, and a newline is an Enter keypress in
+    whatever window has focus — Slack sends the message, a terminal executes it.
+    "inline" emits markers only, so typing downgrades to it. Clipboard and paste
+    output gets the real breaks.
+    """
+    if STRUCTURE_MODE == "blocks" and OUTPUT_MODE in ("type", "type_fast"):
+        return "inline"
+    return STRUCTURE_MODE
+
+
+def _push_structure_mode() -> str:
+    """Publish the effective structure mode to the post-processor; never saves."""
+    effective = get_effective_structure_mode()
+    try:
+        from post_processor import set_structure_mode as post_set_structure
+        post_set_structure(effective)
+    except Exception:
+        pass
+    return effective
+
+
+def set_structure_mode(mode) -> str:
+    """Set and persist the structure mode; keeps the post-processor in sync."""
+    global STRUCTURE_MODE
+    STRUCTURE_MODE = normalize_structure_mode(mode)
+    _push_structure_mode()
+    save_audio_config()
+    return STRUCTURE_MODE
+
+
+def toggle_structure_mode() -> str:
+    """Cycle off -> inline -> blocks -> off and persist."""
+    global STRUCTURE_MODE
+    index = STRUCTURE_MODES.index(STRUCTURE_MODE) if STRUCTURE_MODE in STRUCTURE_MODES else 0
+    STRUCTURE_MODE = STRUCTURE_MODES[(index + 1) % len(STRUCTURE_MODES)]
+    _push_structure_mode()
+    save_audio_config()
+    return STRUCTURE_MODE
 
 
 def set_number_digits(value):
@@ -2103,6 +2180,12 @@ def select_settings_picker():
             "keywords": "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
         },
         {
+            "id": "structure",
+            "icon": "☰ ",
+            "title": "List Formatting",
+            "keywords": "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
+        },
+        {
             "id": "output_mode",
             "icon": "🚀 ",
             "title": "Output Delivery",
@@ -2189,6 +2272,19 @@ def select_settings_picker():
             # style of each preset is visible at a glance.
             _name, badge, preview, color = get_preset_presentation(PUNCTUATION_MODE)
             return preview, badge, color
+        elif item_id == "structure":
+            # The configured mode and the effective one can differ: typing
+            # downgrades "blocks" to "inline" because a newline is an Enter
+            # keypress in whatever window has focus.
+            effective = get_effective_structure_mode()
+            if STRUCTURE_MODE == "off":
+                return "Flat prose (no list formatting)", "[OFF]", "dim white"
+            elif STRUCTURE_MODE == "inline":
+                return "Bullets on one line: - one. - two.", "[INLINE]", "cyan"
+            elif effective != STRUCTURE_MODE:
+                return "Bullets on their own lines (typed text stays inline)", "[PASTE ONLY]", "yellow"
+            else:
+                return "Bullets on their own lines", "[BLOCKS]", "green"
         elif item_id == "trailing_space":
             if AUTO_TYPE_TRAILING_SPACE:
                 return "Enabled (appends ' ')", "[ON]", "green"
@@ -2357,6 +2453,8 @@ def select_settings_picker():
                     else:
                         cycle_punctuation_mode()
                     save_audio_config()
+                elif item_id == "structure":
+                    toggle_structure_mode()
                 elif item_id == "output_mode":
                     cycle_output_mode()
                     save_audio_config()

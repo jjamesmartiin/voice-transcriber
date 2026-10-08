@@ -19,7 +19,12 @@ if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 import transcribe2
 
-from post_processor import clean_speech_transcription, STUTTER_PROTECTED_WORDS
+from post_processor import (
+    clean_speech_transcription,
+    STUTTER_PROTECTED_WORDS,
+    SEGMENT_SENTINEL,
+    SOFT_SEGMENT_SENTINEL,
+)
 
 # Peak amplitude above which a block counts as definite speech (matches the live
 # VAD / worker energy gate).
@@ -59,7 +64,12 @@ def _common_prefix_len(a: str, b: str) -> int:
         i += 1
     return i
 
-def deduplicate_text_overlap(prev_text: str, new_text: str, has_speech_overlap: bool = True) -> str:
+def deduplicate_text_overlap(
+    prev_text: str,
+    new_text: str,
+    has_speech_overlap: bool = True,
+    separator: str = " ",
+) -> str:
     """
     Deduplicates overlapping word sequences between consecutive micro-batch transcripts.
     Preserves genuine repeated words (e.g. 'two two three', 'really really') while
@@ -72,8 +82,14 @@ def deduplicate_text_overlap(prev_text: str, new_text: str, has_speech_overlap: 
 
     # If there was no acoustic speech overlap between chunks (e.g. cut cleanly in silence
     # or at an energy valley), genuine spoken repetitions must be preserved untouched.
+    #
+    # This is also the only branch that saw a real pause, so it is the only one that
+    # carries a boundary: `separator` is a segment sentinel when the cut was clean in
+    # silence, a softer one at an energy trough, and a plain space otherwise. The
+    # branches below all splice two chunks mid-phrase, which is evidence of speech
+    # overlap rather than a pause, so they always join with a space.
     if not has_speech_overlap:
-        return prev_text.strip() + ' ' + new_text.strip()
+        return prev_text.strip() + separator + new_text.strip()
 
     prev_words = prev_text.strip().split()
     new_words = new_text.strip().split()
@@ -324,7 +340,10 @@ class StreamingMicroBatcher:
                         text = text.rstrip('. \t\r\n')
 
                 with self.results_lock:
-                    self.transcribed_chunks.append((chunk_index, text, has_overlap))
+                    # `is_forced` describes the cut *before* this chunk: a clean
+                    # silence cut is a real pause, a forced energy-trough cut is a
+                    # weaker boundary. The stitcher turns that into a sentinel.
+                    self.transcribed_chunks.append((chunk_index, text, has_overlap, is_forced))
             except Exception as e:
                 print(f'Micro-batch worker error: {e}')
             finally:
@@ -466,16 +485,30 @@ class StreamingMicroBatcher:
 
             raw_full = ''
             for item in self.transcribed_chunks:
-                if len(item) == 3:
+                if len(item) >= 4:
+                    _, t, has_overlap, is_forced = item[:4]
+                elif len(item) == 3:
                     _, t, has_overlap = item
+                    is_forced = False
                 else:
                     _, t = item[:2]
                     has_overlap = True
+                    is_forced = False
                 if not t:
                     continue
-                raw_full = deduplicate_text_overlap(raw_full, t, has_speech_overlap=has_overlap)
+                # A boundary is only meaningful when there is already text to
+                # separate, and only when the cut was clean (see dedup above).
+                if raw_full:
+                    separator = SOFT_SEGMENT_SENTINEL if is_forced else SEGMENT_SENTINEL
+                else:
+                    separator = " "
+                raw_full = deduplicate_text_overlap(
+                    raw_full, t, has_speech_overlap=has_overlap, separator=separator
+                )
 
-            raw_full = re.sub(r"\s+([.,!?;:])", r"\1", raw_full)
+            # A sentinel counts as whitespace here, so a stray full stop that
+            # starts a new chunk still attaches to the sentence before it.
+            raw_full = re.sub(r"[\s\x1e\x1f]+([.,!?;:])", r"\1", raw_full)
             raw_full = re.sub(r"([.!?])\s*\1+", r"\1", raw_full)
 
             # Execute final cleaning pass (skip_slm=True for instant ASR, skip_slm=False for vLLM SLM)

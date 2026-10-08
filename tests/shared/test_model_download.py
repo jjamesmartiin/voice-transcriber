@@ -37,9 +37,38 @@ def test_is_local_model_complete(tmp_path):
 
 
 def test_find_repo_root():
+    """A real checkout is found from this file's own path."""
     root = model_download.find_repo_root()
     assert root is not None
-    assert os.path.isdir(os.path.join(root, ".git"))
+    assert model_download._has_repo_marker(root)
+
+
+def test_find_repo_root_accepts_a_worktree_marker(monkeypatch, tmp_path):
+    """`git worktree add` leaves a `.git` *file*, not a directory.
+
+    Regression: requiring a directory made ``find_repo_root()`` return None in a
+    worktree, so the Cohere weights were installed outside the checkout and the
+    worktree's own ``models/`` directory was ignored.
+    """
+    src = tmp_path / "checkout" / "src" / "voice_transcriber"
+    src.mkdir(parents=True)
+    (src / "model_download.py").write_text("# stub", encoding="utf-8")
+    (tmp_path / "checkout" / ".git").write_text(
+        "gitdir: /elsewhere/.git/worktrees/checkout\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(model_download, "__file__", str(src / "model_download.py"))
+
+    assert model_download.find_repo_root() == str(tmp_path / "checkout")
+
+
+def test_find_repo_root_is_none_without_a_marker(monkeypatch, tmp_path):
+    """Read-only installs (Nix store, AppImage) have no marker: fall back."""
+    src = tmp_path / "readonly_app" / "src" / "voice_transcriber"
+    src.mkdir(parents=True)
+    (src / "model_download.py").write_text("# stub", encoding="utf-8")
+    monkeypatch.setattr(model_download, "__file__", str(src / "model_download.py"))
+
+    assert model_download.find_repo_root() is None
 
 
 def test_write_provenance(tmp_path):

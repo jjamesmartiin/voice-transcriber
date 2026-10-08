@@ -94,6 +94,11 @@ pub enum Wire {
         ui_theme: Option<String>,
         #[serde(default)]
         punctuation_mode: Option<String>,
+        /// Configured list-formatting mode: "off", "inline" or "blocks". The
+        /// engine reports what the user chose; the *effective* mode can be
+        /// "inline" while typing, because a newline is an Enter keypress.
+        #[serde(default)]
+        structure_mode: Option<String>,
         #[serde(default)]
         trailing_space: Option<bool>,
         #[serde(default)]

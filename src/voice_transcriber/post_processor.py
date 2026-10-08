@@ -46,7 +46,7 @@ DANGLING_WORDS_REGEX = re.compile(
     r"of|to|in|for|with|on|at|from|by|about|into|through|during|below|between|under|without|"
     r"and|or|but|because|if|while|since|until|unless|"
     r"very|too|quite|really|such|more|less|most|least|"
-    r"two|three|four|five|several|multiple|few|many|some|another|each|every|"
+    r"several|multiple|few|many|some|another|each|every|"
     r"different|similar|same|other|next|previous|main|"
     r"is|are|was|were|be|been|being|have|has|had|can|could|would|should|shall|will|might|must"
     r")\s*[.?!]\s+([a-zA-Z])",
@@ -149,7 +149,6 @@ SPOKEN_IP_REGEX = re.compile(
 # Bare CIDR suffix already attached to a digit ("10.0.0.0 slash 24").
 SPOKEN_SUBNET_REGEX = re.compile(r'(?<=\d)\s+slash\s+(\d{1,2})\b', re.IGNORECASE)
 
-
 def _path_repl(m: re.Match) -> str:
     segments = re.findall(r'slash\s+([a-zA-Z0-9_.-]+)', m.group(0), flags=re.IGNORECASE)
     # Path segments are case-sensitive and dictated lowercase; the dictionary has
@@ -207,6 +206,11 @@ _MONTH_NAMES = (
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
 )
+
+_WEEKDAYS = (
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "tues", "thurs", "weds",
+)
 _MONTH_DAY_FOLLOW_REGEX = re.compile(r"\d{1,2}(?:st|nd|rd|th)?$", re.IGNORECASE)
 
 # Common technical acronyms & proper nouns to preserve casing mid-sentence
@@ -263,6 +267,12 @@ def normalize_mid_sentence_casing(text: str) -> str:
         # A month that names a date keeps its capitalization ("my birthday is June 23rd").
         if word.lower() in _MONTH_NAMES and _MONTH_DAY_FOLLOW_REGEX.match(_next_token_after(text, m.end())):
             return m.group(0)
+
+        # A weekday keeps its capitalization wherever it appears: English always
+        # capitalizes them, and the ASR is the only source of that casing ("on
+        # Tuesday, no, Wednesday" must not lose the capital on Wednesday).
+        if word.lower() in _WEEKDAYS:
+            return m.group(0)
         # Preserve plural acronyms mid-sentence ("LLMs", "VMs", "GPUs", "APIs", "SSDs"):
         # all-caps stem + trailing plural 's'. The base-length guard keeps "Is"/"As"/"Us"
         # from being exempted (they should still decapitalize to is/as/us).
@@ -275,12 +285,18 @@ def normalize_mid_sentence_casing(text: str) -> str:
         idx = start_idx - 1
         while idx >= 0 and text[idx] in " \t\r\n":
             idx -= 1
+        boundary_char = text[idx] if idx >= 0 else ""
         end_prev = idx + 1
         while idx >= 0 and text[idx] not in " \t\r\n":
             idx -= 1
         start_prev = idx + 1
         prev_word = text[start_prev:end_prev].rstrip(".,;:!?") if end_prev > start_prev else ""
         if prev_word.lower() in PROPER_NOUN_PRECEDERS and word.lower() not in COMMON_MID_SENTENCE_WORDS:
+            return m.group(0)
+        # A colon or dash introduces a list or a label, so the capital after it
+        # is the writer's, not ASR over-capitalisation ("I can list them like:
+        # Thing one"). The regex lookbehind only knows about sentence ends.
+        if boundary_char in ":-\u2013\u2014":
             return m.group(0)
         lowercased = word[0].lower() + word[1:]
         return " " + lowercased
@@ -320,16 +336,214 @@ STANDALONE_MUTTERINGS_REGEX = re.compile(
     re.IGNORECASE
 )
 
-# Verbal retractions and self-corrections (e.g. "5 PM... actually 6 PM", "John... I mean Alice", "scratch that")
+# ---------------------------------------------------------------------------
+# Verbal self-corrections ("on Tuesday, no, Wednesday" -> "on Wednesday")
+# ---------------------------------------------------------------------------
+# Spoken retractions arrive in two shapes:
+#
+#   1. A phrase trigger: "X actually Y", "X no wait Y", "X I mean Y",
+#      "X make that Y", "X or rather Y". Chained triggers collapse into one
+#      retraction ("no wait make that Y"). "scratch that" / "strike that"
+#      delete the preceding clause and supply no replacement, so they are
+#      handled by their own pattern.
+#   2. A bare "no": "X no Y" — the most common spoken form, and the one the
+#      project's own demo exercises ("Tuesday, no, Wednesday").
+#
+# A trigger phrase alone does not justify a rewrite: "please make that happen"
+# and "the deploy actually works" both contain one, and rewriting either
+# destroys the sentence. A retraction is therefore only resolved when the
+# retracted and replacement spans are the *same kind of value* — both weekdays,
+# both clock times, both amounts. "I mean" is exempt from that check: it is
+# never a verb phrase, and names ("send it to bob I mean alice") have no
+# recognisable category.
+_NUMBER_WORDS = frozenset((
+    "zero one two three four five six seven eight nine ten eleven twelve "
+    "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty "
+    "thirty forty fifty sixty seventy eighty ninety hundred thousand million "
+    "billion trillion dozen couple pair"
+).split())
+_ORDINAL_REGEX = re.compile(r"\d{1,2}(?:st|nd|rd|th)", re.IGNORECASE)
+_CLOCK_REGEX = re.compile(
+    r"\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\d{1,2}:\d{2}|noon|midnight|o'?clock",
+    re.IGNORECASE,
+)
+_MONEY_REGEX = re.compile(
+    r"^\s*(?:[$€£]\s*\d+(?:[.,]\d+)?"
+    r"|\d+(?:[.,]\d+)?\s*(?:dollars?|bucks?|euros?|pounds?|cents?|percent|%))\s*$",
+    re.IGNORECASE,
+)
+_RELATIVE_DAYS = ("today", "tomorrow", "tonight", "yesterday", "tonite")
+
+#: Words that can never be a retracted or a replacement value. The pronouns and
+#: determiners double as the span that must be *kept*: in "remind me tuesday no
+#: wait make that wednesday", "me" belongs to the sentence, not to the date.
+#: The trigger words themselves are here too, so a retracted span can never be
+#: mistaken for the marker that follows it.
+_RETRACTION_STOPWORDS = frozenset((
+    "a an the this that these those it me my mine us our ours you your yours "
+    "him his her hers them their theirs i we he she they "
+    "and or but nor yet so then than as if because though although while "
+    "is are was were am be been being do does did done have has had "
+    "will would shall should can could might must "
+    "to for at in on of with by from about into onto over under "
+    "uh um er ah eh oh okay ok well just very really quite also too "
+    "not actually mean rather make wait scratch strike"
+).split())
+
+#: End-of-phrase deletions: the marker stands alone and removes what precedes it.
+_RETRACTION_DELETE_PHRASES = ("scratch that", "strike that", "never mind that", "never mind")
+#: Markers that introduce a replacement value.
+_RETRACTION_PHRASE_TRIGGERS = ("actually", "make that", "no wait", "i mean", "or rather")
+
+_RETRACTION_TOKEN = r"[A-Za-z0-9$€£%.:'\-]+"
+_RETRACTION_TRIGGER_ALT = r"(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)"
+#: One or more chained markers: "no wait make that Wednesday" is one retraction.
+_RETRACTION_TRIGGER_CHAIN = (
+    _RETRACTION_TRIGGER_ALT + r"(?:\s*,?\s*" + _RETRACTION_TRIGGER_ALT + r")*"
+)
+#: Sentence content that must survive a retraction ("remind **me** …").
+_RETRACTION_KEEP = r"(?P<keep>(?:(?:me|us|you|him|her|them|it|the|my|your|our|their)\s+)*)"
+_RETRACTION_PREP = r"(?:(?P<pre>\b(?:at|in|on|to|for|by|from|with|of|about)\s+))?"
+
+# Verbal retractions and self-corrections (e.g. "5 PM... actually 6 PM",
+# "John... I mean Alice", "on Tuesday... no wait Wednesday", "scratch that")
 RETRACTION_REPLACEMENT_PATTERNS = [
     # "scratch that" / "strike that" / "never mind that" at end of phrase
     re.compile(r"(?:[,.]*\s*)(?:scratch\s+that|strike\s+that|never\s+mind\s+that)[.!?,;:]*\s*$", re.IGNORECASE),
-    # "X... actually Y" / "X... make that Y" / "X... no wait Y" / "X... I mean Y" / "X... or rather Y"
-    re.compile(r"(?:\b(at|in|on|to|for|by|from|with|of|about)\s+)?\b([a-zA-Z0-9$%.\:]+(?:\s+[a-zA-Z0-9$%.\:]+){0,1})\s*[,.]*\s*(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)\s+([a-zA-Z0-9$%.\:]+(?:\s+[a-zA-Z0-9$%.\:]+){0,2})\b", re.IGNORECASE),
+    # "X... actually Y" / "X... make that Y" / "X... no wait Y" / "X... I mean Y"
+    re.compile(
+        _RETRACTION_KEEP + _RETRACTION_PREP
+        + r"(?P<old>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r")?)"
+        + r"\s*[,.;:]*\s*"
+        + r"(?P<trig>" + _RETRACTION_TRIGGER_CHAIN + r")"
+        + r"\s*[,.;:]*\s*"
+        + r"(?P<new>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r"){0,2})",
+        re.IGNORECASE,
+    ),
 ]
+#: Bare "no" as a retraction marker ("on Tuesday, no, Wednesday"). It lives
+#: outside RETRACTION_REPLACEMENT_PATTERNS because it *always* requires the
+#: value-category guard below: the marker alone is never evidence enough.
+_RETRACTION_BARE_NO_PATTERN = re.compile(
+    _RETRACTION_KEEP + _RETRACTION_PREP
+    + r"(?P<old>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r")?)"
+    + r"\s*[,.;:]*\s*\bno\b(?!\s+wait)\s*[,.;:]*\s*"
+    + r"(?P<new>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r"){0,2})",
+    re.IGNORECASE,
+)
 
-_RETRACTION_TRIGGER_0 = ("scratch", "strike", "never")
-_RETRACTION_TRIGGER_1 = ("actually", "make that", "no wait", "mean", "rather")
+
+def _value_category(span: str) -> str | None:
+    """Classify a retracted/replacement span so like can replace like.
+
+    Returns a category name (``weekday``, ``month``, ``relative_day``, ``time``,
+    ``money``, ``ordinal``, ``number``, ``code``) or ``None`` when the span is
+    not a recognisable value.
+    """
+    low = span.strip().lower().rstrip(".,;:!?")
+    if not low:
+        return None
+    tokens = [t.strip(".,;:!?") for t in low.split()]
+    if any(t in _WEEKDAYS for t in tokens):
+        return "weekday"
+    if any(t in _MONTH_NAMES for t in tokens):
+        return "month"
+    if any(t in _RELATIVE_DAYS for t in tokens):
+        return "relative_day"
+    if _CLOCK_REGEX.search(low):
+        return "time"
+    if _MONEY_REGEX.match(low):
+        return "money"
+    if tokens and all(_ORDINAL_REGEX.fullmatch(t) for t in tokens):
+        return "ordinal"
+    if tokens and all(t in _NUMBER_WORDS or t.isdigit() for t in tokens):
+        return "number"
+    if any(c.isdigit() for c in low) and any(c.isalpha() for c in low):
+        return "code"
+    return None
+
+
+def _retraction_replacement(match, require_category: bool) -> str:
+    """Rebuild a matched retraction, or hand the matched text back untouched."""
+    keep = match.group("keep") or ""
+    prep = match.group("pre") or ""
+    old = match.group("old")
+    raw_new = match.group("new")
+
+    if any(t.strip(".,;:!?").lower() in _RETRACTION_STOPWORDS for t in old.split()):
+        # The pattern consumed sentence content ("please make that happen"), not a
+        # retracted value. Leave the text alone.
+        return match.group(0)
+
+    # The replacement ends at the first function word: "wednesday uh and uh also"
+    # is just "wednesday" — the rest of the sentence follows the retraction.
+    tokens = []
+    for token in raw_new.split():
+        if token.strip(".,;:!?").lower() in _RETRACTION_STOPWORDS:
+            break
+        tokens.append(token)
+    if not tokens:
+        return match.group(0)
+    new = " ".join(tokens)
+
+    if require_category:
+        old_category = _value_category(old)
+        if old_category is None or old_category != _value_category(new):
+            return match.group(0)
+
+    if prep and re.match(r"(?:at|in|on|to|for|by|from|with|of|about)\b", new, re.IGNORECASE):
+        prep = ""
+    return f"{keep}{prep}{new}"
+
+
+def process_verbal_retractions(text: str, text_lower: str | None = None) -> str:
+    """Resolve spoken self-corrections, replacing the retracted value in place.
+
+    ``"on Tuesday, no, Wednesday"`` -> ``"on Wednesday"``,
+    ``"at 5 PM... actually 6 PM"`` -> ``"at 6 PM"``,
+    ``"send it to Bob... I mean Alice"`` -> ``"send it to Alice"``,
+    ``"cancel the deploy, scratch that"`` -> ``"cancel the deploy"``.
+
+    A rewrite needs a marker (a phrase trigger or a bare "no") *and*, for
+    everything except "I mean", a retracted and a replacement value of the same
+    kind. Anything ambiguous is returned unchanged.
+    """
+    if not text:
+        return ""
+
+    if text_lower is None:
+        text_lower = text.lower()
+
+    has_delete = any(p in text_lower for p in _RETRACTION_DELETE_PHRASES)
+    has_trigger = any(p in text_lower for p in _RETRACTION_PHRASE_TRIGGERS)
+    # "no" is common in ordinary speech ("no idea", "no problem"), so only pay for
+    # the regex when the word is present at all.
+    has_bare_no = "no" in text_lower and re.search(r"\bno\b(?!\s+wait)", text_lower) is not None
+    if not (has_delete or has_trigger or has_bare_no):
+        return text
+
+    cleaned = text
+
+    # 1. End-of-phrase deletions ("…, scratch that")
+    if has_delete and RETRACTION_REPLACEMENT_PATTERNS[0].search(cleaned):
+        cleaned = RETRACTION_REPLACEMENT_PATTERNS[0].sub("", cleaned)
+
+    # 2. Phrase-triggered replacements ("X actually Y", "X no wait make that Y")
+    if has_trigger and RETRACTION_REPLACEMENT_PATTERNS[1].search(cleaned):
+        def _phrase_repl(m):
+            trigger = m.group("trig").lower()
+            # "I mean" is never a verb phrase, and names have no category.
+            return _retraction_replacement(m, require_category="i mean" not in trigger)
+
+        cleaned = RETRACTION_REPLACEMENT_PATTERNS[1].sub(_phrase_repl, cleaned)
+
+    # 3. Bare "no" replacements, always category-guarded ("Tuesday, no, Wednesday")
+    if has_bare_no and _RETRACTION_BARE_NO_PATTERN.search(cleaned):
+        cleaned = _RETRACTION_BARE_NO_PATTERN.sub(
+            lambda m: _retraction_replacement(m, require_category=True), cleaned
+        )
+
+    return cleaned.strip()
 
 def _sanitize_slm_output(input_text: str, output_text: str) -> str:
     """
@@ -371,39 +585,6 @@ def _sanitize_slm_output(input_text: str, output_text: str) -> str:
     clean_output = re.sub(r'([,.;:])\s*([,.;:])', r'\1', clean_output)
     return clean_output.strip()
 
-
-def process_verbal_retractions(text: str, text_lower: str | None = None) -> str:
-    """
-    Applies zero-latency verbal self-correction parsing:
-    Replaces retracted phrases ('5 PM... actually 6 PM' -> '6 PM')
-    and handles voice deletions ('scratch that').
-    """
-    if not text:
-        return ""
-
-    if text_lower is None:
-        text_lower = text.lower()
-    has_0 = ("scratch" in text_lower or "strike" in text_lower or "never" in text_lower)
-    has_1 = ("actually" in text_lower or "mean" in text_lower or "rather" in text_lower or "make that" in text_lower or "no wait" in text_lower)
-    if not has_0 and not has_1:
-        return text
-
-    cleaned = text
-    # 1. Handle "scratch that" tail deletion
-    if has_0 and RETRACTION_REPLACEMENT_PATTERNS[0].search(cleaned):
-        cleaned = RETRACTION_REPLACEMENT_PATTERNS[0].sub("", cleaned)
-
-    # 2. Handle verbal replacements ("X... actually Y", "X... I mean Y")
-    if has_1 and RETRACTION_REPLACEMENT_PATTERNS[1].search(cleaned):
-        def _replace_retraction(m):
-            prep = m.group(1)
-            target = m.group(3)
-            if prep and not re.match(r"^(?:at|in|on|to|for|by|from|with|of|about)\b", target, re.I):
-                return f"{prep} {target}"
-            return target
-
-        cleaned = RETRACTION_REPLACEMENT_PATTERNS[1].sub(_replace_retraction, cleaned)
-    return cleaned.strip()
 
 VLLM_API_URL = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/completions")
 
@@ -1875,23 +2056,31 @@ def _strip_punctuation(text: str) -> str:
 
     Decimals (``3.14``), IPs (``192.168.1.10``), paths (``/etc/nixos``) and
     contractions (``don't``) keep their separators; everything else is dropped.
+    Line structure and a leading ``- ``/``1. `` list marker survive, so a list
+    built by :func:`process_structure_blocks` is not flattened back into prose.
     """
-    def _keep_or_drop(m: re.Match) -> str:
-        ch = m.group(0)
-        if ch == "-":
-            return ch
-        start, end = m.start(), m.end()
-        before = text[start - 1] if start > 0 else ""
-        after = text[end] if end < len(text) else ""
-        if before.isalnum() and after.isalnum():
-            return ch
-        if ch in "/." and not before.isalnum() and after.isalnum():
-            return ch
-        return ""
+    def _strip_chunk(chunk: str) -> str:
+        def _keep_or_drop(m: re.Match) -> str:
+            ch = m.group(0)
+            if ch == "-":
+                return ch
+            start, end = m.start(), m.end()
+            before = chunk[start - 1] if start > 0 else ""
+            after = chunk[end] if end < len(chunk) else ""
+            if before.isalnum() and after.isalnum():
+                return ch
+            if ch in "/." and not before.isalnum() and after.isalnum():
+                return ch
+            return ""
 
-    return " ".join(re.sub(r"[^\w\s-]", _keep_or_drop, text).split())
+        return " ".join(re.sub(r"[^\w\s-]", _keep_or_drop, chunk).split())
 
-
+    stripped_lines = []
+    for line in text.split("\n"):
+        marker = _LIST_MARKER_PREFIX_REGEX.match(line)
+        prefix = marker.group(0) if marker else ""
+        stripped_lines.append((prefix + _strip_chunk(line[len(prefix):])).rstrip())
+    return "\n".join(stripped_lines)
 def apply_punctuation_mode(text: str, mode: str | None = None) -> str:
     """Format transcribed text according to the selected mode preset.
 
@@ -2351,11 +2540,338 @@ _MUTTERING_KEYWORDS = ("oop", "whoop", "never")
 _FILLER_KEYWORDS = ("um", "uh", "er", "ah")
 
 
+# ---------------------------------------------------------------------------
+# Spoken quotation marks
+# ---------------------------------------------------------------------------
+# ASR essentially never emits literal quote characters, so quoted speech arrives
+# as words. Both markers must be present in the same span before anything is
+# rewritten: a lone "quote" is ordinary speech ("this quote is great", "and I
+# quote", "I quoted him") and must survive untouched.
+_SPOKEN_QUOTE_PATTERN = re.compile(
+    r"\b(?:quote|open\s+quote|begin\s+quote)\b\s*[:,]?\s+"
+    r"(?P<body>.{2,400}?)"
+    r"\s*\b(?:unquote|end\s+quote|close\s+quote)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def process_spoken_quotes(text: str) -> str:
+    """Wrap speech dictated with spoken quotation marks in real quotes.
+
+    ``"he said quote hello unquote to me"`` -> ``'he said "hello" to me'``. A
+    "quote" with no matching "unquote"/"end quote" is never rewritten.
+    """
+    if "quote" not in text.lower():
+        return text
+
+    def _wrap(match) -> str:
+        body = match.group("body").strip()
+        if not body:
+            return match.group(0)
+        return f'"{body}"'
+
+    return _SPOKEN_QUOTE_PATTERN.sub(_wrap, text)
+
+
+# ---------------------------------------------------------------------------
+# Segment boundaries (a pause beats any word as a cue)
+# ---------------------------------------------------------------------------
+# The micro-batcher cuts a chunk in silence or at an energy trough, and then
+# stitches the transcripts back together — which used to throw the boundary
+# away. It now travels with the text as an in-band control character, so it can
+# never be typed by accident and needs no new function signatures:
+#   HARD — a clean cut in silence: a real pause.
+#   SOFT — a forced cut at an energy trough mid-flow: a weaker boundary.
+SEGMENT_SENTINEL = "\x1e"
+SOFT_SEGMENT_SENTINEL = "\x1f"
+
+# ---------------------------------------------------------------------------
+# Structured output: spoken lists, bullets and paragraph breaks
+# ---------------------------------------------------------------------------
+# "off" (the default) is the identity: unless the user asks for structure this
+# stage must not change a single byte. "inline" emits markers but never a
+# newline, so it is safe for the typing sinks. "blocks" emits real bullets and
+# paragraph breaks and is only safe where the text is pasted rather than typed —
+# a newline is an Enter keypress (see docs/formatting.md).
+_STRUCTURE_MODE = "off"
+
+_STRUCTURE_MODE_ALIASES = {
+    "off": "off", "none": "off", "no": "off", "flat": "off", "disabled": "off",
+    "inline": "inline", "dashes": "inline", "safe": "inline", "single_line": "inline",
+    "blocks": "blocks", "bullets": "blocks", "full": "blocks", "lists": "blocks",
+}
+
+
+def normalize_structure_mode(value) -> str:
+    """Map a user value onto ``off``/``inline``/``blocks``; unknown means off."""
+    if value is None:
+        return "off"
+    key = str(value).strip().lower().replace("-", "_")
+    return _STRUCTURE_MODE_ALIASES.get(key, "off")
+
+
+def set_structure_mode(mode) -> str:
+    """Set the global structured-output mode and return the canonical value."""
+    global _STRUCTURE_MODE
+    _STRUCTURE_MODE = normalize_structure_mode(mode)
+    return _STRUCTURE_MODE
+
+
+def get_structure_mode() -> str:
+    return _STRUCTURE_MODE
+
+
+#: Spoken layout cues. They must follow a clause boundary, so "the new line of
+#: GPUs" is never mistaken for a layout instruction.
+_SPOKEN_BREAK_REGEX = re.compile(
+    r"(?:^|(?<=[.!?,;:]\s))\s*"
+    r"(?:new\s+paragraph|new\s+line|next\s+line|bullet\s+point|next\s+bullet)\b[.,:;]?\s*",
+    re.IGNORECASE,
+)
+
+#: An introducer means "what follows is a list". The colon is the common
+#: dictation cue ("I can list them like:").
+_LIST_CUE_BODY = (
+    r"(?:[:：]|like|as\s+follows|the\s+following(?:\s+things)?|these\s+things|"
+    r"here(?:'s|\s+are)\s+the(?:\s+things)?)"
+)
+#: Scans anywhere, because a list is anchored to its cue, not to a sentence
+#: boundary: in "I can list them like: Thing one." the first item is glued to
+#: the introducer.
+_LIST_CUE_SCAN_REGEX = re.compile(_LIST_CUE_BODY, re.IGNORECASE)
+
+_ORDINAL_WORDS = (
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
+    "ninth", "tenth",
+)
+_ORDINAL_TAIL_REGEX = re.compile(r"\b(?:%s)\b[.,:]?\s*$" % "|".join(_ORDINAL_WORDS), re.IGNORECASE)
+_ORDINAL_HEAD_REGEX = re.compile(r"^(?:%s)\b[.,:]?\s*" % "|".join(_ORDINAL_WORDS), re.IGNORECASE)
+#: Explicit numbering labels are dropped when the list is renumbered, because the
+#: number carries what the label said ("step one: install" -> "1. install").
+_NUMBER_LABEL_PREFIX_REGEX = re.compile(
+    r"^(?:step|number|item|point|bullet)\s+(?:%s)\b\s*[.,:;-]?\s*" % "|".join(_ORDINAL_WORDS),
+    re.IGNORECASE,
+)
+
+#: Items longer than this are prose, not list items.
+_STRUCTURE_MAX_ITEM_WORDS = 25
+#: Without an introducer the bar is higher: three or more short parallel sentences.
+_STRUCTURE_MAX_ITEM_WORDS_UNCUED = 12
+_STRUCTURE_MIN_UNCUED_ITEMS = 3
+#: Leading list marker, preserved by the punctuation presets.
+_LIST_MARKER_PREFIX_REGEX = re.compile(r"^(?:-|\d+\.)\s+")
+
+
+#: A full stop, or a line break — a break only exists here because a pause or a
+#: layout cue put it there, which makes it a sentence boundary too.
+_SENTENCE_BOUNDARY_REGEX = re.compile(r"[.!?](?=\s)|\n+")
+
+
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
+    """Character spans of the sentences in *text*, trailing '.' included."""
+    spans = []
+    start = 0
+    for match in _SENTENCE_BOUNDARY_REGEX.finditer(text):
+        if text[match.start()] == "\n":
+            # The line break is the boundary, not part of either sentence.
+            spans.append((start, match.start()))
+            start = match.end()
+            continue
+        spans.append((start, match.end()))
+        start = match.end()
+        while start < len(text) and text[start].isspace():
+            start += 1
+    if start < len(text) and text[start:].strip():
+        spans.append((start, len(text)))
+    return [(s, e) for s, e in spans if text[s:e].strip()]
+
+
+def _sentence_head(sentence: str) -> str:
+    words = sentence.split()
+    return words[0].lower().strip(".,:;!?") if words else ""
+
+
+#: Head words too common to prove two sentences are parallel items. Without this
+#: any two sentences starting with "I" look like a list, which turned a normal
+#: sentence into a bullet in the first cut of this stage.
+_PARALLEL_HEAD_STOPWORDS = frozenset((
+    "i we you he she it they the a an this that these those there here then and "
+    "but or so also now well okay ok"
+).split())
+
+
+def _items_are_parallel(first: str, other: str) -> bool:
+    """True when *other* reads as the next item of the list *first* starts.
+
+    Either both open with an ordinal ("First, ..." / "Second, ...") or they share
+    a discriminating head word ("Thing one" / "Thing two").
+    """
+    if _ORDINAL_HEAD_REGEX.match(first) and _ORDINAL_HEAD_REGEX.match(other):
+        return True
+    head = _sentence_head(first)
+    if not head or head in _PARALLEL_HEAD_STOPWORDS:
+        return False
+    return head == _sentence_head(other)
+
+
+def _has_number_labels(items: list[str]) -> bool:
+    return all(_NUMBER_LABEL_PREFIX_REGEX.match(item) for item in items)
+
+
+def _sentences_from(text: str, start: int) -> list[tuple[int, int]]:
+    """Absolute spans of the sentences beginning at offset *start*."""
+    return [(start + s, start + e) for s, e in _sentence_spans(text[start:])]
+
+
+def _parallel_run_from(text: str, start: int, max_words: int = _STRUCTURE_MAX_ITEM_WORDS):
+    """The maximal parallel run of sentences from *start*, or ``None``.
+
+    *start* may sit mid-sentence, which is what makes a cue like "list them
+    like:" work: the first item is the text between the cue and the next full
+    stop.
+    """
+    spans = _sentences_from(text, start)
+    if len(spans) < 2:
+        return None
+    first = text[spans[0][0]:spans[0][1]]
+    if len(first.split()) > max_words:
+        return None
+    run = [spans[0]]
+    for span in spans[1:]:
+        candidate = text[span[0]:span[1]]
+        if len(candidate.split()) > max_words:
+            break
+        if not _items_are_parallel(first, candidate):
+            break
+        run.append(span)
+    if len(run) < 2:
+        return None
+    items = [text[s:e].strip() for s, e in run]
+    return run[0][0], run[-1][1], items, _has_number_labels(items)
+
+
+def _find_list_region(text: str):
+    """Locate a spoken list, or return ``None``.
+
+    Two passes. First an introducer, which anchors the list exactly where it
+    starts ("I can list them like: Thing one. Thing two."). Then, with no
+    introducer, a run of ordinal-labelled items or of three or more short
+    sentences sharing a head word ("Deploy alpha. Deploy beta. Deploy gamma.").
+    Everything else is prose and is left alone.
+    """
+    cue = None
+    for match in _LIST_CUE_SCAN_REGEX.finditer(text):
+        cue = match                        # the last introducer wins
+    if cue is not None:
+        region = _parallel_run_from(text, cue.end())
+        if region is not None:
+            return region
+
+    for start, _end in _sentence_spans(text):
+        region = _parallel_run_from(text, start, max_words=_STRUCTURE_MAX_ITEM_WORDS_UNCUED)
+        if region is None:
+            continue
+        items = region[2]
+        labelled = any(
+            _ORDINAL_TAIL_REGEX.search(item)
+            or _ORDINAL_HEAD_REGEX.match(item)
+            or _NUMBER_LABEL_PREFIX_REGEX.match(item)
+            for item in items
+        )
+        if labelled or len(items) >= _STRUCTURE_MIN_UNCUED_ITEMS:
+            return region
+    return None
+
+
+def _tidy_blocks(text: str, mode: str) -> str:
+    """Remove whitespace the injected breaks left behind."""
+    if mode != "blocks":
+        return text
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def _render_items(items: list[str], mode: str, numbered: bool) -> str:
+    lines = []
+    for position, item in enumerate(items, start=1):
+        body = _NUMBER_LABEL_PREFIX_REGEX.sub("", item, count=1) if numbered else item
+        body = body.strip()
+        marker = f"{position}. " if numbered else "- "
+        if mode == "blocks":
+            # A bullet list reads better without per-item full stops.
+            if body.endswith(".") and not body.endswith(".."):
+                body = body[:-1]
+            lines.append(f"{marker}{body}".rstrip())
+        else:
+            lines.append(f"{marker}{body}")
+    if mode == "blocks":
+        return "\n\n" + "\n".join(lines)
+    return " " + " ".join(lines)
+
+
+def _break_replacement(match: re.Match, mode: str) -> str:
+    cue = match.group(0).lower()
+    if "bullet" in cue:
+        return "\n- " if mode == "blocks" else " - "
+    if "paragraph" in cue:
+        return "\n\n" if mode == "blocks" else " - "
+    return "\n" if mode == "blocks" else " - "
+
+
+def _strip_segment_sentinels(text: str, replacement: str = " ") -> str:
+    """Replace boundary sentinels; never leave one in text that can be typed."""
+    return text.replace(SEGMENT_SENTINEL, replacement).replace(SOFT_SEGMENT_SENTINEL, replacement)
+
+
+def _resolve_segment_sentinels(text: str, structure_mode: str | None, is_intermediate: bool) -> str:
+    """Turn microphone-pause sentinels into the layout the current mode asks for.
+
+    With structure off (or for an intermediate live chunk) they become spaces, so
+    the output is byte-identical to before this existed and no control character
+    can reach the terminal. Only "blocks" turns a pause into a break, because a
+    break is a newline and a newline is an Enter keypress.
+    """
+    if is_intermediate:
+        return _strip_segment_sentinels(text)
+    effective = _STRUCTURE_MODE if structure_mode is None else normalize_structure_mode(structure_mode)
+    if effective != "blocks":
+        return _strip_segment_sentinels(text)
+    text = text.replace(SEGMENT_SENTINEL, "\n\n")
+    return text.replace(SOFT_SEGMENT_SENTINEL, "\n")
+
+
+def process_structure_blocks(text: str, mode: str | None = None) -> str:
+    """Render spoken enumerations as bullets and spoken layout cues as breaks.
+
+    Pure and conservative: in "off" mode, or when no cue is recognised, the input
+    is returned unchanged. "inline" never emits a newline (safe for typing);
+    "blocks" emits real line breaks (clipboard/paste only).
+    """
+    effective = _STRUCTURE_MODE if mode is None else normalize_structure_mode(mode)
+    if effective == "off" or not text:
+        return text
+
+    text = _SPOKEN_BREAK_REGEX.sub(lambda m: _break_replacement(m, effective), text)
+
+    region = _find_list_region(text)
+    if region is None:
+        return _tidy_blocks(text, effective)
+    start, end, items, numbered = region
+    prefix = text[:start].rstrip()
+    body = _render_items(items, effective, numbered)
+    if not prefix:
+        # A list that opens the utterance must not begin with a separator.
+        body = body.lstrip()
+    return _tidy_blocks(prefix + body + text[end:], effective)
+
+
 def clean_speech_transcription(
     text: str,
     skip_slm: bool = False,
     punctuation_mode: str | None = None,
-    is_intermediate: bool = False
+    is_intermediate: bool = False,
+    structure_mode: str | None = None,
 ) -> str:
     """
     Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
@@ -2363,6 +2879,11 @@ def clean_speech_transcription(
     """
     if not text:
         return ""
+
+    # 0. Microphone-pause boundaries from the micro-batcher, resolved before any
+    #    other rule sees the text (a pause is the strongest boundary cue we have).
+    if SEGMENT_SENTINEL in text or SOFT_SEGMENT_SENTINEL in text:
+        text = _resolve_segment_sentinels(text, structure_mode, is_intermediate)
 
     # Hot-reload dictionary if files were modified on disk (~1 us check)
     _check_and_reload_dictionary_if_changed()
@@ -2535,6 +3056,9 @@ def clean_speech_transcription(
     # 13h. Process serial numbers, model codes, and NATO phonetic strings ("X K 9 4 J" -> "XK94J")
     cleaned = process_serial_numbers(cleaned)
 
+    # 13i. Convert spoken quotation marks ("he said quote hello unquote" -> 'he said "hello"')
+    cleaned = process_spoken_quotes(cleaned)
+
     cleaned = cleaned.strip()
     if not cleaned or not cleaned.strip(".,!?;: \t\n\r"):
         return ""
@@ -2548,7 +3072,13 @@ def clean_speech_transcription(
                 if len(cleaned.split(None, 3)) >= 3:
                     cleaned += "."
 
-    # 15. Apply punctuation mode formatting (if not intermediate chunk)
+    # 15. Structured output: spoken lists become bullets, spoken layout cues
+    #     become breaks. Runs before the punctuation preset, which preserves
+    #     the markers (see _strip_punctuation).
+    if not is_intermediate:
+        cleaned = process_structure_blocks(cleaned, mode=structure_mode)
+
+    # 16. Apply punctuation mode formatting (if not intermediate chunk)
     if not is_intermediate:
         cleaned = apply_punctuation_mode(cleaned, mode=punctuation_mode)
 
