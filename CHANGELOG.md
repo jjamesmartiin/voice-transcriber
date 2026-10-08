@@ -30,6 +30,15 @@ normally reuses the existing bundle. See
   in-band control character: in `blocks` mode a clean silence cut is a paragraph
   break and a forced cut is a line break, while `off` and `inline` flatten both to
   a space, so the default output is byte-identical to before.
+- **`cleanup_mode`: three levels of cleaning.** `off` keeps every word (no
+  hallucination stripping, no filler removal, no correction rewriting — verbatim),
+  `artifacts` removes noise only (a `"Thank you."` hallucinated from a one-second
+  clip, filler, stutters, trailing mutterings) while leaving anything you corrected
+  verbatim, and `full` — the default, and what shipped before — also resolves
+  self-corrections. Settable from the settings modal in either frontend, the
+  `cleanup` control verb, or the config file. Number/date formatting, the
+  dictionary, casing and the punctuation preset are separate settings and are not
+  gated by it. See [`docs/cleanup_modes.md`](docs/cleanup_modes.md).
 
 ### Fixed
 

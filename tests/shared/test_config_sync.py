@@ -533,6 +533,58 @@ def test_typing_downgrades_blocks_to_inline(tmp_path, monkeypatch):
         t2.set_output_mode("clipboard")
 
 
+def test_cleanup_mode_defaults_full_and_round_trips(tmp_path, monkeypatch):
+    """The cleanup setting persists, and "full" is the shipped default."""
+    import yaml
+
+    import post_processor
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    t2.load_audio_config()
+    assert t2.get_cleanup_mode() == "full"
+    # Loading publishes it to the post-processor, so the default is in force too.
+    assert post_processor.get_cleanup_mode() == "full"
+
+    try:
+        t2.set_cleanup_mode("artifacts")
+        assert t2.get_cleanup_mode() == "artifacts"
+        assert post_processor.get_cleanup_mode() == "artifacts"
+        assert yaml.safe_load(config.read_text())["cleanup_mode"] == "artifacts"
+
+        # A fresh load reads it back.
+        t2.CLEANUP_MODE = "full"
+        t2.load_audio_config()
+        assert t2.get_cleanup_mode() == "artifacts"
+
+        # Cycling walks off -> artifacts -> full -> off.
+        assert t2.toggle_cleanup_mode() == "full"
+        assert t2.toggle_cleanup_mode() == "off"
+        assert post_processor.get_cleanup_mode() == "off"
+    finally:
+        t2.set_cleanup_mode("full")
+
+
+def test_cleanup_mode_env_override_and_unknown_value(tmp_path, monkeypatch):
+    import yaml
+
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"cleanup_mode": "artifacts"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    monkeypatch.setenv("VT_CLEANUP_MODE", "off")
+    t2.load_audio_config()
+    assert t2.get_cleanup_mode() == "off"
+
+    # An unrecognised value falls back to the default, not to "off": a typo must
+    # not look like a deliberately disabled feature.
+    monkeypatch.setenv("VT_CLEANUP_MODE", "nonsense")
+    t2.load_audio_config()
+    assert t2.get_cleanup_mode() == "full"
+    t2.set_cleanup_mode("full")
+
+
 def test_main_typing_formatting_options(monkeypatch):
     """Test that disabling trailing space and auto-punctuate works in main._do_process_recording."""
     from main import SimpleVoiceTranscriber

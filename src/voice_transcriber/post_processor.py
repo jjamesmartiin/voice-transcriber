@@ -2909,19 +2909,90 @@ def process_structure_blocks(text: str, mode: str | None = None) -> str:
     return _tidy_blocks(prefix + body + text[end:], effective)
 
 
+# ---------------------------------------------------------------------------
+# Cleanup modes: how much of the pass may change the words themselves
+# ---------------------------------------------------------------------------
+# The post-processor does two very different jobs, and they are worth separating:
+#
+#   * **removing noise** — hallucinations on silence ("Thank you." out of a 1 s
+#     clip), filler ("uh"), stutters ("the the"), a clipped onset consonant
+#     ("t needs" -> "needs"), trailing mutterings ("..., never mind").
+#   * **resolving self-corrections** — the speaker changed their mind, so the
+#     retracted words go: "Tuesday, no sorry, Wednesday" -> "Wednesday".
+#
+# "off" keeps every word, "artifacts" removes noise only, and "full" — the
+# shipped default — also resolves corrections. Number/date formatting, the custom
+# dictionary, casing, the punctuation preset and structured output are *not*
+# gated here: they are separate settings, and they change how text looks rather
+# than which words survive.
+_CLEANUP_MODE = "full"
+_CLEANUP_MODES = ["off", "artifacts", "full"]
+_CLEANUP_MODE_ALIASES = {
+    "off": "off", "none": "off", "no": "off", "raw": "off", "verbatim": "off",
+    "disabled": "off",
+    "artifacts": "artifacts", "artifact": "artifacts", "noise": "artifacts",
+    "safe": "artifacts", "cleanup": "artifacts", "light": "artifacts",
+    "full": "full", "all": "full", "corrections": "full", "complete": "full",
+    "heavy": "full",
+}
+
+
+def normalize_cleanup_mode(value) -> str:
+    """Map a user value onto ``off``/``artifacts``/``full``.
+
+    An unrecognised value means ``full``, unlike the structure modes (where it
+    means ``off``): this setting *defaults* to the shipped behaviour, so going
+    quiet on a typo would look like the feature was broken instead of disabled.
+    """
+    if value is None:
+        return "full"
+    return _CLEANUP_MODE_ALIASES.get(str(value).strip().lower().replace("-", "_"), "full")
+
+
+def set_cleanup_mode(mode) -> str:
+    """Set the cleanup mode and return the canonical value."""
+    global _CLEANUP_MODE
+    _CLEANUP_MODE = normalize_cleanup_mode(mode)
+    return _CLEANUP_MODE
+
+
+def get_cleanup_mode() -> str:
+    return _CLEANUP_MODE
+
+
+def _removes_noise() -> bool:
+    """False only in "off": may the pass delete anything at all."""
+    return _CLEANUP_MODE != "off"
+
+
+def _resolves_corrections() -> bool:
+    """True only in "full": may the pass rewrite what the speaker retracted."""
+    return _CLEANUP_MODE == "full"
+
+
 def clean_speech_transcription(
     text: str,
     skip_slm: bool = False,
     punctuation_mode: str | None = None,
     is_intermediate: bool = False,
     structure_mode: str | None = None,
+    cleanup_mode: str | None = None,
 ) -> str:
     """
     Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
     repeated stutters, verbal self-corrections, and trailing hallucinations.
+
+    ``cleanup_mode`` decides how much of that is allowed to change the words: see
+    the mode block above ("off" keeps everything, "artifacts" removes noise,
+    "full" also resolves self-corrections).
     """
     if not text:
         return ""
+
+    # The argument wins over the module global, so a caller can pin the mode for a
+    # single utterance the way the tests do.
+    if cleanup_mode is not None:
+        set_cleanup_mode(cleanup_mode)
 
     # 0. Microphone-pause boundaries from the micro-batcher, resolved before any
     #    other rule sees the text (a pause is the strongest boundary cue we have).
@@ -2934,13 +3005,17 @@ def clean_speech_transcription(
     cleaned = text
     cleaned_lower = text.lower()
 
-    # 0. Apply verbal edit self-correction pre-pass & hesitation filler removal
-    new_cleaned = process_verbal_retractions(cleaned, cleaned_lower)
-    if new_cleaned is not cleaned:
-        cleaned = new_cleaned
-        cleaned_lower = cleaned.lower()
+    # 0. Verbal self-corrections ("Tuesday, no sorry, Wednesday" -> "Wednesday").
+    #    "full" only: dropping retracted words is a rewrite of what was said, so
+    #    "artifacts" leaves it verbatim.
+    if _resolves_corrections():
+        new_cleaned = process_verbal_retractions(cleaned, cleaned_lower)
+        if new_cleaned is not cleaned:
+            cleaned = new_cleaned
+            cleaned_lower = cleaned.lower()
 
-    if ("um" in cleaned_lower or "uh" in cleaned_lower or "ah" in cleaned_lower or
+    # 0a. Hesitation filler ("uh", "um") is noise, not a correction.
+    if _removes_noise() and ("um" in cleaned_lower or "uh" in cleaned_lower or "ah" in cleaned_lower or
         " er" in cleaned_lower or "er " in cleaned_lower or cleaned_lower.startswith("er") or cleaned_lower.endswith("er")):
         if FILLER_WORDS_REGEX.search(cleaned):
             cleaned = FILLER_WORDS_REGEX.sub(" ", cleaned)
@@ -2952,7 +3027,7 @@ def clean_speech_transcription(
         cleaned_lower = cleaned.lower()
 
     # 0c. Scrub stray microphone click / onset consonant clipping before words ("t needs" -> "needs")
-    if cleaned_lower.startswith("t ") or cleaned_lower.startswith("'t "):
+    if _removes_noise() and (cleaned_lower.startswith("t ") or cleaned_lower.startswith("'t ")):
         cleaned = LEADING_STRAY_T_REGEX.sub(r"\1", cleaned)
         cleaned_lower = cleaned.lower()
 
@@ -2961,28 +3036,36 @@ def clean_speech_transcription(
         cleaned = ADDRESSING_MISHEARINGS_REGEX.sub(r"\1 addressing", cleaned)
         cleaned_lower = cleaned.lower()
 
-    # 0. Apply optional vLLM / SLM rewrite pass (unless bypassed for intermediate streaming micro-chunks)
-    if not skip_slm and os.environ.get("VT_ENABLE_SLM", "0") == "1":
+    # 0. Optional vLLM / SLM rewrite pass. Its contract is retraction + filler
+    #    removal, so it belongs to "full": no mode may rewrite words otherwise.
+    if not skip_slm and _resolves_corrections() and os.environ.get("VT_ENABLE_SLM", "0") == "1":
         cleaned = process_slm_llm_rewrite(cleaned)
         cleaned_lower = cleaned.lower()
 
     # 1. Hallucination and trailing muttering stripping
-    if ("watching" in cleaned_lower or "subtitles" in cleaned_lower or "subscribe" in cleaned_lower or "==" in cleaned_lower):
+    if _removes_noise() and ("watching" in cleaned_lower or "subtitles" in cleaned_lower or "subscribe" in cleaned_lower or "==" in cleaned_lower):
         for pat in HALLUCINATION_PATTERNS:
             cleaned = pat.sub("", cleaned)
         cleaned_lower = cleaned.lower()
 
-    if ("oop" in cleaned_lower or "whoop" in cleaned_lower or "never" in cleaned_lower):
+    if _removes_noise() and ("oop" in cleaned_lower or "whoop" in cleaned_lower or "never" in cleaned_lower):
         if cleaned_lower.rstrip(" .?!,;:").endswith(("oops", "whoops", "oopsy", "whoopsy", "oop", "opps", "nevermind", "never mind")):
+            def _drop_muttering(m):
+                # A real sentence end stays ("deploy. never mind" -> "deploy."); a
+                # dangling comma or semicolon must not, or the text ends up as
+                # "cancel the deploy,." once terminal punctuation is added.
+                kept = m.group(1)
+                return " " if kept in ",;:" else kept
+
             while True:
-                new_cleaned = TRAILING_MUTTERINGS_REGEX.sub(r"\1", cleaned)
+                new_cleaned = TRAILING_MUTTERINGS_REGEX.sub(_drop_muttering, cleaned)
                 if new_cleaned == cleaned:
                     break
                 cleaned = new_cleaned
             cleaned = STANDALONE_MUTTERINGS_REGEX.sub("", cleaned)
             cleaned_lower = cleaned.lower()
 
-    if len(cleaned) <= 40:
+    if _removes_noise() and len(cleaned) <= 40:
         stripped_h = cleaned.strip(" .?!").lower()
         if stripped_h in ("you", "bye", "thank you", "thanks", "subtitles", "shh", "shhh", "ptl"):
             return ""
@@ -2992,12 +3075,12 @@ def clean_speech_transcription(
         return ""
 
     # 2 & 3. Deduplicate repeated words across punctuation & direct filler stutters
-    has_punct_cand, has_direct = _check_stutters(cleaned_lower)
+    has_punct_cand, has_direct = _check_stutters(cleaned_lower) if _removes_noise() else (False, False)
     if has_punct_cand and any(p in cleaned for p in ".-"):
         cleaned = STUTTER_PUNCT_REGEX.sub(_collapse_stutter_punct, cleaned)
     if has_direct:
         cleaned = STUTTER_DIRECT_REGEX.sub(r"\1", cleaned)
-    if "to" in cleaned_lower and ("into" in cleaned_lower or "onto" in cleaned_lower or "in to" in cleaned_lower or "on to" in cleaned_lower):
+    if _removes_noise() and "to" in cleaned_lower and ("into" in cleaned_lower or "onto" in cleaned_lower or "in to" in cleaned_lower or "on to" in cleaned_lower):
         cleaned = PREPOSITION_COMPOUND_STUTTER_REGEX.sub(lambda m: "into" if "into" in m.group(0).lower() else "onto", cleaned)
 
     # 4-9. Sentence boundary & clause linking fixes

@@ -99,6 +99,10 @@ pub enum Wire {
         /// "inline" while typing, because a newline is an Enter keypress.
         #[serde(default)]
         structure_mode: Option<String>,
+        /// Configured cleanup mode: "off", "artifacts" or "full" — how much of
+        /// the pass may change the words (see docs/cleanup_modes.md).
+        #[serde(default)]
+        cleanup_mode: Option<String>,
         #[serde(default)]
         trailing_space: Option<bool>,
         #[serde(default)]

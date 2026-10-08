@@ -102,6 +102,7 @@ class RatatuiTui:
         self.on_set_theme = None
         self.on_cycle_punctuation = None
         self.on_cycle_structure = None
+        self.on_cycle_cleanup = None
         self.on_set_punctuation = None
         self.on_reset_defaults = None
         self.on_reset_terminal = None
@@ -288,6 +289,9 @@ class RatatuiTui:
         elif cmd in ("cycle_structure", "cycle_structure_mode"):
             if getattr(self, "on_cycle_structure", None):
                 self.on_cycle_structure()
+        elif cmd in ("cycle_cleanup", "cycle_cleanup_mode"):
+            if getattr(self, "on_cycle_cleanup", None):
+                self.on_cycle_cleanup()
         elif cmd == "cycle_typing_wpm" and getattr(self, "on_cycle_typing_wpm", None):
             self.on_cycle_typing_wpm()
         elif cmd == "set_typing_wpm":
@@ -578,7 +582,7 @@ class RatatuiTui:
         self._send({"t": "cfg", "secondary": device_name})
 
     def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None,
-                         sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None,
+                         sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None,
                          trailing_space=None, auto_punctuate=None, number_digits=None,
                          number_mode=None, serial_collapse=None, spell_command=None,
                          middle_click_enabled=None, typing_wpm=None, hotkeys=None):
@@ -610,6 +614,9 @@ class RatatuiTui:
         if structure_mode is not None:
             self.structure_mode = structure_mode
             msg["structure_mode"] = structure_mode
+        if cleanup_mode is not None:
+            self.cleanup_mode = cleanup_mode
+            msg["cleanup_mode"] = cleanup_mode
         if trailing_space is not None:
             self.trailing_space = bool(trailing_space)
             msg["trailing_space"] = self.trailing_space

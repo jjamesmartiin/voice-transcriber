@@ -32,6 +32,7 @@ pub enum SettingKind {
     OutputMode,
     PunctuationMode,
     StructureMode,
+    CleanupMode,
     Theme,
     Microphone,
     RescanMics,
@@ -47,7 +48,7 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 16] = [
+pub const SETTINGS: [SettingItem; 17] = [
     // NOTE: icons must be exactly one glyph whose *own* codepoint already
     // occupies its final width in every terminal - never a `U+FE0F`
     // variation-selector sequence and never a ZWJ sequence. Terminals that
@@ -68,6 +69,12 @@ pub const SETTINGS: [SettingItem; 16] = [
         icon: "•",
         title: "List Formatting",
         keywords: "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
+    },
+    SettingItem {
+        kind: SettingKind::CleanupMode,
+        icon: "•",
+        title: "Cleanup Mode",
+        keywords: "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
     },
     SettingItem {
         kind: SettingKind::OutputMode,
@@ -316,6 +323,17 @@ impl SettingItem {
                         "[DEFAULT]",
                         Color::Green,
                     ),
+                };
+                (desc.to_string(), badge, color)
+            }
+            SettingKind::CleanupMode => {
+                // Spec: docs/cleanup_modes.md. "off" keeps every word (nothing is
+                // deleted), "artifacts" deletes noise only, "full" also resolves
+                // what the speaker retracted.
+                let (desc, badge, color) = match app.cleanup_mode.as_str() {
+                    "off" => ("Keeps every word", "[OFF]", Color::DarkGray),
+                    "artifacts" => ("Removes noise only", "[NOISE]", Color::Cyan),
+                    _ => ("Resolves corrections", "[FULL]", Color::Green),
                 };
                 (desc.to_string(), badge, color)
             }
@@ -1177,6 +1195,14 @@ pub fn run_settings_picker(
                                         }
                                     }
                                 }
+                                SettingKind::CleanupMode => {
+                                    app.cycle_cleanup_mode();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_cleanup").is_err() {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
                                 SettingKind::StructureMode => {
                                     app.cycle_structure_mode();
                                     if let Some(w) = writer {
@@ -1531,6 +1557,10 @@ mod tests {
             app.structure_mode = mode.to_string();
             check(&app, &idle, SettingKind::StructureMode);
         }
+        for mode in ["off", "artifacts", "full"] {
+            app.cleanup_mode = mode.to_string();
+            check(&app, &idle, SettingKind::CleanupMode);
+        }
         for theme in [
             Theme::Auto,
             Theme::Green,
@@ -1603,6 +1633,39 @@ mod tests {
         assert_eq!(app.structure_mode, "blocks");
         app.cycle_structure_mode();
         assert_eq!(app.structure_mode, "off");
+    }
+
+    #[test]
+    fn test_cleanup_previews_match_the_spec() {
+        // Spec: docs/cleanup_modes.md, enforced on the Python side by
+        // tests/shared/test_cleanup_modes.py.
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        let idle = SettingsPickerState::new();
+        let item = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::CleanupMode)
+            .unwrap();
+
+        let expected = [
+            ("off", "Keeps every word", "[OFF]"),
+            ("artifacts", "Removes noise only", "[NOISE]"),
+            ("full", "Resolves corrections", "[FULL]"),
+        ];
+        for (mode, desc, badge) in expected {
+            app.cleanup_mode = mode.to_string();
+            let (got_desc, got_badge, _) = item.value_and_badge(&app, &idle);
+            assert_eq!(got_desc, desc, "preview for cleanup mode {mode}");
+            assert_eq!(got_badge, badge, "badge for cleanup mode {mode}");
+        }
+
+        // The local cycle must only produce modes the engine knows, and round-trip.
+        app.cleanup_mode = "off".to_string();
+        app.cycle_cleanup_mode();
+        assert_eq!(app.cleanup_mode, "artifacts");
+        app.cycle_cleanup_mode();
+        assert_eq!(app.cleanup_mode, "full");
+        app.cycle_cleanup_mode();
+        assert_eq!(app.cleanup_mode, "off");
     }
 
     #[test]

@@ -30,6 +30,7 @@ _VALUE_VERBS = {
     "numbers": "auto",
     "punctuation": "full",
     "structure": "inline",
+    "cleanup": "artifacts",
 }
 
 
@@ -654,6 +655,7 @@ class TestVerbCatalogue:
         assert control.VERBS["numbers"]["choices"] == ["auto", "digits", "words"]
         assert control.VERBS["middle-click"]["choices"] == ["on", "off"]
         assert control.VERBS["structure"]["choices"] == ["off", "inline", "blocks"]
+        assert control.VERBS["cleanup"]["choices"] == ["off", "artifacts", "full"]
         # A free-text value must not claim a closed set.
         assert "choices" not in control.VERBS["set-mic"]
         assert "choices" not in control.VERBS["theme"] or "auto" in control.VERBS["theme"]["choices"]
@@ -665,6 +667,7 @@ class TestVerbCatalogue:
         assert control.VERBS["mute"]["toggles"] is True
         assert control.VERBS["spell"]["toggles"] is True
         assert control.VERBS["structure"]["required"] is True
+        assert control.VERBS["cleanup"]["required"] is True
 
     def test_structure_verb_reports_both_modes(self):
         """The reply distinguishes the configured mode from the effective one.
@@ -676,6 +679,13 @@ class TestVerbCatalogue:
         assert spec["returns"] == ["structure_mode", "structure_setting"]
         assert "structure_mode" in control.VERBS["status"]["returns"]
         assert "structure_setting" in control.VERBS["status"]["returns"]
+
+    def test_cleanup_verb_is_in_the_catalogue(self):
+        """The cleanup modes are part of the verb surface, like every setting."""
+        spec = control.VERBS["cleanup"]
+        assert spec["value"] == "mode"
+        assert spec["returns"] == ["cleanup_mode"]
+        assert "cleanup_mode" in control.VERBS["status"]["returns"]
 
     def test_normalize_verb_is_forgiving(self):
         assert control.normalize_verb("  SET_MIC ") == "set-mic"

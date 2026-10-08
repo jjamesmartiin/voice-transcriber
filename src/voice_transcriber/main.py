@@ -250,6 +250,7 @@ class SimpleVoiceTranscriber:
             ui_theme=getattr(t2, 'UI_THEME', 'auto'),
             punctuation_mode=getattr(t2, 'PUNCTUATION_MODE', 'full'),
             structure_mode=getattr(t2, 'get_structure_mode', lambda: 'off')(),
+            cleanup_mode=getattr(t2, 'get_cleanup_mode', lambda: 'full')(),
             trailing_space=getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True),
             auto_punctuate=getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True),
             number_digits=getattr(t2, 'NUMBER_DIGITS', True),
@@ -284,6 +285,7 @@ class SimpleVoiceTranscriber:
         self.tui.on_cycle_punctuation = self._on_tui_cycle_punctuation_mode
         self.tui.on_set_punctuation = self._on_tui_set_punctuation_mode
         self.tui.on_cycle_structure = self._on_tui_cycle_structure_mode
+        self.tui.on_cycle_cleanup = self._on_tui_cycle_cleanup_mode
         self.tui.on_reset_defaults = self._on_tui_reset_defaults
         self.tui.on_open_preset_picker = self.open_preset_picker
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
@@ -589,6 +591,12 @@ class SimpleVoiceTranscriber:
             # typing something other than what the modal shows.
             detail = f"{new_mode} (typed text uses {effective} — a newline is an Enter keypress)"
         self.tui.print_event("📋 List Formatting", f"Structure mode: {detail}", level="info")
+
+    def _on_tui_cycle_cleanup_mode(self):
+        import t2
+        new_mode = t2.toggle_cleanup_mode()
+        self._sync_tui_state()
+        self.tui.print_event("🧹 Cleanup Mode", f"Cleanup set to {new_mode}", level="info")
 
     def _on_tui_reset_defaults(self):
         """Restore every user-tunable setting to its shipped default."""
@@ -1172,6 +1180,7 @@ class SimpleVoiceTranscriber:
             "punctuation_mode": getattr(t2, "PUNCTUATION_MODE", "full"),
             "structure_mode": getattr(t2, "get_effective_structure_mode", lambda: "off")(),
             "structure_setting": getattr(t2, "get_structure_mode", lambda: "off")(),
+            "cleanup_mode": getattr(t2, "get_cleanup_mode", lambda: "full")(),
             "ui_theme": getattr(t2, "UI_THEME", "auto"),
             "middle_click": bool(getattr(t2, "MIDDLE_CLICK_ENABLED", False)),
             "last_transcription": getattr(self, "last_transcription", ""),
@@ -1448,6 +1457,13 @@ class SimpleVoiceTranscriber:
         if verb in ("structure", "structure-mode"):
             need_value()
             t2.set_structure_mode(value)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb)
+
+        if verb in ("cleanup", "cleanup-mode"):
+            need_value()
+            t2.set_cleanup_mode(value)
             t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)

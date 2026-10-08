@@ -194,6 +194,9 @@ pub struct App {
     pub punctuation_mode: String,
     /// Configured list-formatting mode ("off"/"inline"/"blocks").
     pub structure_mode: String,
+    /// Configured cleanup mode ("off"/"artifacts"/"full"): how much of the
+    /// post-processing pass may change the words. See docs/cleanup_modes.md.
+    pub cleanup_mode: String,
     #[allow(dead_code)]
     pub sound_theme: String,
     pub ui_theme: Theme,
@@ -256,6 +259,7 @@ impl App {
             middle_click_enabled: false,
             punctuation_mode: "full".to_string(),
             structure_mode: "off".to_string(),
+            cleanup_mode: "full".to_string(),
             sound_theme: "proximity".to_string(),
             ui_theme,
             should_quit: false,
@@ -409,6 +413,21 @@ impl App {
         &self.structure_mode
     }
 
+    /// Advance the cleanup mode through the three the engine knows
+    /// (``t2.CLEANUP_MODES == ["off", "artifacts", "full"]``). As with the other
+    /// cycles, the engine is authoritative and replies with a `cfg` that
+    /// overwrites this optimistic value.
+    pub fn cycle_cleanup_mode(&mut self) -> &str {
+        const CLEANUP_MODES: [&str; 3] = ["off", "artifacts", "full"];
+        let idx = CLEANUP_MODES
+            .iter()
+            .position(|m| *m == self.cleanup_mode)
+            .map(|i| (i + 1) % CLEANUP_MODES.len())
+            .unwrap_or(0);
+        self.cleanup_mode = CLEANUP_MODES[idx].to_string();
+        &self.cleanup_mode
+    }
+
     #[allow(dead_code)] // retained to mirror Python's `cycle_punctuation`; the
     // preset modal owns punctuation selection on this frontend.
     pub fn cycle_punctuation(&mut self) {
@@ -465,6 +484,7 @@ impl App {
                 ui_theme,
                 punctuation_mode,
                 structure_mode,
+                cleanup_mode,
                 trailing_space,
                 auto_punctuate,
                 number_digits,
@@ -485,6 +505,7 @@ impl App {
                 ui_theme,
                 punctuation_mode,
                 structure_mode,
+                cleanup_mode,
                 trailing_space,
                 auto_punctuate,
                 number_digits,
@@ -534,6 +555,7 @@ impl App {
         ui_theme: Option<String>,
         punctuation_mode: Option<String>,
         structure_mode: Option<String>,
+        cleanup_mode: Option<String>,
         trailing_space: Option<bool>,
         auto_punctuate: Option<bool>,
         number_digits: Option<bool>,
@@ -576,6 +598,9 @@ impl App {
         }
         if let Some(s) = structure_mode {
             self.structure_mode = s;
+        }
+        if let Some(c) = cleanup_mode {
+            self.cleanup_mode = c;
         }
         if let Some(sp) = trailing_space {
             self.trailing_space = sp;

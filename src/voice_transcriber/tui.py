@@ -137,6 +137,7 @@ class VoiceTranscriberTUI:
         self.middle_click_enabled = False
         self.punctuation_mode = "full"
         self.structure_mode = "off"
+        self.cleanup_mode = "full"
         self.copy_to_clipboard = True
         self.sound_theme = "proximity"
         self.last_transcription = ""
@@ -158,6 +159,7 @@ class VoiceTranscriberTUI:
         self.on_set_theme = None
         self.on_cycle_punctuation = None
         self.on_cycle_structure = None
+        self.on_cycle_cleanup = None
         self.on_set_punctuation = None
         self.on_open_theme_picker = None
         self.on_open_preset_picker = None
@@ -231,7 +233,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -251,6 +253,8 @@ class VoiceTranscriberTUI:
                 self.punctuation_mode = punctuation_mode
             if structure_mode is not None:
                 self.structure_mode = structure_mode
+            if cleanup_mode is not None:
+                self.cleanup_mode = cleanup_mode
             if trailing_space is not None:
                 self.trailing_space = bool(trailing_space)
             if auto_punctuate is not None:

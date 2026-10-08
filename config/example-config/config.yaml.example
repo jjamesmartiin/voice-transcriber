@@ -93,6 +93,24 @@ preset: "autocorrect"
 structure_mode: "off"
 
 # ------------------------------------------------------------------------------
+# Cleanup Mode (How Much the Pass May Change the Words)
+# The post-processor removes ASR noise and resolves spoken self-corrections. This
+# setting decides how much of that it is allowed to do. Selectable at runtime via
+# 'Cleanup Mode' in the settings modal, or `python src/main.py cleanup <mode>`.
+#   - "off"       : keeps every word. No hallucination stripping, no filler, no
+#                   stutter removal, no correction rewriting — verbatim.
+#   - "artifacts" : removes noise only (silence hallucinations like "Thank you.",
+#                   filler, stutters, a clipped onset consonant, trailing
+#                   mutterings). If you correct yourself, the words stay as said.
+#   - "full"      : also resolves self-corrections, so "Tuesday no sorry
+#                   Wednesday" comes out as "Wednesday".
+# Not gated by this setting: number/date formatting, the dictionary, casing, the
+# punctuation preset and structured output — those change how text looks, not
+# which words survive. See docs/cleanup_modes.md.
+# Default: "full"
+cleanup_mode: "full"
+
+# ------------------------------------------------------------------------------
 # Spoken Language Setting & Disclaimer
 # Voice Transcriber is designed and optimized specifically for English ("en").
 # The real-time post-processor (verbal retractions like "scratch that", stutter

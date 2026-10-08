@@ -138,6 +138,11 @@ PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "aesthetic_
 #: Structured output (spoken lists -> bullets). "off" is the shipped default.
 STRUCTURE_MODE = "off"
 STRUCTURE_MODES = ["off", "inline", "blocks"]
+#: Cleanup modes: how much of the post-processing pass may change the words.
+#: "full" is the shipped default, "artifacts" removes noise only, "off" keeps every
+#: word. See docs/cleanup_modes.md.
+CLEANUP_MODE = "full"
+CLEANUP_MODES = ["off", "artifacts", "full"]
 LANGUAGE = "en"
 WAIT_FOR_MODEL_ON_STARTUP = True
 ENABLE_SLM = False
@@ -169,6 +174,7 @@ DEFAULT_SETTINGS = {
     'UI_THEME': "red",
     'PUNCTUATION_MODE': "no_punctuation",
     'STRUCTURE_MODE': "off",
+    'CLEANUP_MODE': "full",
     'LANGUAGE': "en",
     'WAIT_FOR_MODEL_ON_STARTUP': True,
     'ENABLE_SLM': False,
@@ -764,7 +770,7 @@ def _normalize_bool(value, default: bool = False) -> bool:
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, TYPING_WPM, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, TYPING_WPM, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -827,6 +833,11 @@ def load_audio_config(file_path=None):
             env_structure = os.environ.get("VT_STRUCTURE_MODE", "").strip().lower()
             if env_structure:
                 STRUCTURE_MODE = normalize_structure_mode(env_structure)
+
+            CLEANUP_MODE = normalize_cleanup_mode(config.get('cleanup_mode', 'full'))
+            env_cleanup = os.environ.get("VT_CLEANUP_MODE", "").strip().lower()
+            if env_cleanup:
+                CLEANUP_MODE = normalize_cleanup_mode(env_cleanup)
 
             LANGUAGE = config.get('language', 'en')
             env_lang = os.environ.get("VT_LANGUAGE", "").strip().lower()
@@ -1022,6 +1033,9 @@ def load_audio_config(file_path=None):
         # Publish the effective structured-output mode (never saves: this is a load)
         _push_structure_mode()
 
+        # Publish the cleanup mode (never saves: this is a load)
+        _push_cleanup_mode()
+
         # Sync custom word/phrase dictionary if configured in config or external file
         dict_setting = config.get('dictionary')
         dict_file = config.get('dictionary_file')
@@ -1096,6 +1110,7 @@ def save_audio_config(file_path=None):
             'punctuation_mode': PUNCTUATION_MODE,
             'preset': PUNCTUATION_MODE,
             'structure_mode': STRUCTURE_MODE,
+            'cleanup_mode': CLEANUP_MODE,
             'language': LANGUAGE,
             'enable_slm': ENABLE_SLM,
             'wait_for_model_on_startup': WAIT_FOR_MODEL_ON_STARTUP,
@@ -1136,6 +1151,7 @@ def reset_to_defaults() -> dict:
     NUMBER_DIGITS = (NUMBER_MODE != "words")
     set_number_digits(NUMBER_MODE)
     _push_structure_mode()
+    _push_cleanup_mode()
     try:
         import hotkeys
 
@@ -1502,6 +1518,49 @@ def toggle_structure_mode() -> str:
     _push_structure_mode()
     save_audio_config()
     return STRUCTURE_MODE
+
+
+def normalize_cleanup_mode(value) -> str:
+    """Canonicalise a cleanup mode; the post-processor owns the alias table."""
+    try:
+        from post_processor import normalize_cleanup_mode as post_normalize
+        return post_normalize(value)
+    except Exception:
+        return "full"
+
+
+def get_cleanup_mode() -> str:
+    """The configured cleanup mode ("off"/"artifacts"/"full")."""
+    return CLEANUP_MODE
+
+
+def _push_cleanup_mode() -> str:
+    """Publish the cleanup mode to the post-processor; never saves."""
+    try:
+        from post_processor import set_cleanup_mode as post_set_cleanup
+        post_set_cleanup(CLEANUP_MODE)
+    except Exception:
+        pass
+    return CLEANUP_MODE
+
+
+def set_cleanup_mode(mode) -> str:
+    """Set and persist the cleanup mode; keeps the post-processor in sync."""
+    global CLEANUP_MODE
+    CLEANUP_MODE = normalize_cleanup_mode(mode)
+    _push_cleanup_mode()
+    save_audio_config()
+    return CLEANUP_MODE
+
+
+def toggle_cleanup_mode() -> str:
+    """Cycle off -> artifacts -> full -> off and persist."""
+    global CLEANUP_MODE
+    index = CLEANUP_MODES.index(CLEANUP_MODE) if CLEANUP_MODE in CLEANUP_MODES else 0
+    CLEANUP_MODE = CLEANUP_MODES[(index + 1) % len(CLEANUP_MODES)]
+    _push_cleanup_mode()
+    save_audio_config()
+    return CLEANUP_MODE
 
 
 def set_number_digits(value):
@@ -2180,6 +2239,12 @@ def select_settings_picker():
             "keywords": "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
         },
         {
+            "id": "cleanup",
+            "icon": "🧹 ",
+            "title": "Cleanup Mode",
+            "keywords": "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
+        },
+        {
             "id": "structure",
             "icon": "☰ ",
             "title": "List Formatting",
@@ -2272,6 +2337,13 @@ def select_settings_picker():
             # style of each preset is visible at a glance.
             _name, badge, preview, color = get_preset_presentation(PUNCTUATION_MODE)
             return preview, badge, color
+        elif item_id == "cleanup":
+            if CLEANUP_MODE == "off":
+                return "Keeps every word (no cleaning)", "[OFF]", "dim white"
+            elif CLEANUP_MODE == "artifacts":
+                return "Removes noise only (no corrections)", "[NOISE]", "cyan"
+            else:
+                return "Removes noise and resolves corrections", "[FULL]", "green"
         elif item_id == "structure":
             # The configured mode and the effective one can differ: typing
             # downgrades "blocks" to "inline" because a newline is an Enter
@@ -2282,7 +2354,7 @@ def select_settings_picker():
             elif STRUCTURE_MODE == "inline":
                 return "Bullets on one line: - one. - two.", "[INLINE]", "cyan"
             elif effective != STRUCTURE_MODE:
-                return "Bullets on their own lines (typed text stays inline)", "[PASTE ONLY]", "yellow"
+                return "Bullets on their own lines (typed text stays inline)", "[PASTE]", "yellow"
             else:
                 return "Bullets on their own lines", "[BLOCKS]", "green"
         elif item_id == "trailing_space":
@@ -2453,6 +2525,8 @@ def select_settings_picker():
                     else:
                         cycle_punctuation_mode()
                     save_audio_config()
+                elif item_id == "cleanup":
+                    toggle_cleanup_mode()
                 elif item_id == "structure":
                     toggle_structure_mode()
                 elif item_id == "output_mode":

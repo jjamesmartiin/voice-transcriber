@@ -108,7 +108,7 @@ VERBS: dict[str, dict] = {
         "returns": [
             "state", "recording", "device", "model", "muted", "output_mode",
             "number_mode", "punctuation_mode", "structure_mode",
-            "structure_setting", "ui_theme", "middle_click",
+            "structure_setting", "cleanup_mode", "ui_theme", "middle_click",
             "last_transcription",
         ],
     },
@@ -169,6 +169,13 @@ VERBS: dict[str, dict] = {
         "choices": ["off", "inline", "blocks"],
         "required": True,
         "returns": ["structure_mode", "structure_setting"],
+    },
+    "cleanup": {
+        "summary": "Set how much the cleanup pass may change the words (keep everything, remove noise, or also resolve corrections)",
+        "value": "mode",
+        "choices": ["off", "artifacts", "full"],
+        "required": True,
+        "returns": ["cleanup_mode"],
     },
     "trailing-space": {
         "summary": "Append a space to auto-typed text",
