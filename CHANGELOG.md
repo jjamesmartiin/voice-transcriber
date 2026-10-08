@@ -14,6 +14,8 @@ normally reuses the existing bundle. See
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-10-08
+
 ### Changed
 
 - **Repository layout / developer experience.** The five verb entry points moved
@@ -241,7 +243,8 @@ First tagged release: offline Cohere ASR, global `Alt+Shift` push-to-talk with a
 hands-free latch, streaming VAD, the English post-processor, and text injection
 on Linux.
 
-[Unreleased]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.1.1...v1.2.0

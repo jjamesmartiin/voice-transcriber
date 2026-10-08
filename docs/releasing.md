@@ -16,20 +16,22 @@ Runbook for cutting a release of voice-transcriber on GitHub
 
 ```bash
 # 1. Bump the version across all versioned surfaces (see "Version bump" below).
-#    flake.nix, src/voice_transcriber/tui.py, tui-rs/src/main.rs, pyproject.toml, packaging/nix/package.nix, packaging/linux/*.appdata.xml
+#    flake.nix, src/voice_transcriber/tui.py, src/voice_transcriber/__init__.py,
+#    tui-rs/src/main.rs, pyproject.toml, packaging/nix/package.nix,
+#    packaging/linux/*.appdata.xml, scripts/generate_demo_gif.py
 
 # 2. Verify the tree is green before tagging.
 ./scripts/test.sh
 nix build .#vt-tui --no-link --print-out-paths
 
 # 3. Commit, tag, push the tag. Pushing the tag is what creates the release.
-git add -A && git commit -m "release: v1.3.0"
-git tag v1.3.0
+git add -A && git commit -m "release: v1.3.1"
+git tag v1.3.1
 git push github main --tags        # remote 'github' == git@github.com:jjamesmartiin/voice-transcriber.git
 
 # 4. Wait for the `release` workflow to finish (it creates the Release and
 #    attaches vt-x86_64.AppImage and VoiceTranscriber-windows-x86_64.zip). Watch it, or poll the release object:
-nix develop --command gh release view v1.3.0
+nix develop --command gh release view v1.3.1
 
 # 5. NOTHING TO DO FOR THE WEIGHTS. They live in a revision-keyed model
 #    bundle and are re-published only when REVISION changes — see
@@ -48,13 +50,15 @@ version:
 
 | File | What |
 | :--- | :--- |
-| `flake.nix` | `version = "1.3.0";` in the flake `outputs` let-block |
-| `flake.nix` | `version = "1.3.0";` in the `pkgs.stdenv.mkDerivation` attrs |
-| `src/voice_transcriber/tui.py` | `def __init__(self, app_version="1.3.0", ...)` |
-| `tui-rs/src/main.rs` | `const VERSION: &str = "1.3.0";` |
-| `pyproject.toml` | `version = "1.3.0"` |
-| `packaging/nix/package.nix` | `version = "1.3.0";` |
-| `packaging/linux/*.appdata.xml` | `<release version="1.3.0" date="YYYY-MM-DD"/>` |
+| `flake.nix` | `version = "1.3.1";` in the flake `outputs` let-block |
+| `flake.nix` | `version = "1.3.1";` in the `pkgs.stdenv.mkDerivation` attrs |
+| `src/voice_transcriber/tui.py` | `def __init__(self, app_version="1.3.1", ...)` |
+| `src/voice_transcriber/__init__.py` | `__version__ = "1.3.1"` |
+| `tui-rs/src/main.rs` | `const VERSION: &str = "1.3.1";` |
+| `pyproject.toml` | `version = "1.3.1"` |
+| `packaging/nix/package.nix` | `version = "1.3.1";` |
+| `packaging/linux/*.appdata.xml` | a new `<release version="1.3.1" date="YYYY-MM-DD"/>` entry |
+| `scripts/generate_demo_gif.py` | the hero GIF's `voice transcriber v1.3.1 active` banner (then regenerate the GIF) |
 
 `tui-rs/Cargo.toml` tracks the Rust frontend (`vt-tui`) internal crate version (`0.1.0`) independently
 and is not the app version.
@@ -73,7 +77,7 @@ python -m pytest tests/shared/test_version_consistency.py
 
 1. **Linux AppImage job (`ubuntu-latest`)**: installs Nix, runs `nix bundle --bundler github:ralismark/nix-appimage .#default` → `vt-x86_64.AppImage`.
 2. **Windows Standalone ZIP job (`windows-latest`)**: installs dependencies, executes `platforms/windows/build_offline.py --no-model`, and zips `dist/VoiceTranscriber` → `VoiceTranscriber-windows-x86_64.zip`.
-3. `softprops/action-gh-release@v2` attaches the assets to the GitHub Release with `fail_on_unmatched_files: true`.
+3. `softprops/action-gh-release@v3` attaches the assets to the GitHub Release with `fail_on_unmatched_files: true`.
 
 It uses no secrets. Its header comment states the weights are deliberately not
 fetched in CI.
