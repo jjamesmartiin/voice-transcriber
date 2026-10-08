@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 from hotkeys import WaylandGlobalHotkeys
 import t2
@@ -54,21 +53,4 @@ def test_cpu_isolation_idle_vs_processing(cpu_power_monitor, sample_audio_file):
 
     # Verify post-processing CPU returns to low idle state
     assert idle_cpu_after < 5.0, f"CPU usage did not return to idle baseline after processing: {idle_cpu_after:.2f}%"
-
-def test_cpu_affinity_and_priority():
-    """
-    Test CPU core pinning and priority preemption setup.
-    """
-    # apply_cpu_affinity_and_priority was removed from src/t2.py; skip gracefully
-    if not hasattr(t2, "apply_cpu_affinity_and_priority"):
-        pytest.skip("t2.apply_cpu_affinity_and_priority no longer exists in production code")
-    import os
-    # Test setting CPU affinity to dedicated core (e.g. last core)
-    t2.apply_cpu_affinity_and_priority(affinity_setting="last_1", high_priority=True)
-
-    if hasattr(os, "sched_getaffinity"):
-        current_affinity = list(os.sched_getaffinity(0))
-        total_cpus = os.cpu_count() or 1
-        assert current_affinity == [total_cpus - 1], f"Expected affinity to be [{total_cpus - 1}], got {current_affinity}"
-        print(f"\n[CPU Pinning Test] Successfully pinned to dedicated core: {current_affinity}")
 

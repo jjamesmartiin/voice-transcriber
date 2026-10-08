@@ -11,12 +11,28 @@ Supports:
   - Short single-word / phrase pickup tests (sample_id='short_word', 'short_phrase')
   - Standard samples (sample_id='1' through '8')
   - Full suite runner (sample_id='all')
+
+Device and volume handling
+--------------------------
+This suite has to run on somebody else's machine without arguments, so it picks the
+microphone most specifically first: ``--in``/``VT_LOOPBACK_IN`` when given, else the
+device the Voice Transcriber app is configured with (that is the mic the user
+actually dictates into), else the system default. A configured device that is no
+longer present — an unplugged USB mic — falls back to the system default rather than
+failing the run. The default output is raised to full volume and unmuted first,
+because a loopback test cannot hear what it does not play.
+
+Not collected by pytest: this file is a *script*, because it plays audio and records
+from a real microphone. Run it directly (see ``docs/agent_testing_workflow.md``)::
+
+    nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
 """
 
 import os
 import sys
 import time
 import re
+import subprocess
 import numpy as np
 import soundfile as sf
 import sounddevice as sd
@@ -64,6 +80,54 @@ def resolve_device(spec, kind):
     if not matches:
         raise SystemExit(f"No {kind} device matching {s!r}; use --list to see devices")
     return matches[0]
+
+
+def resolve_vt_configured_input():
+    """Resolve the microphone this machine last used in Voice Transcriber.
+
+    Returns ``(device_index_or_None, description)``. The configured *name* is
+    preferred over the configured *index*, because sounddevice indexes shift as
+    devices come and go: a saved index can quietly point at a different
+    microphone by the time this runs, and picking the wrong mic is worse than
+    falling back to the system default.
+    """
+    name = getattr(t2, "PRIMARY_DEVICE_NAME", None)
+    if name:
+        try:
+            return resolve_device(name, 'input'), f"Voice Transcriber config: {name!r}"
+        except SystemExit:
+            print(f"note: configured microphone {name!r} is not connected; using the system default")
+    index = getattr(t2, "INPUT_DEVICE_INDEX", None)
+    if index is not None and not name:
+        try:
+            return resolve_device(index, 'input'), f"Voice Transcriber config: index {index}"
+        except SystemExit:
+            print(f"note: configured microphone index {index} has no input; using the system default")
+    return None, "system default"
+
+
+def max_output_volume():
+    """Raise the default output to full volume and unmute it, for the loopback.
+
+    Best effort: a host without PipeWire (or without ``wpctl``) is told to set the
+    volume by hand rather than failing the run. The previous value is printed so it
+    can be put back.
+    """
+    def wpctl(*args):
+        return subprocess.run(["wpctl", *args], capture_output=True, text=True, timeout=5)
+
+    try:
+        before = wpctl("get-volume", "@DEFAULT_AUDIO_SINK@")
+    except (FileNotFoundError, subprocess.SubprocessError):
+        print("volume: wpctl is not available - set the output volume to maximum yourself")
+        return
+    if before.returncode != 0:
+        print("volume: no default PipeWire sink - set the output volume to maximum yourself")
+        return
+    wpctl("set-mute", "@DEFAULT_AUDIO_SINK@", "0")
+    wpctl("set-volume", "@DEFAULT_AUDIO_SINK@", "1.0")
+    after = wpctl("get-volume", "@DEFAULT_AUDIO_SINK@")
+    print(f"volume: {before.stdout.strip()} -> {after.stdout.strip()} (unmuted, maximum)")
 
 
 def device_rate(device):
@@ -206,14 +270,29 @@ def main():
         return
 
     sample_arg = args.sample
+
+    # Load the app's config first: it records the microphone this machine dictates
+    # into, which is a better guess than the session default (and the whole point
+    # of running this on somebody else's machine without arguments).
+    try:
+        t2.load_audio_config()
+    except Exception as exc:  # a config problem must never fail the suite
+        print(f"note: could not load the Voice Transcriber config ({exc})")
+
     out_device = resolve_device(args.out, 'output')
-    in_device = resolve_device(args.inp, 'input')
+    if args.inp:
+        in_device = resolve_device(args.inp, 'input')
+        in_origin = f"--in {args.inp!r}"
+    else:
+        in_device, in_origin = resolve_vt_configured_input()
+
+    max_output_volume()
 
     print("\n" + "=" * 80)
     print("🎙️  LIVE SPEAKER-TO-MIC ACOUSTIC LOOPBACK SUITE")
     print("=" * 80)
     print(f"output device: {out_device if out_device is not None else 'system default'}")
-    print(f"input device : {in_device if in_device is not None else 'system default'}")
+    print(f"input device : {in_device if in_device is not None else 'system default'}  [{in_origin}]")
 
     # Pre-initialize single transcriber instance
     transcriber = SimpleVoiceTranscriber()
