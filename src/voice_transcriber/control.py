@@ -107,7 +107,8 @@ VERBS: dict[str, dict] = {
         "summary": "Report engine state and settings",
         "returns": [
             "state", "recording", "device", "model", "muted", "output_mode",
-            "number_mode", "punctuation_mode", "ui_theme", "middle_click",
+            "number_mode", "punctuation_mode", "structure_mode",
+            "structure_setting", "ui_theme", "middle_click",
             "last_transcription",
         ],
     },
@@ -161,6 +162,13 @@ VERBS: dict[str, dict] = {
             "aesthetic_lowercase", "gen_z",
         ],
         "required": True,
+    },
+    "structure": {
+        "summary": "Set how spoken lists are formatted (flat, inline markers, or real bullets)",
+        "value": "mode",
+        "choices": ["off", "inline", "blocks"],
+        "required": True,
+        "returns": ["structure_mode", "structure_setting"],
     },
     "trailing-space": {
         "summary": "Append a space to auto-typed text",

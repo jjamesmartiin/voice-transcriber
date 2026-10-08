@@ -31,6 +31,7 @@ pub enum SettingKind {
     SoundMute,
     OutputMode,
     PunctuationMode,
+    StructureMode,
     Theme,
     Microphone,
     RescanMics,
@@ -46,7 +47,7 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 15] = [
+pub const SETTINGS: [SettingItem; 16] = [
     // NOTE: icons must be exactly one glyph whose *own* codepoint already
     // occupies its final width in every terminal - never a `U+FE0F`
     // variation-selector sequence and never a ZWJ sequence. Terminals that
@@ -61,6 +62,12 @@ pub const SETTINGS: [SettingItem; 15] = [
         icon: "✨",
         title: "Mode Preset",
         keywords: "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
+    },
+    SettingItem {
+        kind: SettingKind::StructureMode,
+        icon: "•",
+        title: "List Formatting",
+        keywords: "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
     },
     SettingItem {
         kind: SettingKind::OutputMode,
@@ -309,6 +316,28 @@ impl SettingItem {
                         "[DEFAULT]",
                         Color::Green,
                     ),
+                };
+                (desc.to_string(), badge, color)
+            }
+            SettingKind::StructureMode => {
+                // Spec: docs/formatting.md. "blocks" emits real line breaks, and
+                // a newline is an Enter keypress, so the engine downgrades it to
+                // "inline" while the output is typed. The badge says so rather
+                // than advertising a formatting that is not in force.
+                let (desc, badge, color) = match app.structure_mode.as_str() {
+                    "inline" => (
+                        "Bullets on one line: - one. - two.",
+                        "[INLINE]",
+                        Color::Cyan,
+                    ),
+                    "blocks" => {
+                        if matches!(app.output_mode.as_str(), "type" | "type_fast") {
+                            ("Typed text stays inline", "[PASTE]", Color::Yellow)
+                        } else {
+                            ("Bullets on their own lines", "[BLOCKS]", Color::Green)
+                        }
+                    }
+                    _ => ("Flat prose (no list formatting)", "[OFF]", Color::DarkGray),
                 };
                 (desc.to_string(), badge, color)
             }
@@ -1148,6 +1177,14 @@ pub fn run_settings_picker(
                                         }
                                     }
                                 }
+                                SettingKind::StructureMode => {
+                                    app.cycle_structure_mode();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_structure").is_err() {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
                                 SettingKind::OutputMode => {
                                     app.cycle_output_mode();
                                     if let Some(w) = writer {
@@ -1490,6 +1527,10 @@ mod tests {
             app.punctuation_mode = mode.to_string();
             check(&app, &idle, SettingKind::PunctuationMode);
         }
+        for mode in ["off", "inline", "blocks"] {
+            app.structure_mode = mode.to_string();
+            check(&app, &idle, SettingKind::StructureMode);
+        }
         for theme in [
             Theme::Auto,
             Theme::Green,
@@ -1514,6 +1555,54 @@ mod tests {
         }
 
         assert!(clipped.is_empty(), "labels would be clipped: {clipped:?}");
+    }
+
+    #[test]
+    fn test_structure_previews_match_the_spec() {
+        // Spec: docs/formatting.md, enforced on the Python side by
+        // tests/shared/test_structure_blocks.py and
+        // tests/shared/test_config_sync.py (the downgrade rule).
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        let idle = SettingsPickerState::new();
+        let item = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::StructureMode)
+            .unwrap();
+
+        app.structure_mode = "off".to_string();
+        let (desc, badge, _) = item.value_and_badge(&app, &idle);
+        assert_eq!(desc, "Flat prose (no list formatting)");
+        assert_eq!(badge, "[OFF]");
+
+        app.structure_mode = "inline".to_string();
+        let (desc, badge, _) = item.value_and_badge(&app, &idle);
+        assert_eq!(desc, "Bullets on one line: - one. - two.");
+        assert_eq!(badge, "[INLINE]");
+
+        // Configured "blocks" reads differently depending on the output path,
+        // because typing downgrades it to inline in the engine.
+        app.structure_mode = "blocks".to_string();
+        app.output_mode = "clipboard".to_string();
+        let (desc, badge, _) = item.value_and_badge(&app, &idle);
+        assert_eq!(desc, "Bullets on their own lines");
+        assert_eq!(badge, "[BLOCKS]");
+
+        for mode in ["type", "type_fast"] {
+            app.output_mode = mode.to_string();
+            let (desc, badge, _) = item.value_and_badge(&app, &idle);
+            assert_eq!(desc, "Typed text stays inline", "output mode {mode}");
+            assert_eq!(badge, "[PASTE]", "output mode {mode}");
+        }
+
+        // The optimistic local cycle must only ever produce modes the engine
+        // knows, and must round-trip.
+        app.structure_mode = "off".to_string();
+        app.cycle_structure_mode();
+        assert_eq!(app.structure_mode, "inline");
+        app.cycle_structure_mode();
+        assert_eq!(app.structure_mode, "blocks");
+        app.cycle_structure_mode();
+        assert_eq!(app.structure_mode, "off");
     }
 
     #[test]

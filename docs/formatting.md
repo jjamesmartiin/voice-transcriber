@@ -20,6 +20,19 @@ Aliases: `none`/`flat`/`no` → `off`; `dashes`/`safe`/`single-line` → `inline
 guess: failing to `off` is the only safe failure for a formatter that injects
 keystrokes.
 
+### Configured vs effective
+
+The setting has two readings, and they can differ:
+
+| Name | Where | Meaning |
+| --- | --- | --- |
+| *configured* (`structure_mode` in the config, `structure_setting` in `status`) | what the user chose in the settings modal | never silently changed |
+| *effective* (`structure_mode` in `status`, `post_processor.get_structure_mode()`) | what the text processor is actually using | `inline` whenever the output mode is `type`/`type_fast` and the configured mode is `blocks` |
+
+Both UIs show the configured mode and say when it is downgraded
+(`blocks (paste only)`), so the modal never claims a formatting that is not in
+force.
+
 ### The newline rule
 
 `blocks` is never used for auto-typed text. A newline is an `Enter` keypress to

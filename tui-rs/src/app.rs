@@ -192,6 +192,8 @@ pub struct App {
     pub hotkeys: Vec<String>,
     pub middle_click_enabled: bool,
     pub punctuation_mode: String,
+    /// Configured list-formatting mode ("off"/"inline"/"blocks").
+    pub structure_mode: String,
     #[allow(dead_code)]
     pub sound_theme: String,
     pub ui_theme: Theme,
@@ -253,6 +255,7 @@ impl App {
             hotkeys: Vec::new(),
             middle_click_enabled: false,
             punctuation_mode: "full".to_string(),
+            structure_mode: "off".to_string(),
             sound_theme: "proximity".to_string(),
             ui_theme,
             should_quit: false,
@@ -391,6 +394,21 @@ impl App {
         self.ui_theme
     }
 
+    /// Advance the list-formatting mode through the three the engine knows
+    /// (``t2.STRUCTURE_MODES == ["off", "inline", "blocks"]``). The engine is
+    /// authoritative and replies with a `cfg` that overwrites this optimistic
+    /// value, so we must never invent a mode it cannot round-trip.
+    pub fn cycle_structure_mode(&mut self) -> &str {
+        const STRUCTURE_MODES: [&str; 3] = ["off", "inline", "blocks"];
+        let idx = STRUCTURE_MODES
+            .iter()
+            .position(|m| *m == self.structure_mode)
+            .map(|i| (i + 1) % STRUCTURE_MODES.len())
+            .unwrap_or(0);
+        self.structure_mode = STRUCTURE_MODES[idx].to_string();
+        &self.structure_mode
+    }
+
     #[allow(dead_code)] // retained to mirror Python's `cycle_punctuation`; the
     // preset modal owns punctuation selection on this frontend.
     pub fn cycle_punctuation(&mut self) {
@@ -446,6 +464,7 @@ impl App {
                 sound_theme,
                 ui_theme,
                 punctuation_mode,
+                structure_mode,
                 trailing_space,
                 auto_punctuate,
                 number_digits,
@@ -465,6 +484,7 @@ impl App {
                 sound_theme,
                 ui_theme,
                 punctuation_mode,
+                structure_mode,
                 trailing_space,
                 auto_punctuate,
                 number_digits,
@@ -513,6 +533,7 @@ impl App {
         sound_theme: Option<String>,
         ui_theme: Option<String>,
         punctuation_mode: Option<String>,
+        structure_mode: Option<String>,
         trailing_space: Option<bool>,
         auto_punctuate: Option<bool>,
         number_digits: Option<bool>,
@@ -552,6 +573,9 @@ impl App {
         }
         if let Some(p) = punctuation_mode {
             self.punctuation_mode = p;
+        }
+        if let Some(s) = structure_mode {
+            self.structure_mode = s;
         }
         if let Some(sp) = trailing_space {
             self.trailing_space = sp;

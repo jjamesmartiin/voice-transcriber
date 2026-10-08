@@ -79,6 +79,20 @@ copy_to_clipboard: false
 preset: "autocorrect"
 
 # ------------------------------------------------------------------------------
+# List Formatting (Structured Output)
+# Turns spoken enumerations into real lists: "I can list them like: Thing one.
+# Thing two." becomes a bulleted list. Selectable at runtime via 'List
+# Formatting' in the settings modal, or `python src/main.py structure <mode>`.
+#   - "off"    : Flat prose; nothing is reformatted (default).
+#   - "inline" : Bullets on one line ("- one. - two."). Safe while typing.
+#   - "blocks" : Real bullets and paragraph breaks. Needs a paste/insert path:
+#                a newline is an Enter keypress, so typed output (output_mode
+#                "type"/"type_fast") is automatically downgraded to "inline",
+#                and `status` reports that in structure_mode/structure_setting.
+# Default: "off"
+structure_mode: "off"
+
+# ------------------------------------------------------------------------------
 # Spoken Language Setting & Disclaimer
 # Voice Transcriber is designed and optimized specifically for English ("en").
 # The real-time post-processor (verbal retractions like "scratch that", stutter

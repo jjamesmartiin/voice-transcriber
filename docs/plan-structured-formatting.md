@@ -247,7 +247,7 @@ one-size-fits-all key for "new line". Therefore:
 | M2 | Phase A1 (D1–D3) | **done** — enumerations survive, list cues keep their capital, spoken quotes are rewrapped |
 | M3 | Phase A2 + eval cases | Table-driven structure tests green; `off` byte-identical to today |
 | M4 | Phase A3 (sentinel + boundaries) | Pause-separated items list without cue words |
-| M5 | Phase A4 (setting end-to-end) | Control API, both TUI modals, docs, `CHANGELOG.md`; `nix build .#vt-tui` green |
+| M5 | Phase A4 (setting end-to-end) | **done** — config + `structure` verb + `status` keys + Rich settings row + ratatui row; docs and `CHANGELOG.md` updated |
 
 Each milestone is its own commit series on `feat/structured-formatting`; the
 branch merges to `main` only with `./scripts/test.sh` green.
