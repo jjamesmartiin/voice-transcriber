@@ -32,6 +32,38 @@ class TestLinuxClipboardSink:
         assert hal.get_clipboard_sink(hal.LINUX).copy_text("hello") is True
         assert calls[0][0] == ["wl-copy"]
         assert calls[0][1]["input"] == b"hello"
+        # The tool is given a leash: a copy must never block the pipeline. This is
+        # far below the 1.5 s post-release budget, while a healthy tool returns in
+        # milliseconds.
+        assert 0 < calls[0][1]["timeout"] <= 0.5
+
+    def test_a_tool_that_holds_the_selection_is_a_successful_copy(self, monkeypatch):
+        """`wl-copy` can keep serving the clipboard instead of forking away.
+
+        That used to hang the caller forever (it hung pytest tests/e2e on a machine
+        where wl-clipboard 2.3.0 behaved that way). A tool still holding the
+        selection has accepted the payload, so the copy counts as done.
+        """
+        monkeypatch.setattr(
+            shutil, "which", lambda name: f"/usr/bin/{name}" if name == "wl-copy" else None
+        )
+
+        def blocking_run(args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 0))
+
+        monkeypatch.setattr(subprocess, "run", blocking_run)
+        assert hal.get_clipboard_sink(hal.LINUX).copy_text("held open") is True
+
+    def test_a_tool_that_cannot_start_is_a_failed_copy(self, monkeypatch):
+        monkeypatch.setattr(
+            shutil, "which", lambda name: f"/usr/bin/{name}" if name == "wl-copy" else None
+        )
+
+        def unspawnable(args, **kwargs):
+            raise OSError("no such file")
+
+        monkeypatch.setattr(subprocess, "run", unspawnable)
+        assert hal.get_clipboard_sink(hal.LINUX).copy_text("nope") is False
 
     def test_xclip_fallback(self, monkeypatch):
         calls = []

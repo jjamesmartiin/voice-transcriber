@@ -42,6 +42,15 @@ normally reuses the existing bundle. See
 
 ### Fixed
 
+- **A clipboard tool can no longer hang a transcription.** The Linux sink ran
+  `wl-copy` (or `xclip`) through `subprocess.run` with no timeout, and `wl-copy`
+  keeps *serving the selection* instead of forking away on some setups
+  (wl-clipboard 2.3.0 blocks indefinitely in a headless-ish Wayland session). The
+  copy path now gives the tool a short leash and treats "still holding the
+  selection" as a successful copy, because the payload has been handed over. The
+  same unbounded call lived in the e2e suite's own sink, where it hung
+  `pytest tests/e2e` on this machine.
+
 - **Verbal self-corrections no longer corrupt the sentence.** The demo the README
   and blog advertise — "remind me tuesday no wait make that wednesday …" — came
   out as "remind make that wednesday …", losing "me tuesday" and leaving the

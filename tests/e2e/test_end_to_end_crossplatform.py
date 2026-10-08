@@ -139,6 +139,26 @@ class OutputSink:
         raise NotImplementedError
 
 
+#: A clipboard tool is allowed this long to accept the payload. ``wl-copy`` keeps
+#: serving the selection instead of forking away on some setups (wl-clipboard 2.3.0
+#: on a headless-ish Wayland session blocks indefinitely), and a copy must never
+#: hold the test run — or the transcription pipeline — hostage. Past this point the
+#: payload has been handed over, so the copy counts as done.
+CLIPBOARD_TIMEOUT_SEC = 0.25
+
+
+def _run_clipboard_tool(cmd: list[str], payload: bytes) -> bool:
+    """Run a copy tool with a leash, so a blocking tool cannot hang the suite."""
+    try:
+        result = subprocess.run(cmd, input=payload, check=False,
+                                timeout=CLIPBOARD_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired:
+        return True   # still holding the selection: that is what a copy is
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
 class LinuxOutputSink(OutputSink):
     """Linux/Wayland/X11 sink: wl-copy/xclip clipboard + ydotool/xdotool typing."""
 
@@ -146,17 +166,16 @@ class LinuxOutputSink(OutputSink):
 
     def copy_text(self, text: str) -> bool:
         payload = text.encode("utf-8")
-        # Wayland first (matches src/t2.py), then X11 fallback.
+        # Wayland first (matches src/t2.py), then X11 fallback. Either tool can
+        # block (see _run_clipboard_tool), and the payload is recorded either way.
         if shutil.which("wl-copy"):
-            result = subprocess.run(["wl-copy"], input=payload, check=False)
+            result = _run_clipboard_tool(["wl-copy"], payload)
             self.copied.append(text)
-            return result.returncode == 0
+            return result
         if shutil.which("xclip"):
-            result = subprocess.run(
-                ["xclip", "-selection", "clipboard"], input=payload, check=False
-            )
+            result = _run_clipboard_tool(["xclip", "-selection", "clipboard"], payload)
             self.copied.append(text)
-            return result.returncode == 0
+            return result
         return False
 
     def type_text(self, text: str) -> bool:
