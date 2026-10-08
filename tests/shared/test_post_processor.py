@@ -870,6 +870,50 @@ def test_weekday_capitalisation_is_preserved_mid_sentence():
         "The build ran on Wednesday and Thursday."
 
 
+# ---------------------------------------------------------------------------
+# Apologies and hesitation inside a correction
+# ---------------------------------------------------------------------------
+# Reported from real dictation: "...let's schedule it for Tuesday no sorry
+# Wednesday" came out as "...schedule it for sorry Wednesday" — the apology was
+# swallowed into the *replacement*, and the category guard let it through because
+# "sorry Wednesday" merely *contains* a weekday. An apology now extends the
+# marker, never the value, and a value has to be nothing but the value.
+
+@pytest.mark.parametrize("spoken,expected", [
+    ("Okay this should be a good test here let's schedule it for Tuesday no sorry Wednesday",
+     "Okay this should be a good test here let's schedule it for Wednesday."),
+    ("Let's schedule it for Tuesday no wait sorry Wednesday", "Let's schedule it for Wednesday."),
+    ("Let's schedule it for Tuesday actually sorry Wednesday", "Let's schedule it for Wednesday."),
+    ("Let's schedule it for Tuesday no uh Wednesday", "Let's schedule it for Wednesday."),
+])
+def test_an_apology_or_filler_inside_a_correction(spoken, expected):
+    assert pp.clean_speech_transcription(spoken, skip_slm=True, punctuation_mode="full") == expected
+
+
+@pytest.mark.parametrize("text", [
+    "I'm sorry Wednesday works for me",
+    "I'm sorry about the delay",
+    "Sorry, Tuesday is bad for me",
+    "The apologies were sincere",
+    # Punctuation alone cannot say which Tuesday is being retracted, so this
+    # needs commas around a word that is *also* ordinary speech. Left alone.
+    "Let's schedule it for Tuesday, sorry, Wednesday",
+])
+def test_an_apology_alone_is_not_a_retraction(text):
+    assert pp.process_verbal_retractions(text) == text
+
+
+def test_a_value_is_the_whole_span_not_a_span_containing_a_value():
+    """Every token has to belong to the category, or the span is not a value."""
+    assert pp._value_category("Wednesday") == "weekday"
+    assert pp._value_category("next Wednesday") == "weekday"
+    assert pp._value_category("sorry Wednesday") is None
+    assert pp._value_category("Wednesday please") is None
+    assert pp._value_category("October 20th") == "month"
+    assert pp._value_category("5 PM") == "time"
+    assert pp._value_category("two") == "number"
+
+
 def test_slm_output_sanitizer_exists_and_scrubs():
     """The optional SLM path's sanitiser is reachable and does its documented job.
 

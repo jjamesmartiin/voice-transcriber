@@ -386,21 +386,42 @@ _RETRACTION_STOPWORDS = frozenset((
     "is are was were am be been being do does did done have has had "
     "will would shall should can could might must "
     "to for at in on of with by from about into onto over under "
-    "uh um er ah eh oh okay ok well just very really quite also too "
-    "not actually mean rather make wait scratch strike"
+    "uh um er ah eh hmm erm uhh umm oh okay ok well just very really quite also too "
+    "not actually mean rather make wait scratch strike "
+    "sorry apologies apologise apologize apologizing apologising oops excuse bad"
 ).split())
 
 #: End-of-phrase deletions: the marker stands alone and removes what precedes it.
 _RETRACTION_DELETE_PHRASES = ("scratch that", "strike that", "never mind that", "never mind")
 #: Markers that introduce a replacement value.
-_RETRACTION_PHRASE_TRIGGERS = ("actually", "make that", "no wait", "i mean", "or rather")
+_RETRACTION_PHRASE_TRIGGERS = (
+    "actually", "make that", "no wait", "i mean", "or rather",
+    # An apology only ever *extends* a marker, but the cheap gate below has to let
+    # the text through so the patterns can see it.
+    "sorry", "apolog", "oops", "my bad", "excuse me",
+)
 
 _RETRACTION_TOKEN = r"[A-Za-z0-9$€£%.:'\-]+"
 _RETRACTION_TRIGGER_ALT = r"(?:actually|make\s+that|no\s+wait|I\s+mean|or\s+rather)"
-#: One or more chained markers: "no wait make that Wednesday" is one retraction.
-_RETRACTION_TRIGGER_CHAIN = (
-    _RETRACTION_TRIGGER_ALT + r"(?:\s*,?\s*" + _RETRACTION_TRIGGER_ALT + r")*"
+#: An apology inside a correction ("Tuesday, no sorry, Wednesday") belongs to the
+#: *marker*, never to the replacement value. It may extend a marker, but it never
+#: starts one: "sorry" on its own is ordinary speech ("I'm sorry Wednesday works
+#: for me"), and "Tuesday, sorry, Wednesday" needs punctuation to tell those two
+#: apart, so it is deliberately left alone.
+_RETRACTION_APOLOGY_ALT = (
+    r"(?:i'?m\s+sorry|i\s+am\s+sorry|excuse\s+me|my\s+bad"
+    r"|apolog(?:y|ies|ise|ize|ising|izing)|oops|sorry)"
 )
+#: Hesitation noise may sit between a marker and its value ("no uh Wednesday").
+_RETRACTION_FILLER_ALT = r"(?:uh|um|er|ah|hmm|erm|uhh|umm)"
+#: One or more chained markers, with apologies allowed anywhere after the first:
+#: "no wait make that Wednesday" and "no sorry Wednesday" are both one retraction.
+_RETRACTION_TRIGGER_CHAIN = (
+    _RETRACTION_TRIGGER_ALT
+    + r"(?:\s*,?\s*(?:" + _RETRACTION_TRIGGER_ALT + r"|" + _RETRACTION_APOLOGY_ALT + r"))*"
+)
+#: Optional hesitation noise before the replacement value.
+_RETRACTION_FILLER_PREFIX = r"(?:" + _RETRACTION_FILLER_ALT + r"\s*,?\s*)*"
 #: Sentence content that must survive a retraction ("remind **me** …").
 _RETRACTION_KEEP = r"(?P<keep>(?:(?:me|us|you|him|her|them|it|the|my|your|our|their)\s+)*)"
 _RETRACTION_PREP = r"(?:(?P<pre>\b(?:at|in|on|to|for|by|from|with|of|about)\s+))?"
@@ -417,6 +438,7 @@ RETRACTION_REPLACEMENT_PATTERNS = [
         + r"\s*[,.;:]*\s*"
         + r"(?P<trig>" + _RETRACTION_TRIGGER_CHAIN + r")"
         + r"\s*[,.;:]*\s*"
+        + _RETRACTION_FILLER_PREFIX
         + r"(?P<new>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r"){0,2})",
         re.IGNORECASE,
     ),
@@ -427,10 +449,17 @@ RETRACTION_REPLACEMENT_PATTERNS = [
 _RETRACTION_BARE_NO_PATTERN = re.compile(
     _RETRACTION_KEEP + _RETRACTION_PREP
     + r"(?P<old>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r")?)"
-    + r"\s*[,.;:]*\s*\bno\b(?!\s+wait)\s*[,.;:]*\s*"
+    + r"\s*[,.;:]*\s*\bno\b(?!\s+wait)\s*(?:,?\s*" + _RETRACTION_APOLOGY_ALT + r")?\s*[,.;:]*\s*"
+    + _RETRACTION_FILLER_PREFIX
     + r"(?P<new>" + _RETRACTION_TOKEN + r"(?:\s+" + _RETRACTION_TOKEN + r"){0,2})",
     re.IGNORECASE,
 )
+
+
+#: Qualifiers that may precede a value in a retraction ("next Tuesday", "this Friday").
+_VALUE_QUALIFIERS = frozenset(("next", "last", "this", "coming", "upcoming", "following"))
+#: Words that belong to a clock time alongside the digits in it.
+_CLOCK_WORDS = frozenset(("am", "pm", "a.m.", "p.m.", "noon", "midnight", "o'clock", "oclock", "hours", "hrs"))
 
 
 def _value_category(span: str) -> str | None:
@@ -439,26 +468,40 @@ def _value_category(span: str) -> str | None:
     Returns a category name (``weekday``, ``month``, ``relative_day``, ``time``,
     ``money``, ``ordinal``, ``number``, ``code``) or ``None`` when the span is
     not a recognisable value.
+
+    **Every** token has to belong to the category. That strictness is the point:
+    "sorry Wednesday" *contains* a weekday but is not a date, and accepting it as
+    the replacement is how "Tuesday, no sorry, Wednesday" once came out as "sorry
+    Wednesday".
     """
     low = span.strip().lower().rstrip(".,;:!?")
     if not low:
         return None
     tokens = [t.strip(".,;:!?") for t in low.split()]
-    if any(t in _WEEKDAYS for t in tokens):
+    core = list(tokens)
+    while core and core[0] in _VALUE_QUALIFIERS:
+        core = core[1:]
+    if not core:
+        return None
+
+    def _numeric(token: str) -> bool:
+        return token.isdigit() or bool(_ORDINAL_REGEX.fullmatch(token))
+
+    if any(t in _WEEKDAYS for t in core) and all(t in _WEEKDAYS or _numeric(t) for t in core):
         return "weekday"
-    if any(t in _MONTH_NAMES for t in tokens):
+    if any(t in _MONTH_NAMES for t in core) and all(t in _MONTH_NAMES or _numeric(t) for t in core):
         return "month"
-    if any(t in _RELATIVE_DAYS for t in tokens):
+    if all(t in _RELATIVE_DAYS for t in core):
         return "relative_day"
-    if _CLOCK_REGEX.search(low):
+    if _CLOCK_REGEX.search(low) and all(_numeric(t) or t in _CLOCK_WORDS for t in core):
         return "time"
     if _MONEY_REGEX.match(low):
         return "money"
-    if tokens and all(_ORDINAL_REGEX.fullmatch(t) for t in tokens):
+    if all(_ORDINAL_REGEX.fullmatch(t) for t in core):
         return "ordinal"
-    if tokens and all(t in _NUMBER_WORDS or t.isdigit() for t in tokens):
+    if all(t in _NUMBER_WORDS or t.isdigit() for t in core):
         return "number"
-    if any(c.isdigit() for c in low) and any(c.isalpha() for c in low):
+    if len(core) == 1 and any(c.isdigit() for c in core[0]) and any(c.isalpha() for c in core[0]):
         return "code"
     return None
 
