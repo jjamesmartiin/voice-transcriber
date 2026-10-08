@@ -67,10 +67,38 @@ Introducers: a colon, or `like`, `as follows`, `the following [things]`,
 * **`first`/`second` are not renumbered.** They stay bullets: turning
   "First, update the config" into "1. update the config" would delete a spoken
   word for no layout gain, and the list already reads as ordered.
-* **No pause-based boundaries yet.** Silence is a stronger signal than any cue
-  word, but the micro-batcher's segment boundaries are not carried this far down
-  the pipeline yet — that is Phase A3 in
-  `docs/plan-structured-formatting.md`.
+* **A pause is a paragraph, not (yet) a bullet.** A silence is a strong enough
+  signal to break a paragraph, but not strong enough on its own to decide that
+  what follows is a *list item* — that still needs a cue, an ordinal label or a
+  shared head word. Turning a run of pause-separated short fragments into bullets
+  is the next refinement (Phase A3 follow-up in
+  `docs/plan-structured-formatting.md`).
+
+### Microphone pauses
+
+The micro-batcher cuts a chunk in silence or at an energy trough, and it used to
+throw that boundary away when it stitched the transcripts back together. It now
+carries it: a clean silence cut (a real pause) and a forced energy-trough cut (a
+weaker one) travel with the text as in-band control characters —
+`SEGMENT_SENTINEL` (`\x1e`) and `SOFT_SEGMENT_SENTINEL` (`\x1f`) in
+`post_processor.py`.
+
+| Boundary | `off` / `inline` | `blocks` |
+| --- | --- | --- |
+| clean silence cut (hard) | a space | a paragraph break (`\n\n`) |
+| forced energy-trough cut (soft) | a space | a line break (`\n`) |
+| chunk with no text | nothing | nothing |
+
+The marker is in band precisely so that no function signature had to change, and
+it is a control character precisely so it can never be typed by accident. Two
+rules keep it contained: no mode may ever let a sentinel reach the output, and a
+live intermediate chunk (which the TUI renders) is flattened to spaces. When the
+structure mode is `off` the result is byte-identical to the behaviour before
+boundaries existed, which the tests pin.
+
+Only the *clean cut* branch of `deduplicate_text_overlap()` carries a boundary.
+The overlap branches splice two chunks mid-phrase, which is evidence of speech
+overlap rather than of a pause.
 
 ## 4. Invariants
 
@@ -83,6 +111,8 @@ Introducers: a colon, or `like`, `as follows`, `the following [things]`,
    list survives.
 5. The stage is a pure function of `(text, mode)`; it reads no config, clock or
    network.
+6. No sentinel (`\x1e`, `\x1f`) ever appears in the output of any mode, including
+   `off` and including a live intermediate chunk.
 
 ## 5. Worked example
 

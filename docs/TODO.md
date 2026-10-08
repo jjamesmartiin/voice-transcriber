@@ -17,6 +17,8 @@ changelog; see [`CHANGELOG.md`](CHANGELOG.md) for what shipped in each release.
 
 ---
 
+- [ ] **Pause-separated lists are paragraphs, not bullets (post-processing).** Segment boundaries are now carried end-to-end (hard silence cut, soft energy-trough cut) and `blocks` mode turns them into paragraph/line breaks, verified by model-free tests in `tests/shared/test_structure_blocks.py`. What is *not* done: promoting a run of pause-separated short fragments to a bullet list, and using the measured gap in milliseconds (the batcher currently reports the *kind* of cut, not its duration). Both need a confidence rule that has been measured against real dictation, not invented. The e2e behaviour with real audio has also not been re-run since the sentinel was introduced: the worktree has no weights, so `tests/e2e/` could not be executed. Run `./scripts/test.sh e2e` on a machine with the model before trusting the pause path end-to-end.
+
 - [x] Move the pytest cache into tests/ (`pytest.ini` sets `cache_dir = tests/.pytest_cache`)
 - [x] Localize `.gitignore` per-directory (`src/`, `tests/`, `config/`) so the root stays flat
 - [x] Remove the root `HF_TOKEN` file — the runtime no longer needs a Hugging Face token (weights come from the GitHub release assets). The maintainer release tool (`scripts/prepare_model_release.py`) reads the local HF cache only and embeds no secrets.

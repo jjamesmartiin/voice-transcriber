@@ -24,6 +24,12 @@ normally reuses the existing bundle. See
   settings modal in either frontend, the `structure` control verb, or the config
   file. Typed output is automatically downgraded from `blocks` to `inline`,
   because a newline is an Enter keypress in whatever window has focus.
+- **Microphone pauses are no longer thrown away.** The micro-batcher cuts a chunk
+  in silence (a real pause) or at an energy trough (a weaker one) and used to
+  lose that boundary when stitching. The boundary now travels with the text as an
+  in-band control character: in `blocks` mode a clean silence cut is a paragraph
+  break and a forced cut is a line break, while `off` and `inline` flatten both to
+  a space, so the default output is byte-identical to before.
 
 ### Fixed
 

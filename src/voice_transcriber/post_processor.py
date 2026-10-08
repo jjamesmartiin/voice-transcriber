@@ -2574,6 +2574,18 @@ def process_spoken_quotes(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Segment boundaries (a pause beats any word as a cue)
+# ---------------------------------------------------------------------------
+# The micro-batcher cuts a chunk in silence or at an energy trough, and then
+# stitches the transcripts back together — which used to throw the boundary
+# away. It now travels with the text as an in-band control character, so it can
+# never be typed by accident and needs no new function signatures:
+#   HARD — a clean cut in silence: a real pause.
+#   SOFT — a forced cut at an energy trough mid-flow: a weaker boundary.
+SEGMENT_SENTINEL = "\x1e"
+SOFT_SEGMENT_SENTINEL = "\x1f"
+
+# ---------------------------------------------------------------------------
 # Structured output: spoken lists, bullets and paragraph breaks
 # ---------------------------------------------------------------------------
 # "off" (the default) is the identity: unless the user asks for structure this
@@ -2651,11 +2663,21 @@ _STRUCTURE_MIN_UNCUED_ITEMS = 3
 _LIST_MARKER_PREFIX_REGEX = re.compile(r"^(?:-|\d+\.)\s+")
 
 
+#: A full stop, or a line break — a break only exists here because a pause or a
+#: layout cue put it there, which makes it a sentence boundary too.
+_SENTENCE_BOUNDARY_REGEX = re.compile(r"[.!?](?=\s)|\n+")
+
+
 def _sentence_spans(text: str) -> list[tuple[int, int]]:
     """Character spans of the sentences in *text*, trailing '.' included."""
     spans = []
     start = 0
-    for match in re.finditer(r"[.!?](?=\s)", text):
+    for match in _SENTENCE_BOUNDARY_REGEX.finditer(text):
+        if text[match.start()] == "\n":
+            # The line break is the boundary, not part of either sentence.
+            spans.append((start, match.start()))
+            start = match.end()
+            continue
         spans.append((start, match.end()))
         start = match.end()
         while start < len(text) and text[start].isspace():
@@ -2797,6 +2819,28 @@ def _break_replacement(match: re.Match, mode: str) -> str:
     return "\n" if mode == "blocks" else " - "
 
 
+def _strip_segment_sentinels(text: str, replacement: str = " ") -> str:
+    """Replace boundary sentinels; never leave one in text that can be typed."""
+    return text.replace(SEGMENT_SENTINEL, replacement).replace(SOFT_SEGMENT_SENTINEL, replacement)
+
+
+def _resolve_segment_sentinels(text: str, structure_mode: str | None, is_intermediate: bool) -> str:
+    """Turn microphone-pause sentinels into the layout the current mode asks for.
+
+    With structure off (or for an intermediate live chunk) they become spaces, so
+    the output is byte-identical to before this existed and no control character
+    can reach the terminal. Only "blocks" turns a pause into a break, because a
+    break is a newline and a newline is an Enter keypress.
+    """
+    if is_intermediate:
+        return _strip_segment_sentinels(text)
+    effective = _STRUCTURE_MODE if structure_mode is None else normalize_structure_mode(structure_mode)
+    if effective != "blocks":
+        return _strip_segment_sentinels(text)
+    text = text.replace(SEGMENT_SENTINEL, "\n\n")
+    return text.replace(SOFT_SEGMENT_SENTINEL, "\n")
+
+
 def process_structure_blocks(text: str, mode: str | None = None) -> str:
     """Render spoken enumerations as bullets and spoken layout cues as breaks.
 
@@ -2835,6 +2879,11 @@ def clean_speech_transcription(
     """
     if not text:
         return ""
+
+    # 0. Microphone-pause boundaries from the micro-batcher, resolved before any
+    #    other rule sees the text (a pause is the strongest boundary cue we have).
+    if SEGMENT_SENTINEL in text or SOFT_SEGMENT_SENTINEL in text:
+        text = _resolve_segment_sentinels(text, structure_mode, is_intermediate)
 
     # Hot-reload dictionary if files were modified on disk (~1 us check)
     _check_and_reload_dictionary_if_changed()

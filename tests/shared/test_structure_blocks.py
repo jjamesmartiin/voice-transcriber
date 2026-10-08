@@ -184,3 +184,53 @@ def test_pure_gen_z_keeps_structure_while_lowercasing():
                   punctuation_mode="gen_z") == (
         "i can list them like\n\n- thing one\n- thing two"
     )
+
+
+# ---------------------------------------------------------------------------
+# Microphone pauses (segment sentinels)
+# ---------------------------------------------------------------------------
+# A pause is a stronger boundary cue than any word, so the micro-batcher marks
+# clean silence cuts (and forced energy-trough cuts) when it stitches chunks.
+# The marker is an in-band control character, which is why no mode may ever let
+# one reach the output.
+
+HARD = pp.SEGMENT_SENTINEL
+SOFT = pp.SOFT_SEGMENT_SENTINEL
+
+
+@pytest.mark.parametrize("mode", ["off", "inline", "blocks"])
+def test_a_segment_sentinel_never_reaches_the_output(mode):
+    for text in [f"Thing one.{HARD}Thing two.", f"We shipped it.{SOFT}Then we rested."]:
+        out = render(text, mode)
+        assert HARD not in out and SOFT not in out, out
+
+
+def test_pauses_are_flattened_when_structure_is_off():
+    """Off stays byte-identical to the pre-boundary behaviour: a pause is a space."""
+    assert render(f"Thing one.{HARD}Thing two.", "off") == "Thing one. Thing two."
+    assert render(f"We shipped it.{SOFT}Then we rested.", "off") == "We shipped it. Then we rested."
+
+
+def test_a_hard_pause_is_a_paragraph_and_a_soft_cut_is_a_break():
+    assert render(f"We shipped it.{HARD}Then we rested.", "blocks") == (
+        "We shipped it.\n\nThen we rested."
+    )
+    assert render(f"We shipped it.{SOFT}Then we rested.", "blocks") == (
+        "We shipped it.\nThen we rested."
+    )
+
+
+def test_pause_separated_items_become_a_list():
+    """The user's case without an introducer: the pauses alone mark the items."""
+    assert render(f"Thing one.{HARD}Thing two.{HARD}Thing three.", "blocks") == (
+        "- Thing one\n- Thing two\n- Thing three"
+    )
+
+
+def test_a_live_intermediate_chunk_never_carries_a_sentinel():
+    """The TUI shows intermediate text, so it must never see a control character."""
+    out = pp.clean_speech_transcription(
+        f"partial{HARD}text", skip_slm=True, is_intermediate=True, structure_mode="blocks"
+    )
+    assert HARD not in out and SOFT not in out
+    assert out == "partial text"

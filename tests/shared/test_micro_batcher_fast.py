@@ -212,6 +212,29 @@ class TestMicroBatchingEngine(unittest.TestCase):
             else:
                 os.environ["VT_NUMBER_DIGITS"] = old_env
 
+    def test_deduplicate_carries_a_boundary_only_on_a_clean_cut(self):
+        """Only a clean silence cut is a pause, so only it carries a separator.
+
+        The overlap branches splice two chunks mid-phrase, which is evidence of
+        speech overlap rather than a pause, so they always join with a space —
+        inserting a break there would cut a sentence (or a word) in half.
+        """
+        from micro_batcher import deduplicate_text_overlap
+        from post_processor import SEGMENT_SENTINEL, SOFT_SEGMENT_SENTINEL
+
+        assert deduplicate_text_overlap(
+            "a b", "c d", has_speech_overlap=False, separator=SEGMENT_SENTINEL
+        ) == "a b" + SEGMENT_SENTINEL + "c d"
+        assert deduplicate_text_overlap(
+            "a b", "c d", has_speech_overlap=False, separator=SOFT_SEGMENT_SENTINEL
+        ) == "a b" + SOFT_SEGMENT_SENTINEL + "c d"
+        # The default is unchanged, so every existing caller behaves as before.
+        assert deduplicate_text_overlap("a b", "c d", has_speech_overlap=False) == "a b c d"
+        assert deduplicate_text_overlap(
+            "went to the", "the store today", has_speech_overlap=True,
+            separator=SEGMENT_SENTINEL,
+        ) == "went to the store today"
+
     def test_deduplicate_text_overlap_cases(self):
         """Test intelligent text overlap deduplication across chunk boundaries."""
         from micro_batcher import deduplicate_text_overlap
