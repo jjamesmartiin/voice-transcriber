@@ -35,10 +35,10 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.inputs.build_appimage == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v19
+        uses: DeterminateSystems/nix-installer-action@v23
 
       - name: Build and bundle the app into a single AppImage
         run: |
@@ -53,7 +53,7 @@ jobs:
           ls -lh vt-x86_64.AppImage
 
       - name: Upload AppImage to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: ./vt-*.AppImage
@@ -63,10 +63,10 @@ jobs:
     name: Build standalone Windows EXE
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -87,7 +87,7 @@ jobs:
           Get-Item VoiceTranscriber-windows-x86_64.zip | Select-Object Name, Length
 
       - name: Upload Windows EXE zip to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: ./VoiceTranscriber-windows-x86_64.zip
