@@ -2056,23 +2056,31 @@ def _strip_punctuation(text: str) -> str:
 
     Decimals (``3.14``), IPs (``192.168.1.10``), paths (``/etc/nixos``) and
     contractions (``don't``) keep their separators; everything else is dropped.
+    Line structure and a leading ``- ``/``1. `` list marker survive, so a list
+    built by :func:`process_structure_blocks` is not flattened back into prose.
     """
-    def _keep_or_drop(m: re.Match) -> str:
-        ch = m.group(0)
-        if ch == "-":
-            return ch
-        start, end = m.start(), m.end()
-        before = text[start - 1] if start > 0 else ""
-        after = text[end] if end < len(text) else ""
-        if before.isalnum() and after.isalnum():
-            return ch
-        if ch in "/." and not before.isalnum() and after.isalnum():
-            return ch
-        return ""
+    def _strip_chunk(chunk: str) -> str:
+        def _keep_or_drop(m: re.Match) -> str:
+            ch = m.group(0)
+            if ch == "-":
+                return ch
+            start, end = m.start(), m.end()
+            before = chunk[start - 1] if start > 0 else ""
+            after = chunk[end] if end < len(chunk) else ""
+            if before.isalnum() and after.isalnum():
+                return ch
+            if ch in "/." and not before.isalnum() and after.isalnum():
+                return ch
+            return ""
 
-    return " ".join(re.sub(r"[^\w\s-]", _keep_or_drop, text).split())
+        return " ".join(re.sub(r"[^\w\s-]", _keep_or_drop, chunk).split())
 
-
+    stripped_lines = []
+    for line in text.split("\n"):
+        marker = _LIST_MARKER_PREFIX_REGEX.match(line)
+        prefix = marker.group(0) if marker else ""
+        stripped_lines.append((prefix + _strip_chunk(line[len(prefix):])).rstrip())
+    return "\n".join(stripped_lines)
 def apply_punctuation_mode(text: str, mode: str | None = None) -> str:
     """Format transcribed text according to the selected mode preset.
 
@@ -2565,11 +2573,261 @@ def process_spoken_quotes(text: str) -> str:
     return _SPOKEN_QUOTE_PATTERN.sub(_wrap, text)
 
 
+# ---------------------------------------------------------------------------
+# Structured output: spoken lists, bullets and paragraph breaks
+# ---------------------------------------------------------------------------
+# "off" (the default) is the identity: unless the user asks for structure this
+# stage must not change a single byte. "inline" emits markers but never a
+# newline, so it is safe for the typing sinks. "blocks" emits real bullets and
+# paragraph breaks and is only safe where the text is pasted rather than typed —
+# a newline is an Enter keypress (see docs/formatting.md).
+_STRUCTURE_MODE = "off"
+
+_STRUCTURE_MODE_ALIASES = {
+    "off": "off", "none": "off", "no": "off", "flat": "off", "disabled": "off",
+    "inline": "inline", "dashes": "inline", "safe": "inline", "single_line": "inline",
+    "blocks": "blocks", "bullets": "blocks", "full": "blocks", "lists": "blocks",
+}
+
+
+def normalize_structure_mode(value) -> str:
+    """Map a user value onto ``off``/``inline``/``blocks``; unknown means off."""
+    if value is None:
+        return "off"
+    key = str(value).strip().lower().replace("-", "_")
+    return _STRUCTURE_MODE_ALIASES.get(key, "off")
+
+
+def set_structure_mode(mode) -> str:
+    """Set the global structured-output mode and return the canonical value."""
+    global _STRUCTURE_MODE
+    _STRUCTURE_MODE = normalize_structure_mode(mode)
+    return _STRUCTURE_MODE
+
+
+def get_structure_mode() -> str:
+    return _STRUCTURE_MODE
+
+
+#: Spoken layout cues. They must follow a clause boundary, so "the new line of
+#: GPUs" is never mistaken for a layout instruction.
+_SPOKEN_BREAK_REGEX = re.compile(
+    r"(?:^|(?<=[.!?,;:]\s))\s*"
+    r"(?:new\s+paragraph|new\s+line|next\s+line|bullet\s+point|next\s+bullet)\b[.,:;]?\s*",
+    re.IGNORECASE,
+)
+
+#: An introducer means "what follows is a list". The colon is the common
+#: dictation cue ("I can list them like:").
+_LIST_CUE_BODY = (
+    r"(?:[:：]|like|as\s+follows|the\s+following(?:\s+things)?|these\s+things|"
+    r"here(?:'s|\s+are)\s+the(?:\s+things)?)"
+)
+#: Scans anywhere, because a list is anchored to its cue, not to a sentence
+#: boundary: in "I can list them like: Thing one." the first item is glued to
+#: the introducer.
+_LIST_CUE_SCAN_REGEX = re.compile(_LIST_CUE_BODY, re.IGNORECASE)
+
+_ORDINAL_WORDS = (
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
+    "ninth", "tenth",
+)
+_ORDINAL_TAIL_REGEX = re.compile(r"\b(?:%s)\b[.,:]?\s*$" % "|".join(_ORDINAL_WORDS), re.IGNORECASE)
+_ORDINAL_HEAD_REGEX = re.compile(r"^(?:%s)\b[.,:]?\s*" % "|".join(_ORDINAL_WORDS), re.IGNORECASE)
+#: Explicit numbering labels are dropped when the list is renumbered, because the
+#: number carries what the label said ("step one: install" -> "1. install").
+_NUMBER_LABEL_PREFIX_REGEX = re.compile(
+    r"^(?:step|number|item|point|bullet)\s+(?:%s)\b\s*[.,:;-]?\s*" % "|".join(_ORDINAL_WORDS),
+    re.IGNORECASE,
+)
+
+#: Items longer than this are prose, not list items.
+_STRUCTURE_MAX_ITEM_WORDS = 25
+#: Without an introducer the bar is higher: three or more short parallel sentences.
+_STRUCTURE_MAX_ITEM_WORDS_UNCUED = 12
+_STRUCTURE_MIN_UNCUED_ITEMS = 3
+#: Leading list marker, preserved by the punctuation presets.
+_LIST_MARKER_PREFIX_REGEX = re.compile(r"^(?:-|\d+\.)\s+")
+
+
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
+    """Character spans of the sentences in *text*, trailing '.' included."""
+    spans = []
+    start = 0
+    for match in re.finditer(r"[.!?](?=\s)", text):
+        spans.append((start, match.end()))
+        start = match.end()
+        while start < len(text) and text[start].isspace():
+            start += 1
+    if start < len(text) and text[start:].strip():
+        spans.append((start, len(text)))
+    return [(s, e) for s, e in spans if text[s:e].strip()]
+
+
+def _sentence_head(sentence: str) -> str:
+    words = sentence.split()
+    return words[0].lower().strip(".,:;!?") if words else ""
+
+
+#: Head words too common to prove two sentences are parallel items. Without this
+#: any two sentences starting with "I" look like a list, which turned a normal
+#: sentence into a bullet in the first cut of this stage.
+_PARALLEL_HEAD_STOPWORDS = frozenset((
+    "i we you he she it they the a an this that these those there here then and "
+    "but or so also now well okay ok"
+).split())
+
+
+def _items_are_parallel(first: str, other: str) -> bool:
+    """True when *other* reads as the next item of the list *first* starts.
+
+    Either both open with an ordinal ("First, ..." / "Second, ...") or they share
+    a discriminating head word ("Thing one" / "Thing two").
+    """
+    if _ORDINAL_HEAD_REGEX.match(first) and _ORDINAL_HEAD_REGEX.match(other):
+        return True
+    head = _sentence_head(first)
+    if not head or head in _PARALLEL_HEAD_STOPWORDS:
+        return False
+    return head == _sentence_head(other)
+
+
+def _has_number_labels(items: list[str]) -> bool:
+    return all(_NUMBER_LABEL_PREFIX_REGEX.match(item) for item in items)
+
+
+def _sentences_from(text: str, start: int) -> list[tuple[int, int]]:
+    """Absolute spans of the sentences beginning at offset *start*."""
+    return [(start + s, start + e) for s, e in _sentence_spans(text[start:])]
+
+
+def _parallel_run_from(text: str, start: int, max_words: int = _STRUCTURE_MAX_ITEM_WORDS):
+    """The maximal parallel run of sentences from *start*, or ``None``.
+
+    *start* may sit mid-sentence, which is what makes a cue like "list them
+    like:" work: the first item is the text between the cue and the next full
+    stop.
+    """
+    spans = _sentences_from(text, start)
+    if len(spans) < 2:
+        return None
+    first = text[spans[0][0]:spans[0][1]]
+    if len(first.split()) > max_words:
+        return None
+    run = [spans[0]]
+    for span in spans[1:]:
+        candidate = text[span[0]:span[1]]
+        if len(candidate.split()) > max_words:
+            break
+        if not _items_are_parallel(first, candidate):
+            break
+        run.append(span)
+    if len(run) < 2:
+        return None
+    items = [text[s:e].strip() for s, e in run]
+    return run[0][0], run[-1][1], items, _has_number_labels(items)
+
+
+def _find_list_region(text: str):
+    """Locate a spoken list, or return ``None``.
+
+    Two passes. First an introducer, which anchors the list exactly where it
+    starts ("I can list them like: Thing one. Thing two."). Then, with no
+    introducer, a run of ordinal-labelled items or of three or more short
+    sentences sharing a head word ("Deploy alpha. Deploy beta. Deploy gamma.").
+    Everything else is prose and is left alone.
+    """
+    cue = None
+    for match in _LIST_CUE_SCAN_REGEX.finditer(text):
+        cue = match                        # the last introducer wins
+    if cue is not None:
+        region = _parallel_run_from(text, cue.end())
+        if region is not None:
+            return region
+
+    for start, _end in _sentence_spans(text):
+        region = _parallel_run_from(text, start, max_words=_STRUCTURE_MAX_ITEM_WORDS_UNCUED)
+        if region is None:
+            continue
+        items = region[2]
+        labelled = any(
+            _ORDINAL_TAIL_REGEX.search(item)
+            or _ORDINAL_HEAD_REGEX.match(item)
+            or _NUMBER_LABEL_PREFIX_REGEX.match(item)
+            for item in items
+        )
+        if labelled or len(items) >= _STRUCTURE_MIN_UNCUED_ITEMS:
+            return region
+    return None
+
+
+def _tidy_blocks(text: str, mode: str) -> str:
+    """Remove whitespace the injected breaks left behind."""
+    if mode != "blocks":
+        return text
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def _render_items(items: list[str], mode: str, numbered: bool) -> str:
+    lines = []
+    for position, item in enumerate(items, start=1):
+        body = _NUMBER_LABEL_PREFIX_REGEX.sub("", item, count=1) if numbered else item
+        body = body.strip()
+        marker = f"{position}. " if numbered else "- "
+        if mode == "blocks":
+            # A bullet list reads better without per-item full stops.
+            if body.endswith(".") and not body.endswith(".."):
+                body = body[:-1]
+            lines.append(f"{marker}{body}".rstrip())
+        else:
+            lines.append(f"{marker}{body}")
+    if mode == "blocks":
+        return "\n\n" + "\n".join(lines)
+    return " " + " ".join(lines)
+
+
+def _break_replacement(match: re.Match, mode: str) -> str:
+    cue = match.group(0).lower()
+    if "bullet" in cue:
+        return "\n- " if mode == "blocks" else " - "
+    if "paragraph" in cue:
+        return "\n\n" if mode == "blocks" else " - "
+    return "\n" if mode == "blocks" else " - "
+
+
+def process_structure_blocks(text: str, mode: str | None = None) -> str:
+    """Render spoken enumerations as bullets and spoken layout cues as breaks.
+
+    Pure and conservative: in "off" mode, or when no cue is recognised, the input
+    is returned unchanged. "inline" never emits a newline (safe for typing);
+    "blocks" emits real line breaks (clipboard/paste only).
+    """
+    effective = _STRUCTURE_MODE if mode is None else normalize_structure_mode(mode)
+    if effective == "off" or not text:
+        return text
+
+    text = _SPOKEN_BREAK_REGEX.sub(lambda m: _break_replacement(m, effective), text)
+
+    region = _find_list_region(text)
+    if region is None:
+        return _tidy_blocks(text, effective)
+    start, end, items, numbered = region
+    prefix = text[:start].rstrip()
+    body = _render_items(items, effective, numbered)
+    if not prefix:
+        # A list that opens the utterance must not begin with a separator.
+        body = body.lstrip()
+    return _tidy_blocks(prefix + body + text[end:], effective)
+
+
 def clean_speech_transcription(
     text: str,
     skip_slm: bool = False,
     punctuation_mode: str | None = None,
-    is_intermediate: bool = False
+    is_intermediate: bool = False,
+    structure_mode: str | None = None,
 ) -> str:
     """
     Cleans raw speech transcription text of ASR artifacts, false sentence breaks,
@@ -2765,7 +3023,13 @@ def clean_speech_transcription(
                 if len(cleaned.split(None, 3)) >= 3:
                     cleaned += "."
 
-    # 15. Apply punctuation mode formatting (if not intermediate chunk)
+    # 15. Structured output: spoken lists become bullets, spoken layout cues
+    #     become breaks. Runs before the punctuation preset, which preserves
+    #     the markers (see _strip_punctuation).
+    if not is_intermediate:
+        cleaned = process_structure_blocks(cleaned, mode=structure_mode)
+
+    # 16. Apply punctuation mode formatting (if not intermediate chunk)
     if not is_intermediate:
         cleaned = apply_punctuation_mode(cleaned, mode=punctuation_mode)
 
