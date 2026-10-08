@@ -15,6 +15,8 @@
 # Usage:
 #   ./scripts/publish_model_bundle.sh              publish the existing dist/model assets
 #   ./scripts/publish_model_bundle.sh --build      package them first, then publish
+#   ./scripts/publish_model_bundle.sh --model NAME publish a specific registry model
+#                                                  (default: cohere; see MODEL_DOWNLOAD registry)
 #   ./scripts/publish_model_bundle.sh --dry-run    show the plan, change nothing
 #
 # Extra flags are forwarded to scripts/prepare_model_release.py with --build
@@ -24,10 +26,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BUILD=0
+MODEL="${VT_MODEL:-cohere}"
 DRY_RUN="${DRY_RUN:-0}"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --build)   BUILD=1; shift ;;
+        --model)   MODEL="$2"; shift 2 ;;
+        --model=*) MODEL="${1#--model=}"; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         --)        shift; break ;;
         *)         break ;;   # packaging flags are forwarded, not consumed here
@@ -52,14 +57,16 @@ fi
 
 # Read the constants out of the client module so the publisher can never
 # disagree with what the client will actually request.
-read -r REPO TAG REV < <("$PY" -c \
-    'import sys; sys.path.insert(0, "src"); import model_download as m; print(m.REPO_SLUG, m.MODEL_BUNDLE_TAG, m.REVISION)')
+read -r REPO TAG REV PREFIX DISPLAY < <(MODEL="$MODEL" "$PY" -c \
+    'import os, sys; sys.path.insert(0, "src"); import model_download as m; \
+     s = m.get_spec(os.environ["MODEL"]); \
+     print(m.REPO_SLUG, s.bundle_tag, s.revision, s.asset_prefix, s.display_name)')
 
-PREFIX="cohere-transcribe-${REV}"
 OUT="${OUT:-dist/model}"
 SUMS="$OUT/${PREFIX}.SHA256SUMS"
 DRY_RUN="${DRY_RUN:-0}"
 
+echo "model  : $MODEL ($DISPLAY)"
 echo "repo   : $REPO"
 echo "tag    : $TAG   (revision ${REV:0:12})"
 echo "source : $OUT"
@@ -71,13 +78,13 @@ echo
 if [ "$BUILD" = 1 ]; then
     if [ "$DRY_RUN" = 1 ]; then
         echo "would package assets into $OUT from the local model snapshot:"
-        echo "  $PY scripts/prepare_model_release.py --out $OUT $*"
+        echo "  $PY scripts/prepare_model_release.py --model $MODEL --out $OUT $*"
         echo
     else
         echo "Packaging from the local model snapshot: tar -> split -> xz -> SHA256SUMS -> verify."
         echo "CPU-heavy and serial; this is the slow half."
         echo
-        "$PY" scripts/prepare_model_release.py --out "$OUT" "$@"
+        "$PY" scripts/prepare_model_release.py --model "$MODEL" --out "$OUT" "$@"
         echo
     fi
 fi
@@ -120,7 +127,7 @@ if ! "${GH[@]}" release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
         echo "Creating weights release $TAG ..."
         "${GH[@]}" release create "$TAG" --repo "$REPO" --prerelease \
             --title "Model bundle ${REV:0:12}" \
-            --notes "Cohere Transcribe weights for revision \`${REV}\`.
+            --notes "${DISPLAY} weights for revision \`${REV}\`.
 
 Not an app release: this tag exists only to host the model assets, so app
 releases never have to re-upload them. See docs/releasing.md."

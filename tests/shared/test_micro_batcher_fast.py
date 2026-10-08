@@ -7,6 +7,7 @@ Runs in milliseconds without requiring neural network model weights.
 import os
 import sys
 import unittest
+from unittest import mock
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
@@ -16,6 +17,7 @@ from post_processor import (
     get_number_digits_mode,
     set_number_digits_mode,
 )
+import micro_batcher
 from micro_batcher import trim_trailing_silence, StreamingMicroBatcher, has_speech_activity
 
 class TestMicroBatchingEngine(unittest.TestCase):
@@ -143,19 +145,27 @@ class TestMicroBatchingEngine(unittest.TestCase):
                 os.environ["VT_VLLM_URL"] = old_url
 
     def test_micro_batcher_buffer_splitting(self):
-        """Test StreamingMicroBatcher splits chunks correctly"""
-        batcher = StreamingMicroBatcher(sample_rate=16000, mode="always")
-        batcher.start()
+        """Test StreamingMicroBatcher splits chunks correctly
 
-        # Feed 4 seconds of speech audio (above threshold)
-        sr = 16000
-        speech_chunk = np.random.uniform(-0.05, 0.05, sr).astype(np.float32)
-        for _ in range(4):
-            batcher.feed_audio(speech_chunk)
+        The worker thread must never reach the real backend: it would call
+        ``ensure_local_cohere()`` and silently start a multi-gigabyte model
+        download. This is a ``unittest.TestCase``, so the pytest ``fake_asr``
+        fixture does not reach it - patch the backend explicitly instead.
+        """
+        with mock.patch.object(micro_batcher.transcribe2, "transcribe_audio",
+                               return_value="hello world"):
+            batcher = StreamingMicroBatcher(sample_rate=16000, mode="always")
+            batcher.start()
 
-        # Finish
-        text = batcher.finish_and_get_text()
-        self.assertIsInstance(text, str)
+            # Feed 4 seconds of speech audio (above threshold)
+            sr = 16000
+            speech_chunk = np.random.uniform(-0.05, 0.05, sr).astype(np.float32)
+            for _ in range(4):
+                batcher.feed_audio(speech_chunk)
+
+            # Finish
+            text = batcher.finish_and_get_text()
+            self.assertIsInstance(text, str)
 
     def test_number_words_to_digits(self):
         """Test spoken number words convert to actual digits."""

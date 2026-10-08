@@ -33,60 +33,45 @@ import tempfile
 
 # Single source of truth for what this package contains: importing rather than
 # re-declaring means the builder and the installer cannot disagree about the
-# revision, which would otherwise drift silently on a model bump.
+# revision or the file list, which would otherwise drift silently on a model
+# bump. ``--model`` selects the registry entry to package.
 sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "src"))
-from model_download import (  # noqa: E402
-    REPO_ID,
-    REVISION,
-    SAFETENSORS_SHA256,
-)
+from model_download import get_spec  # noqa: E402
 
-# Files from the HF snapshot that transformers needs for a local offline load.
-REQUIRED_FILES = [
-    "config.json",
-    "generation_config.json",
-    "model.safetensors",
-    "modeling_cohere_asr.py",
-    "configuration_cohere_asr.py",
-    "processing_cohere_asr.py",
-    "tokenization_cohere_asr.py",
-    "processor_config.json",
-    "preprocessor_config.json",
-    "tokenizer_config.json",
-    "tokenizer.json",
-    "tokenizer.model",
-    "special_tokens_map.json",
-]
-
-NOTICE = (
-    "Cohere Transcribe 2B (cohere-transcribe-03-2026)\n"
-    "Automatic Speech Recognition model by Cohere / Cohere Labs.\n"
-    f"Revision: {REVISION}\n"
-    f"Source: https://huggingface.co/{REPO_ID}\n"
-    "\n"
-    "This model is licensed under the Apache License, Version 2.0 "
-    "(see the LICENSE file in this directory).\n"
-    "Weights mirrored for distribution via the voice-transcriber GitHub release."
-)
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def find_hf_cache_model_dir():
+def build_notice(spec):
+    """The NOTICE shipped beside the license inside the release archive."""
+    return (
+        f"{spec.display_name} ({spec.repo_id.rsplit('/', 1)[-1]})\n"
+        f"{spec.description}\n"
+        f"Revision: {spec.revision}\n"
+        f"Source: https://huggingface.co/{spec.repo_id}\n"
+        "\n"
+        f"This model is licensed under {spec.license_name} "
+        "(see the LICENSE file in this directory).\n"
+        "Weights mirrored for distribution via the voice-transcriber GitHub release."
+    )
+
+
+def find_hf_cache_model_dir(spec):
     """Locate the downloaded snapshot inside ~/.cache/huggingface/hub."""
     hub = os.path.expanduser("~/.cache/huggingface/hub")
-    repo_dir = os.path.join(hub, "models--" + REPO_ID.replace("/", "--"))
-    snap = os.path.join(repo_dir, "snapshots", REVISION)
+    repo_dir = os.path.join(hub, "models--" + spec.repo_id.replace("/", "--"))
+    snap = os.path.join(repo_dir, "snapshots", spec.revision)
     if os.path.isdir(snap):
         return snap
     refs_main = os.path.join(repo_dir, "refs", "main")
     if os.path.exists(refs_main):
         snap2 = os.path.join(repo_dir, "snapshots", open(refs_main).read().strip())
-        if os.path.isdir(snap2) and all(os.path.exists(os.path.join(snap2, f)) for f in REQUIRED_FILES):
+        if os.path.isdir(snap2) and all(os.path.exists(os.path.join(snap2, f)) for f in spec.package_files):
             return snap2
     # fall back to any snapshot that looks complete
     import glob
     for cand in sorted(glob.glob(os.path.join(repo_dir, "snapshots", "*"))):
-        if all(os.path.exists(os.path.join(cand, f)) for f in REQUIRED_FILES):
+        if all(os.path.exists(os.path.join(cand, f)) for f in spec.package_files):
             return cand
     return None
 
@@ -123,27 +108,29 @@ def xz_compress(src, dst, level=6):
     return os.path.getsize(dst)
 
 
-def build_tar(model_dir, staging, out_tar):
+def build_tar(spec, model_dir, staging, out_tar):
     """Copy the flat model files + license into staging, then tar them."""
     os.makedirs(staging, exist_ok=True)
-    missing = [f for f in REQUIRED_FILES if not os.path.exists(os.path.join(model_dir, f))]
+    missing = [f for f in spec.package_files if not os.path.exists(os.path.join(model_dir, f))]
     if missing:
         print(f"ERROR: source model dir is missing files: {missing}")
         sys.exit(2)
 
-    for f in REQUIRED_FILES:
+    for f in spec.package_files:
         shutil.copy2(os.path.join(model_dir, f), os.path.join(staging, f))
 
-    # Apache-2.0 redistribution compliance: ship the license + attribution.
-    here = os.path.dirname(os.path.abspath(__file__))
-    lic = os.path.join(here, "..", "config", "licenses", "Cohere-Apache-2.0.txt")
-    if os.path.exists(lic):
+    # Redistribution compliance: ship the license + attribution declared by the
+    # spec, so a second model needs no edit here.
+    lic = spec.license_file
+    if lic and not os.path.isabs(lic):
+        lic = os.path.join(REPO_ROOT, lic)
+    if lic and os.path.exists(lic):
         shutil.copy2(lic, os.path.join(staging, "LICENSE"))
     else:
-        print("WARNING: config/licenses/Cohere-Apache-2.0.txt not found; "
+        print(f"WARNING: {spec.license_file} not found; "
               "model LICENSE file will be missing from the release asset.")
     with open(os.path.join(staging, "NOTICE"), "w") as f:
-        f.write(NOTICE)
+        f.write(build_notice(spec))
 
     with tarfile.open(out_tar, "w", format=tarfile.GNU_FORMAT) as tf:
         for name in sorted(os.listdir(staging)):
@@ -175,9 +162,10 @@ def split_file(path, parts_dir, n_parts):
     return paths
 
 
-def verify(outdir, prefix, parts_raw, original_tar, model_safetensors_sha):
+def verify(spec, outdir, parts_raw, original_tar):
     """Re-assemble decompressed parts and confirm the tar round-trips."""
     print("\nVerifying parts ...")
+    prefix = spec.asset_prefix
     xz = find_xz()
     combined = os.path.join(outdir, ".verify.tar")
     with open(combined, "wb") as out:
@@ -198,27 +186,32 @@ def verify(outdir, prefix, parts_raw, original_tar, model_safetensors_sha):
     print(f"  reassembled tar size match: {ok_sizes} "
           f"({os.path.getsize(combined)} vs {os.path.getsize(original_tar)})")
 
-    # Stream-hash model.safetensors inside the reassembled tar.
-    member_sha = None
+    # Stream-hash every redistributed file the spec pins, so the check is
+    # format-agnostic (safetensors, GGUF, ONNX, ...).
+    ok_hash = True
     with tarfile.open(combined, "r") as tf:
-        m = tf.extractfile("model.safetensors")
-        assert m is not None, "model.safetensors missing from tar"
-        h = hashlib.sha256()
-        while True:
-            b = m.read(1 << 20)
-            if not b:
-                break
-            h.update(b)
-        member_sha = h.hexdigest()
-    ok_hash = member_sha == model_safetensors_sha
-    print(f"  model.safetensors sha256 match: {ok_hash}")
+        for fname, expected in spec.digests.items():
+            m = tf.extractfile(fname)
+            assert m is not None, f"{fname} missing from tar"
+            h = hashlib.sha256()
+            while True:
+                b = m.read(1 << 20)
+                if not b:
+                    break
+                h.update(b)
+            match = h.hexdigest() == expected
+            ok_hash = ok_hash and match
+            print(f"  {fname} sha256 match: {match}")
     os.remove(combined)
     return ok_sizes and ok_hash
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Package Cohere Transcribe weights "
+    ap = argparse.ArgumentParser(description="Package a registered model's weights "
                                              "as split-xz GitHub Release assets.")
+    ap.add_argument("--model", default="cohere",
+                    help="Registry model to package (default: cohere); the "
+                         "registry lives in src/voice_transcriber/model_download.py")
     ap.add_argument("--model-dir", default=None,
                     help="Flat directory with the model files (default: locate "
                          "the HF cache snapshot automatically)")
@@ -237,21 +230,23 @@ def main():
                          "SHA256SUMS (USB / airgapped delivery)")
     args = ap.parse_args()
 
-    model_dir = args.model_dir or find_hf_cache_model_dir()
+    spec = get_spec(args.model)
+    model_dir = args.model_dir or find_hf_cache_model_dir(spec)
     if not model_dir or not os.path.isdir(model_dir):
         print("ERROR: could not find the model. Pass --model-dir explicitly.")
         sys.exit(2)
 
+    print(f"Model: {spec.name} ({spec.repo_id}@{spec.revision[:12]})")
     print(f"Source model dir: {model_dir}")
-    prefix = f"cohere-transcribe-{REVISION}"
+    prefix = spec.asset_prefix
     os.makedirs(args.out, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="vt-model-release-") as tmp:
         staging = os.path.join(tmp, "staging")
         tar_path = os.path.join(tmp, "model.tar")
 
-        print(f"Staging {len(REQUIRED_FILES)} files + LICENSE/NOTICE ...")
-        build_tar(model_dir, staging, tar_path)
+        print(f"Staging {len(spec.package_files)} files + LICENSE/NOTICE ...")
+        build_tar(spec, model_dir, staging, tar_path)
         raw = os.path.getsize(tar_path)
         print(f"tar created: {raw/1e9:.2f} GB")
 
@@ -277,7 +272,7 @@ def main():
         print(f"SHA256SUMS -> {sums_path}")
 
         if not args.skip_verify:
-            ok = verify(args.out, prefix, pieces, tar_path, SAFETENSORS_SHA256)
+            ok = verify(spec, args.out, pieces, tar_path)
             if not ok:
                 print("VERIFICATION FAILED — do not publish these assets.")
                 sys.exit(1)
