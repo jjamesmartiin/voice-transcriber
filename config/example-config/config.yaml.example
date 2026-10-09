@@ -129,10 +129,14 @@ cleanup_mode: "full"
 # Default: "off"
 formatter: "off"
 
-# Which formatter backend to use. "s1-mini" is the bundled default;
-# "llama-server" attaches to an external server instead.
-# Env: VT_FORMATTER_MODEL. Default: "s1-mini"
-formatter_model: "s1-mini"
+# Which formatter backend to use.
+#   - "llama-server": runs the model in a llama-server subprocess. This is the
+#     shipped default: it is the only option that is both portable and fast today,
+#     because the in-process bindings cannot use llama.cpp's runtime CPU dispatch
+#     (see docs/plan-on-device-formatter.md sec 6.1).
+#   - "s1-mini":     the in-process fallback (milestone C4). Not built yet.
+# Env: VT_FORMATTER_MODEL. Default: "llama-server"
+formatter_model: "llama-server"
 
 # The writing style the formatter aims for.
 #   - "casual", "semi-casual", "semi-formal" (default), "formal"

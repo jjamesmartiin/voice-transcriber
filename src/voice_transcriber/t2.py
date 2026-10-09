@@ -151,7 +151,12 @@ FORMATTER_MODES = ["off", "on"]
 #: User-selectable backends. "noop" is deliberately absent: it is the identity
 #: backend used by tests, not something to offer a user. The registry is still
 #: the source of truth and a test asserts this list cannot drift from it.
-FORMATTER_MODEL = "s1-mini"
+#:
+#: The default is the subprocess backend, not "s1-mini". `s1-mini` in this codebase
+#: names the *in-process* backend (milestone C4), which does not exist yet, so
+#: defaulting to it made `formatter: on` a silent no-op out of the box. See
+#: formatter.DEFAULT_BACKEND and docs/plan-on-device-formatter.md sec 6.1.
+FORMATTER_MODEL = "llama-server"
 FORMATTER_MODELS = ["s1-mini", "llama-server"]
 FORMATTER_STYLE = "semi-formal"
 FORMATTER_STYLES = ["casual", "semi-casual", "semi-formal", "formal"]
@@ -195,7 +200,7 @@ DEFAULT_SETTINGS = {
     'STRUCTURE_MODE': "off",
     'CLEANUP_MODE': "full",
     'FORMATTER': "off",
-    'FORMATTER_MODEL': "s1-mini",
+    'FORMATTER_MODEL': "llama-server",
     'FORMATTER_STYLE': "semi-formal",
     'FORMATTER_CONTEXT': "general",
     'LANGUAGE': "en",
@@ -1634,8 +1639,6 @@ def normalize_formatter_model(value) -> str:
     """A backend name. Unknown values fall back to the shipped default."""
     text = str(value).strip().lower() if value is not None else ""
     return text or FORMATTER_MODEL
-
-
 def get_formatter() -> str:
     """The configured formatter mode ("off"/"on")."""
     return FORMATTER

@@ -86,10 +86,10 @@ def test_resolve_backend_name_rejects_an_unknown_name():
 def test_the_default_backend_is_absent_until_its_milestone():
     """Fail safe, not fail loud.
 
-    ``s1-mini`` is the default and its module lands in milestone C4. Until then
-    resolving it must mean "no formatting available", never a crash on the
-    dictation path. ``llama-server`` used to be in this list too; it now exists
-    (C3), so only the genuinely absent one is asserted here.
+    ``s1-mini`` names the *in-process* backend and its module lands in milestone
+    C4; the shipped default is ``llama-server``, which does exist. Resolving an
+    absent module must mean "no formatting available", never a crash on the
+    dictation path.
     """
     assert formatter.load_backend("s1-mini") is None
     assert formatter.load_backend("not-a-backend") is None

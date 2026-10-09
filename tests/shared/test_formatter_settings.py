@@ -149,7 +149,11 @@ def test_the_default_is_off():
     assert t2.DEFAULT_SETTINGS["FORMATTER"] == "off"
     assert t2.DEFAULT_SETTINGS["FORMATTER_STYLE"] == "semi-formal"
     assert t2.DEFAULT_SETTINGS["FORMATTER_CONTEXT"] == "general"
-    assert t2.DEFAULT_SETTINGS["FORMATTER_MODEL"] == "s1-mini"
+    # The *subprocess* backend, which exists and is the shipping path - not
+    # "s1-mini", which names the in-process backend (C4) that does not exist yet.
+    # Defaulting to that made `formatter: on` a silent no-op.
+    assert t2.DEFAULT_SETTINGS["FORMATTER_MODEL"] == "llama-server"
+    assert t2.DEFAULT_SETTINGS["FORMATTER_MODEL"] == formatter.DEFAULT_BACKEND
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +185,10 @@ def test_effective_formatter_reflects_the_cleanup_gate():
 # ---------------------------------------------------------------------------
 def test_no_backend_means_the_text_passes_through(cfg):
     t2.set_formatter("on")
-    t2.FORMATTER_MODEL = "s1-mini"  # registered, but its module is not installed
+    # Registered, but its module is not installed - the common case for the
+    # in-process backend until C4 lands, and for any backend on a machine that
+    # never downloaded the weights.
+    t2.FORMATTER_MODEL = "s1-mini"
     assert _run() == pp.clean_speech_transcription(SAMPLE, skip_slm=True)
 
 
@@ -229,9 +236,10 @@ def test_context_normalisation(value, expected):
 
 
 def test_model_normalisation_falls_back_to_the_shipped_default():
-    assert t2.normalize_formatter_model("") == "s1-mini"
-    assert t2.normalize_formatter_model(None) == "s1-mini"
+    assert t2.normalize_formatter_model("") == "llama-server"
+    assert t2.normalize_formatter_model(None) == "llama-server"
     assert t2.normalize_formatter_model("llama-server") == "llama-server"
+    assert t2.normalize_formatter_model("s1-mini") == "s1-mini"
 
 
 def test_setting_names_are_the_documented_ones(cfg):
@@ -241,7 +249,7 @@ def test_setting_names_are_the_documented_ones(cfg):
     t2.load_audio_config()
     assert (t2.get_formatter(), t2.get_formatter_model(),
             t2.get_formatter_style(), t2.get_formatter_context()) == (
-        "off", "s1-mini", "semi-formal", "general")
+        "off", "llama-server", "semi-formal", "general")
 
 
 # ---------------------------------------------------------------------------
@@ -299,9 +307,9 @@ def test_cycles_wrap(cfg):
     assert t2.toggle_formatter() == "on"
     assert t2.toggle_formatter() == "off"
 
-    t2.set_formatter_model("s1-mini")
-    assert t2.cycle_formatter_model() == "llama-server"
+    t2.set_formatter_model("llama-server")
     assert t2.cycle_formatter_model() == "s1-mini"
+    assert t2.cycle_formatter_model() == "llama-server"
 
     t2.set_formatter_style("casual")
     assert [t2.cycle_formatter_style() for _ in range(4)] == [

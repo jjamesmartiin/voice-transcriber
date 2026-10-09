@@ -41,10 +41,20 @@ BACKENDS: dict[str, str] = {
 }
 
 #: Backend used when none is named. Must be a key of :data:`BACKENDS`.
-#: Until ``s1-mini`` lands (milestone C3) this resolves to a module that does not
-#: exist yet, which :func:`load_backend` treats as "no formatting available" -
-#: the correct fail-safe, not a crash.
-DEFAULT_BACKEND = "s1-mini"
+#:
+#: This is the **subprocess** backend, and it is the default because
+#: docs/plan-on-device-formatter.md sec 6.1 made it the primary shipping path:
+#: it is the only option that is both portable and fast today, since the
+#: ``llama-cpp-python`` bindings cannot use llama.cpp's runtime CPU dispatch at
+#: all (upstream issue #2069 - "no backends are loaded"), leaving the Nix
+#: in-process artifact on a baseline SSE2 build that nixpkgs notes can be 13x
+#: slower. Measured warm on this machine: 182 ms for a 15-token rewrite.
+#:
+#: This was briefly ``"s1-mini"``, which is the *in-process* backend and does not
+#: exist yet (milestone C4). Because that module was absent,
+#: :func:`load_backend` returned ``None`` and ``formatter: on`` silently did
+#: nothing out of the box - the feature looked broken rather than disabled.
+DEFAULT_BACKEND = "llama-server"
 
 #: What a backend module must expose. Checked on first load rather than at
 #: import time, so declaring a backend stays free and a half-added one degrades
