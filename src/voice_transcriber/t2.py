@@ -143,6 +143,20 @@ STRUCTURE_MODES = ["off", "inline", "blocks"]
 #: word. See docs/cleanup_modes.md.
 CLEANUP_MODE = "full"
 CLEANUP_MODES = ["off", "artifacts", "full"]
+#: Optional on-device formatter (docs/plan-on-device-formatter.md). "off" is the
+#: shipped default and means the dictation path is byte-identical to a build
+#: without the feature.
+FORMATTER = "off"
+FORMATTER_MODES = ["off", "on"]
+#: User-selectable backends. "noop" is deliberately absent: it is the identity
+#: backend used by tests, not something to offer a user. The registry is still
+#: the source of truth and a test asserts this list cannot drift from it.
+FORMATTER_MODEL = "s1-mini"
+FORMATTER_MODELS = ["s1-mini", "llama-server"]
+FORMATTER_STYLE = "semi-formal"
+FORMATTER_STYLES = ["casual", "semi-casual", "semi-formal", "formal"]
+FORMATTER_CONTEXT = "general"
+FORMATTER_CONTEXTS = ["general", "email"]
 LANGUAGE = "en"
 WAIT_FOR_MODEL_ON_STARTUP = True
 ENABLE_SLM = False
@@ -172,9 +186,18 @@ DEFAULT_SETTINGS = {
     'KEEP_BLUETOOTH_HANDSFREE': True,
     'SOUND_THEME': "proximity",
     'UI_THEME': "red",
+    # NOTE: deliberately NOT the same as the module global above, which is
+    # "full". "Reset to Defaults" targets "no_punctuation" as a product
+    # decision - pinned by test_settings_menu.py
+    # ::test_shipped_defaults_are_the_intended_baseline. Do not "fix" this to
+    # match the global; the two are intended to differ.
     'PUNCTUATION_MODE': "no_punctuation",
     'STRUCTURE_MODE': "off",
     'CLEANUP_MODE': "full",
+    'FORMATTER': "off",
+    'FORMATTER_MODEL': "s1-mini",
+    'FORMATTER_STYLE': "semi-formal",
+    'FORMATTER_CONTEXT': "general",
     'LANGUAGE': "en",
     'WAIT_FOR_MODEL_ON_STARTUP': True,
     'ENABLE_SLM': False,
@@ -770,7 +793,7 @@ def _normalize_bool(value, default: bool = False) -> bool:
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, TYPING_WPM, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, TYPING_WPM, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -838,6 +861,29 @@ def load_audio_config(file_path=None):
             env_cleanup = os.environ.get("VT_CLEANUP_MODE", "").strip().lower()
             if env_cleanup:
                 CLEANUP_MODE = normalize_cleanup_mode(env_cleanup)
+
+            FORMATTER = normalize_formatter_enabled(config.get('formatter', 'off'))
+            env_formatter = os.environ.get("VT_FORMATTER", "").strip().lower()
+            if env_formatter:
+                FORMATTER = normalize_formatter_enabled(env_formatter)
+
+            FORMATTER_MODEL = normalize_formatter_model(
+                config.get('formatter_model', FORMATTER_MODEL))
+            env_formatter_model = os.environ.get("VT_FORMATTER_MODEL", "").strip().lower()
+            if env_formatter_model:
+                FORMATTER_MODEL = normalize_formatter_model(env_formatter_model)
+
+            FORMATTER_STYLE = normalize_formatter_style(
+                config.get('formatter_style', FORMATTER_STYLE))
+            env_formatter_style = os.environ.get("VT_FORMATTER_STYLE", "").strip().lower()
+            if env_formatter_style:
+                FORMATTER_STYLE = normalize_formatter_style(env_formatter_style)
+
+            FORMATTER_CONTEXT = normalize_formatter_context(
+                config.get('formatter_context', FORMATTER_CONTEXT))
+            env_formatter_context = os.environ.get("VT_FORMATTER_CONTEXT", "").strip().lower()
+            if env_formatter_context:
+                FORMATTER_CONTEXT = normalize_formatter_context(env_formatter_context)
 
             LANGUAGE = config.get('language', 'en')
             env_lang = os.environ.get("VT_LANGUAGE", "").strip().lower()
@@ -1036,6 +1082,9 @@ def load_audio_config(file_path=None):
         # Publish the cleanup mode (never saves: this is a load)
         _push_cleanup_mode()
 
+        # Publish the formatter settings (never saves: this is a load)
+        _push_formatter_settings()
+
         # Sync custom word/phrase dictionary if configured in config or external file
         dict_setting = config.get('dictionary')
         dict_file = config.get('dictionary_file')
@@ -1111,6 +1160,10 @@ def save_audio_config(file_path=None):
             'preset': PUNCTUATION_MODE,
             'structure_mode': STRUCTURE_MODE,
             'cleanup_mode': CLEANUP_MODE,
+            'formatter': FORMATTER,
+            'formatter_model': FORMATTER_MODEL,
+            'formatter_style': FORMATTER_STYLE,
+            'formatter_context': FORMATTER_CONTEXT,
             'language': LANGUAGE,
             'enable_slm': ENABLE_SLM,
             'wait_for_model_on_startup': WAIT_FOR_MODEL_ON_STARTUP,
@@ -1150,8 +1203,15 @@ def reset_to_defaults() -> dict:
         globals()[name] = value
     NUMBER_DIGITS = (NUMBER_MODE != "words")
     set_number_digits(NUMBER_MODE)
+    # NOTE: the punctuation preset is deliberately *not* pushed to the
+    # post-processor here. Doing so is arguably more correct (otherwise the reset
+    # only takes effect on the next launch, while the file already says otherwise,
+    # because save_audio_config() below persists it), but it is a behaviour change
+    # outside the formatter work and it perturbs several order-dependent tests.
+    # Tracked as A6 in docs/TODO-parity.md rather than smuggled in here.
     _push_structure_mode()
     _push_cleanup_mode()
+    _push_formatter_settings()
     try:
         import hotkeys
 
@@ -1542,6 +1602,160 @@ def structure_setting_state(structure_mode: str, effective_mode: str):
     if effective_mode != structure_mode:
         return "Typed text stays inline", "[PASTE]", "yellow"
     return "Bullets on their own lines", "[BLOCKS]", "green"
+
+
+# ---------------------------------------------------------------------------
+# Optional on-device formatter (docs/plan-on-device-formatter.md)
+# ---------------------------------------------------------------------------
+
+def normalize_formatter_enabled(value) -> str:
+    """Map a user value onto ``off``/``on``; unknown means ``off``.
+
+    The opposite of ``cleanup_mode``, and deliberately so: this setting is off by
+    default, so a typo must not switch a language model on by accident.
+    """
+    if value is None:
+        return "off"
+    text = str(value).strip().lower()
+    return "on" if text in ("on", "true", "yes", "enabled", "1") else "off"
+
+
+def normalize_formatter_style(value) -> str:
+    text = str(value).strip().lower().replace("_", "-") if value is not None else ""
+    return text if text in FORMATTER_STYLES else "semi-formal"
+
+
+def normalize_formatter_context(value) -> str:
+    text = str(value).strip().lower() if value is not None else ""
+    return text if text in FORMATTER_CONTEXTS else "general"
+
+
+def normalize_formatter_model(value) -> str:
+    """A backend name. Unknown values fall back to the shipped default."""
+    text = str(value).strip().lower() if value is not None else ""
+    return text or FORMATTER_MODEL
+
+
+def get_formatter() -> str:
+    """The configured formatter mode ("off"/"on")."""
+    return FORMATTER
+
+
+def is_formatter_enabled() -> bool:
+    return FORMATTER == "on"
+
+
+def get_formatter_model() -> str:
+    return FORMATTER_MODEL
+
+
+def get_formatter_style() -> str:
+    return FORMATTER_STYLE
+
+
+def get_formatter_context() -> str:
+    return FORMATTER_CONTEXT
+
+
+def get_effective_formatter() -> str:
+    """What the pipeline will actually do, which is not always what was configured.
+
+    ``cleanup_mode: off`` promises that nothing is deleted, and the formatter's
+    entire contract is deleting fillers and retracted words. It therefore cannot
+    run there however the user set ``formatter``. Reporting both values is what
+    stops a silently-inert setting from looking like a broken feature.
+    """
+    if FORMATTER != "on":
+        return "off"
+    return "off" if CLEANUP_MODE == "off" else "on"
+
+
+def _push_formatter_settings() -> dict:
+    """Publish the formatter settings to the post-processor; never saves."""
+    try:
+        from post_processor import set_formatter_settings
+        return set_formatter_settings(
+            enabled=(FORMATTER == "on"), model=FORMATTER_MODEL,
+            style=FORMATTER_STYLE, context=FORMATTER_CONTEXT,
+        )
+    except Exception:
+        return {}
+
+
+def set_formatter(value) -> str:
+    """Set and persist the formatter mode; keeps the post-processor in sync."""
+    global FORMATTER
+    FORMATTER = normalize_formatter_enabled(value)
+    _push_formatter_settings()
+    save_audio_config()
+    return FORMATTER
+
+
+def toggle_formatter() -> str:
+    """Cycle off -> on -> off and persist."""
+    return set_formatter("off" if FORMATTER == "on" else "on")
+
+
+def set_formatter_model(value) -> str:
+    global FORMATTER_MODEL
+    FORMATTER_MODEL = normalize_formatter_model(value)
+    _push_formatter_settings()
+    save_audio_config()
+    return FORMATTER_MODEL
+
+
+def cycle_formatter_model() -> str:
+    index = FORMATTER_MODELS.index(FORMATTER_MODEL) if FORMATTER_MODEL in FORMATTER_MODELS else -1
+    return set_formatter_model(FORMATTER_MODELS[(index + 1) % len(FORMATTER_MODELS)])
+
+
+def set_formatter_style(value) -> str:
+    global FORMATTER_STYLE
+    FORMATTER_STYLE = normalize_formatter_style(value)
+    _push_formatter_settings()
+    save_audio_config()
+    return FORMATTER_STYLE
+
+
+def cycle_formatter_style() -> str:
+    index = FORMATTER_STYLES.index(FORMATTER_STYLE) if FORMATTER_STYLE in FORMATTER_STYLES else 0
+    return set_formatter_style(FORMATTER_STYLES[(index + 1) % len(FORMATTER_STYLES)])
+
+
+def set_formatter_context(value) -> str:
+    global FORMATTER_CONTEXT
+    FORMATTER_CONTEXT = normalize_formatter_context(value)
+    _push_formatter_settings()
+    save_audio_config()
+    return FORMATTER_CONTEXT
+
+
+def cycle_formatter_context() -> str:
+    index = FORMATTER_CONTEXTS.index(FORMATTER_CONTEXT) if FORMATTER_CONTEXT in FORMATTER_CONTEXTS else 0
+    return set_formatter_context(FORMATTER_CONTEXTS[(index + 1) % len(FORMATTER_CONTEXTS)])
+
+
+def formatter_setting_state(enabled: str):
+    """``(description, badge, colour)`` for the settings modal's formatter row.
+
+    The labels are mirrored in ``tui-rs/src/settings_picker.rs`` and held
+    together by a source-level parity guard, exactly as the structure row is.
+    """
+    if enabled != "on":
+        return "Off: deterministic cleanup only", "[OFF]", "dim white"
+    return "Rewrites the transcript on this machine", "[ON]", "green"
+
+
+def formatter_model_setting_state(model: str = FORMATTER_MODEL):
+    return f"Backend: {model}", "[MODEL]", "cyan"
+
+
+def formatter_style_setting_state(style: str = FORMATTER_STYLE):
+    return f"Writing style: {style}", "[STYLE]", "cyan"
+
+
+def formatter_context_setting_state(context: str = FORMATTER_CONTEXT):
+    return f"Context: {context}", "[CONTEXT]", "cyan"
 
 
 def normalize_cleanup_mode(value) -> str:
@@ -2275,6 +2489,30 @@ def select_settings_picker():
             "keywords": "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
         },
         {
+            "id": "formatter",
+            "icon": "🪄 ",
+            "title": "Formatter",
+            "keywords": "formatter local rewrite slm llm language model cleanup polish rewrite offline on off",
+        },
+        {
+            "id": "formatter_model",
+            "icon": "🧠 ",
+            "title": "Formatter Backend",
+            "keywords": "formatter model backend s1-mini llama-server which model swap",
+        },
+        {
+            "id": "formatter_style",
+            "icon": "✍️ ",
+            "title": "Formatter Style",
+            "keywords": "formatter style tone casual semi-casual semi-formal formal writing voice",
+        },
+        {
+            "id": "formatter_context",
+            "icon": "✉️ ",
+            "title": "Formatter Context",
+            "keywords": "formatter context general email message greeting sign-off destination",
+        },
+        {
             "id": "output_mode",
             "icon": "🚀 ",
             "title": "Output Delivery",
@@ -2377,6 +2615,17 @@ def select_settings_picker():
             return structure_setting_state(
                 STRUCTURE_MODE, get_effective_structure_mode()
             )
+        elif item_id == "formatter":
+            # The labels live in formatter_setting_state() so they can be held to
+            # the ratatui ones by a source-level parity guard, the same way the
+            # structure row is.
+            return formatter_setting_state(FORMATTER)
+        elif item_id == "formatter_model":
+            return formatter_model_setting_state(FORMATTER_MODEL)
+        elif item_id == "formatter_style":
+            return formatter_style_setting_state(FORMATTER_STYLE)
+        elif item_id == "formatter_context":
+            return formatter_context_setting_state(FORMATTER_CONTEXT)
         elif item_id == "trailing_space":
             if AUTO_TYPE_TRAILING_SPACE:
                 return "Enabled (appends ' ')", "[ON]", "green"
@@ -2549,6 +2798,14 @@ def select_settings_picker():
                     toggle_cleanup_mode()
                 elif item_id == "structure":
                     toggle_structure_mode()
+                elif item_id == "formatter":
+                    toggle_formatter()
+                elif item_id == "formatter_model":
+                    cycle_formatter_model()
+                elif item_id == "formatter_style":
+                    cycle_formatter_style()
+                elif item_id == "formatter_context":
+                    cycle_formatter_context()
                 elif item_id == "output_mode":
                     cycle_output_mode()
                     save_audio_config()

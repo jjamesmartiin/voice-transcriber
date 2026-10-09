@@ -3054,6 +3054,89 @@ def _removes_noise() -> bool:
     return _CLEANUP_MODE != "off"
 
 
+# ---------------------------------------------------------------------------
+# Optional on-device formatter (docs/plan-on-device-formatter.md)
+# ---------------------------------------------------------------------------
+# Off by default, and `off` means byte-identical: this stage is a pure
+# pass-through unless the user both enabled the formatter and left cleanup on.
+# The settings live here rather than in t2 so the post-processor stays usable
+# stand-alone and so nothing has to import t2 to render text.
+_FORMATTER_ENABLED = False
+_FORMATTER_MODEL: str | None = None
+_FORMATTER_STYLE = "semi-formal"
+_FORMATTER_CONTEXT = "general"
+
+
+def set_formatter_settings(enabled=None, model=None, style=None, context=None) -> dict:
+    """Publish the formatter settings from the config layer.
+
+    ``None`` means "leave alone", and the canonical values live in
+    :mod:`formatter` - this only stores them. Never raises.
+    """
+    global _FORMATTER_ENABLED, _FORMATTER_MODEL, _FORMATTER_STYLE, _FORMATTER_CONTEXT
+    if enabled is not None:
+        _FORMATTER_ENABLED = bool(enabled)
+    if model is not None:
+        _FORMATTER_MODEL = str(model).strip().lower() or None
+    if style is not None:
+        _FORMATTER_STYLE = str(style).strip().lower() or _FORMATTER_STYLE
+    if context is not None:
+        _FORMATTER_CONTEXT = str(context).strip().lower() or _FORMATTER_CONTEXT
+    return get_formatter_settings()
+
+
+def get_formatter_settings() -> dict:
+    return {
+        "enabled": _FORMATTER_ENABLED,
+        "model": _FORMATTER_MODEL,
+        "style": _FORMATTER_STYLE,
+        "context": _FORMATTER_CONTEXT,
+    }
+
+
+def formatter_is_active() -> bool:
+    """Whether the formatter is allowed to run *at all* for these settings.
+
+    Two hard gates, neither of which is a preference:
+
+    * ``formatter: off`` is the default, and off must be byte-identical to a
+      build without this feature.
+    * ``cleanup_mode: off`` promises that nothing is deleted, and the formatter's
+      entire contract is deleting fillers, false starts and retracted words.
+      Running it there would break that promise outright. This is the same gate
+      ``formatter.may_run()`` applies; docs/cleanup_modes.md sec 4 states it for
+      the SLM pass and this is the same bargain.
+    """
+    return _FORMATTER_ENABLED and _removes_noise()
+
+
+def _apply_formatter(text: str, structure_mode: str | None = None) -> str:
+    """Run the optional on-device formatter, or return ``text`` untouched.
+
+    Every failure mode returns the input. The formatter may fail; dictation may
+    not. Nothing here raises, and nothing here logs transcript content.
+    """
+    if not formatter_is_active() or not text.strip():
+        return text
+    try:
+        from formatter import format_text, structure_for_mode
+    except Exception:
+        return text
+    try:
+        # The same resolution `_resolve_segment_sentinels` uses: an explicit
+        # argument wins, otherwise the published (already downgraded) mode.
+        effective = _STRUCTURE_MODE if structure_mode is None else normalize_structure_mode(structure_mode)
+        return format_text(
+            text,
+            style=_FORMATTER_STYLE,
+            structure=structure_for_mode(effective),
+            context=_FORMATTER_CONTEXT,
+            backend=_FORMATTER_MODEL,
+        )
+    except Exception:
+        return text
+
+
 def _resolves_corrections() -> bool:
     """True only in "full": may the pass rewrite what the speaker retracted."""
     return _CLEANUP_MODE == "full"
@@ -3286,6 +3369,16 @@ def clean_speech_transcription(
             if not _BARE_SERIAL_OR_TRIGGER_REGEX.match(cleaned):
                 if len(cleaned.split(None, 3)) >= 3:
                     cleaned += "."
+
+    # 14b. Optional on-device formatter (docs/plan-on-device-formatter.md).
+    #      Placed last among the deterministic stages so the model sees finished
+    #      text and never has to guess at what a regex already handles; the
+    #      structure stage below still owns layout and the punctuation preset
+    #      still owns punctuation, so the formatter cannot fight either - and if
+    #      it emits list markup while the user asked for prose, the output is
+    #      rejected rather than silently rewritten (guardrail 3b in formatter.py).
+    if not is_intermediate:
+        cleaned = _apply_formatter(cleaned, structure_mode=structure_mode)
 
     # 15. Structured output: spoken lists become bullets, spoken layout cues
     #     become breaks. Runs before the punctuation preset, which preserves

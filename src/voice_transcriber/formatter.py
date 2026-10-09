@@ -317,12 +317,16 @@ def has_content_words(text: str) -> bool:
     return bool(_canonical_tokens(_filler_regex().sub(" ", text or "")))
 
 
-def validate(original: str, candidate: str) -> str | None:
+def validate(original: str, candidate: str, *, structure: str | None = None) -> str | None:
     """Check a candidate against every guardrail.
 
     Returns ``None`` when the candidate is usable, or a human-readable reason
     when it must be rejected. A reason is a bug report about the prompt, not
     something the user should ever see - the caller falls back silently.
+
+    ``structure`` is the axis the control line asked for. When it is ``prose``
+    the user turned structured output off, and list markup in the answer means
+    the model ignored the control line.
     """
     if not isinstance(candidate, str):
         return "backend returned a non-string"
@@ -376,6 +380,15 @@ def validate(original: str, candidate: str) -> str | None:
             if not _contains_subsequence(haystack, _canonical_tokens(item)):
                 return f"list item does not appear verbatim in the input: {item!r}"
 
+    # Guardrail 3b: never fight the structure setting. With `structure_mode: off`
+    # the user asked for flat prose, so list markup means the model ignored the
+    # control line. Rejecting is deliberate over stripping, per the plan: silently
+    # removing the markers would hide a prompt that no longer matches the format
+    # the model was trained against, and the failure would return on the next
+    # model bump with no signal.
+    if structure == "prose" and items:
+        return "output contains list markup but prose was requested"
+
     return None
 
 
@@ -426,7 +439,7 @@ def format_text(
         if elapsed > timeout_s:
             return original
 
-        if validate(original, candidate) is not None:
+        if validate(original, candidate, structure=structure) is not None:
             return original
         return candidate
     except Exception:

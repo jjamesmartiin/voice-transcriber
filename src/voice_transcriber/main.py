@@ -251,6 +251,10 @@ class SimpleVoiceTranscriber:
             punctuation_mode=getattr(t2, 'PUNCTUATION_MODE', 'full'),
             structure_mode=getattr(t2, 'get_structure_mode', lambda: 'off')(),
             cleanup_mode=getattr(t2, 'get_cleanup_mode', lambda: 'full')(),
+            formatter=getattr(t2, 'get_formatter', lambda: 'off')(),
+            formatter_model=getattr(t2, 'get_formatter_model', lambda: 's1-mini')(),
+            formatter_style=getattr(t2, 'get_formatter_style', lambda: 'semi-formal')(),
+            formatter_context=getattr(t2, 'get_formatter_context', lambda: 'general')(),
             trailing_space=getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True),
             auto_punctuate=getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True),
             number_digits=getattr(t2, 'NUMBER_DIGITS', True),
@@ -286,6 +290,10 @@ class SimpleVoiceTranscriber:
         self.tui.on_set_punctuation = self._on_tui_set_punctuation_mode
         self.tui.on_cycle_structure = self._on_tui_cycle_structure_mode
         self.tui.on_cycle_cleanup = self._on_tui_cycle_cleanup_mode
+        self.tui.on_cycle_formatter = self._on_tui_cycle_formatter
+        self.tui.on_cycle_formatter_model = self._on_tui_cycle_formatter_model
+        self.tui.on_cycle_formatter_style = self._on_tui_cycle_formatter_style
+        self.tui.on_cycle_formatter_context = self._on_tui_cycle_formatter_context
         self.tui.on_reset_defaults = self._on_tui_reset_defaults
         self.tui.on_open_preset_picker = self.open_preset_picker
         self.tui.on_cycle_theme = self._on_tui_cycle_theme
@@ -597,6 +605,38 @@ class SimpleVoiceTranscriber:
         new_mode = t2.toggle_cleanup_mode()
         self._sync_tui_state()
         self.tui.print_event("🧹 Cleanup Mode", f"Cleanup set to {new_mode}", level="info")
+
+    def _on_tui_cycle_formatter(self):
+        import t2
+        new_mode = t2.toggle_formatter()
+        self._sync_tui_state()
+        if new_mode == "on":
+            # Turning it on is the one case where the setting can be inert, so say
+            # so here rather than letting it look like the feature is broken.
+            message = "Rewrites the transcript locally"
+            if t2.get_effective_formatter() != "on":
+                message += " — inactive while cleanup mode is off"
+        else:
+            message = "Off: deterministic cleanup only"
+        self.tui.print_event("🪄 Formatter", message, level="info")
+
+    def _on_tui_cycle_formatter_model(self):
+        import t2
+        new_model = t2.cycle_formatter_model()
+        self._sync_tui_state()
+        self.tui.print_event("🧠 Formatter Backend", f"Using {new_model}", level="info")
+
+    def _on_tui_cycle_formatter_style(self):
+        import t2
+        new_style = t2.cycle_formatter_style()
+        self._sync_tui_state()
+        self.tui.print_event("✍️ Formatter Style", f"Writing style: {new_style}", level="info")
+
+    def _on_tui_cycle_formatter_context(self):
+        import t2
+        new_context = t2.cycle_formatter_context()
+        self._sync_tui_state()
+        self.tui.print_event("✉️ Formatter Context", f"Context: {new_context}", level="info")
 
     def _on_tui_reset_defaults(self):
         """Restore every user-tunable setting to its shipped default."""
@@ -1181,6 +1221,14 @@ class SimpleVoiceTranscriber:
             "structure_mode": getattr(t2, "get_effective_structure_mode", lambda: "off")(),
             "structure_setting": getattr(t2, "get_structure_mode", lambda: "off")(),
             "cleanup_mode": getattr(t2, "get_cleanup_mode", lambda: "full")(),
+            # Configured vs effective, like the structure pair above: with
+            # cleanup off the formatter cannot run, and `status` should say so
+            # rather than report "on" for something that is inert.
+            "formatter": getattr(t2, "get_effective_formatter", lambda: "off")(),
+            "formatter_setting": getattr(t2, "get_formatter", lambda: "off")(),
+            "formatter_model": getattr(t2, "get_formatter_model", lambda: "s1-mini")(),
+            "formatter_style": getattr(t2, "get_formatter_style", lambda: "semi-formal")(),
+            "formatter_context": getattr(t2, "get_formatter_context", lambda: "general")(),
             "ui_theme": getattr(t2, "UI_THEME", "auto"),
             "middle_click": bool(getattr(t2, "MIDDLE_CLICK_ENABLED", False)),
             "last_transcription": getattr(self, "last_transcription", ""),
@@ -1464,6 +1512,34 @@ class SimpleVoiceTranscriber:
         if verb in ("cleanup", "cleanup-mode"):
             need_value()
             t2.set_cleanup_mode(value)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb)
+
+        if verb in ("formatter", "formatter-mode"):
+            need_value()
+            t2.set_formatter(value)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb)
+
+        if verb in ("formatter-model", "formatter_model"):
+            need_value()
+            t2.set_formatter_model(value)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb)
+
+        if verb in ("formatter-style", "formatter_style"):
+            need_value()
+            t2.set_formatter_style(value)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb)
+
+        if verb in ("formatter-context", "formatter_context"):
+            need_value()
+            t2.set_formatter_context(value)
             t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)

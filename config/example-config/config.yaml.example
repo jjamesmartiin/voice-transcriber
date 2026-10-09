@@ -111,6 +111,40 @@ structure_mode: "off"
 cleanup_mode: "full"
 
 # ------------------------------------------------------------------------------
+# On-Device Formatter (optional local language model)
+# An optional second pass that rewrites the cleaned transcript the way a cloud
+# dictation product would: casing fixed, false starts resolved, spoken lists
+# turned into real list markup, e-mail structure applied. It runs entirely on
+# this machine — no network, no telemetry, nothing written to disk.
+# Selectable at runtime via 'Formatter' in the settings modal, or
+# `python src/main.py formatter <off|on>`.
+#   - "off" : the shipped default; the dictation path is byte-identical to a
+#             build without this feature.
+#   - "on"  : rewrite locally. Needs the formatter model (a separate ~462 MiB
+#             download, prompted for on first use) and uses no network at run time.
+# Requires a model download, so this ships off. It is also skipped, whatever
+# this is set to, when cleanup_mode is "off": that mode promises nothing is
+# deleted and the formatter's whole job is deleting fillers and false starts.
+# `status` reports both values as formatter/formatter_setting.
+# Default: "off"
+formatter: "off"
+
+# Which formatter backend to use. "s1-mini" is the bundled default;
+# "llama-server" attaches to an external server instead.
+# Env: VT_FORMATTER_MODEL. Default: "s1-mini"
+formatter_model: "s1-mini"
+
+# The writing style the formatter aims for.
+#   - "casual", "semi-casual", "semi-formal" (default), "formal"
+# This is deliberately its own setting rather than derived from the punctuation
+# preset, so neither can clobber the other. Env: VT_FORMATTER_STYLE.
+formatter_style: "semi-formal"
+
+# What the text is for. "email" applies greeting/sign-off structure.
+# Env: VT_FORMATTER_CONTEXT. Default: "general"
+formatter_context: "general"
+
+# ------------------------------------------------------------------------------
 # Spoken Language Setting & Disclaimer
 # Voice Transcriber is designed and optimized specifically for English ("en").
 # The real-time post-processor (verbal retractions like "scratch that", stutter
