@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use ratatui::style::Color;
 
-use crate::ipc::Wire;
+use crate::ipc::{SpeakerCount, Wire};
 
 /// UI colour palettes. Mirrors `COLOR_PALETTES` in `src/tui.py`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -212,6 +212,20 @@ pub struct App {
     pub meeting_mode: String,
     /// Meeting capture in-memory spill threshold, in minutes.
     pub meeting_spill_minutes: u32,
+    /// Configured diarization toggle ("off"/"on"): label who said what in
+    /// meeting transcripts. See docs/meeting_mode.md.
+    pub diarization: String,
+    /// Speaker-count hint ("auto" or "2".."8") in its canonical string form.
+    pub diarization_speakers: String,
+    /// Configured diarization model registry id (e.g. "diarization").
+    pub diarization_model: String,
+    /// Where the finished transcript is written (repo-relative by default).
+    pub meeting_output_dir: String,
+    /// The artifact form: "text", "json" or "markdown".
+    pub meeting_output_format: String,
+    /// The live speakers map: ordered names, index *i* names speaker *i*. It is
+    /// transcript metadata rather than config, edited from the meeting screen.
+    pub speaker_names: Vec<String>,
     #[allow(dead_code)]
     pub sound_theme: String,
     pub ui_theme: Theme,
@@ -286,6 +300,12 @@ impl App {
             cleanup_mode: "full".to_string(),
             meeting_mode: "off".to_string(),
             meeting_spill_minutes: 10,
+            diarization: "off".to_string(),
+            diarization_speakers: "auto".to_string(),
+            diarization_model: "diarization".to_string(),
+            meeting_output_dir: "meetings".to_string(),
+            meeting_output_format: "text".to_string(),
+            speaker_names: Vec::new(),
             sound_theme: "proximity".to_string(),
             ui_theme,
             should_quit: false,
@@ -539,6 +559,59 @@ impl App {
         self.meeting_spill_minutes
     }
 
+    /// Advance the diarization toggle through the two states the engine knows
+    /// (``t2.DIARIZATION_MODES == ["off", "on"]``). The engine is authoritative
+    /// and replies with a `cfg` that overwrites this optimistic value.
+    pub fn cycle_diarization(&mut self) -> &str {
+        const DIARIZATION_MODES: [&str; 2] = ["off", "on"];
+        let idx = DIARIZATION_MODES
+            .iter()
+            .position(|m| *m == self.diarization)
+            .map(|i| (i + 1) % DIARIZATION_MODES.len())
+            .unwrap_or(0);
+        self.diarization = DIARIZATION_MODES[idx].to_string();
+        &self.diarization
+    }
+
+    /// Advance the speaker-count hint through the shipped choices
+    /// (``t2.DIARIZATION_SPEAKER_CHOICES == ["auto", 2..8]``).
+    pub fn cycle_diarization_speakers(&mut self) -> &str {
+        const CHOICES: [&str; 8] = ["auto", "2", "3", "4", "5", "6", "7", "8"];
+        let idx = CHOICES
+            .iter()
+            .position(|m| *m == self.diarization_speakers)
+            .map(|i| (i + 1) % CHOICES.len())
+            .unwrap_or(0);
+        self.diarization_speakers = CHOICES[idx].to_string();
+        &self.diarization_speakers
+    }
+
+    /// Advance the diarization model through the shipped names
+    /// (``t2.DIARIZATION_MODELS``). One name today; cycling is a round-trip.
+    pub fn cycle_diarization_model(&mut self) -> &str {
+        const MODELS: [&str; 1] = ["diarization"];
+        let idx = MODELS
+            .iter()
+            .position(|m| *m == self.diarization_model)
+            .map(|i| (i + 1) % MODELS.len())
+            .unwrap_or(0);
+        self.diarization_model = MODELS[idx].to_string();
+        &self.diarization_model
+    }
+
+    /// Advance the transcript form through the three the engine knows
+    /// (``t2.MEETING_OUTPUT_FORMATS == ["text", "json", "markdown"]``).
+    pub fn cycle_meeting_output_format(&mut self) -> &str {
+        const FORMATS: [&str; 3] = ["text", "json", "markdown"];
+        let idx = FORMATS
+            .iter()
+            .position(|m| *m == self.meeting_output_format)
+            .map(|i| (i + 1) % FORMATS.len())
+            .unwrap_or(0);
+        self.meeting_output_format = FORMATS[idx].to_string();
+        &self.meeting_output_format
+    }
+
     #[allow(dead_code)] // retained to mirror Python's `cycle_punctuation`; the
                         // preset modal owns punctuation selection on this frontend.
     pub fn cycle_punctuation(&mut self) {
@@ -609,6 +682,12 @@ impl App {
                 middle_click_enabled,
                 typing_wpm,
                 hotkeys,
+                diarization,
+                diarization_speakers,
+                diarization_model,
+                meeting_output_dir,
+                meeting_output_format,
+                speakers,
             } => self.apply_config(
                 mic,
                 secondary,
@@ -636,6 +715,12 @@ impl App {
                 middle_click_enabled,
                 typing_wpm,
                 hotkeys,
+                diarization,
+                diarization_speakers,
+                diarization_model,
+                meeting_output_dir,
+                meeting_output_format,
+                speakers,
             ),
             Wire::Quit => self.should_quit = true,
             Wire::Header | Wire::Suspend | Wire::Resume => {}
@@ -692,6 +777,12 @@ impl App {
         middle_click_enabled: Option<bool>,
         typing_wpm: Option<u32>,
         hotkeys: Option<Vec<String>>,
+        diarization: Option<String>,
+        diarization_speakers: Option<SpeakerCount>,
+        diarization_model: Option<String>,
+        meeting_output_dir: Option<String>,
+        meeting_output_format: Option<String>,
+        speakers: Option<Vec<String>>,
     ) {
         if let Some(m) = mic {
             self.active_device = m;
@@ -778,6 +869,26 @@ impl App {
         }
         if let Some(h) = hotkeys {
             self.hotkeys = h;
+        }
+        if let Some(d) = diarization {
+            self.diarization = d;
+        }
+        if let Some(s) = diarization_speakers {
+            self.diarization_speakers = s.as_string();
+        }
+        if let Some(m) = diarization_model {
+            self.diarization_model = m;
+        }
+        if let Some(p) = meeting_output_dir {
+            self.meeting_output_dir = p;
+        }
+        if let Some(f) = meeting_output_format {
+            self.meeting_output_format = f;
+        }
+        if let Some(n) = speakers {
+            // Transcript metadata: the engine is authoritative, so replace
+            // rather than merge. A blank list is a legitimate "no names".
+            self.speaker_names = n;
         }
     }
 }

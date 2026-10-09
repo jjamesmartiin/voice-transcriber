@@ -257,7 +257,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, meeting_mode=None, meeting_spill_minutes=None, diarization=None, diarization_speakers=None, diarization_model=None, meeting_output_dir=None, meeting_output_format=None, formatter=None, formatter_model=None, formatter_style=None, formatter_context=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, meeting_mode=None, meeting_spill_minutes=None, diarization=None, diarization_speakers=None, diarization_model=None, meeting_output_dir=None, meeting_output_format=None, speakers=None, formatter=None, formatter_model=None, formatter_style=None, formatter_context=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -293,6 +293,12 @@ class VoiceTranscriberTUI:
                 self.meeting_output_dir = meeting_output_dir
             if meeting_output_format is not None:
                 self.meeting_output_format = meeting_output_format
+            if speakers is not None:
+                # The live speakers map is transcript metadata, pushed so the
+                # meeting screen can seed its editor. This TUI renders no list
+                # yet, but main.py calls whichever frontend it got with the same
+                # keywords, so it must accept them.
+                self.speaker_names = [str(name) for name in speakers]
             if formatter is not None:
                 self.formatter = formatter
             if formatter_model is not None:

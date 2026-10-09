@@ -15,6 +15,7 @@ mod ipc;
 mod mic_picker;
 mod preset_picker;
 mod settings_picker;
+mod speaker_picker;
 mod textfit;
 mod theme_picker;
 mod ui;
@@ -206,6 +207,12 @@ impl Runtime {
                 middle_click_enabled,
                 typing_wpm,
                 hotkeys,
+                diarization,
+                diarization_speakers,
+                diarization_model,
+                meeting_output_dir,
+                meeting_output_format,
+                speakers,
             } => app.apply_config(
                 mic,
                 secondary,
@@ -233,6 +240,12 @@ impl Runtime {
                 middle_click_enabled,
                 typing_wpm,
                 hotkeys,
+                diarization,
+                diarization_speakers,
+                diarization_model,
+                meeting_output_dir,
+                meeting_output_format,
+                speakers,
             ),
             Wire::Tx {
                 text,
@@ -403,7 +416,7 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
             while event::poll(Duration::ZERO)? {
                 match event::read()? {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        if let Some(intent) = key_intent(key) {
+                        if let Some(intent) = key_intent(key, &app.state) {
                             match intent {
                                 Intent::Quit => {
                                     // Best-effort: we are quitting regardless.
@@ -415,8 +428,21 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                                         app.should_quit = true;
                                     }
                                 }
+                                Intent::ToggleMeeting => {
+                                    if ipc::send_cmd(&writer, "toggle_meeting").is_err() {
+                                        app.should_quit = true;
+                                    }
+                                }
                                 Intent::OpenSettingsPicker => {
                                     settings_picker::run_settings_picker(
+                                        Some(&writer),
+                                        Some(&rx),
+                                        &mut app,
+                                    )?;
+                                    rt.flush_pending(&mut app)?;
+                                }
+                                Intent::OpenSpeakerEditor => {
+                                    speaker_picker::run_speaker_picker(
                                         Some(&writer),
                                         Some(&rx),
                                         &mut app,
@@ -478,9 +504,13 @@ fn run_local(demo_enabled: bool, theme: Theme) -> io::Result<()> {
         while event::poll(Duration::ZERO)? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    if let Some(intent) = key_intent(key) {
+                    if let Some(intent) = key_intent(key, &app.state) {
                         match intent {
                             Intent::Quit => app.should_quit = true,
+                            Intent::ToggleMeeting => {}
+                            Intent::OpenSpeakerEditor => {
+                                speaker_picker::run_speaker_picker(None, None, &mut app)?;
+                            }
                             Intent::ToggleRecord => {
                                 if app.state == RunState::Ready {
                                     script.pause();
@@ -578,17 +608,35 @@ struct Pending {
     action: Action,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Intent {
     ToggleRecord,
+    ToggleMeeting,
     OpenSettingsPicker,
+    OpenSpeakerEditor,
     ResetTerminal,
     Quit,
 }
 
-fn key_intent(key: KeyEvent) -> Option<Intent> {
+/// Map a keypress to an intent, aware of the one screen whose keys differ.
+///
+/// The *meeting screen* (`RunState::Meeting`) has its own map: Space/Enter
+/// start or stop the meeting capture, `s`/`S` open the speaker-name editor, and
+/// `Esc`/`q`/`Ctrl+C` quit. `,` and `r` are deliberately unbound there. Every
+/// other screen keeps the global contract exactly as it was: `Space`/`Enter`
+/// record, `s`/`S`/`,` open the settings modal, `r` resets, `q`/`Esc`/`Ctrl+C`
+/// quit. See docs/meeting_mode.md.
+fn key_intent(key: KeyEvent, state: &RunState) -> Option<Intent> {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return Some(Intent::Quit);
+    }
+    if *state == RunState::Meeting {
+        return match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => Some(Intent::Quit),
+            KeyCode::Char(' ') | KeyCode::Enter => Some(Intent::ToggleMeeting),
+            KeyCode::Char('s') | KeyCode::Char('S') => Some(Intent::OpenSpeakerEditor),
+            _ => None,
+        };
     }
     // The settings modal is the single configuration entry point. There is no
     // global hotkey for it and no one-off toggle shortcuts: `s`/`S`/`,` opens
@@ -630,6 +678,87 @@ fn print_help() {
          \x20   s, S, ,           Settings & configuration modal (the only config entry point)\n\
          \x20                     Microphone, theme and presets are sub-pickers inside it\n\
          \x20   r                 Reset terminal & clipboard bridge\n\
+         \x20   q, Esc, Ctrl+C    Quit\n\
+         \n\
+         MEETING SCREEN (while a meeting capture is active):\n\
+         \x20   Space / Enter     Start / stop the meeting capture\n\
+         \x20   s, S              Edit the speaker names (ordered list)\n\
          \x20   q, Esc, Ctrl+C    Quit"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// Outside the meeting screen the global terminal contract is exactly what
+    /// it always was.
+    #[test]
+    fn test_global_keys_are_unchanged_outside_the_meeting_screen() {
+        for state in [RunState::Ready, RunState::Recording, RunState::Processing] {
+            assert_eq!(
+                key_intent(key(KeyCode::Char(' ')), &state),
+                Some(Intent::ToggleRecord)
+            );
+            assert_eq!(
+                key_intent(key(KeyCode::Enter), &state),
+                Some(Intent::ToggleRecord)
+            );
+            assert_eq!(
+                key_intent(key(KeyCode::Char('s')), &state),
+                Some(Intent::OpenSettingsPicker)
+            );
+            assert_eq!(
+                key_intent(key(KeyCode::Char('S')), &state),
+                Some(Intent::OpenSettingsPicker)
+            );
+            assert_eq!(
+                key_intent(key(KeyCode::Char(',')), &state),
+                Some(Intent::OpenSettingsPicker)
+            );
+            assert_eq!(
+                key_intent(key(KeyCode::Char('r')), &state),
+                Some(Intent::ResetTerminal)
+            );
+            assert_eq!(
+                key_intent(key(KeyCode::Char('q')), &state),
+                Some(Intent::Quit)
+            );
+            assert_eq!(key_intent(key(KeyCode::Esc), &state), Some(Intent::Quit));
+        }
+    }
+
+    /// The meeting screen is the one place the keys differ (docs/meeting_mode.md).
+    #[test]
+    fn test_meeting_screen_keys_differ() {
+        let meeting = RunState::Meeting;
+        assert_eq!(
+            key_intent(key(KeyCode::Char(' ')), &meeting),
+            Some(Intent::ToggleMeeting)
+        );
+        assert_eq!(
+            key_intent(key(KeyCode::Enter), &meeting),
+            Some(Intent::ToggleMeeting)
+        );
+        assert_eq!(
+            key_intent(key(KeyCode::Char('s')), &meeting),
+            Some(Intent::OpenSpeakerEditor)
+        );
+        assert_eq!(
+            key_intent(key(KeyCode::Char('S')), &meeting),
+            Some(Intent::OpenSpeakerEditor)
+        );
+        assert_eq!(key_intent(key(KeyCode::Esc), &meeting), Some(Intent::Quit));
+        assert_eq!(
+            key_intent(key(KeyCode::Char('q')), &meeting),
+            Some(Intent::Quit)
+        );
+        // `,` and `r` are deliberately unbound on the meeting screen.
+        assert_eq!(key_intent(key(KeyCode::Char(',')), &meeting), None);
+        assert_eq!(key_intent(key(KeyCode::Char('r')), &meeting), None);
+    }
 }

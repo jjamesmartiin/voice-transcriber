@@ -299,6 +299,9 @@ class SimpleVoiceTranscriber:
             diarization_model=getattr(t2, 'get_diarization_model', lambda: 'diarization')(),
             meeting_output_dir=getattr(t2, 'get_meeting_output_dir', lambda: 'meetings')(),
             meeting_output_format=getattr(t2, 'get_meeting_output_format', lambda: 'text')(),
+            # The live speakers map: transcript metadata edited on the meeting
+            # screen, pushed so the ratatui editor seeds from the engine's list.
+            speakers=self.get_speaker_names(),
             formatter=getattr(t2, 'get_formatter', lambda: 'off')(),
             formatter_model=getattr(t2, 'get_formatter_model', lambda: 's1-mini')(),
             formatter_style=getattr(t2, 'get_formatter_style', lambda: 'semi-formal')(),
@@ -1496,7 +1499,12 @@ class SimpleVoiceTranscriber:
             # rather than report "on" for something that is inert.
             "formatter": getattr(t2, "get_effective_formatter", lambda: "off")(),
             "formatter_setting": getattr(t2, "get_formatter", lambda: "off")(),
-            "formatter_model": getattr(t2, "get_formatter_model", lambda: "s1-mini")(),
+            # The stored value stays the machine id; the reply names the model
+            # the way its licence requires ("S1-mini" by "Superwhisper").
+            "formatter_model": getattr(
+                t2, "formatter_model_display_name",
+                lambda: t2.get_formatter_model(),
+            )(),
             "formatter_style": getattr(t2, "get_formatter_style", lambda: "semi-formal")(),
             "formatter_context": getattr(t2, "get_formatter_context", lambda: "general")(),
             "ui_theme": getattr(t2, "UI_THEME", "auto"),

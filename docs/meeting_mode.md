@@ -129,6 +129,97 @@ is still transcribing turns is applied to the finished document. The control API
 also exposes it as metadata (`speakers`, aliases `speaker-names` / `speaker-map`)
 for scripting, and `status` reports it as `speakers`.
 
+### The speaker-label rendering rule
+
+This is the one rule every artifact form shares; it lives in
+`meeting_pipeline.MeetingPipeline.speaker_label()`:
+
+* a turn's numeric speaker index *i* (zero-based) is labelled with `names[i]`
+  when that slot holds a non-empty name;
+* a blank slot, or an index past the end of the list, falls back to the
+  readable **`Speaker N`** with `N = i + 1` — a partial map still renders and a
+  transcript is never label-less;
+* with diarization off, or labelling overridden off, the transcript is
+  unlabelled: `text`/`markdown` emit the bare text, `json` sets `name` to
+  `null` and `labelled` to `false`.
+
+`text` renders `[<label>] <text>` lines, `markdown` renders
+`**<label>:** <text>`, and `json` carries both the numeric `speaker` and the
+resolved `name`.
+
+### The frozen bridge contract (S2/S3)
+
+The ratatui half of D5 was derived from the merged Python code and is frozen
+here. It is enforced by source-level parity guards
+(`tests/shared/test_config_sync.py`, `tests/shared/test_meeting_screen.py`) so
+the two languages cannot drift.
+
+**Control verbs** (see `docs/control_api.md`; `python src/main.py help --json`
+is authoritative):
+
+| Verb | Value | Choices | Returns |
+| --- | --- | --- | --- |
+| `diarization` (engine also accepts `diarization-mode`) | `state` | `off`, `on` | `diarization`, `diarization_setting` |
+| `diarization-speakers` (engine also accepts `diarization_speakers`) | `count` | `auto`, `2`–`8`; omit to cycle | `diarization_speakers` |
+| `diarization-model` (engine also accepts `diarization_model`) | `model` | `diarization` (required) | `diarization_model` |
+| `meeting-output` (aliases `meeting-output-dir`, `meeting-output-folder`) | `folder` | — | `meeting_output_dir` |
+| `meeting-format` (engine also accepts `meeting-output-format`, `meeting_format`) | `format` | `text`, `json`, `markdown`; omit to cycle | `meeting_output_format` |
+| `speakers` (aliases `speaker-names`, `speaker-map`) | `names` | ordered, comma-separated string or list | `speakers` |
+
+The `control.py` catalogue is the aliased surface (`help --json` resolves aliases
+client-side); the parenthesised spellings are accepted directly by
+`handle_control` for the frontends.
+
+Setting `speakers` is **transcript metadata**, so it does **not** write
+`config/config.yaml`; the other five are settings and do.
+
+**`status` fields:** `diarization` (effective) and `diarization_setting`
+(configured) — the same value today, reported as a pair like the formatter —
+plus `diarization_speakers`, `diarization_model`, `meeting_output_dir`,
+`meeting_output_format`, `speakers`, and the D4 trio `meeting_transcript`,
+`meeting_transcript_path`, `meeting_speakers`.
+
+**Python → Rust (`cfg` wire):** `diarization` (string `off`/`on`),
+`diarization_speakers` (either the string `auto` or an integer `2`–`8`),
+`diarization_model` (registry id), `meeting_output_dir` (string),
+`meeting_output_format` (string), and `speakers` (an ordered array of strings).
+The Rust `App` stores the machine values verbatim; only the *display* differs
+(`"S1-mini" by "Superwhisper"` for the formatter model).
+
+**Rust → Python (`cmd` wire):**
+
+```
+{"t":"cmd","cmd":"cycle_diarization"}
+{"t":"cmd","cmd":"cycle_diarization_speakers"}
+{"t":"cmd","cmd":"cycle_diarization_model"}
+{"t":"cmd","cmd":"cycle_meeting_output_format"}
+{"t":"cmd","cmd":"set_meeting_output_dir","path":"<folder>"}
+{"t":"cmd","cmd":"set_speakers","speakers":["Priya","Sam"]}
+{"t":"cmd","cmd":"toggle_meeting"}     # the meeting screen's Space/Enter
+```
+
+The speaker editor is **native to each frontend**: the Rich editor is
+`t2.select_speaker_editor()`, and ratatui owns `tui-rs/src/speaker_picker.rs`
+(open from the meeting screen's `s`). Both produce the same ordered list and
+both write it back through `set_speakers`/the `on_set_speaker_names` seam, so
+there is exactly one speakers map on the engine. The `open_speaker_editor`
+command remains accepted by `tui_ratatui.py` for a frontend that wants to
+delegate to the Rich editor; the ratatui frontend does not send it.
+
+### The settings labels (both frontends, identical strings)
+
+| Setting key | Row title | Off/empty state | On/value state | Badge |
+| --- | --- | --- | --- | --- |
+| `diarization` | Speaker Labels | `Off: one speaker per transcript` | `Labels who said what in meeting transcripts` | `[OFF]` / `[ON]` |
+| `diarization_speakers` | Speaker Count | `Auto-detect the speaker count` | `Expecting N speakers` | `[AUTO]` / `[N]` |
+| `diarization_model` | Speaker Model | — | `Model: <id>` | `[MODEL]` |
+| `meeting_output_dir` | Transcript Folder | — | `Saved to <path>` | `[DIR]` |
+| `meeting_output_format` | Transcript Form | — | `Transcript form: <form>` | `[FORM]` |
+
+The row titles match the Python settings menu exactly; the descriptions and
+badges are the strings `t2.*_setting_state()` returns, and the ratatui source
+literals are pinned against them by the parity guards.
+
 ## Progress state
 
 `status` (and the TUI) carry a meeting sub-state:

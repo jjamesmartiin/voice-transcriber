@@ -1000,6 +1000,63 @@ def test_ratatui_meeting_labels_match_python():
     assert t2.meeting_spill_setting_state(10)[1] in implementation
 
 
+def test_ratatui_diarization_and_output_labels_match_python():
+    """D5/D6: the new ratatui rows render the exact Python labels.
+
+    Same source-scoped guard as the structure/meeting labels above. The row
+    *titles* come from ``t2.MEETING_SETTINGS_TITLES`` (the settings menu reads
+    the same constant), and the descriptions/badges come from the
+    ``t2.*_setting_state()`` helpers the Rich modal uses, so neither language can
+    drift without failing here.
+    """
+    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
+    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    for kind in ("Diarization", "DiarizationSpeakers", "DiarizationModel",
+                 "MeetingOutputDir", "MeetingOutputFormat"):
+        assert f"SettingKind::{kind}" in implementation, (
+            f"could not find SettingKind::{kind} in tui-rs/src/settings_picker.rs - "
+            "the parity guard is looking in the wrong place")
+
+    # Row titles, exactly as the Python settings menu shows them.
+    for key, title in t2.MEETING_SETTINGS_TITLES.items():
+        assert f'"{title}"' in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer titles the {key} row "
+            f"{title!r}")
+
+    # Literal labels, taken from Python so the two cannot disagree.
+    for desc in (t2.diarization_setting_state("off")[0],
+                 t2.diarization_setting_state("on")[0],
+                 t2.diarization_speakers_setting_state("auto")[0]):
+        assert desc in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows {desc!r}")
+    # Interpolated labels: the Rust source holds the format string, so pin the
+    # prefix the row is built from.
+    for prefix in ("Model: ", "Saved to ", "Transcript form: "):
+        assert prefix in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows {prefix!r}")
+
+    # Every badge, taken from Python.
+    for state in (t2.diarization_setting_state("off"),
+                  t2.diarization_setting_state("on"),
+                  t2.diarization_speakers_setting_state("auto"),
+                  t2.diarization_model_setting_state("diarization"),
+                  t2.meeting_output_dir_setting_state("/tmp/x"),
+                  t2.meeting_output_format_setting_state("json")):
+        assert state[1] in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows the {state[1]} badge")
+
+    # The speaker-count row interpolates the count at render time.
+    assert 'format!("Expecting {count} speakers")' in implementation
+    for n in range(2, 9):
+        assert f'"[{n}]"' in implementation
+
+    # Commands the modal emits for the new rows.
+    for command in ("cycle_diarization", "cycle_diarization_speakers",
+                    "cycle_diarization_model", "cycle_meeting_output_format",
+                    "set_meeting_output_dir"):
+        assert command in implementation, f"ratatui no longer sends {command}"
+
+
 def test_the_naming_decision_is_recorded():
     """A2: `off`/`inline`/`blocks` are canonical; the others are aliases.
 
