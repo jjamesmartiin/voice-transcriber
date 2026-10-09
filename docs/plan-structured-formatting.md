@@ -342,10 +342,49 @@ reachable only by hand-editing config. Consequences for this work:
 
 1. **Typed newlines** — resolved: never inject `Enter`; bullets are
    clipboard/paste-only (section 5).
-2. **Value naming** — still open: `off | inline | blocks` vs. `off | bullets |
-   full`; verb/key names follow from it.
+2. **Value naming** — resolved: `off | inline | blocks` are the canonical values.
+   `bullets`, `full` and `lists` stay accepted as *input* aliases, so nobody who
+   thinks in terms of "bullets" is locked out, but they are not what the modal
+   or the config file shows. Two reasons, both concrete rather than aesthetic:
+   * **`full` is already taken.** It is the canonical *cleanup* mode, and the
+     same settings list renders it as a `[FULL]` badge
+     (`cleanup_modes.md`). Reusing it would put two identical badges on two
+     unrelated axes in one modal.
+   * **The dangerous axis is transport, not appearance.** `inline` never emits a
+     newline; `blocks` does, and a newline is an `Enter` keypress in whatever
+     window holds focus. "bullets" describes how the result looks but says
+     nothing about the hazard that makes this setting worth being careful with.
 3. **Example corpus** — none available for now, so M1/M2 proceed from the measured
    failures above and the README/blog utterances, which are authentic (written
    from real dictation).
-4. **Paragraph breaks** — still open: is a spoken pause >= ~700 ms a paragraph
-   break on its own, or only after a structure cue?
+4. **Paragraph breaks** — resolved: **a pause is a paragraph on its own; no spoken
+   cue is required, and no larger millisecond threshold is used.** The pause must
+   simply sit at a *clause boundary*.
+
+   The original question assumed the choice was temporal (is 250 ms enough, or
+   should it be ~700 ms?). Measurement says the temporal axis is the wrong one:
+   the micro-batcher cuts at `min_silence_sec = 0.25`, and it reports only the
+   *kind* of cut (hard = clean silence, soft = forced energy trough), not a
+   duration. More importantly, 700 ms is no more a paragraph than 250 ms is when
+   the pause lands mid-clause. Before this was fixed, `blocks` mode produced:
+
+   ```
+   in   : I was going to the [pause] store and then home.
+   out  : I was going to the\n\nstore and then home.     <- blank line mid-sentence
+   ```
+
+   and likewise after a comma (`"First we plan,\n\nthen we ship."`) and after a
+   function word (`"so the plan is\n\nwe ship on Friday."`). What separates a
+   paragraph boundary from a breath is **linguistic**: whether the pause follows
+   a finished sentence or a content word.
+
+   So the rule is now: a pause keeps its kind-based treatment (`hard` -> `\n\n`,
+   `soft` -> `\n`) only when the text before it ends a clause — a terminal
+   `.`/`?`/`!`, or a content word. Straight after a comma, semicolon, colon, or a
+   function word (`the`, `and`, `is`, `to`, ...) it joins with a space, exactly as
+   `inline` does. See `_pause_is_a_boundary()` in `post_processor.py`.
+
+   This keeps both shapes that matter: the pause-separated list
+   (`"milk [pause] eggs [pause] bread"` still becomes paragraphs / bullets) and
+   the sentence-per-paragraph case, while removing the mid-sentence blank line.
+   `off` and `inline` are untouched - they flatten every pause to a space.

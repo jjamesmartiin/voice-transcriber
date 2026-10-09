@@ -234,3 +234,89 @@ def test_a_live_intermediate_chunk_never_carries_a_sentinel():
     )
     assert HARD not in out and SOFT not in out
     assert out == "partial text"
+
+
+# ---------------------------------------------------------------------------
+# A pause is a boundary only at a clause boundary (A3)
+# ---------------------------------------------------------------------------
+# The gap's *kind* still decides paragraph versus line break, but a pause that
+# lands mid-clause joins with a space. Before this guard, a 250 ms breath in the
+# middle of a sentence produced a blank line there:
+#     "I was going to the [pause] store"  ->  "I was going to the\n\nstore"
+# See _pause_is_a_boundary() for why the answer is linguistic rather than a
+# larger millisecond threshold.
+
+@pytest.mark.parametrize("text", [
+    # Mid-phrase: the pause follows a function word.
+    f"I was going to the{HARD}store and then home.",
+    f"so the plan is{HARD}we ship on Friday.",
+    f"give it to{HARD}me please.",
+    f"it costs about{HARD}twenty pounds.",
+    # Mid-clause: the pause follows punctuation that opens a continuation.
+    f"First we plan,{HARD}then we ship.",
+    f"milk,{HARD}eggs,{HARD}bread.",
+    # Same for the weaker, forced cut.
+    f"I was going to the{SOFT}store and then home.",
+    f"the plan is{SOFT}we ship on Friday.",
+])
+def test_a_pause_mid_clause_joins_with_a_space(text):
+    out = render(text, "blocks")
+    assert "\n" not in out, out
+    assert HARD not in out and SOFT not in out, out
+
+
+def test_a_pause_after_a_content_word_is_still_a_boundary():
+    """The guard must not undo the pause-separated list.
+
+    Items end in content words rather than sentences, so a rule keyed only on
+    terminal punctuation would have flattened these. Both shapes are pinned,
+    because both occur: real dictation rarely supplies the full stops.
+    """
+    assert render(f"milk{HARD}eggs{HARD}bread", "blocks") == "milk\n\neggs\n\nbread."
+    assert render(f"Thing one.{HARD}Thing two.{HARD}Thing three.", "blocks") == (
+        "- Thing one\n- Thing two\n- Thing three"
+    )
+    assert render(f"first{HARD}second{HARD}third", "blocks") == (
+        "- first\n- second\n- third"
+    )
+
+
+def test_the_clause_guard_never_touches_off_or_inline():
+    """Whatever the guard decides, only `blocks` may change - `off` is a promise.
+
+    `off` and `inline` flatten every pause to a space, exactly as they did
+    before the guard existed, so no newline and no control character can appear
+    there regardless of what the pause follows. (Casing and the punctuation
+    preset are not cleanup concerns and still apply, hence the full stops.)
+    """
+    for mode in ("off", "inline"):
+        for text in (f"I was going to the{HARD}store", f"milk{HARD}eggs",
+                     f"We shipped it.{SOFT}Then we rested."):
+            out = render(text, mode)
+            assert "\n" not in out, out
+            assert HARD not in out and SOFT not in out, out
+
+    assert render(f"I was going to the{HARD}store", "off") == "I was going to the store."
+    assert render(f"milk{HARD}eggs", "inline") == "milk eggs"
+
+
+def test_the_clause_vocabulary_stays_a_grammar_list():
+    """Guard against the list becoming an ad-hoc dumping ground.
+
+    It is English function words only. Words that are *not* function words are
+    exactly the ones that may end a clause, so letting content words in would
+    silently disable the boundary in the cases that matter.
+    """
+    for word in ("milk", "eggs", "bread", "friday", "store", "plan"):
+        assert word not in pp._CLAUSE_CONTINUATION_WORDS
+    for word in ("the", "a", "and", "is", "to", "of"):
+        assert word in pp._CLAUSE_CONTINUATION_WORDS
+
+
+def test_pause_is_a_boundary_directly():
+    assert pp._pause_is_a_boundary("We shipped it.") is True
+    assert pp._pause_is_a_boundary("milk") is True
+    assert pp._pause_is_a_boundary("going to the") is False
+    assert pp._pause_is_a_boundary("First we plan,") is False
+    assert pp._pause_is_a_boundary("") is False
+    assert pp._pause_is_a_boundary("   ") is False

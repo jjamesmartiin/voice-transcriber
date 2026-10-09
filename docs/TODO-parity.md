@@ -167,11 +167,56 @@ Mostly implemented; **the open work is integration, not features.**
       of them this bug. Prose, NATO dictation, real codes and the `artifacts`/`full` outputs are
       byte-identical. Known cost, pinned in a test rather than hidden: an all-`{a,i,o}` run no
       longer collapses (`A I O` stays as-is), which is the ambiguous set by definition.
-- [ ] **A2** Resolve the branch's open question: setting value naming —
-      `off | inline | blocks` (current) vs `off | bullets | full`. *Done = one name chosen,
-      aliases documented, both TUIs agree.*
-- [ ] **A3** Resolve the paragraph-break threshold: is a ≥700 ms pause a paragraph on its
-      own, or only after a structure cue? *Done = a written decision + a pinned test.*
+- [x] **A2** Resolve the branch's open question: setting value naming —
+      `off | inline | blocks` (current) vs `off | bullets | full`.
+      **DECIDED: `off | inline | blocks` stay canonical**; `bullets`/`full`/`lists` remain
+      accepted *input* aliases, so nobody is locked out. Two concrete reasons:
+      * **`full` is already taken** — it is the canonical *cleanup* mode and the same settings
+        list renders it as a `[FULL]` badge, so reusing it would put two identical badges on
+        two unrelated axes in one modal.
+      * **The dangerous axis is transport, not appearance** — `inline` never emits a newline,
+        `blocks` does, and a newline is an `Enter` keypress in whatever window has focus.
+        "bullets" describes the look but hides the hazard.
+
+      **Fixed a real drift while resolving it.** The two frontends disagreed on the
+      `blocks`-while-typing row, and the Python one advertised a formatting that was not in
+      force: it read `"Bullets on their own lines (typed text stays inline)"` while Rust
+      correctly read `"Typed text stays inline"`. Root cause: the label logic was trapped as a
+      closure inside the interactive `select_settings_picker()`, so it was untestable and
+      nothing could catch the divergence. Extracted to `t2.structure_setting_state()` and
+      pinned by both a parametrised test and a **source-level parity guard** against
+      `tui-rs/src/settings_picker.rs` (mirroring the one in `test_mode_presets.py`). Rust was
+      right, so Python was brought to it. `cargo test`: 51 passed.
+- [x] **A3** Resolve the paragraph-break threshold — is a ≥700 ms pause a paragraph on its own,
+      or only after a structure cue? **DECIDED: a pause is a paragraph on its own — no cue, and
+      no larger millisecond threshold — but only at a clause boundary. Implemented.**
+
+      The question assumed a temporal axis, and measurement says that is the wrong axis. The
+      batcher cuts at `min_silence_sec = 0.25` and reports only the *kind* of cut, not a
+      duration; and 700 ms is no more a paragraph than 250 ms is when the pause lands
+      mid-clause. It did land mid-clause, and `blocks` mode emitted a blank line there:
+
+      | input | before | after |
+      | --- | --- | --- |
+      | `I was going to the [pause] store and then home.` | `...the\n\nstore...` | `...the store...` |
+      | `First we plan, [pause] then we ship.` | `plan,\n\nthen` | `plan, then` |
+      | `so the plan is [pause] we ship on Friday.` | `is\n\nwe` | `is we` |
+
+      What separates a paragraph from a breath is **linguistic**: whether the pause follows a
+      finished sentence or a content word. So the kind-based rule (`hard` → `\n\n`, `soft` →
+      `\n`) now applies only when `_pause_is_a_boundary()` says the text before it ends a
+      clause; straight after a comma/semicolon/colon or a function word it joins with a space,
+      exactly as `inline` does.
+
+      **This was tuned against the pinned list tests rather than guessed.** A blanket
+      "must end in terminal punctuation" rule looked right but would have regressed the
+      realistic list case — `milk [pause] eggs [pause] bread` has no internal full stops and
+      currently becomes paragraphs. Every pre-existing pause test happened to use
+      sentence-final text (`"Thing one." + pause`), which is exactly why the mid-clause bug
+      survived: the fixtures were unrepresentative. Both shapes are now pinned.
+
+      `off` and `inline` are provably untouched — they flatten every pause to a space, pinned
+      by a test. 1197 passed, 2 skipped; ruff clean; `cargo test` 51 passed.
 - [ ] **A4** Extend `eval/` with a `formatting` slice: input transcript → expected output,
       **including the four Wispr reference fixtures** from formatter §4.
       *Done = the parity gate is a regression test, not a one-off comparison.*

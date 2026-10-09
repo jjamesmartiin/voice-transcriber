@@ -2886,6 +2886,63 @@ def _strip_segment_sentinels(text: str, replacement: str = " ") -> str:
     return text.replace(SEGMENT_SENTINEL, replacement).replace(SOFT_SEGMENT_SENTINEL, replacement)
 
 
+_SENTINEL_RE = re.compile(f"[{SEGMENT_SENTINEL}{SOFT_SEGMENT_SENTINEL}]")
+
+#: Punctuation that ends a sentence.
+_TERMINAL_PUNCT_RE = re.compile(r"[.?!\u2026](?:[\"'\u201d\u2019)\]]+)?$")
+
+#: Punctuation that opens a continuation, never ends a clause.
+_CONTINUATION_PUNCT_RE = re.compile(r"[,;:]$")
+
+#: Words that cannot end an English clause. A pause straight after one of these
+#: is a disfluency *inside* a clause, not a paragraph boundary: a speaker who
+#: says "I was going to the [pause] store" paused to breathe, not to start a
+#: paragraph, and a reader who sees a blank line mid-sentence reads it as a bug.
+#:
+#: This is the answer to the plan's open question (docs/plan-structured-
+#: formatting.md sec 12.4). The choice is deliberately *not* a larger millisecond
+#: threshold: 250 ms of silence is the batcher's clean-silence cut and 700 ms is
+#: no more a paragraph than 250 ms is when the pause lands mid-clause. What
+#: separates the two cases is linguistic, not temporal, so the guard is too.
+#: A spoken cue is not required either - the pause alone still marks a boundary,
+#: it just has to be at a boundary-shaped position.
+_CLAUSE_CONTINUATION_WORDS = frozenset((
+    # articles, demonstratives, possessives
+    "a an the this that these those my your his her its our their"
+    # pronouns
+    " i we you he she it they me us them him"
+    # conjunctions and subordinators
+    " and or but nor so than as if because though although while when where which who whom whose"
+    # auxiliaries and copulas
+    " is are was were am be been being do does did done have has had"
+    " will would shall should can could may might must"
+    # prepositions
+    " to of in on at by for with from about into onto over under between during"
+    # standalones that always continue
+    " not no very just really quite also too well then there here"
+).split())
+
+
+def _pause_is_a_boundary(before: str) -> bool:
+    """Does the text before a pause end a clause?
+
+    True for a finished sentence or a content word, False when the pause splits
+    a phrase - straight after a comma/semicolon/colon, after a function word, or
+    with nothing before it at all.
+    """
+    stripped = before.rstrip()
+    if not stripped:
+        return False
+    if _TERMINAL_PUNCT_RE.search(stripped):
+        return True
+    if _CONTINUATION_PUNCT_RE.search(stripped):
+        return False
+    last = stripped.rsplit(None, 1)[-1].strip(".,;:!?\"'()[]{}").lower()
+    if not last:
+        return False
+    return last not in _CLAUSE_CONTINUATION_WORDS
+
+
 def _resolve_segment_sentinels(text: str, structure_mode: str | None, is_intermediate: bool) -> str:
     """Turn microphone-pause sentinels into the layout the current mode asks for.
 
@@ -2893,14 +2950,27 @@ def _resolve_segment_sentinels(text: str, structure_mode: str | None, is_interme
     the output is byte-identical to before this existed and no control character
     can reach the terminal. Only "blocks" turns a pause into a break, because a
     break is a newline and a newline is an Enter keypress.
+
+    In "blocks", the *kind* of cut decides paragraph versus line break, but only
+    when the pause sits at a clause boundary; a pause mid-clause joins with a
+    space, exactly as `inline` would, because a blank line mid-sentence is a bug
+    the reader can see. See :func:`_pause_is_a_boundary`.
     """
     if is_intermediate:
         return _strip_segment_sentinels(text)
     effective = _STRUCTURE_MODE if structure_mode is None else normalize_structure_mode(structure_mode)
     if effective != "blocks":
         return _strip_segment_sentinels(text)
-    text = text.replace(SEGMENT_SENTINEL, "\n\n")
-    return text.replace(SOFT_SEGMENT_SENTINEL, "\n")
+
+    def _replace(match: re.Match) -> str:
+        # Prior sentinels are flattened first, or the token before this one
+        # would still carry a control character and defeat the word check.
+        before = _strip_segment_sentinels(text[:match.start()], " ")
+        if not _pause_is_a_boundary(before):
+            return " "
+        return "\n\n" if match.group(0) == SEGMENT_SENTINEL else "\n"
+
+    return _SENTINEL_RE.sub(_replace, text)
 
 
 def process_structure_blocks(text: str, mode: str | None = None) -> str:
