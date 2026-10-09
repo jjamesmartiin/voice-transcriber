@@ -138,7 +138,12 @@ Capture exists (D2) and diarization exists (D3), but nothing joins them up yet.
 
 - [ ] **C6** — publish the model bundle + the first-use download prompt that states the size;
       this is also where the model registry gains its `formatter` spec, which is currently the
-      one thing `llama_server._model_path()` reaches past.
+      one thing `llama_server._model_path()` reaches past. **The same change registers a
+      `diarization` spec** (pyannote segmentation tarball + 3D-Speaker embedding, ~46.6 MB,
+      MIT / Apache-2.0). Without it a fresh machine cannot run meeting mode's diarization at
+      all — the weights at `~/.local/share/vt/models/diarization/` were placed by hand for the
+      D3 spike — so it is a ship blocker for workstream D. Verified coordinates are in the
+      research pass recorded under D7 in §4D.
 - [ ] **C9** — licence obligations: the licence + `NOTICE` into `config/licenses/`, and the
       exact model naming (**"S1-mini" by "Superwhisper"**) on every surface that names it.
 - [ ] **C8** — the documentation set: spec doc, README requirements table, `architecture.md`,
@@ -694,7 +699,51 @@ two-voice meeting (espeak `en+m3` / `en+f4`, four turns A-B-A-B) produced:
 - [ ] **D6** Settings (`diarization`, `diarization_speakers`, `diarization_model`).
       *Done = `off` byte-identical; single-speaker `auto` adds no label; both TUIs.*
 - [ ] **D7** Eval entry + DER recorded next to the ASR numbers; `docs/TODO.md` verification
-      notes for unverified platforms.
+      notes for unverified platforms. **Researched 2026-10-09; design decided, not yet
+      implemented.**
+
+      * **sherpa-onnx ships no DER computation at all.** Introspected on the installed 1.12.25
+        (read the version from the nix store path — `sherpa_onnx.__version__` **raises
+        AttributeError** and there is no dist metadata, so any doc quoting it is wrong).
+        `dir(sherpa_onnx)` holds no `der`/`metric`/`collar` symbol, and every "diarization eval
+        script" upstream ships — `scripts/pyannote/segmentation/speaker-diarization-onnx.py`,
+        the copy inside the model tarball, `run.sh` — is a *runner* that prints
+        `start -- end speaker_NN` and computes nothing. Several `pip install pyannote.audio`, a
+        torch stack D already rejected.
+        → Write a **small self-contained DER in `eval/`** (~150–250 lines: build the timeline,
+        per-region ref/sys speaker sets, optimal 1-to-1 mapping over a collar, sum
+        missed + false alarm + confusion over total reference speech). This mirrors
+        `eval/score.py`, which already self-implements Levenshtein instead of taking a
+        dependency. Mirror `wq2012/mdeval`; do not import it.
+      * **Reference data: a committed synthetic espeak fixture** — `en+m3 -p 20 -s 145` vs
+        `en+f4 -p 85 -s 190`, the pair `diarization-benchmark.md` §6 measured as *actually*
+        separating (the `en-us` vs `en-gb+f3` attempt collapsed to one speaker even at
+        `num_speakers=2`). ~645 KiB PCM16, exact ground-truth turn boundaries, no run-time cost.
+        **Label it a regression smoke gate, never an accuracy claim:** a 4-turn A-B-A-B clip of
+        maximally separated voices exercises almost none of the failure modes that matter
+        (crosstalk, overlap, similar voices, far-field, short backchannels). The meaningful
+        number is **AMI SDM** (ungated, already the `accented` slice's source) — a tier-2
+        follow-up to record in `docs/TODO.md`, not to pretend the synthetic number replaces.
+      * **Where:** new `eval/score_diarization.py` driving the shipped path
+        (`voice_transcriber.diarize.diarize`, so it exercises `diarizers/sherpa_onnx.py`), and
+        `eval/diarization_results.json` following `results.json`'s `{meta, results}` shape with
+        `der`, `missed`, `false_alarm`, `speaker_confusion`, `collar`, `ref_speech_s` and the
+        sherpa-onnx version in `meta`. Fixture + RTTM + generator recipe go in a new **tracked**
+        `eval/diarization/` (NOT `eval/data/`, whose `.gitignore` is `*` / `!.gitignore`).
+        Add a **model-free unit test of the DER function** in `tests/shared/` so the metric is
+        pinned with no weights.
+      * **Acceptance criterion:** pass iff turn count == 4 **and** ordering is A,B,A,B **and**
+        DER ≤ 0.10 at `collar = 0.25 s` **and** `missed` and `false_alarm` are each < 0.05 —
+        the extra two assertions stop a compensated miss/FA swap passing a total-only check.
+        After the first clean run, tighten to the recorded value plus a small margin. **The DER
+        number must be recorded, not asserted:** the research pass wrote no code and measured
+        nothing.
+      * **No network:** committed fixture; imports only stdlib + numpy/soundfile/sherpa_onnx;
+        skips with a clear message (never fails) when the graphs are absent — the same
+        fail-safe the backend uses.
+      * ⚠️ **Gap this surfaced:** there was no wired download path for the diarization models,
+        so a fresh machine can only *skip* this eval. Being fixed in parallel by the
+        `diarization` `ModelSpec` — see the C6 entry in §2b.
 
 ### 4E. ASR bake-off — Parakeet vs Cohere
 
