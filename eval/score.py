@@ -95,6 +95,11 @@ def eprint(*a, **k):
 
 # ---------------------------------------------------------------------------
 # Scoring primitives (self-implemented, no extra deps)
+#
+# These are pure observers: they must never mutate app globals. Any mode they
+# need for comparison (e.g. digit normalisation) is passed as an argument to the
+# product helper, not set on the product module -- otherwise scoring one clip
+# would change how the next clip is transcribed.
 # ---------------------------------------------------------------------------
 _NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
 _DISFLUENCY_FILLERS_RE = re.compile(r"\b(uh|um|er|ah|mm)\b", re.IGNORECASE)
@@ -118,9 +123,13 @@ def normalize(text: str, normalize_numbers: bool = True) -> str:
         # Strip punctuation first so number words parse cleanly without phrase splits
         t = re.sub(r"[,.?!;:]", " ", text)
         try:
-            from post_processor import convert_number_words_to_digits, set_number_digits_enabled
-            set_number_digits_enabled(True)
-            t = convert_number_words_to_digits(" ".join(t.split()).lower())
+            from post_processor import convert_number_words_to_digits
+            # Score spoken numbers and digits identically *locally*: pass the mode
+            # explicitly instead of toggling the app's global number mode. The old
+            # `set_number_digits_enabled(True)` here leaked into the next clip's
+            # transcription, so only clip 1 ran with the configured
+            # number_digits=false and the recorded baseline misdescribed 153/154.
+            t = convert_number_words_to_digits(" ".join(t.split()).lower(), mode="digits")
             t = re.sub(r"(\d),(\d)", r"\1\2", t)
             text = t
         except Exception:
