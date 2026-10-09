@@ -48,6 +48,11 @@ Voice Transcriber is evaluated with a reproducible test suite in `eval/` across 
 > **Latency Breakdown**: Streaming VAD: `0 ms` · Post-Processor: `~16 µs` · Cohere CPU Inference: `~0.15x RTF` (~0.7s on 5s audio) · End-to-End Delivery: `< 1.0 s`.  
 > *Read the engineering deep dive in the [Technical Blog Post](docs/blog_post.md).*
 
+The same 154-clip harness was used to evaluate **Parakeet TDT 0.6B v3** as an
+alternative ASR backend. It is faster and much lighter, but loses every accuracy
+slice, so **Cohere remains the default**; set `model_backend: parakeet` to opt
+in. The measurement and verdict are in [`docs/asr-bakeoff.md`](docs/asr-bakeoff.md).
+
 ---
 
 ## 📝 Formatting Mode Presets
@@ -122,8 +127,8 @@ for the platform you are targeting.
 | **Disk (standalone Windows EXE)** | ~6 GB — the bundle carries its own Python, PyTorch, and the full 3.9 GB model. |
 | **Network** | ~2.8 GB download on **first launch only**, for the compressed model weights. Fully offline afterwards. Set `VT_AUTO_DOWNLOAD_MODEL=0` to skip the download and supply weights yourself. |
 | **Model weights** | Auto-installed on first run, or provided via `VT_MODEL_DIR` / a local `models/cohere/`. The download is split-xz and needs ~2.8 GB down / ~4 GB on disk. |
-| **Optional on-device formatter** | Off by default. Needs a `llama-server` binary (from `pkgs.llama-cpp` in the dev shell, or llama.cpp's prebuilt Windows build) and ~462 MiB for the S1-mini Q4 GGUF, downloaded on first use after you enable the formatter. |
-| **Optional meeting mode (diarization)** | Off by default. Needs ~40 MB for the two sherpa-onnx graphs (pyannote segmentation + 3D-Speaker), downloaded on first use. |
+| **Optional on-device formatter** | Off by default. Needs a `llama-server` binary (from `pkgs.llama-cpp` in the dev shell, or llama.cpp's prebuilt Windows build) and ~462 MiB for the S1-mini Q4 GGUF. The first-use download prompt is implemented, but the bundle is not published yet — until it is, supply the weights locally. |
+| **Optional meeting mode (diarization)** | Off by default. Needs ~40 MB for the two sherpa-onnx graphs (pyannote segmentation + 3D-Speaker). Registered and packaged, but there is no in-app download path yet — place them under the model directory. |
 | **Audio** | A working microphone exposed as the system default input device. |
 | **Python** | **3.10+** — only needed to run from source or to build. The Nix package and the Windows EXE bundle their own interpreter. |
 
@@ -410,6 +415,8 @@ Under Nix the same verbs pass through the wrapper: `nix run . -- status`.
 | **Recording** | `start`, `stop`, `toggle`, `wait`, `status` |
 | **Devices** | `mics`, `set-mic`, `rescan-mics` |
 | **Settings** | `output`, `numbers`, `punctuation`, `theme`, `trailing-space`, `auto-punctuate`, `serial`, `spell`, `middle-click`, `mute` |
+| **Formatting** | `structure`, `cleanup`, `formatter`, `formatter-style`, `formatter-context`, `formatter-model` |
+| **Meeting** | `meeting`, `meeting-start`, `meeting-stop`, `meeting-spill`, `meeting-format`, `meeting-output`, `speakers`, `diarization`, `diarization-speakers`, `diarization-model` |
 | **Modals** | `settings`, `mic` (interactive — take over the terminal) |
 | **Lifecycle** | `reset-defaults`, `reset-terminal`, `ping`, `doctor`, `help`, `quit` |
 
@@ -583,8 +590,7 @@ download). Acquisition order:
 Once the weights are on disk the app runs **fully offline** with no network
 access.
 
-Two optional models are registry entries and download through the same verified
-split-xz path, but only the first time the feature is used:
+Two optional models are registered bundles:
 
 * **On-device formatter** - `"S1-mini" by "Superwhisper"`, a ~462 MiB Q4 GGUF
   (`superwhisper/s1-mini-GGUF`) run by a local `llama-server`. Enabling the
@@ -595,8 +601,13 @@ split-xz path, but only the first time the feature is used:
   graphs (`k2-fsa/sherpa-onnx`, MIT + Apache-2.0); see
   [`config/licenses/`](config/licenses/).
 
-Every install writes a `SOURCE.json` next to the weights recording the upstream
-repo, revision and sha256.
+The bundles are produced by the release tooling, but **none has been published
+yet**: the formatter's first-use download prompt cannot fetch an unpublished
+asset, and diarization has no in-app download path at all. Until they are
+published, place the weights under the model directory (`VT_MODEL_DIR`, or the
+per-user install dir). The app degrades to unformatted text / a single speaker
+rather than failing when they are absent. Every install writes a `SOURCE.json`
+next to the weights recording the upstream repo, revision and sha256.
 
 ### Language Support & Disclaimer
 
@@ -608,6 +619,50 @@ repo, revision and sha256.
 > no weights. First launch auto-installs them from the GitHub release asset
 > (~2.8 GB down, ~4 GB on disk), which is the one slow step (a few minutes on a
 > fast connection, longer on a slow one) before dictation starts.
+
+---
+
+## Meeting Mode (diarization)
+
+Meeting mode is a long, **non-injecting** capture: it records a meeting,
+transcribes it in the background when you stop, and writes a transcript document
+instead of typing into the focused window. It is **off by default**; with
+`meeting: off` the dictation path is byte-identical to a build without the
+feature.
+
+| Setting | Values | Default |
+| :--- | :--- | :--- |
+| `meeting` | `off`, `on` | `off` |
+| `meeting_spill_minutes` | 1–240 | `10` |
+| `meeting_output_dir` | path | `meetings` (repo-local, gitignored) |
+| `meeting_output_format` | `text`, `json`, `markdown` | `text` |
+| `diarization` | `off`, `on` | `off` |
+| `diarization_speakers` | `auto`, `2`–`8` | `auto` |
+| `diarization_model` | registry name | `diarization` |
+
+Start and stop a capture with `python src/main.py meeting-start` / `meeting-stop`;
+`meeting-format`, `meeting-output` and `meeting-spill` set the rest. With
+`diarization: on`, the pass labels each turn with its speaker (`Speaker 1`,
+`Speaker 2`, …); `off` never loads the model and produces a single-speaker
+transcript. `diarization_speakers` is only a hint. All three diarization keys are
+on the settings modal in both Python frontends and in the config file.
+
+**Speaker names** are transcript metadata, not configuration: they are an ordered
+list you edit live on the meeting screen, or set without a TUI with
+`python src/main.py speakers "Alex, Priya, Sam"` (blank slots and speakers past
+the end of the list fall back to the readable `Speaker N` label). The map is read
+when the document is written, so a rename applies to the finished transcript;
+`status` reports it as `speakers`.
+
+Meeting transcripts land in a repo-local, gitignored `<repo>/meetings/` by
+default; an absolute `meeting_output_dir` is used as-is, and
+`VT_MEETING_OUTPUT_DIR` always wins. See
+[`docs/meeting_mode.md`](docs/meeting_mode.md).
+
+> **Diarization needs the two sherpa-onnx graphs**, which are a registered
+> bundle but have no in-app download path yet — place them under the model
+> directory (see [Model Weights](#model-weights--offline-operation)). Without
+> them, `diarization: on` degrades to one speaker rather than failing.
 
 ---
 
