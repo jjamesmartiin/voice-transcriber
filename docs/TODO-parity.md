@@ -63,6 +63,21 @@ Reconsidering any of these is allowed, but it needs new evidence, not a fresh op
 | D7 | Typed output **never** injects `Enter`; `blocks` downgrades to `inline` when typing | `plan-structured-formatting.md` §5 |
 | D8 | Every feature is a toggle, `off` is byte-identical to today, and `help --json` is the verb catalogue | `plan-structured-formatting.md` §11 |
 | D9 | The ≤1.5 s release-to-clipboard SLA applies to the **default** configuration; the formatter is the one documented opt-in exemption | formatter §9 |
+| D10 | **The legacy SLM pass stays as it is — deliberately not retired.** It is the "bring your own model server" escape hatch (HTTP to `VT_VLLM_URL`, off by default, opt-in via `VT_ENABLE_SLM=1`), and it may be worth improving later. It is a *different mechanism* from the formatter, not an older version of it. | decided 2026-10-08 |
+
+### 1a. A known interaction, not a bug
+
+The SLM pass and the formatter can both run, and neither knows about the other. With
+`VT_ENABLE_SLM=1` **and** a formatter backend enabled, one utterance goes through **two LLM
+passes**: the SLM pass at step 0 (HTTP to an external server), then the deterministic cleanup,
+then the formatter at step 14b (local model, its own guardrails). Each validates against the
+other's output and the user pays for two models.
+
+That is a **consequence of D10**, not an oversight, and it is left in place: the SLM pass needs
+an env var *and* a self-hosted vLLM server, so nobody reaches this state by accident. If it
+ever becomes confusing, the options are to make the two mutually exclusive, or to warn in
+`status`. Recorded here so the next person to see two rewrites in one transcript knows it is
+expected.
 
 ---
 
