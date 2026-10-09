@@ -43,8 +43,8 @@
     "component_gate": 0.025,
     "passed": true,
     "progress_calls": 24,
-    "git_rev": "cdc81c3c34469a7015ea5cb425dd62d7faa412da",
-    "git_dirty": true,
+    "git_rev": "cbdad800cdf68b7127f391934b52a69fa2b36482",
+    "git_dirty": false,
     "invocation": [
       "python",
       "eval/score_diarization.py"
