@@ -15,36 +15,46 @@ needed to pick it back up is here or one link away.
 
 ## 0. Where things stand
 
-_Snapshot: 2026-10-08._
+_Snapshot: 2026-10-08 (later than the first revision of this file — see the note below)._
+
+Everything below is committed on `main` and the working tree is clean.
 
 | Tree / branch | State |
 | --- | --- |
-| `~/gitprojects/voice-transcriber` (main) | `beeca42` · **uncommitted**: the three parity docs (§ below) |
-| `~/gitprojects/voice-transcriber-fmt` (`feat/structured-formatting`) | `c359da3`, **9 commits ahead of main, NOT merged** |
-| `~/gitprojects/voice-transcriber-models` (`refactor/model-registry`) | **`1fec412` — workstream B DONE, unpushed.** Independently verified: 1163 tests pass with no network. Four cosmetic output deviations + one release-artifact regression logged in §4B. |
+| `~/gitprojects/voice-transcriber` (main) | merged and clean; **nothing pushed** — main is 17 commits ahead of the remote |
+| `work/c2-e2e`, `work/d3-sherpa`, `work/d2-meeting` | merged into main; worktrees removed, branches kept as a safety net |
+| `~/gitprojects/voice-transcriber-fmt` (`feat/structured-formatting`) | **obsolete** — main contains a strictly larger reimplementation; see A1 |
+| `~/gitprojects/voice-transcriber-models` (`refactor/model-registry`) | merged into main; see B1–B6 |
+| `work/e-parakeet` (`~/gitprojects/voice-transcriber-e-parakeet`) | **in flight** — workstream E |
 
-### ⚠️ Two things that would have been lost on a reboot
+**The two warnings below are resolved, and kept only because they are the reason this file
+exists at all.** §2 and §3 were rewritten: they used to be a "ready to start" / "blocked on
+network" split written when nothing had been done, and they had drifted into contradicting
+§4 — listing finished work as pending and finished downloads as blocked. If those sections
+ever disagree with §4 again, **§4 wins**.
 
-1. **`feat/structured-formatting` has diverged from `main`, and both edited
-   `post_processor.py`.** The branch carries the structure stage, pause boundaries, spoken
-   lists and the retraction fixes (`bd30610`, `00747f3`, `92cd5d6`, `eb05c64`, `f79c3db`).
-   Meanwhile main gained *related* post-processor work (`424a1d8` three cleanup modes,
-   `ec12b1c` apology-in-a-correction, `beeca42` clipboard). **The merge is not trivial and
-   must not be done blind** — see §4A.
-2. **The `model-registry` worktree was created but contains no work.** If workstream B is
-   reported as "in progress" anywhere, that is wrong: the branch is at main's HEAD. The
-   acceptance criteria are preserved verbatim in §4B so the task can be re-run from scratch.
+### Two things that would have been lost on a reboot (both now safe)
 
-### Docs added in this session (uncommitted on main)
+1. **`feat/structured-formatting` had diverged from `main`, with both editing
+   `post_processor.py`.** Resolved in A1: it is not a merge at all — main carries an
+   independent, strictly larger implementation, byte-identical `micro_batcher.py`, and a fix
+   the branch still lacks. The branch still exists locally and is safe to delete once someone
+   has re-verified that, ideally *after* pushing it somewhere.
+2. **The earlier caution that the `model-registry` worktree "contains no work" is obsolete.**
+   Workstream B landed, was independently verified hermetic (1163 tests, no network), and is
+   merged.
+
+### Docs committed in this session
 
 | File | What |
 | --- | --- |
 | `docs/plan-parity-roadmap.md` | entry point: workstreams, order, non-negotiables |
 | `docs/plan-diarization.md` | meeting-mode diarization, sherpa-onnx, alternatives assessed |
 | `docs/plan-on-device-formatter.md` | S1-mini formatter, swappable backend, exact contract |
-| `docs/plan-structured-formatting.md` | pre-existing; the structure stage (implemented on the `-fmt` branch) |
-
-**First commit action:** commit these four documents.
+| `docs/formatter-benchmark.md` | measured: latency, RSS, determinism, parity deviations |
+| `docs/diarization-benchmark.md` | measured: RTF, turns, speaker counts, memory |
+| `docs/meeting_mode.md` | capture lifecycle, settings, spill behaviour |
+| `docs/asr-bakeoff.md` | workstream E's verdict (in flight) |
 
 ---
 
@@ -81,30 +91,73 @@ expected.
 
 ---
 
-## 2. Ready to start now — no network required
+## 2. What is actually left — grouped by what it blocks
 
-Everything here is code, tests, docs and refactoring. None of it downloads a model.
+Rewritten 2026-10-08. The previous version split by "needs network", which stopped being the
+useful axis the moment the downloads were made. **If this section ever disagrees with §4, §4
+wins** — it drifted into contradiction once already.
 
-- [ ] **A1** — Reconcile `feat/structured-formatting` with `main` (§4A)
-- [ ] **B1–B6** — Workstream B, the `ModelSpec` registry (§4B) — **the shared prerequisite**
-- [ ] **C1** — `formatter.py` skeleton + `fake` backend + the seven guardrails as tests
-- [ ] **D1** — Define the `diarize.py` backend contract + a `fake` diarizer, no models
-- [ ] **E1** — Write the Parakeet backend module (it can be written and unit-tested before any
-      weights exist; only the *run* needs the download)
-- [ ] **X1** — CI: assert `src/` imports nothing from `eval/` (§5)
+### 2a. Needed before meeting mode works end to end
 
-## 3. Blocked on network — do not start on a hotspot
+Capture exists (D2) and diarization exists (D3), but nothing joins them up yet.
 
-Each of these pulls weights. Sizes are known, so they are cheap to schedule later.
+- [ ] **D4** — turn slicing → per-turn ASR → per-turn post-processing. **The keystone of
+      workstream D.** `diarize.py` returns `Turn`s and `meeting.py` has `on_audio` as the
+      hand-off seam, so this is the wiring plus the per-turn ASR fan-out.
+- [ ] **D5** — the output artifact + a speakers map (plain text, optional JSON/Markdown,
+      renamable labels). Needs the output-location decision from §7.
+- [ ] **D6** — settings (`diarization`, `diarization_speakers`, `diarization_model`) across
+      every surface, with `off` byte-identical.
+- [ ] **D7** — an `eval/` entry and a recorded **DER**, next to the ASR numbers.
 
-- [!] **C2** — `llama-server` + the 462 MiB S1-mini GGUF → the M2 end-to-end proof
-- [!] **D3** — sherpa-onnx diarization models (**~40 MB total**) → the D3 spike
-- [!] **E2** — Parakeet TDT 0.6B v3 (**~490 MB**) → the ASR bake-off
-- [!] **E3** — Cohere int8 ONNX (**~2.9 GB**) → only if E2 says keep Cohere
+### 2b. Needed before this can ship
+
+- [ ] **C6** — publish the model bundle + the first-use download prompt that states the size;
+      this is also where the model registry gains its `formatter` spec, which is currently the
+      one thing `llama_server._model_path()` reaches past.
+- [ ] **C9** — licence obligations: the licence + `NOTICE` into `config/licenses/`, and the
+      exact model naming (**"S1-mini" by "Superwhisper"**) on every surface that names it.
+- [ ] **C8** — the documentation set: spec doc, README requirements table, `architecture.md`,
+      `TODO.md` notes.
+- [ ] **X3** — `CHANGELOG.md` and `README.md` per workstream at merge time.
+- [ ] **Push.** Nothing is on any remote; main is 17 commits ahead. The remotes are
+      `gitea@git.jdm.cx:jamesm/voice-transcriber.git` and
+      `git@github.com:jjamesmartiin/voice-transcriber.git`.
+
+### 2c. Quality gates
+
+- [ ] **A4** / **C7** — the `eval/` formatting slice, including the four Wispr reference
+      fixtures, so parity is a regression gate rather than a one-off comparison. The e2e suite
+      already asserts the fixtures against the live model; this is the recorded-manifest half.
+- [ ] **X1** — CI: assert `src/` imports nothing from `eval/`, keeping the product offline-first.
+- [ ] **X2** — do not let the `torch`/`onnxruntime` decision land in two workstreams at once.
+- [ ] **X4** — anything only verifiable on a real Windows/macOS host gets a `docs/TODO.md` entry.
+- [ ] **E4** — feed E's verdict back into D (does §3's "diarize first" design survive?).
+
+### 2d. Known, deliberately deferred
+
+- [ ] **A6** — `reset_to_defaults()` does not push the punctuation preset it changes, so it
+      only takes effect next launch; and its target deliberately differs from the first-run
+      default. Fixing it exposed order-dependent leakage in several fixtures, so it was
+      reverted and recorded rather than chased. See A6 for the detail.
+- [ ] **E3** — the sherpa-onnx int8 ONNX path for Cohere (~2.9 GB), **only if E2 says keep
+      Cohere**. It would drop the `torch` dependency (~0.7–1.1 GB installed).
+
+### 2e. Cleanup, whenever convenient
+
+- Delete `feat/structured-formatting` and `refactor/model-registry` locally — both are
+  obsolete or merged — **after pushing them somewhere** if you want the history.
+- Remove the `voice-transcriber-fmt` and `voice-transcriber-models` worktrees, and the
+  `work/*` branches once the merges have settled.
 
 ---
 
 ## 4. Workstream checklists
+
+> §3 is deliberately retired: it used to be "blocked on network", which stopped being a
+> useful split once the weights were fetched, so its contents moved into §2. The numbering is
+> deliberately **not** renumbered — `§4A`, `§5`, `§6` and friends are cross-referenced from
+> this file and from the plan documents.
 
 ### 4A. Structured formatting & error correction
 
@@ -402,8 +455,8 @@ Detail: [`plan-on-device-formatter.md`](plan-on-device-formatter.md).
 
       Both rules are deterministic, live in `tests/shared` as well as the e2e suite, and are
       independent of the model.
-- [~] **C3** `formatters/llama_server.py` — the **shipped** backend: spawn/attach, process
-      lifecycle, kill-on-timeout. **CODE DONE in `6299947`** — 34 tests, driven by a stub server
+- [x] **C3** `formatters/llama_server.py` — the **shipped** backend: spawn/attach, process
+      lifecycle, kill-on-timeout. **DONE in `6299947`** — 34 tests, driven by a stub server
       that speaks just enough of the OpenAI API, so the real subprocess path and the real
       `urllib` client run offline with only the *model* faked. Three findings worth keeping:
       * **A production bug caught before shipping:** `stderr=PIPE` with no reader deadlocks the
@@ -414,7 +467,9 @@ Detail: [`plan-on-device-formatter.md`](plan-on-device-formatter.md).
         on every utterance.
       * **Attach mode must never kill.** `VT_FORMATTER_SERVER_URL` means the server is not
         ours; timeout terminates only a process we spawned. Pinned by a test each.
-      *The latency half of the exit criteria needs the 462 MiB GGUF and is folded into C2.*
+      *The latency half of the exit criteria — "a warm server answers within the §9 budget" —
+      is now **measured**, by C2: 135.6 ms (retraction) to 441.7 ms (long), i.e. 9–29 % of the
+      1.5 s SLA. Exit criteria met.*
 - [x] **C4** `formatters/s1_mini.py` — in-process fallback, baselined against C3.
       **DROPPED (decided 2026-10-08), superseding M3b.** The in-process runtime loses on
       every axis that matters here, and the plan's own §6.1 finding is why:
