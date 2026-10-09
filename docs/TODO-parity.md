@@ -128,23 +128,45 @@ Mostly implemented; **the open work is integration, not features.**
       **Not done by this task:** deleting the branch. It is unpushed, and "obsolete" is a strong
       enough claim that it should be re-verified and pushed somewhere first, not acted on
       locally. Nothing is lost by leaving it.
-- [ ] **A5** *(new, found while investigating A1)* **`process_serial_numbers()` ignores
-      `cleanup_mode` and merges words.** `cleanup_mode: off` is documented as "every word that
-      was said, verbatim", but the serial/Roman-numeral collapse is not gated by it, so it
-      rewrites text *by joining tokens*:
+- [x] **A5** **`process_serial_numbers()` merged words regardless of `cleanup_mode`.**
+      **FIXED in `a2c91b8`.** `cleanup_mode: off` is documented as "every word that was said,
+      verbatim", but the serial/Roman-numeral collapse is not gated by it and was *joining*
+      tokens, so it rewrote text instead of only reformatting it:
 
-      | input | `off` output | correct |
+      | input | before | after |
       | --- | --- | --- |
       | `I I I think it works.` | `III think it works.` | unchanged |
-      | `a a a think` | `AAA think` | unchanged |
-      | `1 1 1 works` | `111 works` | unchanged (numbers stay in `digits` mode) |
+      | `a a a think` | `AAA think` | unchanged (`a a a think.` - the full stop is the un-gated punctuation preset) |
+      | `so I I I mean` | `so III mean.` | unchanged |
 
-      Requires 3+ consecutive identical single letters, so it mostly hits disfluent speech —
-      which is precisely this app's input. **Pre-existing, not a regression:** reproducible on
-      the merge-base `0656d57`, on `main` and on `feat/structured-formatting`, so neither branch
-      caused it. It contradicts `cleanup_modes.md` §4 invariant 2, and `a a a` -> `AAA` also
-      changes case. Needs a decision: gate serial collapse behind `cleanup_mode`, or require a
-      cue before collapsing. *Done = `off` provably deletes nothing for repeated single letters.*
+      **Root cause:** `_is_valid_untriggered_serial()` Case 3 read *any* run of single letters
+      as an initialism. English has single-letter *words* ("a", "I", and the vocative "O"), so
+      a run made entirely of them is prose. The existing guard knew this but covered only the
+      2-token case - `I I` was safe, `I I I` was not. `O O O` was safe **by accident**: "o"
+      means zero in `_DIGIT_WORDS`, so it was exempted as a digit run by an earlier guard.
+
+      **Fix:** generalise the guard - a run is prose only when *every* token is one of those
+      words, so `A B I`/`I B M`/`B B B` still collapse. A trigger noun still forces a collapse
+      ("serial number A A A" -> "AAA"), because the triggered path never consults this function.
+
+      **Why not gate it behind `cleanup_mode`** (the other candidate, and the first suggestion):
+      `cleanup_modes.md` §2 deliberately excludes serial/number/casing from the gate, because
+      `off` promises "nothing deleted, nothing rewritten as a correction" while those settings
+      change how text *looks* - `off` with `number_digits: digits` still writes `25`.
+      **Be precise about what a gate would have done, though: it would have hidden the symptom.**
+      The weld is observable *only* at `off` - above it the stutter pass runs first, reduces
+      `I I I` to `I I`, and the old 2-token guard then catches it. Measured over a 16-sentence
+      corpus in `artifacts` and `full`: **zero** cases where the weld was visible. That is the
+      real argument for fixing the detector instead: the only thing hiding the bug above `off`
+      is an accident of pass ordering plus that narrow guard, so a gate would fix what users see
+      while leaving the class of bug in place. Reorder the passes, or hit a run the stutter pass
+      does not match, and it returns.
+
+      **Verified by differential comparison** against the previous implementation over a
+      44-sentence corpus x 3 cleanup modes: **132 comparisons, 4 changed**, all at `off` and all
+      of them this bug. Prose, NATO dictation, real codes and the `artifacts`/`full` outputs are
+      byte-identical. Known cost, pinned in a test rather than hidden: an all-`{a,i,o}` run no
+      longer collapses (`A I O` stays as-is), which is the ambiguous set by definition.
 - [ ] **A2** Resolve the branch's open question: setting value naming —
       `off | inline | blocks` (current) vs `off | bullets | full`. *Done = one name chosen,
       aliases documented, both TUIs agree.*
