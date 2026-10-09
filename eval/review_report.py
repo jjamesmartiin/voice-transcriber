@@ -196,8 +196,13 @@ def build_html(results: dict, manifest: dict, out_html: str, results_path: str,
                      f"({state})</code> &middot; ")
     if meta.get("overall_wer") is not None:
         parts.append(f"overall_wer=<code>{_fmt_pct(float(meta['overall_wer']))}</code> &middot; ")
+    if meta.get("env"):
+        env_str = " ".join(f"{k}={v}" for k, v in meta["env"].items())
+        parts.append(f"<br>env: <code>{html.escape(env_str)}</code>")
     if meta.get("invocation"):
         parts.append(f"<br>invocation: <code>{html.escape(' '.join(map(str, meta['invocation'])))}</code>")
+    if meta.get("reproduce"):
+        parts.append(f"<br>reproduce: <code>{html.escape(str(meta['reproduce']))}</code>")
     parts.append("</div>")
 
     # ---- per-slice roll-up ----

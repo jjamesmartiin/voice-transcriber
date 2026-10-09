@@ -41,6 +41,7 @@ import contextlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -55,6 +56,11 @@ TARGET_SR = 16000
 # Filled in by load_app_config(); written into the result JSON so a baseline can
 # always state where its settings came from.
 _CONFIG_SOURCE = {"path": "", "loaded": False, "error": ""}
+
+# Environment variables a scoring run actually depends on. Recorded verbatim (when
+# present) so `meta.invocation` can be reproduced by copy-paste, not just inferred
+# from the semantic keys.
+_RECORDED_ENV_VARS = ("PYTHONPATH", "VT_INT8_DYNAMIC", "VT_MODEL_DIR", "VT_PLATFORM")
 
 
 def _git_revision():
@@ -71,6 +77,16 @@ def _git_revision():
         return rev, bool(status)
     except Exception:
         return "", False
+
+
+def _reproduce_command() -> str:
+    """A single shell line that reruns this exact invocation, env included."""
+    env_prefix = " ".join(
+        f"{k}={shlex.quote(os.environ[k])}" for k in _RECORDED_ENV_VARS if k in os.environ
+    )
+    argv = ["python", os.path.relpath(__file__, REPO_ROOT)] + sys.argv[1:]
+    cmd = " ".join(shlex.quote(a) for a in argv)
+    return f"{env_prefix} {cmd}".strip()
 
 
 def eprint(*a, **k):
@@ -455,6 +471,8 @@ def main():
                 "config_source": dict(_CONFIG_SOURCE),
                 "manifest": os.path.relpath(args.manifest, REPO_ROOT),
                 "invocation": ["python", os.path.relpath(__file__, REPO_ROOT)] + sys.argv[1:],
+                "env": {k: os.environ[k] for k in _RECORDED_ENV_VARS if k in os.environ},
+                "reproduce": _reproduce_command(),
                 "overall_wer": overall_wer,
                 "overall_clean_wer": overall_clean_wer,
                 "overall_cer": overall_cer,

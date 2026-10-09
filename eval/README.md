@@ -80,9 +80,10 @@ Key flags:
 The JSON `meta` block records the full configuration and the exact invocation so
 a baseline can state how it was produced: `backend`, `int8_dynamic`,
 `number_digits` (+ `number_digits_config`), `blocks_ms`, `skip_slm`, `device`,
-`git_rev`/`git_dirty`, `config_source` (path + whether it loaded), `manifest`, and
-`invocation`. Extra keys are additive; older result JSON files that predate them
-still load.
+`git_rev`/`git_dirty`, `config_source` (path + whether it loaded), `manifest`,
+`invocation` (argv), `env` (the relevant environment variables, verbatim), and
+`reproduce` (a single copy-pasteable shell line). Extra keys are additive; older
+result JSON files that predate them still load.
 
 The app's **real config is honoured**: `number_digits` is read from
 `config/config.yaml` (currently `false`) and applied via
@@ -154,8 +155,11 @@ nix develop --command python eval/review_report.py
 ```
 
 Inputs default to `eval/results.json` + `eval/manifest.jsonl`; outputs are
-`eval/report.html` and machine-readable `eval/review.json` (both overridable with
-`--out`/`--json`). The diff compares whitespace tokens on a lowercased `[a-z0-9]`
+`eval/report.html` (committed — the human artifact) and `eval/review.json`
+(machine readable, **gitignored**: it is pure derived data whose only inputs are
+`results.json` + `manifest.jsonl`, so tracking it would add ~500 KiB of diff
+noise to every future results change). Both paths are overridable with
+`--out`/`--json`. The diff compares whitespace tokens on a lowercased `[a-z0-9]`
 key, so case/punctuation-only differences (which scoring normalisation ignores)
 are not flagged.
 
