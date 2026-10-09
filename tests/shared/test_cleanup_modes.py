@@ -165,3 +165,49 @@ def test_the_punctuation_preset_is_not_gated_by_cleanup_mode():
     assert pp.clean_speech_transcription(
         "So uh this is fine", skip_slm=True, punctuation_mode="no_punctuation", cleanup_mode="off",
     ) == "So uh this is fine"
+
+
+# ---------------------------------------------------------------------------
+# The verbatim invariant, against the pass that broke it
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text,expected_at_off", [
+    # Casing and the punctuation preset are deliberately *not* gated by
+    # cleanup_mode, so `off` is allowed to add the full stop - what matters is
+    # that the letters are still separate words.
+    ("I I I think it works.", "I I I think it works."),
+    ("a a a think", "a a a think."),
+    ("so I I I mean", "so I I I mean."),
+])
+def test_off_keeps_repeated_single_letters_spaced(text, expected_at_off):
+    """`off` promises "every word that was said, verbatim".
+
+    Regression for A5. The serial-collapse pass is *not* gated by
+    `cleanup_mode` - deliberately, since it is a formatting setting like
+    `number_digits` - but it was silently deleting spaces here, so `off`
+    rewrote `I I I think it works.` to `III think it works.`. The promise is
+    about deletion, not about which passes run, so it has to hold at every
+    mode; the fix belongs in the detector, not in a gate.
+    """
+    assert render(text, "off") == expected_at_off
+
+
+@pytest.mark.parametrize("mode", ["off", "artifacts", "full"])
+def test_no_mode_joins_repeated_single_letters_into_a_serial(mode):
+    """The serial pass must never merge them, in any mode.
+
+    Note what is *not* asserted: at `artifacts` and `full` a repeated word is
+    legitimately reduced (`I I I` -> `I I`) by the stutter pass, which is noise
+    removal and is exactly what those modes are for. The bug was the serial
+    pass welding them into one token.
+    """
+    for text in ("I I I think it works.", "a a a think"):
+        out = render(text, mode)
+        assert "III" not in out, out
+        assert "AAA" not in out, out
+
+
+def test_the_serial_pass_still_collapses_real_codes_in_every_mode():
+    """The A5 fix must not turn serial collapse off - only stop it misfiring."""
+    for mode in ("off", "artifacts", "full"):
+        assert render("the code is X K 9 4 J", mode) == "the code is XK94J."

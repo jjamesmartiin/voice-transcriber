@@ -1952,6 +1952,12 @@ def _format_serial_tokens(raw: str, collapse: bool) -> str:
     return "".join(converted) if collapse else " ".join(converted)
 
 
+#: English words that are a single letter. A run of single letters drawn
+#: *entirely* from this set is prose, not an initialism - see Case 3 below.
+#: "a" and "I" are ordinary words; "O" is a vocative ("O Canada").
+_ENGLISH_SINGLE_LETTER_WORDS = frozenset({"a", "i", "o"})
+
+
 def _is_valid_untriggered_serial(raw: str) -> bool:
     toks = [w for w in re.split(r"[\s-]+", raw) if w]
     if len(toks) < 2:
@@ -2000,7 +2006,20 @@ def _is_valid_untriggered_serial(raw: str) -> bool:
     # Case 3: 2+ single letters (e.g. 'FBI', 'KGB', 'CPU', 'ABC')
     all_single_letters = all(len(t) == 1 and t.isalpha() for t in toks)
     if all_single_letters:
-        if len(toks) == 2 and any(t.lower() in ("a", "i") for t in toks):
+        # A run made *entirely* of English single-letter words is prose, not an
+        # initialism: "I I I think" is three pronouns and "a a a" is a stutter,
+        # whereas "A B C" or "F B I" really are initialisms. "O" was already
+        # safe, but by accident - "o" means zero in _DIGIT_WORDS, so "O O O"
+        # was exempted as a digit run by the guard above, not by any intent.
+        #
+        # This generalises the previous guard, which only covered the 2-token
+        # case ("I I" was safe, "I I I" collapsed to "III").
+        #
+        # Known cost: an all-{a,i,o} run is now left alone, so a dictated
+        # "A I O" no longer becomes "AIO". That is the ambiguous set by
+        # definition, and a trigger word restores it: the triggered path does
+        # not consult this function, so "the code is A I O" still collapses.
+        if all(t in _ENGLISH_SINGLE_LETTER_WORDS for t in lower_toks):
             return False
         return True
 

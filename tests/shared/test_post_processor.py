@@ -470,6 +470,69 @@ def test_serial_detection_ignores_natural_english(serial_settings, text):
     assert pp.process_serial_numbers(text) == text
 
 
+@pytest.mark.parametrize("text", [
+    # A run made *entirely* of English single-letter words is prose, not an
+    # initialism. Regression: the old guard only covered the 2-token case, so
+    # "I I" survived but "I I I" was collapsed to "III".
+    "I I I think it works.",
+    "a a a think",
+    "a a a a think",
+    "so I I I mean",
+    "I I I",
+    "we I I I go",
+    "O O O say can you see",
+    # Already-safe neighbours, kept so the guard cannot be narrowed by accident.
+    "I I think it works.",
+    "I, I, I think it works.",
+    "I think it works.",
+])
+def test_repeated_single_letter_words_are_prose(serial_settings, text):
+    assert pp.process_serial_numbers(text) == text
+
+
+@pytest.mark.parametrize("text,expected", [
+    # The prose guard must not weaken real initialisms: one token outside
+    # {a, i, o} makes the run a code again.
+    ("A B I", "ABI"),
+    ("A B C", "ABC"),
+    ("B B B", "BBB"),
+    ("X X X", "XXX"),
+    ("I B M", "IBM"),
+    # Lowercase collapses too; single letters are uppercased by the formatter.
+    ("a b c", "ABC"),
+])
+def test_one_non_prose_letter_restores_the_initialism(serial_settings, text, expected):
+    assert pp.process_serial_numbers(text) == expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    # A trigger noun immediately before the run still forces a collapse, because
+    # the triggered path never consults the prose guard. This is the escape
+    # hatch for genuinely dictated all-{a,i,o} identifiers.
+    ("serial number A A A", "serial number AAA"),
+    ("serial X K 9 4 J", "serial XK94J"),
+    ("my model number is A B C 1 2 3", "my model number is ABC123"),
+])
+def test_a_trigger_noun_still_collapses(serial_settings, text, expected):
+    assert pp.process_serial_numbers(text) == expected
+
+
+def test_the_trigger_must_be_adjacent_known_limitation(serial_settings):
+    """Documents the boundary of the prose guard, not an aspiration.
+
+    "code A I O" collapses because a trigger sits directly before the run, and
+    "A I O" collapses anyway via the digit-word rule ("o" means zero, so the
+    run looks alphanumeric). But "the code is I I I" does *not*, because the
+    trigger regex requires the noun to be adjacent - "is" breaks it - so the
+    run falls through to the untriggered path and is now correctly read as
+    prose. The recall we lose here is limited to all-{a,i,o} runs whose trigger
+    is separated by a word, which is why the fix is still the right trade.
+    """
+    assert pp.process_serial_numbers("code A I O") == "code AIO"
+    assert pp.process_serial_numbers("the code is F B I") == "the code is FBI"
+    assert pp.process_serial_numbers("the code is I I I") == "the code is I I I"
+
+
 def test_quantity_plus_article_survives_full_pipeline(serial_settings):
     # "150 to 170 a month" is a price, not a model code (F150 / XK94J still collapse).
     out = pp.clean_speech_transcription(
