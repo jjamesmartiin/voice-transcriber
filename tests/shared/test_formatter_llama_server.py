@@ -611,3 +611,4 @@ def test_an_unavailable_backend_falls_back_to_the_original(monkeypatch):
     formatter.reset_backend_cache()
     original = "buy milk"
     assert formatter.format_text(original, backend="llama-server") == original
+

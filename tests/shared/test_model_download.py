@@ -107,6 +107,87 @@ def test_get_spec_rejects_an_unknown_model():
         model_download.get_spec("nope")
 
 
+def test_formatter_and_diarization_specs_are_registered():
+    """The two redistributable non-ASR models resolve and carry their own data.
+
+    A fresh machine needs a download path for both; before C6 the registry held
+    only Cohere, so enabling the formatter or meeting mode did nothing unless the
+    files had been placed by hand.
+    """
+    formatter = model_download.get_spec("formatter")
+    assert formatter.repo_id == "superwhisper/s1-mini-GGUF"
+    assert formatter.target_subdir == "formatter"
+    assert formatter.required_local == ("s1-mini-q4_k_m.gguf",)
+    assert formatter.digests["s1-mini-q4_k_m.gguf"] == (
+        "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634")
+    assert formatter.model_ids == ("s1-mini",)
+    # The licence's naming term must survive as the display name.
+    assert formatter.display_name == '"S1-mini" by "Superwhisper"'
+
+    diarization = model_download.get_spec("diarization")
+    assert diarization.target_subdir == "diarization"
+    assert diarization.model_ids == ("diarization",)
+    assert set(diarization.required_local) == set(diarization.digests)
+    # Nested install layout the backend reads (diarizers/sherpa_onnx.py).
+    assert any(f.endswith("pyannote-segmentation-3-0/model.onnx")
+               for f in diarization.required_local)
+    assert any(f.endswith(".onnx") and "3dspeaker" in f
+               for f in diarization.required_local)
+
+
+def test_registry_name_for_model_maps_config_ids_to_registry_keys():
+    assert model_download.registry_name_for_model("s1-mini") == "formatter"
+    assert model_download.registry_name_for_model("S1-MINI") == "formatter"
+    assert model_download.registry_name_for_model("diarization") == "diarization"
+    assert model_download.registry_name_for_model("gpt-9-turbo") is None
+    assert model_download.registry_name_for_model("") is None
+    assert model_download.registry_name_for_model(None) is None
+
+
+def test_every_shipped_formatter_model_id_has_a_registry_entry():
+    """`formatter.MODELS` and the registry must not drift apart.
+
+    `formatter_model` names a *model id*; the registry is the single home for
+    what that id actually downloads. Without this pin, a new model in the
+    settings cycle could resolve to nothing at download time.
+    """
+    import formatter as formatter_module
+
+    for model_id in formatter_module.MODELS:
+        name = model_download.registry_name_for_model(model_id)
+        assert name is not None, f"no registry entry claims model id {model_id!r}"
+        spec = model_download.get_spec(name)
+        assert any(str(f).endswith(".gguf") for f in spec.required_local), (
+            f"{name} declares no GGUF for {model_id!r}")
+
+
+def test_models_dir_prefers_an_existing_per_user_install(monkeypatch, tmp_path):
+    """Registering an entry must not hide weights installed outside a checkout.
+
+    Regression the diarization graphs exposed: a writable checkout with no
+    `models/<subdir>` used to win over a complete per-user install, so adding the
+    `diarization` spec made already-present graphs unfindable.
+    """
+    monkeypatch.delenv("VT_MODEL_DIR", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(model_download, "find_repo_root", lambda: str(tmp_path / "repo"))
+    (tmp_path / "repo").mkdir()
+    spec = _synthetic_spec(name="synthetic", target_subdir="synthetic")
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+
+    installed = tmp_path / "vt" / "models" / "synthetic"
+    installed.mkdir(parents=True)
+    for req in spec.required_local:
+        (installed / req).write_text("stub", encoding="utf-8")
+
+    assert model_download.models_dir("synthetic") == str(installed)
+    # ... and a completely absent install still targets the writable checkout.
+    for req in spec.required_local:
+        (installed / req).unlink()
+    assert model_download.models_dir("synthetic") == os.path.join(
+        str(tmp_path), "repo", "models", "synthetic")
+
+
 def test_is_model_complete_is_per_spec(monkeypatch, tmp_path):
     spec = _synthetic_spec()
     monkeypatch.setitem(model_download.MODELS, spec.name, spec)

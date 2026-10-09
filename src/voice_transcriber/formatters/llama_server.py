@@ -164,10 +164,10 @@ def _binary() -> str | None:
     return which("llama-server")
 
 
-#: Model id -> the GGUF the release bundle installs for it. The model registry
-#: (milestone C6) becomes the single declaration home for this; until then this is
-#: the one place the mapping lives, so it is at least one place rather than none.
-#: The ids match `formatter.MODELS` and the config choices, which a test pins.
+#: Model id -> the GGUF the release bundle installs for it. The model registry is
+#: now the single declaration home for this (``FORMATTER.required_local``); this
+#: map is the fallback for a build whose registry import fails, and a test pins it
+#: to the registry entry so the two cannot drift.
 MODEL_FILENAMES: dict[str, str] = {
     "s1-mini": "s1-mini-q4_k_m.gguf",
 }
@@ -177,6 +177,24 @@ DEFAULT_MODEL_ID = "s1-mini"
 
 #: Subdirectory under the app's data dir where the formatter weights live.
 DEFAULT_MODEL_SUBDIR = "formatter"
+
+
+def _registry_model_name() -> str:
+    """Registry key for the shipped formatter model.
+
+    Isolated from the rest of ``_candidate_model_dirs`` because a missing
+    registry entry (a build without it, or an import failure) must not abort the
+    conventional install path - which is the one that finds weights installed
+    outside a checkout.
+    """
+    try:
+        from voice_transcriber import model_download
+        name = model_download.registry_name_for_model(DEFAULT_MODEL_ID)
+        if name:
+            return name
+    except Exception:
+        pass
+    return DEFAULT_MODEL_SUBDIR
 
 
 def _model_filenames(model: str | None = None) -> tuple[str, ...]:
@@ -195,10 +213,9 @@ def _model_filenames(model: str | None = None) -> tuple[str, ...]:
 def _candidate_model_dirs() -> list[str]:
     """Directories to look in for the GGUF, most specific first.
 
-    Each lookup is isolated: the registry accessors raise ``KeyError`` for a name
-    that is not registered yet, and one shared ``try`` would let the missing spec
-    abort the conventional path too - which is the only one that can succeed
-    before milestone C6 adds the formatter spec.
+    Every lookup is isolated: a registry accessor can raise (a name this build
+    does not know), and one shared ``try`` would let that abort the conventional
+    per-user path, which is what finds weights installed outside a checkout.
     """
     dirs: list[str] = []
     try:
@@ -206,11 +223,11 @@ def _candidate_model_dirs() -> list[str]:
     except Exception:
         return dirs
     try:
-        registry_dir = model_download.models_dir("formatter")
+        registry_dir = model_download.models_dir(_registry_model_name())
         if registry_dir:
             dirs.append(str(registry_dir))
     except Exception:
-        pass  # KeyError until C6 registers a formatter spec
+        pass
     try:
         dirs.append(os.path.join(str(model_download.get_data_dir()),
                                  "models", DEFAULT_MODEL_SUBDIR))
@@ -222,12 +239,11 @@ def _candidate_model_dirs() -> list[str]:
 def _model_path(model: str | None = None) -> str | None:
     """Locate the GGUF for ``model``, or ``None``.
 
-    Explicit override, then the registry, then the conventional install path. The
-    registry is the real answer, but a stock build carries no formatter spec yet
-    (milestone C6). Without the conventional-location fallback a model that *is*
-    installed stays unfindable, so enabling the formatter would silently do nothing
-    unless the user also set ``VT_FORMATTER_MODEL_PATH`` - the same failure this
-    backend's own default had before it was pointed at the shipping path.
+    Explicit override, then the model registry, then the conventional install
+    path. The registry is the real answer (``FORMATTER`` declares the filename
+    and digest); the filename map and the per-user fallback stay so a build whose
+    registry import fails - or weights installed outside the checkout - still
+    resolves.
     """
     override = (os.environ.get(ENV_MODEL_PATH) or "").strip()
     if override:
@@ -236,9 +252,12 @@ def _model_path(model: str | None = None) -> str | None:
     spec = None
     try:
         from voice_transcriber import model_download
-        spec = model_download.get_spec("formatter")
+        registry_name = model_download.registry_name_for_model(
+            str(model or DEFAULT_MODEL_ID).strip().lower())
+        if registry_name:
+            spec = model_download.get_spec(registry_name)
     except Exception:
-        pass
+        spec = None
 
     names = [str(name) for name in (getattr(spec, "required_local", ()) or ())
              if str(name).endswith(".gguf")]
@@ -250,7 +269,6 @@ def _model_path(model: str | None = None) -> str | None:
             candidate = os.path.join(directory, name)
             if os.path.exists(candidate):
                 return candidate
-    return None
     return None
 
 

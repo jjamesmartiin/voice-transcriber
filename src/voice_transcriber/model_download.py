@@ -70,7 +70,15 @@ class ModelSpec:
     package_files: tuple = ()        # files the packager stages into the tar
     required_local: tuple = ()       # minimal set meaning "loadable locally"
     digests: dict = dataclasses.field(default_factory=dict)  # file -> sha256
+    #: Config-layer model ids that select this entry. ``formatter_model: s1-mini``
+    #: and ``diarization_model: diarization`` are user-facing values; this maps
+    #: them back to the registry key so the mapping lives in exactly one place.
+    model_ids: tuple = ()
     license_file: str = ""           # repo-relative license to ship
+    #: Repo-relative NOTICE to ship *verbatim*. Empty means "generate one from
+    #: the spec" (the Cohere behaviour). A model whose upstream NOTICE carries
+    #: an operative clause - S1-mini's naming term - must ship that exact text.
+    notice_file: str = ""
     license_name: str = ""           # short license label (NOTICE, provenance)
     target_subdir: str = ""          # <models root>/<target_subdir>
     download_hint: str = ""          # size hint shown in the download prompt
@@ -138,9 +146,107 @@ COHERE = ModelSpec(
     download_hint="~2.8 GB (~3.9 GB uncompressed on disk)",
 )
 
-#: The registry. A future GGUF formatter and the ONNX diarization graphs each
-#: add one entry here and inherit the whole installer/publisher pipeline.
-MODELS: dict = {COHERE.name: COHERE}
+#: The registry. Every redistributable artifact is one entry here; the packager
+#: and publisher read the entry, and the installers resolve through it. Adding a
+#: model is adding an entry, never a branch in the installer.
+
+# --- Formatter: S1-mini (GGUF, llama.cpp) ----------------------------------
+# The quant lives in a *separate* repo from the base model: superwhisper/s1-mini
+# ships no GGUF at all. Pin by commit sha, because the repo has no tags (a
+# ``v1`` ref 404s). The digest is the extracted file, not the download wrapper.
+_FORMATTER_REVISION = "34add00a48a2e5d24e5a4ee5405a99620a3a240c"
+_FORMATTER_SHA256 = "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634"
+_FORMATTER_TAG = f"model-formatter-{_FORMATTER_REVISION[:12]}"
+
+FORMATTER = ModelSpec(
+    name="formatter",
+    # The licence's additional term requires exactly this attribution wherever
+    # the model is named, so it is the display name as well as the NOTICE title.
+    display_name='"S1-mini" by "Superwhisper"',
+    description="On-device transcript formatter by Superwhisper.",
+    repo_id="superwhisper/s1-mini-GGUF",
+    revision=_FORMATTER_REVISION,
+    asset_prefix=f"s1-mini-{_FORMATTER_REVISION}",
+    bundle_tag=_FORMATTER_TAG,
+    release_base=f"{_REPO_URL}/releases/download/{_FORMATTER_TAG}",
+    package_files=("s1-mini-q4_k_m.gguf",),
+    required_local=("s1-mini-q4_k_m.gguf",),
+    digests={"s1-mini-q4_k_m.gguf": _FORMATTER_SHA256},
+    model_ids=("s1-mini",),
+    license_file="config/licenses/S1-mini-Apache-2.0.txt",
+    notice_file="config/licenses/S1-mini-NOTICE.txt",
+    license_name="Apache-2.0 (with an additional naming term)",
+    notice_title="S1-mini",
+    license_title=("the Apache License, Version 2.0, plus the additional "
+                   "naming term"),
+    target_subdir="formatter",
+    download_hint="~462 MiB",
+)
+
+# --- Diarization: pyannote segmentation + 3D-Speaker embedding --------------
+# Both graphs come from k2-fsa/sherpa-onnx GitHub releases; the embedding asset
+# bucket really is misspelled ``recongition`` upstream, so the URLs are copied
+# literally. The revision is the segmentation tarball's sha256: it is the
+# primary artifact and pins the bundle tag to the content, the same way the
+# Cohere and formatter tags pin to a commit sha.
+_DIARIZATION_TARBALL_SHA256 = (
+    "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488"
+)
+#: Extracted pyannote segmentation graph (what we redistribute).
+_DIARIZATION_SEGMENTATION_SHA256 = (
+    "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079"
+)
+#: 3D-Speaker eres2net embedding graph.
+_DIARIZATION_EMBEDDING_SHA256 = (
+    "1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b"
+)
+_DIARIZATION_REVISION = _DIARIZATION_TARBALL_SHA256
+_DIARIZATION_TAG = f"model-diarization-{_DIARIZATION_REVISION[:12]}"
+#: Installed layout the backend reads (see diarizers/sherpa_onnx.py).
+_DIARIZATION_SEGMENTATION_PATH = (
+    "sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
+)
+_DIARIZATION_EMBEDDING_PATH = (
+    "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+)
+
+DIARIZATION = ModelSpec(
+    name="diarization",
+    display_name="Diarization (sherpa-onnx)",
+    description="Speaker diarization graphs: pyannote segmentation 3.0 "
+                "(MIT) and a 3D-Speaker eres2net embedding (Apache-2.0).",
+    repo_id="k2-fsa/sherpa-onnx",
+    revision=_DIARIZATION_REVISION,
+    asset_prefix=f"diarization-{_DIARIZATION_REVISION}",
+    bundle_tag=_DIARIZATION_TAG,
+    release_base=f"{_REPO_URL}/releases/download/{_DIARIZATION_TAG}",
+    package_files=(
+        _DIARIZATION_EMBEDDING_PATH,
+        _DIARIZATION_SEGMENTATION_PATH,
+    ),
+    required_local=(
+        _DIARIZATION_EMBEDDING_PATH,
+        _DIARIZATION_SEGMENTATION_PATH,
+    ),
+    digests={
+        _DIARIZATION_EMBEDDING_PATH: _DIARIZATION_EMBEDDING_SHA256,
+        _DIARIZATION_SEGMENTATION_PATH: _DIARIZATION_SEGMENTATION_SHA256,
+    },
+    model_ids=("diarization",),
+    license_file="config/licenses/Diarization-LICENSES.txt",
+    notice_file="config/licenses/Diarization-NOTICE.txt",
+    license_name="MIT (segmentation) and Apache-2.0 (embedding)",
+    notice_title="sherpa-onnx diarization models",
+    license_title="MIT (segmentation) and Apache-2.0 (embedding)",
+    target_subdir="diarization",
+    download_hint="~40 MB",
+)
+
+MODELS: dict = {
+    COHERE.name: COHERE,
+    FORMATTER.name: FORMATTER,
+    DIARIZATION.name: DIARIZATION,
+}
 
 # --- Backward-compatible constant aliases (deprecated) ---------------------
 # Kept so existing callers, docs and the publisher's constant import keep
@@ -164,6 +270,22 @@ def get_spec(name):
     except KeyError:
         known = ", ".join(sorted(MODELS))
         raise KeyError(f"unknown model {name!r} (known: {known})") from None
+
+
+def registry_name_for_model(model_id):
+    """Registry key whose ``model_ids`` contains ``model_id``, or ``None``.
+
+    A config value (``formatter_model: s1-mini``, ``diarization_model:
+    diarization``) is a *model id*, not a registry key. This is the one place
+    that mapping lives, so the settings layer and the loaders cannot drift.
+    """
+    key = str(model_id or "").strip().lower()
+    if not key:
+        return None
+    for name, spec in MODELS.items():
+        if key in tuple(getattr(spec, "model_ids", ()) or ()):
+            return name
+    return None
 
 
 def _resolved_spec(name, revision=None):
@@ -204,16 +326,25 @@ def _notify(stage, pct, text):
     print(text, flush=True)
 
 
+def _data_dir():
+    """The per-user data root, without creating anything (see get_data_dir)."""
+    if os.environ.get("XDG_DATA_HOME"):
+        return os.path.join(os.environ["XDG_DATA_HOME"], "vt")
+    if os.name == "posix":
+        return os.path.join(os.path.expanduser("~"), ".local", "share", "vt")
+    return os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "vt")
+
+
 def get_data_dir():
     """Per-user data dir (mirrors t2.get_data_dir without importing the app)."""
-    if os.environ.get("XDG_DATA_HOME"):
-        d = os.path.join(os.environ["XDG_DATA_HOME"], "vt")
-    elif os.name == "posix":
-        d = os.path.join(os.path.expanduser("~"), ".local", "share", "vt")
-    else:
-        d = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "vt")
+    d = _data_dir()
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def _per_user_model_dir(subdir):
+    """Per-user install path for a model subdir, without creating anything."""
+    return os.path.join(_data_dir(), "models", subdir)
 
 
 def _has_repo_marker(directory):
@@ -288,15 +419,28 @@ def _models_dir_for(spec):
         if os.path.isdir(exe_models) or os.access(exe_dir, os.W_OK):
             return exe_models
     root = find_repo_root()
-    if root:
-        repo_dir = os.path.join(root, "models", subdir)
-        # writable now? (no side effects: don't create anything on lookup)
-        if os.path.isdir(repo_dir):
-            if os.access(repo_dir, os.W_OK):
-                return repo_dir
-        elif os.access(root, os.W_OK):
-            return repo_dir
-    return os.path.join(get_data_dir(), "models", subdir)
+    repo_dir = os.path.join(root, "models", subdir) if root else None
+    per_user = _per_user_model_dir(subdir)
+
+    # An existing, complete install always wins, wherever it lives. This keeps a
+    # model that was installed into the per-user directory (when the checkout
+    # was read-only, or before its registry entry existed) findable once the
+    # checkout path becomes writable - registering a model must never make an
+    # already-installed one unfindable.
+    if repo_dir and is_model_complete(spec.name, repo_dir):
+        return repo_dir
+    if is_model_complete(spec.name, per_user):
+        return per_user
+
+    # Nothing installed yet: a writable checkout is the conventional target, so
+    # the weights live visibly in the project they came from; read-only installs
+    # (Nix store, AppImage) fall back to the per-user data dir.
+    if repo_dir and (
+        (os.path.isdir(repo_dir) and os.access(repo_dir, os.W_OK))
+        or (not os.path.isdir(repo_dir) and os.access(root, os.W_OK))
+    ):
+        return repo_dir
+    return per_user
 
 
 def cohere_models_dir():
