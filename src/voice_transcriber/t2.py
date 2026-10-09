@@ -1520,6 +1520,30 @@ def toggle_structure_mode() -> str:
     return STRUCTURE_MODE
 
 
+def structure_setting_state(structure_mode: str, effective_mode: str):
+    """``(description, badge, colour)`` for the settings modal's structure row.
+
+    Extracted from the nested closure inside ``select_settings_picker()`` so it
+    can be tested: while it lived in there the Python labels silently drifted
+    away from the ratatui ones, and nothing could catch it.
+
+    The configured mode and the effective one differ when typing downgrades
+    ``blocks`` to ``inline``. In that case the row must say what is actually in
+    force rather than advertising the configured value - the modal previously
+    read "Bullets on their own lines (typed text stays inline)", which claims a
+    formatting the engine had already refused. ``tui-rs/src/settings_picker.rs``
+    had this right, so Python is being brought into line with Rust, not the
+    reverse. ``tests/shared/test_config_sync.py`` holds the two together.
+    """
+    if structure_mode == "off":
+        return "Flat prose (no list formatting)", "[OFF]", "dim white"
+    if structure_mode == "inline":
+        return "Bullets on one line: - one. - two.", "[INLINE]", "cyan"
+    if effective_mode != structure_mode:
+        return "Typed text stays inline", "[PASTE]", "yellow"
+    return "Bullets on their own lines", "[BLOCKS]", "green"
+
+
 def normalize_cleanup_mode(value) -> str:
     """Canonicalise a cleanup mode; the post-processor owns the alias table."""
     try:
@@ -2347,16 +2371,12 @@ def select_settings_picker():
         elif item_id == "structure":
             # The configured mode and the effective one can differ: typing
             # downgrades "blocks" to "inline" because a newline is an Enter
-            # keypress in whatever window has focus.
-            effective = get_effective_structure_mode()
-            if STRUCTURE_MODE == "off":
-                return "Flat prose (no list formatting)", "[OFF]", "dim white"
-            elif STRUCTURE_MODE == "inline":
-                return "Bullets on one line: - one. - two.", "[INLINE]", "cyan"
-            elif effective != STRUCTURE_MODE:
-                return "Bullets on their own lines (typed text stays inline)", "[PASTE]", "yellow"
-            else:
-                return "Bullets on their own lines", "[BLOCKS]", "green"
+            # keypress in whatever window has focus. The labels live in
+            # structure_setting_state() so they can be tested against the
+            # ratatui ones.
+            return structure_setting_state(
+                STRUCTURE_MODE, get_effective_structure_mode()
+            )
         elif item_id == "trailing_space":
             if AUTO_TYPE_TRAILING_SPACE:
                 return "Enabled (appends ' ')", "[ON]", "green"

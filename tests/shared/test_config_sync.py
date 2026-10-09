@@ -638,3 +638,92 @@ def test_main_typing_formatting_options(monkeypatch):
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# Structure-mode labels: the two frontends must advertise the same thing
+# ---------------------------------------------------------------------------
+
+RUST_SETTINGS_PICKER = (
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    + "/tui-rs/src/settings_picker.rs"
+)
+
+
+@pytest.mark.parametrize("configured,effective,desc,badge,colour", [
+    # Configuring "blocks" while typing is the interesting row: the engine
+    # downgrades it to inline, so the row must not promise bullets on their own
+    # lines. Python used to say exactly that; Rust already said this.
+    ("blocks", "inline", "Typed text stays inline", "[PASTE]", "yellow"),
+    ("blocks", "blocks", "Bullets on their own lines", "[BLOCKS]", "green"),
+    ("inline", "inline", "Bullets on one line: - one. - two.", "[INLINE]", "cyan"),
+    ("off", "off", "Flat prose (no list formatting)", "[OFF]", "dim white"),
+])
+def test_structure_setting_labels(configured, effective, desc, badge, colour):
+    assert t2.structure_setting_state(configured, effective) == (desc, badge, colour)
+
+
+def test_no_structure_label_advertises_a_formatting_not_in_force():
+    """The regression this file exists to prevent.
+
+    "Bullets on their own lines" is only true when the breaks will actually be
+    emitted; under typing the configured blocks mode is downgraded to inline.
+    """
+    desc, badge, _ = t2.structure_setting_state("blocks", "inline")
+    assert "own lines" not in desc
+    assert badge == "[PASTE]"
+
+
+def test_ratatui_structure_labels_match_python():
+    """The ratatui modal renders these strings from another language.
+
+    Pin its literals by source, scoped to the non-test half of the file: the
+    Rust test repeats these strings, and matching those would let the real
+    implementation drift. Mirrors the guard in tests/shared/test_mode_presets.py.
+    """
+    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
+    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    assert "SettingKind::StructureMode" in implementation, (
+        "could not find the structure row in tui-rs/src/settings_picker.rs - the "
+        "parity guard is looking in the wrong place"
+    )
+    for configured, effective in [
+        ("off", "off"), ("inline", "inline"),
+        ("blocks", "blocks"), ("blocks", "inline"),
+    ]:
+        desc, badge, _ = t2.structure_setting_state(configured, effective)
+        assert desc in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows {desc!r} "
+            f"(structure_mode={configured}, effective={effective})"
+        )
+        assert badge in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows the {badge} badge"
+        )
+
+
+def test_the_naming_decision_is_recorded():
+    """A2: `off`/`inline`/`blocks` are canonical; the others are aliases.
+
+    Kept as a test rather than a comment because the alternatives are tempting
+    and the reasons are non-obvious:
+
+    * `full` is already the canonical *cleanup* mode, and the same modal shows
+      it as a "[FULL]" badge. Reusing it for structure would put two identical
+      badges on two different axes in one list.
+    * `bullets` describes how the output looks, but not the thing that makes
+      this setting dangerous - `inline` never emits a newline and `blocks` does,
+      and a newline is an Enter keypress in whatever window has focus. The
+      canonical names encode the transport, which is the safety-relevant axis.
+
+    Both alternatives are accepted as *input*, so nobody who thinks in terms of
+    "bullets" is locked out.
+    """
+    from post_processor import normalize_structure_mode
+
+    assert t2.STRUCTURE_MODES == ["off", "inline", "blocks"]
+    assert normalize_structure_mode("bullets") == "blocks"
+    assert normalize_structure_mode("full") == "blocks"
+    assert normalize_structure_mode("lists") == "blocks"
+    assert normalize_structure_mode("dashes") == "inline"
+    assert normalize_structure_mode("single-line") == "inline"
+    assert normalize_structure_mode("nonsense") == "off"
