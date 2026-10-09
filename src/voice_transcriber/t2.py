@@ -156,16 +156,21 @@ MEETING_SPILL_CHOICES = [5, 10, 20, 30, 60]
 #: without the feature.
 FORMATTER = "off"
 FORMATTER_MODES = ["off", "on"]
-#: User-selectable backends. "noop" is deliberately absent: it is the identity
-#: backend used by tests, not something to offer a user. The registry is still
-#: the source of truth and a test asserts this list cannot drift from it.
-#:
-#: The default is the subprocess backend, not "s1-mini". `s1-mini` in this codebase
-#: names the *in-process* backend (milestone C4), which does not exist yet, so
-#: defaulting to it made `formatter: on` a silent no-op out of the box. See
-#: formatter.DEFAULT_BACKEND and docs/plan-on-device-formatter.md sec 6.1.
-FORMATTER_MODEL = "llama-server"
-FORMATTER_MODELS = ["s1-mini", "llama-server"]
+#: Which **model** the formatter loads. Not a backend: the runtime is an
+#: implementation detail (`formatter.DEFAULT_BACKEND`), and conflating the two is
+#: what once left this default pointing at a runtime that did not exist.
+FORMATTER_MODEL = "s1-mini"
+#: Selectable models. A literal rather than `formatter.MODELS` because `t2` imports
+#: that module lazily by convention (see the post_processor imports below), and a
+#: module-level import here would make `t2` depend on the import order. A test pins
+#: the two lists together instead, so they cannot drift silently.
+FORMATTER_MODELS = ["s1-mini"]
+#: The default model id, mirroring `formatter.DEFAULT_MODEL` (pinned by a test).
+#: A module-level constant rather than reaching into `formatter`, which `t2` does
+#: not import at module scope - and getting that wrong here silently aborted the
+#: whole of `load_audio_config` past this point, so every later key kept its old
+#: value and the symptom showed up as unrelated tests failing.
+FORMATTER_DEFAULT_MODEL = FORMATTER_MODELS[0]
 FORMATTER_STYLE = "semi-formal"
 FORMATTER_STYLES = ["casual", "semi-casual", "semi-formal", "formal"]
 FORMATTER_CONTEXT = "general"
@@ -210,7 +215,7 @@ DEFAULT_SETTINGS = {
     'MEETING': "off",
     'MEETING_SPILL_MINUTES': 10,
     'FORMATTER': "off",
-    'FORMATTER_MODEL': "llama-server",
+    'FORMATTER_MODEL': "s1-mini",
     'FORMATTER_STYLE': "semi-formal",
     'FORMATTER_CONTEXT': "general",
     'LANGUAGE': "en",
@@ -1659,9 +1664,26 @@ def normalize_formatter_context(value) -> str:
 
 
 def normalize_formatter_model(value) -> str:
-    """A backend name. Unknown values fall back to the shipped default."""
-    text = str(value).strip().lower() if value is not None else ""
-    return text or FORMATTER_MODEL
+    """A model id, validated against :data:`FORMATTER_MODELS`.
+
+    An unknown or empty value falls back to the shipped default **with a warning**,
+    following `_load_model_backend`'s pattern rather than the structure-mode one.
+    This setting names *what to load*, so a typo should name the default and carry
+    on; silently disabling the feature would look like the formatter had stopped
+    working rather than like a bad config value.
+    """
+    fallback = FORMATTER_DEFAULT_MODEL
+    if value is None:
+        return fallback
+    text = str(value).strip().lower()
+    if not text:
+        return fallback
+    if text not in FORMATTER_MODELS:
+        logger.warning(
+            "Unknown formatter model %r; using %r (known: %s)",
+            text, fallback, ", ".join(FORMATTER_MODELS))
+        return fallback
+    return text
 def get_formatter() -> str:
     """The configured formatter mode ("off"/"on")."""
     return FORMATTER
@@ -1773,7 +1795,7 @@ def formatter_setting_state(enabled: str):
 
 
 def formatter_model_setting_state(model: str = FORMATTER_MODEL):
-    return f"Backend: {model}", "[MODEL]", "cyan"
+    return f"Model: {model}", "[MODEL]", "cyan"
 
 
 def formatter_style_setting_state(style: str = FORMATTER_STYLE):

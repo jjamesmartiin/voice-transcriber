@@ -415,8 +415,40 @@ Detail: [`plan-on-device-formatter.md`](plan-on-device-formatter.md).
       * **Attach mode must never kill.** `VT_FORMATTER_SERVER_URL` means the server is not
         ours; timeout terminates only a process we spawned. Pinned by a test each.
       *The latency half of the exit criteria needs the 462 MiB GGUF and is folded into C2.*
-- [ ] **C4** `formatters/s1_mini.py` — in-process fallback, baselined against C3.
-      *Done = a measured throughput comparison; that measurement picks the documented default.*
+- [x] **C4** `formatters/s1_mini.py` — in-process fallback, baselined against C3.
+      **DROPPED (decided 2026-10-08), superseding M3b.** The in-process runtime loses on
+      every axis that matters here, and the plan's own §6.1 finding is why:
+      * **Portability vs speed is a forced choice, and it loses either way.** Under Nix the
+        in-process build is baseline SSE2 — portable but potentially 13× slower, because the
+        `llama-cpp-python` bindings cannot load llama.cpp's dynamic CPU variants (upstream
+        #2069). A `pip` build enables AVX2 and **SIGILLs on pre-AVX2 hardware**. The
+        subprocess gets `cpuArchDynamicDispatch` from `pkgs.llama-cpp`, so **one artifact is
+        both portable and fast**.
+      * **A native extension per Python version, per platform**, versus zero coupling — a
+        `llama-server` binary works regardless of our Python.
+      * **No pinning treadmill.** The plan wanted `llama-cpp-python==0.3.23` pinned because it
+        pins a vendored llama.cpp commit; a server binary needs no such pin.
+      * **Worse cancellation.** In-process has no `timeout=` kwarg, so it needs a
+        `StoppingCriteria` plus worker-thread abandonment, and a stuck thread cannot be
+        reclaimed. The subprocess is `terminate()` then `kill()`.
+      * **A much slower devShell**, forever, for every developer — it compiles from source.
+
+      **What is actually given up is small and is recorded rather than glossed:** the M3b
+      head-to-head measurement is never made (but the subprocess measures 135–442 ms against a
+      1.5 s budget, so the outcome was not in doubt), and **macOS packaging gets harder** —
+      `llama-cpp-python` ships macOS wheels while a macOS `llama-server` must be found or
+      built. Linux and Windows are both covered (`pkgs.llama-cpp`; llama.cpp's prebuilt
+      `llama-server.exe` zips). If macOS ever becomes a release blocker, this is the one
+      argument to revisit, and it is a packaging argument rather than a capability one.
+
+      **The cleanup this forced is the part that mattered.** With C4 gone, `s1-mini` had to
+      stop being a *backend*: it was a selectable runtime resolving to a module that would
+      never exist, which is exactly the bug class the default itself had — you could select
+      it and the formatter would silently do nothing. So the two axes were separated: the
+      **backend** registry holds only runtimes that exist (`llama-server`, plus `noop` for
+      tests), and `formatter_model` now names a **model**. Checking that also caught the Rust
+      `App` still defaulting to the old value (`dbf71e9`), which the C5 parity guard missed
+      because it pins label strings, not defaults.
 - [x] **C5** Settings end-to-end (`formatter`, `formatter_model`, `formatter_style`,
       `formatter_context`; `structure_mode` supplies the third control axis). **DONE.**
       Surface count, all wired: `config/config.yaml` + the documented example, `t2.py`

@@ -280,7 +280,7 @@ impl App {
             // that resolves to nothing makes the feature look broken rather than
             // disabled. The engine overwrites this from cfg, but a wrong initial
             // value still shows for a moment and is a trap for the next reader.
-            formatter_model: "llama-server".to_string(),
+            formatter_model: "s1-mini".to_string(),
             formatter_style: "semi-formal".to_string(),
             formatter_context: "general".to_string(),
             cleanup_mode: "full".to_string(),
@@ -459,7 +459,7 @@ impl App {
     /// Advance the formatter backend through the two shipped names. The engine
     /// is authoritative and replies with a `cfg` that overwrites this value.
     pub fn cycle_formatter_model(&mut self) -> &str {
-        const FORMATTER_MODELS: [&str; 2] = ["s1-mini", "llama-server"];
+        const FORMATTER_MODELS: [&str; 1] = ["s1-mini"];
         let idx = FORMATTER_MODELS
             .iter()
             .position(|m| *m == self.formatter_model)

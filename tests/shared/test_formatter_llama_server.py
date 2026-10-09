@@ -210,9 +210,22 @@ def test_the_conventional_install_path_is_found(tmp_path, monkeypatch):
     nothing. Same failure as the backend default, found the same way.
     """
     monkeypatch.setattr(llama_server, "_candidate_model_dirs", lambda: [str(tmp_path)])
-    name = llama_server.DEFAULT_MODEL_FILENAMES[0]
+    name = llama_server.MODEL_FILENAMES["s1-mini"]
     (tmp_path / name).write_bytes(b"GGUF")
-    assert llama_server._model_path() == str(tmp_path / name)
+    assert llama_server._model_path("s1-mini") == str(tmp_path / name)
+
+
+def test_an_unknown_model_id_falls_back_to_the_shipped_weights(tmp_path, monkeypatch):
+    """A typo in the config must not look like a missing download.
+
+    Falling back means a machine with the shipped weights still works; reporting
+    unavailable would make a config typo indistinguishable from never having
+    downloaded anything.
+    """
+    monkeypatch.setattr(llama_server, "_candidate_model_dirs", lambda: [str(tmp_path)])
+    name = llama_server.MODEL_FILENAMES[llama_server.DEFAULT_MODEL_ID]
+    (tmp_path / name).write_bytes(b"GGUF")
+    assert llama_server._model_path("gpt-9-turbo") == str(tmp_path / name)
 
 
 def test_an_explicit_path_still_wins(tmp_path, monkeypatch):
@@ -220,8 +233,8 @@ def test_an_explicit_path_still_wins(tmp_path, monkeypatch):
     explicit.write_bytes(b"GGUF")
     monkeypatch.setenv(llama_server.ENV_MODEL_PATH, str(explicit))
     monkeypatch.setattr(llama_server, "_candidate_model_dirs", lambda: [str(tmp_path)])
-    (tmp_path / llama_server.DEFAULT_MODEL_FILENAMES[0]).write_bytes(b"GGUF")
-    assert llama_server._model_path() == str(explicit)
+    (tmp_path / llama_server.MODEL_FILENAMES["s1-mini"]).write_bytes(b"GGUF")
+    assert llama_server._model_path("s1-mini") == str(explicit)
 
 
 def test_the_registry_accessors_raising_does_not_lose_the_fallback(tmp_path, monkeypatch):
@@ -237,16 +250,15 @@ def test_the_registry_accessors_raising_does_not_lose_the_fallback(tmp_path, mon
 
     monkeypatch.setattr(model_download, "models_dir", _raise)
     monkeypatch.setattr(model_download, "get_spec", _raise)
-    monkeypatch.setattr(llama_server, "DEFAULT_MODEL_FILENAMES", ("x.gguf",))
+    monkeypatch.setattr(llama_server, "MODEL_FILENAMES", {"x-model": "x.gguf"})
     # The fixture stubbed this out; put the real one back, it is the subject here.
     monkeypatch.setattr(llama_server, "_candidate_model_dirs",
                         _REAL_CANDIDATE_MODEL_DIRS)
     dirs = llama_server._candidate_model_dirs()
     assert any(str(model_download.get_data_dir()) in directory for directory in dirs), dirs
-    name = "x.gguf"
-    (tmp_path / name).write_bytes(b"GGUF")
+    (tmp_path / "x.gguf").write_bytes(b"GGUF")
     monkeypatch.setattr(llama_server, "_candidate_model_dirs", lambda: [str(tmp_path)])
-    assert llama_server._model_path() == str(tmp_path / name)
+    assert llama_server._model_path("x-model") == str(tmp_path / "x.gguf")
 
 
 def test_unavailable_with_a_binary_but_no_model(tmp_path, monkeypatch):

@@ -32,12 +32,22 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 #: Every formatter backend: a name, and the module implementing it. The swap
-#: point required by the plan is a *config value* resolved through this dict, so
-#: a future in-house fine-tune is a new module plus one entry here.
+#: point required by the plan is a *config value* resolved through this dict, so a
+#: future in-house fine-tune is a new module plus one entry here.
+#:
+#: A backend is a **runtime**, not a model - the two were conflated at first, and
+#: untangling them is what fixed a default that resolved to nothing.
+#:
+#: ``"s1-mini"`` used to be a third entry, pointing at an in-process module. That
+#: milestone (C4) was dropped: the ``llama-cpp-python`` bindings cannot use
+#: llama.cpp's runtime CPU dispatch, so under Nix it would be the *slow* build
+#: (baseline SSE2, potentially 13x) and under pip the *fragile* one (AVX2, so it
+#: SIGILLs on older CPUs). Had the entry stayed, it would have been a selectable
+#: backend resolving to no module - the feature looking broken rather than off,
+#: which is exactly the bug the default itself had.
 BACKENDS: dict[str, str] = {
-    "s1-mini": "voice_transcriber.formatters.s1_mini",       # bundled GGUF, default
-    "llama-server": "voice_transcriber.formatters.llama_server",  # external endpoint
-    "noop": "voice_transcriber.formatters.noop",             # identity, for tests
+    "llama-server": "voice_transcriber.formatters.llama_server",  # shipped
+    "noop": "voice_transcriber.formatters.noop",                  # identity, tests
 }
 
 #: Backend used when none is named. Must be a key of :data:`BACKENDS`.
@@ -50,11 +60,23 @@ BACKENDS: dict[str, str] = {
 #: in-process artifact on a baseline SSE2 build that nixpkgs notes can be 13x
 #: slower. Measured warm on this machine: 182 ms for a 15-token rewrite.
 #:
-#: This was briefly ``"s1-mini"``, which is the *in-process* backend and does not
-#: exist yet (milestone C4). Because that module was absent,
-#: :func:`load_backend` returned ``None`` and ``formatter: on`` silently did
-#: nothing out of the box - the feature looked broken rather than disabled.
+#: This was briefly ``"s1-mini"``, which named a *runtime* rather than a model.
 DEFAULT_BACKEND = "llama-server"
+
+#: The **model** a backend loads when the config names none. Deliberately a
+#: separate axis from :data:`DEFAULT_BACKEND`: ``formatter_model`` used to double
+#: as a backend selector, which is why its default pointed at a runtime that did
+#: not exist. The runtime is an implementation detail; the model is what the user
+#: is actually choosing.
+#:
+#: The model registry (milestone C6) becomes the single declaration home for which
+#: files a model id resolves to; until then ``formatters/llama_server.py`` holds
+#: that mapping, and a test keeps this list and the config choices in step.
+DEFAULT_MODEL = "s1-mini"
+
+#: Model ids a user may select. One today, and the settings surface is built to
+#: cycle a list rather than hardcode a pair, so adding a second is a one-liner.
+MODELS = (DEFAULT_MODEL,)
 
 #: What a backend module must expose. Checked on first load rather than at
 #: import time, so declaring a backend stays free and a half-added one degrades
@@ -115,7 +137,7 @@ def reset_backend_cache() -> None:
     _loaded.clear()
 
 
-def warm(backend: str | None = None) -> bool:
+def warm(backend: str | None = None, model: str | None = None) -> bool:
     """Preload the backend so the first real utterance is not the slow one.
 
     Returns whether a usable backend is ready. Never raises: warming is an
@@ -125,7 +147,7 @@ def warm(backend: str | None = None) -> bool:
     if module is None:
         return False
     try:
-        if not module.available():
+        if not module.available(model=model):
             return False
         module.warm()
         return True
@@ -459,6 +481,7 @@ def format_text(
     structure: str = "prose",
     context: str = DEFAULT_CONTEXT,
     backend: str | None = None,
+    model: str | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> str:
     """Format ``text``, or return it unchanged. Never raises.
@@ -476,7 +499,7 @@ def format_text(
         module = load_backend(backend)
         if module is None:
             return original
-        if not module.available():
+        if not module.available(model=model):
             return original
 
         started = time.monotonic()
@@ -486,6 +509,7 @@ def format_text(
             structure=structure,
             context=context,
             timeout_s=timeout_s,
+            model=model,
         )
         elapsed = time.monotonic() - started
 

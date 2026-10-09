@@ -16,7 +16,7 @@ app's wiring end-to-end without a 462 MiB download.
 from __future__ import annotations
 
 
-def available() -> bool:
+def available(model: str | None = None) -> bool:
     """Always available - that is the point of it."""
     return True
 
@@ -33,6 +33,7 @@ def format_text(
     structure: str = "prose",
     context: str = "general",
     timeout_s: float = 3.0,
+    model: str | None = None,
 ) -> str:
-    """Return ``text`` unchanged, ignoring every axis."""
+    """Return ``text`` unchanged, ignoring every axis (including the model)."""
     return text

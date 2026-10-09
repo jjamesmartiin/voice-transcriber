@@ -1333,7 +1333,7 @@ class SimpleVoiceTranscriber:
             # rather than report "on" for something that is inert.
             "formatter": getattr(t2, "get_effective_formatter", lambda: "off")(),
             "formatter_setting": getattr(t2, "get_formatter", lambda: "off")(),
-            "formatter_model": getattr(t2, "get_formatter_model", lambda: "llama-server")(),
+            "formatter_model": getattr(t2, "get_formatter_model", lambda: "s1-mini")(),
             "formatter_style": getattr(t2, "get_formatter_style", lambda: "semi-formal")(),
             "formatter_context": getattr(t2, "get_formatter_context", lambda: "general")(),
             "ui_theme": getattr(t2, "UI_THEME", "auto"),

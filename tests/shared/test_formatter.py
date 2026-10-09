@@ -37,7 +37,7 @@ import formatter
 def install_fake(monkeypatch, format_text, *, available=True, warm=None):
     """Register a `fake` backend and return its registry name."""
     module = types.SimpleNamespace(
-        available=lambda: available,
+        available=lambda model=None: available,
         warm=warm or (lambda: None),
         format_text=format_text,
     )
@@ -69,7 +69,7 @@ def test_default_backend_is_a_registry_key():
 
 def test_available_backends_lists_the_registry():
     assert formatter.available_backends() == sorted(formatter.BACKENDS)
-    assert {"noop", "s1-mini", "llama-server"} <= set(formatter.available_backends())
+    assert set(formatter.available_backends()) == {"llama-server", "noop"}
 
 
 def test_resolve_backend_name_defaults_to_s1_mini():
@@ -83,16 +83,19 @@ def test_resolve_backend_name_rejects_an_unknown_name():
         formatter.resolve_backend_name("gpt-4")
 
 
-def test_the_default_backend_is_absent_until_its_milestone():
-    """Fail safe, not fail loud.
+def test_s1_mini_is_no_longer_a_backend_at_all():
+    """C4 was dropped, so "s1-mini" must not be selectable as a runtime.
 
-    ``s1-mini`` names the *in-process* backend and its module lands in milestone
-    C4; the shipped default is ``llama-server``, which does exist. Resolving an
-    absent module must mean "no formatting available", never a crash on the
-    dictation path.
+    It used to be a registry entry pointing at an in-process module. Had it stayed
+    while C4 was skipped, selecting it would have resolved to no module and the
+    formatter would have silently done nothing - the same failure the *default*
+    had before it was pointed at the shipping path. The name now means the model.
     """
+    assert "s1-mini" not in formatter.BACKENDS
     assert formatter.load_backend("s1-mini") is None
     assert formatter.load_backend("not-a-backend") is None
+    # ...and the model axis still offers it.
+    assert "s1-mini" in formatter.MODELS
 
 
 def test_the_shipped_backend_exists_and_satisfies_the_contract():

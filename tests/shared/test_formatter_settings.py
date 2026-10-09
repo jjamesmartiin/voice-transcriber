@@ -44,19 +44,24 @@ _stub.calls = []
 
 
 @pytest.fixture
-def backend():
-    """Install a model-free formatter backend and record how it was called."""
+def backend(monkeypatch):
+    """Install a model-free formatter backend and record how it was called.
+
+    Patches **both** axes: the registry entry, and ``formatter.DEFAULT_BACKEND``.
+    ``formatter_model`` names a *model*, not a runtime, so pointing the setting at
+    a stub no longer reaches the stub - without the second patch the run would
+    resolve the real default backend and every assertion below would pass or fail
+    for the wrong reason.
+    """
     _stub.calls = []
     module = types.SimpleNamespace(
-        available=lambda: True, warm=lambda: None, format_text=_stub)
+        available=lambda model=None: True, warm=lambda: None, format_text=_stub)
     saved = dict(formatter.BACKENDS), dict(formatter._loaded)
     saved_model = t2.FORMATTER_MODEL
     formatter.BACKENDS["stub"] = "voice_transcriber.formatters.stub"
     formatter._loaded["stub"] = module
-    # Point the setting at the stub, or the run would resolve the default
-    # backend, find no module and fall open - which would make every assertion
-    # below pass for the wrong reason.
-    t2.FORMATTER_MODEL = "stub"
+    monkeypatch.setattr(formatter, "DEFAULT_BACKEND", "stub")
+    t2.FORMATTER_MODEL = formatter.DEFAULT_MODEL
     yield _stub
     t2.FORMATTER_MODEL = saved_model
     formatter.BACKENDS.clear()
@@ -141,7 +146,7 @@ def test_formatter_off_is_byte_identical(backend, cfg):
     assert t2.DEFAULT_SETTINGS["FORMATTER"] == "off"
     assert "milk and eggs" in off
     assert pp.get_formatter_settings() == {
-        "enabled": True, "model": "stub", "style": "semi-formal",
+        "enabled": True, "model": "s1-mini", "style": "semi-formal",
         "context": "general"}
 
 
@@ -149,11 +154,13 @@ def test_the_default_is_off():
     assert t2.DEFAULT_SETTINGS["FORMATTER"] == "off"
     assert t2.DEFAULT_SETTINGS["FORMATTER_STYLE"] == "semi-formal"
     assert t2.DEFAULT_SETTINGS["FORMATTER_CONTEXT"] == "general"
-    # The *subprocess* backend, which exists and is the shipping path - not
-    # "s1-mini", which names the in-process backend (C4) that does not exist yet.
-    # Defaulting to that made `formatter: on` a silent no-op.
-    assert t2.DEFAULT_SETTINGS["FORMATTER_MODEL"] == "llama-server"
-    assert t2.DEFAULT_SETTINGS["FORMATTER_MODEL"] == formatter.DEFAULT_BACKEND
+    # A *model*, and the two axes are asserted separately on purpose: conflating
+    # them is what left the default pointing at a runtime that did not exist.
+    assert t2.DEFAULT_SETTINGS["FORMATTER_MODEL"] == "s1-mini"
+    assert t2.DEFAULT_SETTINGS["FORMATTER_MODEL"] == formatter.DEFAULT_MODEL
+    assert formatter.DEFAULT_BACKEND in formatter.BACKENDS
+    assert t2.FORMATTER_MODELS == list(formatter.MODELS)
+    assert t2.FORMATTER_DEFAULT_MODEL == formatter.DEFAULT_MODEL
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +201,7 @@ def test_no_backend_means_the_text_passes_through(cfg):
 
 def test_a_raising_backend_leaves_the_text_alone(cfg):
     module = types.SimpleNamespace(
-        available=lambda: True, warm=lambda: None,
+        available=lambda model=None: True, warm=lambda: None,
         format_text=lambda text, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
     formatter.BACKENDS["boom"] = "voice_transcriber.formatters.boom"
     formatter._loaded["boom"] = module
@@ -235,11 +242,21 @@ def test_context_normalisation(value, expected):
     assert t2.normalize_formatter_context(value) == expected
 
 
-def test_model_normalisation_falls_back_to_the_shipped_default():
-    assert t2.normalize_formatter_model("") == "llama-server"
-    assert t2.normalize_formatter_model(None) == "llama-server"
-    assert t2.normalize_formatter_model("llama-server") == "llama-server"
+def test_model_normalisation_validates_and_falls_back():
+    """An unknown model id names the default and carries on.
+
+    Unlike a structure mode, this setting says *what to load* - so a typo should
+    fall back rather than silently switch the feature off, which would look like
+    the formatter had broken rather than like a bad config value.
+    """
+    assert t2.normalize_formatter_model("") == "s1-mini"
+    assert t2.normalize_formatter_model(None) == "s1-mini"
     assert t2.normalize_formatter_model("s1-mini") == "s1-mini"
+    assert t2.normalize_formatter_model("  S1-MINI  ") == "s1-mini"
+    # Unknown values are not accepted as-is, which is the whole point: before,
+    # any non-empty string was taken at face value and resolved to nothing.
+    assert t2.normalize_formatter_model("llama-server") == "s1-mini"
+    assert t2.normalize_formatter_model("gpt-9") == "s1-mini"
 
 
 def test_setting_names_are_the_documented_ones(cfg):
@@ -249,7 +266,7 @@ def test_setting_names_are_the_documented_ones(cfg):
     t2.load_audio_config()
     assert (t2.get_formatter(), t2.get_formatter_model(),
             t2.get_formatter_style(), t2.get_formatter_context()) == (
-        "off", "llama-server", "semi-formal", "general")
+        "off", "s1-mini", "semi-formal", "general")
 
 
 # ---------------------------------------------------------------------------
@@ -258,13 +275,13 @@ def test_setting_names_are_the_documented_ones(cfg):
 def test_settings_round_trip_through_the_config_file(cfg):
     import yaml
     t2.set_formatter("on")
-    t2.set_formatter_model("llama-server")
+    t2.set_formatter_model("s1-mini")
     t2.set_formatter_style("formal")
     t2.set_formatter_context("email")
 
     saved = yaml.safe_load(cfg.read_text())
     assert saved["formatter"] == "on"
-    assert saved["formatter_model"] == "llama-server"
+    assert saved["formatter_model"] == "s1-mini"
     assert saved["formatter_style"] == "formal"
     assert saved["formatter_context"] == "email"
 
@@ -273,7 +290,20 @@ def test_settings_round_trip_through_the_config_file(cfg):
     t2.load_audio_config()
     assert (t2.get_formatter(), t2.get_formatter_model(),
             t2.get_formatter_style(), t2.get_formatter_context()) == (
-        "on", "llama-server", "formal", "email")
+        "on", "s1-mini", "formal", "email")
+
+
+def test_an_unknown_model_in_the_config_is_validated_not_kept(cfg):
+    """A bad model id must not survive into the running config.
+
+    It used to: any non-empty string was accepted, then resolved to no module at
+    all, so the formatter silently did nothing. Falling back to the shipped model
+    keeps a config typo from looking like a broken feature.
+    """
+    import yaml
+    cfg.write_text(yaml.dump({"formatter_model": "gpt-9-turbo"}))
+    t2.load_audio_config()
+    assert t2.get_formatter_model() == "s1-mini"
 
 
 def test_env_overrides_beat_the_config_file(cfg, monkeypatch):
@@ -282,11 +312,17 @@ def test_env_overrides_beat_the_config_file(cfg, monkeypatch):
     monkeypatch.setenv("VT_FORMATTER", "on")
     monkeypatch.setenv("VT_FORMATTER_STYLE", "formal")
     monkeypatch.setenv("VT_FORMATTER_CONTEXT", "email")
-    monkeypatch.setenv("VT_FORMATTER_MODEL", "llama-server")
+    monkeypatch.setenv("VT_FORMATTER_MODEL", "s1-mini")
     t2.load_audio_config()
     assert (t2.get_formatter(), t2.get_formatter_style(),
             t2.get_formatter_context(), t2.get_formatter_model()) == (
-        "on", "formal", "email", "llama-server")
+        "on", "formal", "email", "s1-mini")
+
+
+def test_an_unknown_model_env_override_falls_back(cfg, monkeypatch):
+    monkeypatch.setenv("VT_FORMATTER_MODEL", "not-a-model")
+    t2.load_audio_config()
+    assert t2.get_formatter_model() == "s1-mini"
 
 
 def test_reset_restores_the_shipped_defaults(cfg, backend):
@@ -307,9 +343,12 @@ def test_cycles_wrap(cfg):
     assert t2.toggle_formatter() == "on"
     assert t2.toggle_formatter() == "off"
 
-    t2.set_formatter_model("llama-server")
+    t2.set_formatter_model("s1-mini")
+    # Built as a cycle over a list even though the list has one entry, so adding a
+    # second model is data rather than a refactor. Cycling a one-element list is
+    # deliberately a no-op rather than a special case.
     assert t2.cycle_formatter_model() == "s1-mini"
-    assert t2.cycle_formatter_model() == "llama-server"
+    assert t2.cycle_formatter_model() == "s1-mini"
 
     t2.set_formatter_style("casual")
     assert [t2.cycle_formatter_style() for _ in range(4)] == [
@@ -320,14 +359,20 @@ def test_cycles_wrap(cfg):
     assert t2.cycle_formatter_context() == "general"
 
 
-def test_choices_are_the_registry_not_a_copy():
-    """The backend list is the swap point, so it must not drift from the registry.
+def test_the_model_list_is_not_a_backend_list():
+    """The two axes must not be conflated - that is what the split was for.
 
-    `noop` is the one deliberate omission: it is the identity backend tests use,
-    not something to offer a user.
+    `formatter_model` names a *model*; the runtime is `formatter.DEFAULT_BACKEND`.
+    Before, the same value served both, which is how the default ended up
+    pointing at a runtime that did not exist. These lists must not drift apart
+    silently in either direction: no backend name may appear as a model, and no
+    model may appear as a backend.
     """
-    assert set(t2.FORMATTER_MODELS) <= set(formatter.available_backends())
-    assert set(formatter.available_backends()) - set(t2.FORMATTER_MODELS) == {"noop"}
+    assert t2.FORMATTER_MODELS == list(formatter.MODELS)
+    assert t2.FORMATTER_DEFAULT_MODEL == formatter.DEFAULT_MODEL
+    assert set(t2.FORMATTER_MODELS).isdisjoint(set(formatter.available_backends()))
+    # `noop` is the identity backend tests use, never a model to offer a user.
+    assert "noop" not in t2.FORMATTER_MODELS
     assert t2.FORMATTER_STYLES == list(formatter.STYLES)
     assert t2.FORMATTER_CONTEXTS == list(formatter.CONTEXTS)
 
@@ -341,7 +386,7 @@ def test_formatter_labels():
     assert t2.formatter_setting_state("on") == (
         "Rewrites the transcript on this machine", "[ON]", "green")
     assert t2.formatter_model_setting_state("s1-mini") == (
-        "Backend: s1-mini", "[MODEL]", "cyan")
+        "Model: s1-mini", "[MODEL]", "cyan")
     assert t2.formatter_style_setting_state("formal") == (
         "Writing style: formal", "[STYLE]", "cyan")
     assert t2.formatter_context_setting_state("email") == (
@@ -370,7 +415,7 @@ def test_ratatui_formatter_labels_match_python():
                   "Rewrites the transcript on this machine"):
         assert label in implementation, f"ratatui no longer shows {label!r}"
     # Interpolated labels: match the prefix the format string carries.
-    for prefix in ("Backend: ", "Writing style: ", "Context: "):
+    for prefix in ("Model: ", "Writing style: ", "Context: "):
         assert prefix in implementation, f"ratatui no longer shows {prefix!r}"
     # Every badge, taken from Python so the two cannot disagree about them.
     for state in (t2.formatter_setting_state("off"), t2.formatter_setting_state("on"),

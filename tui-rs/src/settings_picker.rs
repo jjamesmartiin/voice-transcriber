@@ -425,7 +425,7 @@ impl SettingItem {
                 (desc.to_string(), badge, color)
             }
             // Formatter labels (spec): "Off: deterministic cleanup only",
-            // "Rewrites the transcript on this machine", "Backend: {value}",
+            // "Rewrites the transcript on this machine", "Model: {value}",
             // "Writing style: {value}", "Context: {value}".
             SettingKind::Formatter => {
                 // Spec: docs/plan-on-device-formatter.md. The formatter is the
@@ -446,7 +446,7 @@ impl SettingItem {
                 }
             }
             SettingKind::FormatterModel => (
-                format!("Backend: {}", app.formatter_model),
+                format!("Model: {}", app.formatter_model),
                 "[MODEL]",
                 Color::Cyan,
             ),
@@ -1929,7 +1929,7 @@ mod tests {
         for value in ["s1-mini", "llama-server"] {
             app.formatter_model = value.to_string();
             let (desc, badge, _) = model.value_and_badge(&app, &idle);
-            assert_eq!(desc, format!("Backend: {value}"));
+            assert_eq!(desc, format!("Model: {value}"));
             assert_eq!(badge, "[MODEL]");
         }
 
@@ -1963,9 +1963,13 @@ mod tests {
         app.cycle_formatter();
         assert_eq!(app.formatter, "off");
 
+        // One model today, and the cycle is built over a list so a second is data
+        // rather than a refactor. Cycling a one-element list is a no-op rather
+        // than a special case, and the engine is authoritative anyway - its cfg
+        // reply overwrites whatever this produced.
         app.formatter_model = "s1-mini".to_string();
         app.cycle_formatter_model();
-        assert_eq!(app.formatter_model, "llama-server");
+        assert_eq!(app.formatter_model, "s1-mini");
         app.cycle_formatter_model();
         assert_eq!(app.formatter_model, "s1-mini");
 

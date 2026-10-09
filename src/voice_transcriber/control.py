@@ -209,9 +209,9 @@ VERBS: dict[str, dict] = {
         "returns": ["formatter", "formatter_setting"],
     },
     "formatter-model": {
-        "summary": "Choose the formatter backend",
-        "value": "backend",
-        "choices": ["llama-server", "s1-mini"],
+        "summary": "Choose the formatter model",
+        "value": "model",
+        "choices": ["s1-mini"],
         "required": True,
         "returns": ["formatter_model"],
     },

@@ -153,14 +153,15 @@ meeting_spill_minutes: 10
 # Default: "off"
 formatter: "off"
 
-# Which formatter backend to use.
-#   - "llama-server": runs the model in a llama-server subprocess. This is the
-#     shipped default: it is the only option that is both portable and fast today,
-#     because the in-process bindings cannot use llama.cpp's runtime CPU dispatch
-#     (see docs/plan-on-device-formatter.md sec 6.1).
-#   - "s1-mini":     the in-process fallback (milestone C4). Not built yet.
-# Env: VT_FORMATTER_MODEL. Default: "llama-server"
-formatter_model: "llama-server"
+# Which formatter model to load. A *model*, not a runtime: the runtime is an
+# implementation detail, chosen by the backend registry, and the shipped one is
+# the llama-server subprocess (see docs/plan-on-device-formatter.md sec 6.1).
+# Conflating the two is what once left this default resolving to nothing.
+#   - "s1-mini": the bundled 462 MiB GGUF, quantised Q4_K_M.
+# An unknown id names the shipped model and carries on rather than disabling the
+# feature, so a typo cannot look like a broken formatter.
+# Env: VT_FORMATTER_MODEL. Default: "s1-mini"
+formatter_model: "s1-mini"
 
 # The writing style the formatter aims for.
 #   - "casual", "semi-casual", "semi-formal" (default), "formal"

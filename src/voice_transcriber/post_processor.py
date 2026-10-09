@@ -3141,7 +3141,7 @@ def _apply_formatter(text: str, structure_mode: str | None = None) -> str:
             style=_FORMATTER_STYLE,
             structure=structure_for_mode(effective),
             context=_FORMATTER_CONTEXT,
-            backend=_FORMATTER_MODEL,
+            model=_FORMATTER_MODEL,
         )
     except Exception:
         return text

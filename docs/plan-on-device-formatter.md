@@ -420,7 +420,7 @@ Placement rules, and each one is a hard requirement rather than a preference:
 | Key | Values | Default | Notes |
 | --- | --- | --- | --- |
 | `formatter` | `off`, `on` | `off` | `off` never loads the model. |
-| `formatter_model` | backend/model name | `s1-mini` | Resolves through the model registry (§6.1 of the diarization plan) — **this is the swap point**. |
+| `formatter_model` | **model** id | `s1-mini` | Which model to load. **Not** a backend: the runtime is an implementation detail (`formatter.DEFAULT_BACKEND`), and that conflation is what once left this default pointing at a runtime that did not exist. An unknown id names the shipped model and carries on. Resolves through the model registry (C6) — **this is the model swap point**. |
 | `formatter_style` | `casual`, `semi-casual`, `semi-formal`, `formal` | `semi-formal` | The `[Styling: …]` axis. Its own setting, deliberately **not** derived from the punctuation preset, so neither can clobber the other (hazard H2 in `plan-structured-formatting.md`). |
 | `formatter_context` | `general`, `email` | `general` | The `[Context: …]` axis. The destination-aware hook, manual for now. |
 
@@ -525,7 +525,7 @@ code; if a GPU is present, offload layers; if not, CPU with a thread count consi
 | **M1** | Model registry generalisation (shared with diarization D1) | a second `ModelSpec` resolves; Cohere unaffected; `tests/shared` green |
 | **M2** | Bridge: run the GGUF behind `llama-server` and point the **existing** `VT_VLLM_URL` client at it | the four §4 fixtures produce non-empty, sane output — proves the pipe end-to-end before writing any new integration |
 | **M3** | `formatters/llama_server.py` — the **shipped** backend: spawn/attach, process lifecycle, kill-on-timeout, guardrails §8 | **code done** — model-free tests green against a stub server; every guardrail has a failing-input test; *a warm server answers within the §9 budget* is the outstanding half and needs the weights (M2/M6) |
-| **M3b** | `formatters/s1_mini.py` — the in-process backend (registry fallback) | works, and its throughput is **measured against the subprocess path** — this measurement decides which one is the documented default |
+| **M3b** | ~~`formatters/s1_mini.py` — the in-process backend~~ **DROPPED** | Superseded. The in-process runtime forces a choice between slow (baseline SSE2 under Nix, because the bindings cannot load dynamic CPU variants) and fragile (AVX2 pip wheels, SIGILL on pre-AVX2), while the subprocess is both portable and fast. See C4 in `TODO-parity.md` for the full reasoning and for the one thing actually given up (macOS packaging convenience, plus the head-to-head measurement). |
 | **M4** | Settings end-to-end (§7.1) | `off` byte-identical to today; both TUIs; `help --json`; `status` reports configured vs effective |
 | **M5** | Model bundle published + first-use download prompt (size stated) | clean machine → enable formatter → works offline afterwards |
 | **M6** | `eval/` formatting slice + the §4 parity gate + latency numbers | parity measured on all four fixtures; latency recorded per hardware tier |
@@ -534,7 +534,12 @@ code; if a GPU is present, offload layers; if not, CPU with a thread count consi
 M2 is deliberately first among the implementation steps: it gives a measurable result in a
 day using code that already exists, and it de-risks everything after it. Because §6.1 moved the
 shipped path to the subprocess, **M3 is now the real backend rather than a stepping stone** —
-and M3b exists only to keep the in-process option honest rather than assumed.
+and M3b was meant to keep the in-process option honest rather than assumed. **M3b was then
+dropped** (see C4 in `TODO-parity.md`): the measurement it existed to make was pre-empted by
+the subprocess landing at 135–442 ms against a 1.5 s budget, and the in-process runtime loses
+on portability-versus-speed either way. The registry still keeps the two axes separate, so
+revisiting it remains a new module plus one entry — which was the point of M3b's design even
+though the milestone itself is gone.
 
 ## 11. Verification
 

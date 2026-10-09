@@ -164,12 +164,32 @@ def _binary() -> str | None:
     return which("llama-server")
 
 
-#: Conventional GGUF filename, used when the registry has no formatter spec yet
-#: (milestone C6). Mirrors the file the release bundle installs.
-DEFAULT_MODEL_FILENAMES = ("s1-mini-q4_k_m.gguf",)
+#: Model id -> the GGUF the release bundle installs for it. The model registry
+#: (milestone C6) becomes the single declaration home for this; until then this is
+#: the one place the mapping lives, so it is at least one place rather than none.
+#: The ids match `formatter.MODELS` and the config choices, which a test pins.
+MODEL_FILENAMES: dict[str, str] = {
+    "s1-mini": "s1-mini-q4_k_m.gguf",
+}
+
+#: Used when the caller names no model, or names one this build does not know.
+DEFAULT_MODEL_ID = "s1-mini"
 
 #: Subdirectory under the app's data dir where the formatter weights live.
 DEFAULT_MODEL_SUBDIR = "formatter"
+
+
+def _model_filenames(model: str | None = None) -> tuple[str, ...]:
+    """Filenames to look for, in order, for ``model``.
+
+    An unknown id falls back to the default model rather than reporting nothing:
+    a config that names a model this build does not know should still work if the
+    shipped weights are present. Reporting "unavailable" there would make a typo
+    look like a missing download.
+    """
+    key = str(model or DEFAULT_MODEL_ID).strip().lower()
+    name = MODEL_FILENAMES.get(key) or MODEL_FILENAMES[DEFAULT_MODEL_ID]
+    return (name,)
 
 
 def _candidate_model_dirs() -> list[str]:
@@ -199,16 +219,15 @@ def _candidate_model_dirs() -> list[str]:
     return dirs
 
 
-def _model_path() -> str | None:
-    """Locate the GGUF: explicit override, then the registry, then the install path.
+def _model_path(model: str | None = None) -> str | None:
+    """Locate the GGUF for ``model``, or ``None``.
 
-    The registry is the real answer, but a stock build carries no formatter spec
-    yet (milestone C6). Without the conventional-location fallback a model that
-    *is* installed stays unfindable, so ``formatter: on`` would silently do
-    nothing unless the user also set ``VT_FORMATTER_MODEL_PATH`` - the same
-    failure this backend's own default had before it was pointed at the shipping
-    path. Filenames come from the spec when there is one, so the registry remains
-    the single declaration home once it exists.
+    Explicit override, then the registry, then the conventional install path. The
+    registry is the real answer, but a stock build carries no formatter spec yet
+    (milestone C6). Without the conventional-location fallback a model that *is*
+    installed stays unfindable, so enabling the formatter would silently do nothing
+    unless the user also set ``VT_FORMATTER_MODEL_PATH`` - the same failure this
+    backend's own default had before it was pointed at the shipping path.
     """
     override = (os.environ.get(ENV_MODEL_PATH) or "").strip()
     if override:
@@ -224,7 +243,7 @@ def _model_path() -> str | None:
     names = [str(name) for name in (getattr(spec, "required_local", ()) or ())
              if str(name).endswith(".gguf")]
     if not names:
-        names = list(DEFAULT_MODEL_FILENAMES)
+        names = list(_model_filenames(model))
 
     for directory in _candidate_model_dirs():
         for name in names:
@@ -243,21 +262,20 @@ def _threads() -> int:
     return max(1, (os.cpu_count() or 4) // 2)
 
 
-def available() -> bool:
+def available(model: str | None = None) -> bool:
     """Whether this backend could plausibly run, without starting anything.
 
     In attach mode a configured URL is taken at its word - the server is someone
-    else's to manage, and probing it here would add a round trip to a path that
-    is called on every utterance. In spawn mode both the executable and the
-    weights must exist, because without them every call would pay for a failed
-    spawn.
+    else's to manage, and probing it here would add a round trip to a path that is
+    called on every utterance. In spawn mode both the executable and the weights
+    must exist, because without them every call would pay for a failed spawn.
     """
     if (os.environ.get(ENV_SERVER_URL) or "").strip():
         return True
     if _state.get("spawn_failed_at"):
         if time.monotonic() - _state["spawn_failed_at"] < _SPAWN_RETRY_COOLDOWN_S:
             return False
-    return _binary() is not None and _model_path() is not None
+    return _binary() is not None and _model_path(model) is not None
 
 
 def _free_port(host: str = DEFAULT_HOST) -> int:
@@ -333,8 +351,12 @@ def shutdown() -> None:
         _terminate()
 
 
-def _ensure_server() -> str:
+def _ensure_server(model: str | None = None) -> str:
     """Return a base URL for a healthy server, spawning one if needed.
+
+    ``model`` is the model id the config asked for; it reaches ``llama-server`` as
+    the ``-m`` path. In attach mode it is ignored - the attached server already has
+    its own model loaded and it is not ours to re-point.
 
     Raises :class:`BackendUnavailable` rather than returning ``None`` so the
     caller cannot accidentally treat a failure as a successful empty result.
@@ -352,19 +374,20 @@ def _ensure_server() -> str:
                 return _state["url"]
 
         binary = _binary()
-        model = _model_path()
+        model_path = _model_path(model)
         if binary is None:
             raise BackendUnavailable(
                 f"llama-server not found. Set {ENV_BINARY}, or use "
                 f"{ENV_SERVER_URL} to attach to a running server.")
-        if model is None:
+        if model_path is None:
             raise BackendUnavailable(
-                f"no formatter model found. Set {ENV_MODEL_PATH}, or use "
-                f"{ENV_SERVER_URL} to attach to a running server.")
+                f"no formatter model found for {model or DEFAULT_MODEL_ID!r}. Set "
+                f"{ENV_MODEL_PATH}, or use {ENV_SERVER_URL} to attach to a "
+                f"running server.")
 
         port = _free_port()
         url = f"http://{DEFAULT_HOST}:{port}"
-        command = _build_command(binary, model, DEFAULT_HOST, port)
+        command = _build_command(binary, model_path, DEFAULT_HOST, port)
         logger.info("starting llama-server on port %d", port)
         try:
             proc = subprocess.Popen(  # noqa: S603 - argv list, no shell
@@ -459,6 +482,7 @@ def format_text(
     structure: str = "prose",
     context: str = formatter.DEFAULT_CONTEXT,
     timeout_s: float = formatter.DEFAULT_TIMEOUT_S,
+    model: str | None = None,
 ) -> str:
     """Rewrite ``text`` via the server.
 
@@ -466,7 +490,7 @@ def format_text(
     is the caller's job - this function's contract is "produce a candidate",
     which keeps the guardrails in exactly one place.
     """
-    url = _ensure_server()
+    url = _ensure_server(model)
 
     payload = {
         "messages": [
