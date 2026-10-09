@@ -117,22 +117,29 @@ Labelled `S*` to avoid colliding with the `D*` rows above and the `D` workstream
 
 ## 2. What is actually left — grouped by what it blocks
 
-Rewritten 2026-10-08. The previous version split by "needs network", which stopped being the
-useful axis the moment the downloads were made. **If this section ever disagrees with §4, §4
-wins** — it drifted into contradiction once already.
+Rewritten 2026-10-09. **If this section ever disagrees with §4, §4 wins** — it has drifted
+into contradiction twice, so treat §4 as authoritative and fix this one to match.
 
-### 2a. Needed before meeting mode works end to end
+> **Recovered state after the 2026-10-09 session:** A6, C6 (code), C8, C9, D4, D5a, D6, D7,
+> E3, X1, X2, X3, X5 and X6 are done and merged on `wip/feature-parity-2026-10`, green at
+> 1644 passed / 3 skipped with `ruff` clean. Resume state: [`handoff.md`](handoff.md) §0.
+> Adversarial-review findings and their dispositions: **§4F below**.
 
-Capture exists (D2) and diarization exists (D3), but nothing joins them up yet.
+### 2a. Meeting mode — DONE end to end, bar one frontend gap
 
-- [ ] **D4** — turn slicing → per-turn ASR → per-turn post-processing. **The keystone of
-      workstream D.** `diarize.py` returns `Turn`s and `meeting.py` has `on_audio` as the
-      hand-off seam, so this is the wiring plus the per-turn ASR fan-out.
-- [ ] **D5** — the output artifact + a speakers map (plain text, optional JSON/Markdown,
-      renamable labels). Needs the output-location decision from §7.
-- [ ] **D6** — settings (`diarization`, `diarization_speakers`, `diarization_model`) across
-      every surface, with `off` byte-identical.
-- [ ] **D7** — an `eval/` entry and a recorded **DER**, next to the ASR numbers.
+D4 (turn slicing → per-turn ASR → per-turn post-processing), D5a (live speaker map, the
+output-location *setting*, and the JSON/Markdown forms), D6 (settings) and D7 (a recorded DER)
+have all landed, and meeting mode was verified on real two-voice audio.
+
+- [x] **D4** — done. Pipeline verified on a synthesised 18.7 s two-voice clip: 4 turns, correct
+      A-B-A-B assignment, all turns transcribed verbatim.
+- [x] **D5** — the Python side is done as **D5a** (`20f73fb`). **The ratatui half is the one
+      remaining item:** the five new settings rows, the in-TUI speaker editor, and the
+      `"S1-mini" by "Superwhisper"` label. A Rust worker is on it.
+- [x] **D6** — done (`da619d6`) on every **Python** surface; `off` byte-identical.
+- [x] **D7** — done (`ce58b4f`). Measured **DER 0.0145** on the committed synthetic fixture with
+      the gate tightened to ≤0.025; AMI SDM is recorded as the tier-2 follow-up that would give
+      a *real* accuracy number.
 
 ### 2b. Needed before this can ship
 
@@ -152,12 +159,19 @@ Capture exists (D2) and diarization exists (D3), but nothing joins them up yet.
       offline, with no network. **Not done: uploading anything** — no release asset was published,
       so "a clean machine can enable the formatter and work offline" is true of the *code path*
       but not yet of a shipped artifact.
-- [ ] **C9** — licence obligations: the licence + `NOTICE` into `config/licenses/`, and the
+- [x] **C9** — licence obligations: the licence + `NOTICE` into `config/licenses/`, and the
       exact model naming (**"S1-mini" by "Superwhisper"**) on every surface that names it.
-- [ ] **C8** — the documentation set: spec doc, README requirements table, `architecture.md`,
-      `TODO.md` notes.
-- [ ] **X3** — `CHANGELOG.md` and `README.md` per workstream at merge time.
-- [ ] **Push.** Nothing is on any remote; main is 17 commits ahead. The remotes are
+      **DONE 2026-10-09** for the formatter and the diarization models, with provenance. One gap
+      remains and belongs to the Rust worker: the *interactive* label and `status.formatter_model`
+      still render the machine id `s1-mini`.
+- [x] **C8** — the documentation set: spec doc, README requirements table, `architecture.md`,
+      `TODO.md` notes. **DONE 2026-10-09.**
+- [x] **X3** — `CHANGELOG.md` and `README.md` per workstream at merge time. **DONE 2026-10-09**
+      (`cbc50ab`), including a correction: the README had described model bundles as downloading
+      on first use when nothing has been published (§4F F10 tracks the residual wording).
+- [~] **Push.** `main` is **deliberately untouched** so no release can fire; roughly 30 commits
+      sit on `wip/feature-parity-2026-10`, pushed to **github**. **gitea is unreachable** —
+      `git.jdm.cx` no longer resolves — so re-push there when it returns. The remotes are
       `gitea@git.jdm.cx:jamesm/voice-transcriber.git` and
       `git@github.com:jjamesmartiin/voice-transcriber.git`.
 
@@ -166,26 +180,45 @@ Capture exists (D2) and diarization exists (D3), but nothing joins them up yet.
 - [ ] **A4** / **C7** — the `eval/` formatting slice, including the four Wispr reference
       fixtures, so parity is a regression gate rather than a one-off comparison. The e2e suite
       already asserts the fixtures against the live model; this is the recorded-manifest half.
-- [ ] **X1** — CI: assert `src/` imports nothing from `eval/`, keeping the product offline-first.
-- [ ] **X2** — do not let the `torch`/`onnxruntime` decision land in two workstreams at once.
+      **Unblocked:** the ASR baseline it would gate against has been regenerated and is
+      self-describing — once §4F **F1** is fixed, since that currently makes its `meta` claim a
+      configuration the run did not fully use.
+- [x] **X1** — CI: assert `src/` imports nothing from `eval/`. **DONE 2026-10-09** (`1d5417f`) as
+      an AST walk with its own test; CI already runs `tests/shared` on all four jobs.
+- [x] **X2** — do not let the `torch`/`onnxruntime` decision land in two workstreams at once.
+      **DONE 2026-10-09** (`5dc0757`) as a pinning test — which also *corrected this session's
+      own record*: torch stayed 2.10.0, but onnxruntime **did** move (1.24.4 → 1.26.0) with the
+      sherpa-onnx bump. One sherpa-onnx still supplies one onnxruntime for both E3 and D3, which
+      is the invariant that actually matters.
 - [ ] **X4** — anything only verifiable on a real Windows/macOS host gets a `docs/TODO.md` entry.
-- [ ] **E4** — feed E's verdict back into D (does §3's "diarize first" design survive?).
+      The entry for the sherpa-onnx ≥1.13.3 pin (verified on `x86_64-linux` only) is drafted in
+      `docs/TODO.md`/`handoff.md`; the remaining macOS/Windows gaps are already logged there.
+- [x] **E4** — feed E's verdict back into D. **DONE:** Cohere stays the default, and it has no
+      timestamps, so §3's "diarize first" design stands unchanged.
 
 ### 2d. Known, deliberately deferred
 
-- [ ] **A6** — `reset_to_defaults()` does not push the punctuation preset it changes, so it
-      only takes effect next launch; and its target deliberately differs from the first-run
-      default. Fixing it exposed order-dependent leakage in several fixtures, so it was
-      reverted and recorded rather than chased. See A6 for the detail.
-- [ ] **E3** — the sherpa-onnx int8 ONNX path for Cohere (~2.9 GB), **only if E2 says keep
-      Cohere**. It would drop the `torch` dependency (~0.7–1.1 GB installed).
+- [x] **A6** — **DONE 2026-10-09** (`6c01795`): the reset pushes every setting it changes, so it
+      takes effect immediately. The residual *class* — two keys where the reset target still
+      differs from the first-run default — survives as **§4F F3**, and is now measured rather
+      than assumed.
+- [ ] **E3** — the sherpa-onnx int8 ONNX path for Cohere. **The prerequisite landed and is
+      verified** (`16eff14`: a narrow sherpa-onnx **1.13.3** pin; the model decodes correctly;
+      diarization still works on it; torch unchanged). **The ASR backend itself is NOT
+      implemented** — the toolchain is capable, the feature is not. It would still drop the
+      `torch` dependency (~0.7–1.1 GiB installed).
+- [ ] **§4F F9 (needs an owner decision)** — the first-use formatter prompt ends in `input()` on
+      a daemon thread, which under the full-screen ratatui TUI may be invisible, making
+      `formatter: on` look inert on a fresh machine while the README promises it asks first.
 
 ### 2e. Cleanup, whenever convenient
 
-- Delete `feat/structured-formatting` and `refactor/model-registry` locally — both are
-  obsolete or merged — **after pushing them somewhere** if you want the history.
-- Remove the `voice-transcriber-fmt` and `voice-transcriber-models` worktrees, and the
-  `work/*` branches once the merges have settled.
+- [x] The `voice-transcriber-fmt` and `voice-transcriber-models` worktrees are **removed**, and
+      their branches (`feat/structured-formatting`, `refactor/model-registry`) were **pushed to
+      github first** so the history is not lost, since one of them was never on a remote.
+- [ ] Remove the merged `work/parity-*` worktrees and branches once the last wave settles, and
+      delete the stray 3 GB `models/vt-model-dl-*` plus the E3 scratch tarball (keep the
+      extracted tree).
 
 ---
 
@@ -896,6 +929,55 @@ slice. Measured on the real 154-clip set, all three configs, fresh.
    because the decoder hallucinated on silence — that did not reproduce (0/12, and the raw
    decoder gives 0/12 too, so the guard is not what produces the zero). Worth knowing before
    anyone builds machinery for a problem that is not there.
+
+---
+
+## 4F. Red-team findings — 2026-10-09 (adversarial pass over the merged branch)
+
+An adversarial reviewer was run over the merged integration branch at `1523aea`, asked to
+*find* flaws and not fix them. Every finding below is evidence-backed; the reviewer also
+listed what it checked and found clean, which is why absence of a finding here means something.
+
+| # | Sev | Finding | Status |
+| --- | --- | --- | --- |
+| F1 | **HIGH** | `eval/score.py`'s `normalize()` calls `set_number_digits_enabled(True)` and never restores it, so `--no-number-digits` applied to the **first clip only**. `meta.number_digits: false` therefore described 1 of 154 clips. | **fixing** |
+| F2 | MED | `test_settings_menu.py::test_example_config_documents_the_shipped_defaults` compares a hard-coded `key_map` and omits 8 keys that exist in both places (`structure_mode`, `cleanup_mode`, `formatter`, `formatter_model`, `formatter_style`, `formatter_context`, `meeting_output_dir`, `meeting_output_format`), and only checks one direction — so drift in any of them is invisible and the guard cannot fail. | **fixing** |
+| F3 | MED | **Defaults drift, and it contradicts the A6 claim.** `AUTO_TYPE_AUTO_PUNCTUATE` and `UI_THEME` diverge between the module globals (what a fresh install gets) and `DEFAULT_SETTINGS` (what Reset to Defaults gives). | **confirmed, open** |
+| F4 | MED | `tui-rs/src/settings_picker.rs` has no rows for the five new diarization/meeting-output settings. | known **D5a** item — the Rust worker is on it |
+| F5 | MED | A formatter **rejection is silently indistinguishable from the formatter being off** — `validate()` returns a reason that `format_text()` discards, and neither `formatter.py` nor `post_processor._apply_formatter` logs it. Same shape as the bug that already discarded correct model output once. | **recorded** |
+| F6 | LOW-MED | `config/example-config/config.toml.example` documents none of the new settings while the YAML example has all 13. | **fixing** |
+| F7 | LOW | The guardrails understand only **Markdown** list markup; the plan records Wispr emitting `<ol><li>`, so correct HTML-list output would be silently rejected. Not reproducible offline against the real model. | **hypothesis — needs a weights run** |
+| F8 | LOW | `process_structure_blocks(..., "off")` leaks `\x1e` sentinels when called directly. The real pipeline resolves them first and is clean across all 7 edge cases tested; invariant 6 still says no sentinel may reach output. | **recorded** |
+| F9 | MED | The first-use formatter prompt ends in `input()` on a **daemon thread** (`model_download.ensure_model`), while `main._on_model_download_status` is wired for progress only — so under the full-screen ratatui TUI the prompt may be invisible and the formatter may look inert on a fresh machine, while the README says it asks before downloading. | **needs a decision** |
+| F10 | MED | README still promises the formatter GGUF and diarization graphs "download on first use"; nothing has been published. | **fixing** |
+
+**F1 detail, because it is the one that mattered.** The leak meant the recorded baseline's
+hypotheses were produced with digits ON for 153/154 clips. WER is *unaffected* — the scorer
+normalises numbers, so `two` and `2` compare equal, and the 3.57 % headline stands — but the
+human-review artifact showed text the configured app would not produce, which is exactly the
+``self-describing baseline'' property S6 was added for. **Done = the scorer never mutates
+product global state, a regression test pins it, and the baseline + report are regenerated.**
+The lever: the digit anomaly was first noticed as *"prose slices went from 0 digits to some"*
+with an unchanged recorded setting; it was **not** ASR drift, and the recorded-setting-versus-
+actual-behaviour gap is the generalisable lesson.
+
+**F3 detail.** Measured directly — a fresh install (no `config.yaml`) yields
+`AUTO_TYPE_AUTO_PUNCTUATE=True`, `UI_THEME='auto'`; `reset_to_defaults()` yields `False` and
+`'red'`. `PUNCTUATION_MODE` *was* unified by A6 (`full` on both sides), so the class of bug
+survives in two keys rather than being resolved. Both divergences also exist on `main`, so they
+are pre-existing. *Done = either one value owns each key, or each divergence is documented in
+place as deliberate (the way `PUNCTUATION_MODE`'s comment used to do).*
+
+**Deliberately deferred:** F5 and F8 are residual observability/edge issues whose fix is a
+behaviour change, not a repair; F7 needs a weights run to even confirm. F9 is the only one with
+product impact on a fresh machine and is left for the owner (see below).
+
+**Checked and found clean** (so these are not silently untested): `tests/shared` still
+hermetic with no third process leak (verified twice, including with the weights hidden); the
+product itself does not leak the number mode (`set_number_digits*` is only called from
+`t2.py`); `off` byte-identity holds across sentinel edge cases; invented text is rejected by
+the guardrails while retraction and Markdown lists are accepted; `help --json` works with no
+engine; the relative meeting output dir resolves against the repo root.
 
 ---
 
