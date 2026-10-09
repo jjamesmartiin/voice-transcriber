@@ -41,19 +41,19 @@ Written 2026-10-08, at a point where context was getting long.
 **Health at the time of writing**
 
 ```
-1526 passed, 3 skipped   # tests/{shared,linux,wsl,windows}
+1549 passed, 3 skipped   # tests/{shared,linux,wsl,windows}
 ruff check src/ tests/   clean
 cargo test  (tui-rs)     54 passed
 cargo clippy -D warnings clean
 e2e (real GGUF)          8 passed
+meeting mode             verified end to end on real two-voice audio
 ```
 
 **Branch / worktree inventory**
 
 | Branch | State | Action |
 | --- | --- | --- |
-| `work/d4-pipeline` | **in flight** — see §3 | integrate when it reports |
-| `work/e-parakeet` | merged (E) — worktree still present | `git worktree remove` |
+| `work/d4-pipeline`, `work/e-parakeet` | merged (D4, E) — worktrees removed | delete branches when convenient |
 | `work/c2-e2e`, `work/d2-meeting`, `work/d3-sherpa` | merged, worktrees already removed | delete branch when convenient |
 | `refactor/model-registry` | merged (B) — worktree `voice-transcriber-models` still present | remove worktree, then delete branch |
 | `feat/structured-formatting` | **obsolete**, not merged and does not need to be (A1) | keep until pushed somewhere, then delete |
@@ -71,46 +71,39 @@ e2e (real GGUF)          8 passed
 
 ---
 
-## 3. In flight: `work/d4-pipeline`
+## 3. Just landed: `work/d4-pipeline` (merged)
 
-The async meeting pipeline — capture → diarize → per-turn ASR → per-turn
-post-processing → transcript. It is the work that makes meeting mode a feature
-rather than two unconnected halves.
+**Meeting mode is now a working feature**, verified end to end rather than only against
+stubs: a synthesised 18.7 s two-voice clip produced 4 turns with correct A-B-A-B speaker
+assignment and all four turns transcribed verbatim, labelled, and written to a file.
 
-**The requirement it was built to**, from the user directly: *processing happens in
-the background after the meeting ends, and normal dictation keeps working while it
-runs* — stop a meeting, let it process, immediately go back to recording your own
-notes.
+Pipeline: `src/voice_transcriber/meeting_pipeline.py` — resample → diarize the whole
+recording → slice at turn boundaries → ASR **once per turn** → post-process each turn with
+its own text → render atomically.
 
-**The concurrency design it was given** (established by inspection, not invented):
+**The requirement it was built to**, in the user's words: *stop a meeting, let it process,
+and immediately go back to dictating notes*. The design:
 
-- `transcribe2` had **no inference lock**; `_model_lock` in `transcribe_cohere.py`
-  guards only the *load*. The dictation micro-batcher already calls
-  `transcribe_audio` from its own worker thread, so D4 creates a **second
-  concurrent producer on one shared model**.
-- The model is a module-global singleton, so sharing costs **no extra memory**
-  (~2 GB stays ~2 GB). Do **not** load a second copy.
-- So: a shared inference lock added at `transcribe2` (the layer every caller
-  passes through), **released between turns**, and the pipeline **waits while a
-  dictation is live** before starting each turn.
-- Honest bound to preserve: worst-case added dictation latency is **the remainder
-  of one in-flight turn's ASR**, not the whole meeting.
-- Diarization is an **enhancement, not a prerequisite**: `diarize()` returns `[]`
-  when models are missing, and that must still yield a single-speaker transcript.
+- `transcribe2.inference_lock` (module-level, **re-entrant**) guards inference. Re-entrant
+  because the pipeline holds it *and* calls `transcribe_audio`, which acquires it again —
+  a plain `Lock` deadlocks. Dictation acquires it automatically and needed no change.
+- The pipeline waits while a dictation is live **and re-checks inside the lock**.
+- The lock is released **between turns**, so a meeting never owns the model for its duration.
+- One shared model instance, so **no extra memory**.
+- **Honest bound:** a dictation starting in the window after the lock is taken waits the
+  remainder of one in-flight turn's ASR (~0.6 s for realistic turns, 35 s in theory).
+  Inherent to sharing one model; the fixes are outside D4.
 
-**To integrate** (the subagent was told not to commit, so check first):
+**Diarization is an enhancement, not a prerequisite** — `diarize()` returning `[]` means one
+speaker, and the meeting is transcribed anyway. Tested.
 
-```bash
-cd ~/gitprojects/voice-transcriber-d4-pipeline
-git status --short          # expect uncommitted work
-git add -A && git commit -F /tmp/msg.txt     # see §5 for why -F
-cd ~/gitprojects/voice-transcriber
-git merge --no-ff work/d4-pipeline
-```
-
-Then re-run the health block in §2 and check `off`/no-diarizer/single-speaker paths.
+**Left over from D5:** the speakers map (renamable `Speaker 2` → `Priya`), optional
+JSON/Markdown forms, and a *setting* for the output directory — currently
+`VT_MEETING_OUTPUT_DIR` or `<per-user data dir>/meetings/`. The setting is deferred to D6
+because a toggle must land in both TUIs including `tui-rs`, which D4 could not touch.
 
 ---
+
 
 ## 4. Open decisions waiting on the human
 

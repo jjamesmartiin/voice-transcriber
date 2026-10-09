@@ -610,10 +610,68 @@ Detail: [`plan-diarization.md`](plan-diarization.md).
       The obsolete D1 assertion that `load_backend("sherpa-onnx") is None` was split into
       "an absent backend still degrades to `None`" (using names that stay absent after the
       merge) and "the shipped backend exists and satisfies the contract".
-- [ ] **D4** Turn slicing → per-turn ASR → per-turn post-processing.
-      *Done = a two-voice E2E asserts correct turn count and ordering, not just words.*
-- [ ] **D5** Output artifact + speakers map. *Done = a real meeting produces a readable
-      labelled transcript.*
+- [x] **D4** Turn slicing → per-turn ASR → per-turn post-processing. **DONE.**
+
+      `src/voice_transcriber/meeting_pipeline.py`, driven by the `on_audio` seam: resample to
+      16 kHz mono → diarize the whole recording → slice at turn boundaries → ASR **once per
+      turn** → post-process each turn with **its own text** → render a header plus
+      `[Speaker N]` lines to an atomically-written file (`os.replace`).
+
+      **Verified end to end on real audio, not just against stubs.** A synthesised 18.7 s
+two-voice meeting (espeak `en+m3` / `en+f4`, four turns A-B-A-B) produced:
+
+      ```
+      Meeting transcript
+      Date: 2026-10-09 07:06:36
+      Duration: 00:19
+      Speakers: 2
+
+      [Speaker 1] Good morning everyone, thanks for joining the planning call.
+      [Speaker 2] Happy to be here. I have the deployment numbers ready.
+      [Speaker 1] Great, can you walk us through the rollback plan first?
+      [Speaker 2] Yes, we roll back in two stages and verify the cache each time.
+      ```
+
+      All four turns transcribed verbatim, speaker assignment and ordering correct, labels
+      applied, no leftover temp file. Per-turn ASR: **2.05 s cold, then 0.63 / 0.54 / 0.66 s**.
+
+      **The async behaviour was the requirement that shaped the design** — the user's words:
+      *stop a meeting, let it process, and immediately go back to dictating notes*. So:
+      * `transcribe2` gains a module-level **re-entrant** inference lock around inference (not
+        around the backend load, which `_model_lock` in `transcribe_cohere` already covers).
+        Re-entrant because the pipeline holds the lock *and* calls `transcribe_audio`, which
+        acquires it again — a plain `Lock` would deadlock. Dictation acquires it automatically,
+        so the dictation path needed no change at all.
+      * Before each turn the pipeline waits while a dictation is live (100 ms bounded sleeps,
+        not a spin) and **re-checks inside the lock**, so a dictation that won the race is not
+        overtaken.
+      * The lock is **released between turns**, so a long meeting never owns the model for its
+        whole duration. Turns are capped at Cohere's own 35 s `max_audio_clip_s`, and longer
+        turns are **split into same-speaker segments rather than truncated**.
+      * The model is a module-global singleton, so sharing costs **no extra memory**.
+
+      **The honest bound, which is a real limitation and is recorded as one:** if a dictation
+      starts in the window after the pipeline takes the lock, it waits the remainder of one
+      in-flight turn's ASR — one 35 s clip's worth in theory, and ~0.6 s for realistic turns.
+      That residual is inherent to sharing a single model; the fixes (a second ASR instance, or
+      a timestamp-capable ASR) are outside D4.
+
+      **Diarization is an enhancement, not a prerequisite.** `diarize()` returning `[]` does not
+      mean "no transcript" — it means one speaker, so the whole recording becomes a single turn
+      and is transcribed anyway. That is what makes the feature useful before anyone downloads
+      the diarization models, and it is tested.
+
+      `status` grows `meeting_stage`, `meeting_transcript`, `meeting_transcript_path` and
+      `meeting_speakers`, so a user sees *processing, 40 %* rather than nothing for twenty
+      minutes — §7 names that as indistinguishable from a hang.
+- [~] **D5** Output artifact + speakers map. **Artifact DONE by D4**; the speakers map is not.
+      What exists: a header (date, duration, speaker count), `[Speaker N]`-labelled turns, an
+      atomic write, and a configurable location. What is missing: renamable speaker labels
+      (`Speaker 2` → `Priya`), the optional JSON-per-turn and Markdown forms, and a *setting*
+      for the output directory rather than `VT_MEETING_OUTPUT_DIR`. The setting is deliberately
+      deferred to D6 because the repo's rule is that a toggle lands in **both** TUIs including
+      `tui-rs`, which D4 must not touch.
+      *Done = a real meeting produces a readable labelled transcript the user can rename.*
 - [ ] **D6** Settings (`diarization`, `diarization_speakers`, `diarization_model`).
       *Done = `off` byte-identical; single-speaker `auto` adds no label; both TUIs.*
 - [ ] **D7** Eval entry + DER recorded next to the ASR numbers; `docs/TODO.md` verification
