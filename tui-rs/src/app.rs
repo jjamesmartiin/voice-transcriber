@@ -275,7 +275,12 @@ impl App {
             punctuation_mode: "full".to_string(),
             structure_mode: "off".to_string(),
             formatter: "off".to_string(),
-            formatter_model: "s1-mini".to_string(),
+            // The subprocess backend, matching Python's default. Not "s1-mini",
+            // which names the in-process backend that does not exist: a default
+            // that resolves to nothing makes the feature look broken rather than
+            // disabled. The engine overwrites this from cfg, but a wrong initial
+            // value still shows for a moment and is a trap for the next reader.
+            formatter_model: "llama-server".to_string(),
             formatter_style: "semi-formal".to_string(),
             formatter_context: "general".to_string(),
             cleanup_mode: "full".to_string(),
