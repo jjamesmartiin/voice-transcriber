@@ -43,16 +43,16 @@
     "component_gate": 0.025,
     "passed": true,
     "progress_calls": 24,
-    "git_rev": "ce58b4faaa4a13b1bbee9fa0d6e77db378259c75",
-    "git_dirty": false,
+    "git_rev": "cdc81c3c34469a7015ea5cb425dd62d7faa412da",
+    "git_dirty": true,
     "invocation": [
       "python",
       "eval/score_diarization.py"
     ],
     "env": {
-      "PYTHONPATH": "/home/jamesm/gitprojects/voice-transcriber-der/src"
+      "PYTHONPATH": "/home/jamesm/gitprojects/voice-transcriber/src"
     },
-    "reproduce": "PYTHONPATH=/home/jamesm/gitprojects/voice-transcriber-der/src python eval/score_diarization.py"
+    "reproduce": "PYTHONPATH=/home/jamesm/gitprojects/voice-transcriber/src python eval/score_diarization.py"
   },
   "results": [
     {

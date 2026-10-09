@@ -283,7 +283,7 @@ def compute_der(
         return sum(1 for start, end, _sp in ref if start <= mid <= end) > 1
 
     intervals: list[tuple[float, frozenset, frozenset]] = []
-    for left, right in zip(clipped, clipped[1:]):
+    for left, right in zip(clipped, clipped[1:], strict=False):
         dur = right - left
         if dur <= 1e-9:
             continue
