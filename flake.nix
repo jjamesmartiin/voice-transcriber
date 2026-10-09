@@ -76,6 +76,7 @@
             accelerate
             librosa
             datasets
+            sherpa-onnx
             psutil
             pyyaml
           ] ++ (pkgs.lib.optionals isLinux [ evdev python-uinput ]));
@@ -172,6 +173,7 @@
             accelerate
             librosa
             datasets
+            sherpa-onnx
             pytest
             psutil
             pyyaml
@@ -320,6 +322,7 @@
             accelerate
             librosa
             datasets
+            sherpa-onnx
             pip
             pytest
             psutil

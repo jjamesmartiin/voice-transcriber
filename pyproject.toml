@@ -39,6 +39,9 @@ dependencies = [
     "rich",
     "scipy",
     "sentencepiece",
+    # Offline speaker diarization (workstream D). Prebuilt wheels/bindings that
+    # bundle onnxruntime; numpy is its only other Python dependency.
+    "sherpa-onnx",
     "sounddevice",
     "soundfile",
     "torch",
