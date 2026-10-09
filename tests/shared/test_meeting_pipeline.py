@@ -241,6 +241,79 @@ def test_labels_are_present_for_multiple_speakers(tmp_path):
     assert "[Speaker 1]" in result.text and "[Speaker 2]" in result.text
 
 
+def test_diarization_off_skips_the_pass(tmp_path):
+    """D6: diarization off never calls the backend and yields the one-speaker doc.
+
+    This is the byte-identity pin: with the setting off the pipeline behaves
+    exactly like a build without the pass, and the same fixture labels speakers
+    once it is on.
+    """
+    calls = {"n": 0}
+
+    def diarizer(audio, sample_rate, *, progress=None):
+        calls["n"] += 1
+        return [Turn(0.0, 2.0, 0), Turn(2.0, 4.0, 1)]
+
+    off_pipeline = mp.MeetingPipeline(
+        diarizer=diarizer,
+        transcriber=lambda segment: "hello",
+        post_processor=_identity_post,
+        output_dir=str(tmp_path / "off"),
+        diarization_gate=lambda: False,
+    )
+    off_transcript = off_pipeline.process(_audio(4.0), 16000)
+
+    assert calls["n"] == 0, "the backend must not be loaded or called when off"
+    assert off_transcript.speaker_count == 1
+    assert "[Speaker" not in off_transcript.text
+
+    on_pipeline = mp.MeetingPipeline(
+        diarizer=diarizer,
+        transcriber=lambda segment: "hello",
+        post_processor=_identity_post,
+        output_dir=str(tmp_path / "on"),
+        diarization_gate=lambda: True,
+    )
+    on_transcript = on_pipeline.process(_audio(4.0), 16000)
+
+    assert calls["n"] == 1
+    assert on_transcript.speaker_count == 2
+    assert "[Speaker 1]" in on_transcript.text
+
+
+def test_speakers_hint_is_passed_through(tmp_path):
+    """D6: an exact speaker count is a hint, auto means let the backend decide."""
+    seen = {}
+
+    def diarizer(audio, sample_rate, *, progress=None, num_speakers=None):
+        seen["num_speakers"] = num_speakers
+        return [Turn(0.0, 1.0, 0)]
+
+    pipeline = mp.MeetingPipeline(
+        diarizer=diarizer,
+        transcriber=lambda segment: "x",
+        post_processor=_identity_post,
+        output_dir=str(tmp_path),
+        diarization_gate=lambda: True,
+        speakers_hint=lambda: 3,
+    )
+    pipeline.process(_audio(1.0), 16000)
+    assert seen["num_speakers"] == 3
+
+    # "auto" is passed through as no hint at all (the backend's num_clusters=-1).
+    seen.clear()
+    auto_pipeline = mp.MeetingPipeline(
+        diarizer=diarizer,
+        transcriber=lambda segment: "x",
+        post_processor=_identity_post,
+        output_dir=str(tmp_path),
+        diarization_gate=lambda: True,
+        speakers_hint=lambda: "auto",
+    )
+    auto_pipeline.process(_audio(1.0), 16000)
+    assert seen["num_speakers"] is None
+
+
 def test_audio_is_resampled_to_16k_mono(tmp_path):
     seen = {}
 

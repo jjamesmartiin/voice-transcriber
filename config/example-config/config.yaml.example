@@ -135,6 +135,28 @@ meeting: "off"
 meeting_spill_minutes: 10
 
 # ------------------------------------------------------------------------------
+# Diarization / Speaker Labels (meeting mode enhancement)
+# Splits a meeting recording into speaker turns so the transcript can say who
+# is talking. Off by default: the pass loads a local model, so a typo or a
+# missing download must never turn it on by accident (unknown values fail safe
+# to "off"). Selectable at runtime via 'Speaker Labels' in the settings modal,
+# or `python src/main.py diarization <off|on>`. Env: VT_DIARIZATION.
+# Default: "off"
+diarization: "off"
+
+# Optional hint for how many speakers to expect. Everything is more accurate
+# (and clustering is much cheaper) when the count is known, but it is never
+# required: "auto" lets the model decide. Selectable at runtime via 'Speaker
+# Count', or `python src/main.py diarization-speakers <auto|2..8>`.
+# Env: VT_DIARIZATION_SPEAKERS. Default: "auto"
+diarization_speakers: "auto"
+
+# Which diarization model bundle to load. The model is startup-loaded (a change
+# needs a restart; the on/off mode above is hot). Env: VT_DIARIZATION_MODEL.
+# Default: "diarization"
+diarization_model: "diarization"
+
+# ------------------------------------------------------------------------------
 # On-Device Formatter (optional local language model)
 # An optional second pass that rewrites the cleaned transcript the way a cloud
 # dictation product would: casing fixed, false starts resolved, spoken lists

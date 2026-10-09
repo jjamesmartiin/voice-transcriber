@@ -702,6 +702,160 @@ def test_meeting_elapsed_label():
     assert t2.meeting_elapsed_label("bogus") == "00:00"
 
 
+def test_diarization_defaults_off_and_round_trips(tmp_path, monkeypatch):
+    """The speaker-label toggle persists, and "off" is the shipped default."""
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_DIARIZATION", raising=False)
+
+    try:
+        t2.load_audio_config()
+        assert t2.get_diarization() == "off"
+
+        t2.set_diarization("on")
+        assert t2.get_diarization() == "on"
+        assert yaml.safe_load(config.read_text())["diarization"] == "on"
+
+        t2.DIARIZATION = "off"
+        t2.load_audio_config()
+        assert t2.get_diarization() == "on"
+    finally:
+        monkeypatch.delenv("VT_DIARIZATION", raising=False)
+        t2.set_diarization("off")
+
+
+def test_diarization_is_unknown_value_safe(tmp_path, monkeypatch):
+    """An unrecognised value falls back to "off": the pass loads a model."""
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"diarization": "maybe"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_DIARIZATION", raising=False)
+
+    t2.load_audio_config()
+    assert t2.get_diarization() == "off"
+
+
+def test_diarization_env_override_wins(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"diarization": "off"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    try:
+        monkeypatch.setenv("VT_DIARIZATION", "on")
+        t2.load_audio_config()
+        assert t2.get_diarization() == "on"
+    finally:
+        monkeypatch.delenv("VT_DIARIZATION", raising=False)
+        t2.set_diarization("off")
+
+
+def test_diarization_speakers_round_trips_and_cycles(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_DIARIZATION_SPEAKERS", raising=False)
+
+    try:
+        t2.load_audio_config()
+        assert t2.get_diarization_speakers() == "auto"
+
+        t2.set_diarization_speakers(3)
+        assert t2.get_diarization_speakers() == 3
+        assert yaml.safe_load(config.read_text())["diarization_speakers"] == 3
+
+        # An out-of-range or unparseable hint keeps auto-detection rather than
+        # guessing a count: a wrong hint is worse than none.
+        assert t2.set_diarization_speakers(1) == "auto"
+        assert t2.set_diarization_speakers(99) == "auto"
+        assert t2.set_diarization_speakers("lots") == "auto"
+
+        t2.set_diarization_speakers("auto")
+        assert t2.cycle_diarization_speakers() == 2
+        assert t2.cycle_diarization_speakers() == 3
+        for _ in range(6):
+            t2.cycle_diarization_speakers()
+        assert t2.cycle_diarization_speakers() == 2  # 8 -> auto -> 2
+    finally:
+        t2.set_diarization_speakers("auto")
+
+
+def test_diarization_speakers_env_override(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"diarization_speakers": "auto"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    try:
+        monkeypatch.setenv("VT_DIARIZATION_SPEAKERS", "4")
+        t2.load_audio_config()
+        assert t2.get_diarization_speakers() == 4
+    finally:
+        monkeypatch.delenv("VT_DIARIZATION_SPEAKERS", raising=False)
+        t2.set_diarization_speakers("auto")
+
+
+def test_diarization_model_default_and_fallback(tmp_path, monkeypatch):
+    """The model is a registry name; an unknown one warns and keeps the default."""
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_DIARIZATION_MODEL", raising=False)
+
+    try:
+        t2.load_audio_config()
+        assert t2.get_diarization_model() == "diarization"
+        assert t2.DIARIZATION_MODEL in t2.DIARIZATION_MODELS
+
+        # Unknown -> the shipped default, never an empty/disabled value.
+        assert t2.set_diarization_model("nope") == "diarization"
+        assert t2.set_diarization_model("") == "diarization"
+        assert t2.set_diarization_model(None) == "diarization"
+    finally:
+        t2.set_diarization_model(t2.DIARIZATION_DEFAULT_MODEL)
+
+
+def test_diarization_model_env_override(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    try:
+        monkeypatch.setenv("VT_DIARIZATION_MODEL", "diarization")
+        t2.load_audio_config()
+        assert t2.get_diarization_model() == "diarization"
+    finally:
+        monkeypatch.delenv("VT_DIARIZATION_MODEL", raising=False)
+        t2.set_diarization_model(t2.DIARIZATION_DEFAULT_MODEL)
+
+
+def test_diarization_setting_labels_are_stable():
+    assert t2.diarization_setting_state("on") == (
+        "Labels who said what in meeting transcripts", "[ON]", "green"
+    )
+    assert t2.diarization_setting_state("off") == (
+        "Off: one speaker per transcript", "[OFF]", "dim white"
+    )
+    assert t2.diarization_setting_state("nonsense") == (
+        "Off: one speaker per transcript", "[OFF]", "dim white"
+    )
+    assert t2.diarization_speakers_setting_state("auto") == (
+        "Auto-detect the speaker count", "[AUTO]", "cyan"
+    )
+    assert t2.diarization_speakers_setting_state(3) == (
+        "Expecting 3 speakers", "[3]", "cyan"
+    )
+    assert t2.diarization_model_setting_state("diarization") == (
+        "Model: diarization", "[MODEL]", "cyan"
+    )
+
+
 def test_main_typing_formatting_options(monkeypatch):
     """Test that disabling trailing space and auto-punctuate works in main._do_process_recording."""
     from main import SimpleVoiceTranscriber
@@ -872,3 +1026,44 @@ def test_the_naming_decision_is_recorded():
     assert normalize_structure_mode("dashes") == "inline"
     assert normalize_structure_mode("single-line") == "inline"
     assert normalize_structure_mode("nonsense") == "off"
+
+
+def test_both_python_tuis_accept_diarization_settings():
+    """D6: every setting lands in both Python frontends, not just the modal."""
+    from tui import VoiceTranscriberTUI
+    from tui_ratatui import RatatuiTui
+
+    tui = VoiceTranscriberTUI(ui_theme="cyan")
+    tui.set_config_state(
+        diarization="on", diarization_speakers=3, diarization_model="diarization"
+    )
+    assert tui.diarization == "on"
+    assert tui.diarization_speakers == 3
+    assert tui.diarization_model == "diarization"
+
+    rat = RatatuiTui.__new__(RatatuiTui)
+    sent = []
+    rat._send = lambda msg: sent.append(msg)
+    rat.set_config_state(
+        diarization="on", diarization_speakers=3, diarization_model="diarization"
+    )
+    assert sent and sent[-1]["t"] == "cfg"
+    assert sent[-1]["diarization"] == "on"
+    assert sent[-1]["diarization_speakers"] == 3
+    assert sent[-1]["diarization_model"] == "diarization"
+
+
+def test_ratatui_cycle_commands_reach_the_engine():
+    """D6: the ratatui settings modal's cycle commands are wired to callbacks."""
+    from tui_ratatui import RatatuiTui
+
+    rat = RatatuiTui.__new__(RatatuiTui)
+    calls = []
+    rat.on_cycle_diarization = lambda: calls.append("diarization")
+    rat.on_cycle_diarization_speakers = lambda: calls.append("speakers")
+    rat.on_cycle_diarization_model = lambda: calls.append("model")
+
+    for cmd in ("cycle_diarization", "cycle_diarization_speakers", "cycle_diarization_model"):
+        rat._dispatch({"t": "cmd", "cmd": cmd})
+
+    assert calls == ["diarization", "speakers", "model"]

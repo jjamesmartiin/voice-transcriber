@@ -1,8 +1,11 @@
 # Meeting Mode (long, non-injecting capture)
 
-**Status:** capture lifecycle shipped (milestone D2). Diarization, turn slicing
-and the transcript artifact are later milestones — see
-[`plan-diarization.md`](plan-diarization.md), especially §5.2.
+**Status:** capture lifecycle (D2), diarization + per-turn ASR + the transcript
+artifact (D3/D4) and the diarization settings (D6) are shipped. The renamable
+speakers map, JSON/Markdown forms and the output-directory setting are D5 — see
+[`plan-diarization.md`](plan-diarization.md), especially §5.2 and §8. One
+prerequisite gap remains: the diarization model has no download path yet (see
+"Prerequisite gap" below).
 
 Meeting mode is a **second capture lifecycle**. Dictation is push-to-talk and
 seconds long: it captures, transcribes and *injects* typed text. Meeting mode is
@@ -49,6 +52,9 @@ catalogue — do not treat the names below as an exhaustive list.
 | --- | --- | --- | --- |
 | `meeting` | `off`, `on` | `off` | The capture-side enable toggle. `off` (the shipped default) means `meeting-start` refuses and the dictation path is byte-identical to a build without the feature. Unknown values fail safe to `off`. |
 | `meeting_spill_minutes` | `1`–`240` | `10` | In-memory spill threshold, in minutes. The settings modal cycles 5/10/20/30/60; the config file and control API accept any value in range. Unknown or out-of-range values fall back to the default rather than to "no spill". |
+| `diarization` | `off`, `on` | `off` | Speaker labels for meeting transcripts (D6). `off` never loads the diarization model and never runs the pass, so a meeting is transcribed as one speaker. Unknown values fail safe to `off` (the pass loads a model; a typo must not turn it on). |
+| `diarization_speakers` | `auto`, `2`–`8` | `auto` | Optional expected speaker count hint. Everything is more accurate, and clustering much cheaper, when the count is known — but it is only a hint. Out-of-range or unparseable values fall back to `auto`, never to a guessed count. |
+| `diarization_model` | registry name | `diarization` | Which diarization model bundle to load (the `diarization` `ModelSpec` in `model_download.py`). The model is startup-loaded like `model_backend`, so changing it needs a restart; the `diarization` **mode** above is hot. Unknown names warn and fall back to the shipped default. |
 
 `status` reports the pair `meeting` (effective) and `meeting_setting`
 (configured), in the same configured-vs-effective style as `structure_mode` /
@@ -57,9 +63,29 @@ catalogue — do not treat the names below as an exhaustive list.
 gate (for example diarization being switched off in D6) cannot quietly turn one
 into the other.
 
-Env overrides: `VT_MEETING`, `VT_MEETING_SPILL_MINUTES`.
+Env overrides: `VT_MEETING`, `VT_MEETING_SPILL_MINUTES`, `VT_DIARIZATION`,
+`VT_DIARIZATION_SPEAKERS`, `VT_DIARIZATION_MODEL`.
 
-Config keys: `meeting`, `meeting_spill_minutes`.
+Config keys: `meeting`, `meeting_spill_minutes`, `diarization`,
+`diarization_speakers`, `diarization_model`.
+
+The diarization keys are a meeting-mode **enhancement**, not a second feature
+gate. Enabling `meeting` alone still captures and transcribes, but as a single
+speaker; `diarization: on` adds the pass that labels who said what.
+
+### Prerequisite gap: the diarization models have no download path yet
+
+Meeting mode's speaker labels need the sherpa-onnx pyannote-segmentation and
+3D-Speaker embedding graphs. Those weights are **not downloadable through the
+app today**: the on-device model registry has a `diarization` spec landing in
+parallel, but no client path installs it, and `diarize.py`'s backend silently
+degrades to "no diarization" (one speaker) when the graphs are absent. On this
+development machine the graphs were placed under the model directory by hand,
+which is why the verified runs in `docs/meeting_pipeline.md` work here at all.
+Until the registry entry ships a download path, treat speaker labels as
+available only where the weights have been installed manually — they are not a
+first-run experience. This is deliberate D7 research recorded rather than
+implied away.
 
 ## Progress state
 
@@ -73,6 +99,10 @@ Config keys: `meeting`, `meeting_spill_minutes`.
 | `meeting_elapsed_s` | seconds since capture began; frozen once processing starts |
 | `meeting_progress` | batch-phase completion, 0–100 |
 | `meeting_spill_minutes` | the configured threshold |
+| `diarization` | effective diarization toggle (`off`/`on`) |
+| `diarization_setting` | configured diarization toggle (same value today; reported as a pair so a future gate cannot quietly turn one into the other) |
+| `diarization_speakers` | the configured speaker-count hint (`auto` or an int) |
+| `diarization_model` | the configured model registry name |
 
 A live capture has no known total, so `meeting_progress` stays `0` while
 recording and `meeting_elapsed_s` is what tells the user "how far along" it is.
@@ -138,9 +168,10 @@ reason it was chosen.
 
 ## Not in D2
 
-* Diarization and turn slicing (D4) — `meeting.py` exposes `on_audio` as the
-  hand-off seam and `set_progress()` as the progress seam, and does nothing else
-  with the audio.
-* The transcript artifact, speaker labels and the speakers map (D5).
-* The diarization settings themselves (`diarization`, `diarization_speakers`,
-  `diarization_model`) — D6.
+* Diarization and turn slicing — D4 shipped these (`meeting_pipeline.py`).
+* The transcript artifact, speaker labels and the speakers map — D4 shipped the
+  artifact and the speaker labels; the renamable speakers map is D5's
+  remaining work (`docs/plan-diarization.md` §8).
+* The diarization settings (`diarization`, `diarization_speakers`,
+  `diarization_model`) — D6 shipped these; the model download path is the
+  prerequisite gap noted above.

@@ -116,6 +116,10 @@ class SimpleVoiceTranscriber:
             progress=self.meeting.set_progress,
             stage_callback=self.meeting.set_stage,
             cancel_event=self.meeting.cancel_event,
+            # Live gates for the D6 settings, read at run time so switching
+            # speaker labels does not need a restart.
+            diarization_gate=lambda: t2.get_diarization() == "on",
+            speakers_hint=lambda: t2.get_diarization_speakers(),
             on_done=self._on_meeting_transcript,
         )
         self.meeting.set_audio_consumer(self.meeting_pipeline.process)
@@ -278,6 +282,9 @@ class SimpleVoiceTranscriber:
             cleanup_mode=getattr(t2, 'get_cleanup_mode', lambda: 'full')(),
             meeting_mode=getattr(t2, 'get_meeting', lambda: 'off')(),
             meeting_spill_minutes=getattr(t2, 'get_meeting_spill_minutes', lambda: 10)(),
+            diarization=getattr(t2, 'get_diarization', lambda: 'off')(),
+            diarization_speakers=getattr(t2, 'get_diarization_speakers', lambda: 'auto')(),
+            diarization_model=getattr(t2, 'get_diarization_model', lambda: 'diarization')(),
             formatter=getattr(t2, 'get_formatter', lambda: 'off')(),
             formatter_model=getattr(t2, 'get_formatter_model', lambda: 's1-mini')(),
             formatter_style=getattr(t2, 'get_formatter_style', lambda: 'semi-formal')(),
@@ -320,6 +327,9 @@ class SimpleVoiceTranscriber:
         self.tui.on_toggle_meeting = self._on_tui_toggle_meeting
         self.tui.on_cycle_meeting = self._on_tui_cycle_meeting
         self.tui.on_cycle_meeting_spill = self._on_tui_cycle_meeting_spill
+        self.tui.on_cycle_diarization = self._on_tui_cycle_diarization
+        self.tui.on_cycle_diarization_speakers = self._on_tui_cycle_diarization_speakers
+        self.tui.on_cycle_diarization_model = self._on_tui_cycle_diarization_model
         self.tui.on_cycle_formatter = self._on_tui_cycle_formatter
         self.tui.on_cycle_formatter_model = self._on_tui_cycle_formatter_model
         self.tui.on_cycle_formatter_style = self._on_tui_cycle_formatter_style
@@ -779,6 +789,30 @@ class SimpleVoiceTranscriber:
         new_context = t2.cycle_formatter_context()
         self._sync_tui_state()
         self.tui.print_event("✉️ Formatter Context", f"Context: {new_context}", level="info")
+
+    def _on_tui_cycle_diarization(self):
+        import t2
+        new_mode = t2.toggle_diarization()
+        self._sync_tui_state()
+        message = (
+            "Speakers will be labelled in meeting transcripts"
+            if new_mode == "on"
+            else "Off: one speaker per transcript"
+        )
+        self.tui.print_event("🗣️ Speaker Labels", message, level="info")
+
+    def _on_tui_cycle_diarization_speakers(self):
+        import t2
+        count = t2.cycle_diarization_speakers()
+        self._sync_tui_state()
+        detail = "auto-detect" if count == "auto" else f"expecting {count}"
+        self.tui.print_event("🔢 Speaker Count", f"Speaker count: {detail}", level="info")
+
+    def _on_tui_cycle_diarization_model(self):
+        import t2
+        new_model = t2.cycle_diarization_model()
+        self._sync_tui_state()
+        self.tui.print_event("🧠 Speaker Model", f"Using {new_model}", level="info")
 
     def _on_tui_reset_defaults(self):
         """Restore every user-tunable setting to its shipped default."""
@@ -1400,6 +1434,7 @@ class SimpleVoiceTranscriber:
         cannot quietly turn one into the other.
         """
         configured = getattr(t2, "get_meeting", lambda: "off")()
+        diarization = getattr(t2, "get_diarization", lambda: "off")()
         session = self._meeting_session()
         status = session.status() if session is not None else None
         pipeline = getattr(self, "meeting_pipeline", None)
@@ -1407,6 +1442,18 @@ class SimpleVoiceTranscriber:
         return {
             "meeting": configured,
             "meeting_setting": configured,
+            # Diarization is a meeting-mode enhancement. ``diarization`` (effective)
+            # and ``diarization_setting`` (configured) are the same value today -
+            # there is no downgrade path - but reported as a pair so a future gate
+            # cannot quietly turn one into the other, like the formatter pair.
+            "diarization": diarization,
+            "diarization_setting": diarization,
+            "diarization_speakers": getattr(
+                t2, "get_diarization_speakers", lambda: "auto"
+            )(),
+            "diarization_model": getattr(
+                t2, "get_diarization_model", lambda: "diarization"
+            )(),
             "meeting_state": status.state if status is not None else "idle",
             "meeting_stage": getattr(status, "stage", "idle") if status is not None else "idle",
             "meeting_elapsed_s": status.elapsed_s if status is not None else 0.0,
@@ -1751,6 +1798,33 @@ class SimpleVoiceTranscriber:
 
         if verb in ("meeting-stop", "meeting_stop"):
             self._control_meeting_stop()
+            return self._control_status(verb)
+
+        # -- diarization: speaker labels for meeting transcripts ------------
+        if verb in ("diarization", "diarization-mode"):
+            state = self._control_on_off(value)
+            current = t2.get_diarization() == "on"
+            t2.set_diarization((not current) if state is None else state)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb, diarization=t2.get_diarization())
+
+        if verb in ("diarization-speakers", "diarization_speakers"):
+            if value:
+                t2.set_diarization_speakers(value)
+            else:
+                t2.cycle_diarization_speakers()
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(
+                verb, diarization_speakers=t2.get_diarization_speakers()
+            )
+
+        if verb in ("diarization-model", "diarization_model"):
+            need_value()
+            t2.set_diarization_model(value)
+            t2.save_audio_config()
+            self._sync_tui_state()
             return self._control_status(verb)
 
         if verb in ("formatter", "formatter-mode"):

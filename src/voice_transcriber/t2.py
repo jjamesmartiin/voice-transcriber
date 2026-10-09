@@ -166,6 +166,24 @@ MEETING_MODES = ["off", "on"]
 #: Temp-file spill threshold for a long meeting capture, in minutes. Default 10.
 MEETING_SPILL_MINUTES = 10
 MEETING_SPILL_CHOICES = [5, 10, 20, 30, 60]
+#: Speaker diarization for meeting mode (docs/plan-diarization.md sec 6). "off"
+#: is the shipped default, so a meeting capture without the pass is
+#: byte-identical to a build without the feature and the dictation path is never
+#: touched. Unknown values fail safe to "off" because the pass loads a model: a
+#: typo must not switch it on by accident.
+DIARIZATION = "off"
+DIARIZATION_MODES = ["off", "on"]
+#: Speaker-count hint: "auto" or an exact 2-8. A known count makes clustering
+#: cheaper and more accurate, so it is offered but never required.
+DIARIZATION_SPEAKERS = "auto"
+DIARIZATION_SPEAKER_CHOICES = ["auto", 2, 3, 4, 5, 6, 7, 8]
+#: Registry name of the diarization model bundle
+#: (``model_download.MODELS["diarization"]``). The bundle is startup-loaded like
+#: ``model_backend``, so changing it needs a restart; the *mode* is hot.
+DIARIZATION_MODEL = "diarization"
+DIARIZATION_MODELS = ["diarization"]
+#: Shipped default model id (mirrors the registry spec name).
+DIARIZATION_DEFAULT_MODEL = DIARIZATION_MODELS[0]
 #: Optional on-device formatter (docs/plan-on-device-formatter.md). "off" is the
 #: shipped default and means the dictation path is byte-identical to a build
 #: without the feature.
@@ -227,6 +245,9 @@ DEFAULT_SETTINGS = {
     'CLEANUP_MODE': "full",
     'MEETING': "off",
     'MEETING_SPILL_MINUTES': 10,
+    'DIARIZATION': "off",
+    'DIARIZATION_SPEAKERS': "auto",
+    'DIARIZATION_MODEL': DIARIZATION_DEFAULT_MODEL,
     'FORMATTER': "off",
     'FORMATTER_MODEL': "s1-mini",
     'FORMATTER_STYLE': "semi-formal",
@@ -826,7 +847,7 @@ def _normalize_bool(value, default: bool = False) -> bool:
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, MEETING, MEETING_SPILL_MINUTES, FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, TYPING_WPM, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, MEETING, MEETING_SPILL_MINUTES, DIARIZATION, DIARIZATION_SPEAKERS, DIARIZATION_MODEL, FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, TYPING_WPM, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -905,6 +926,23 @@ def load_audio_config(file_path=None):
             env_meeting_spill = os.environ.get("VT_MEETING_SPILL_MINUTES", "").strip().lower()
             if env_meeting_spill:
                 MEETING_SPILL_MINUTES = normalize_meeting_spill_minutes(env_meeting_spill)
+
+            DIARIZATION = normalize_diarization(config.get('diarization', 'off'))
+            env_diarization = os.environ.get("VT_DIARIZATION", "").strip().lower()
+            if env_diarization:
+                DIARIZATION = normalize_diarization(env_diarization)
+
+            DIARIZATION_SPEAKERS = normalize_diarization_speakers(
+                config.get('diarization_speakers', 'auto'))
+            env_diarization_speakers = os.environ.get("VT_DIARIZATION_SPEAKERS", "").strip().lower()
+            if env_diarization_speakers:
+                DIARIZATION_SPEAKERS = normalize_diarization_speakers(env_diarization_speakers)
+
+            DIARIZATION_MODEL = normalize_diarization_model(
+                config.get('diarization_model', DIARIZATION_MODEL))
+            env_diarization_model = os.environ.get("VT_DIARIZATION_MODEL", "").strip().lower()
+            if env_diarization_model:
+                DIARIZATION_MODEL = normalize_diarization_model(env_diarization_model)
 
             FORMATTER = normalize_formatter_enabled(config.get('formatter', 'off'))
             env_formatter = os.environ.get("VT_FORMATTER", "").strip().lower()
@@ -1206,6 +1244,9 @@ def save_audio_config(file_path=None):
             'cleanup_mode': CLEANUP_MODE,
             'meeting': MEETING,
             'meeting_spill_minutes': MEETING_SPILL_MINUTES,
+            'diarization': DIARIZATION,
+            'diarization_speakers': DIARIZATION_SPEAKERS,
+            'diarization_model': DIARIZATION_MODEL,
             'formatter': FORMATTER,
             'formatter_model': FORMATTER_MODEL,
             'formatter_style': FORMATTER_STYLE,
@@ -1956,6 +1997,147 @@ def meeting_spill_setting_state(minutes: int):
     return f"Spills to disk past {minutes} min", "[SPILL]", "cyan"
 
 
+# -- diarization (speaker labels for meeting mode) -------------------------
+# The diarization *mode* is hot (it only decides whether to run the pass); the
+# *model* is startup-loaded, like model_backend. The values here are the
+# settings only - the pass itself lives in ``diarize.py`` and is wired into the
+# meeting pipeline by the engine.
+
+def normalize_diarization(value) -> str:
+    """Map a user value onto ``off``/``on``; unknown means ``off``.
+
+    Fail-safe off: the pass loads a model, so a typo must not turn it on by
+    accident (the same policy as ``normalize_meeting``).
+    """
+    if value is None:
+        return "off"
+    text = str(value).strip().lower()
+    return "on" if text in ("on", "true", "yes", "enabled", "1") else "off"
+
+
+def get_diarization() -> str:
+    """The configured diarization toggle ("off"/"on")."""
+    return DIARIZATION
+
+
+def set_diarization(mode) -> str:
+    """Set and persist the diarization toggle."""
+    global DIARIZATION
+    DIARIZATION = normalize_diarization(mode)
+    save_audio_config()
+    return DIARIZATION
+
+
+def toggle_diarization() -> str:
+    """Cycle off -> on -> off and persist."""
+    global DIARIZATION
+    index = DIARIZATION_MODES.index(DIARIZATION) if DIARIZATION in DIARIZATION_MODES else 0
+    DIARIZATION = DIARIZATION_MODES[(index + 1) % len(DIARIZATION_MODES)]
+    save_audio_config()
+    return DIARIZATION
+
+
+def diarization_setting_state(mode: str):
+    """``(description, badge, colour)`` for the settings modal's speaker row."""
+    if normalize_diarization(mode) == "on":
+        return "Labels who said what in meeting transcripts", "[ON]", "green"
+    return "Off: one speaker per transcript", "[OFF]", "dim white"
+
+
+def normalize_diarization_speakers(value):
+    """Canonicalise the speaker-count hint: ``"auto"`` or an int in 2..8.
+
+    An out-of-range or unparseable value keeps auto-detection rather than
+    guessing a count, because a wrong hint is more damaging than none.
+    """
+    if value is None or isinstance(value, bool):
+        return "auto"
+    if isinstance(value, int):
+        return value if 2 <= value <= 8 else "auto"
+    text = str(value).strip().lower()
+    if text in ("", "auto", "none"):
+        return "auto"
+    try:
+        num = int(text)
+    except (TypeError, ValueError):
+        return "auto"
+    return num if 2 <= num <= 8 else "auto"
+
+
+def get_diarization_speakers():
+    """The configured speaker-count hint: ``"auto"`` or an int."""
+    return DIARIZATION_SPEAKERS
+
+
+def set_diarization_speakers(value):
+    """Set and persist the speaker-count hint; unknown values mean auto."""
+    global DIARIZATION_SPEAKERS
+    DIARIZATION_SPEAKERS = normalize_diarization_speakers(value)
+    save_audio_config()
+    return DIARIZATION_SPEAKERS
+
+
+def cycle_diarization_speakers():
+    """Cycle auto -> 2 -> 3 ... -> 8 -> auto and persist."""
+    global DIARIZATION_SPEAKERS
+    current = normalize_diarization_speakers(DIARIZATION_SPEAKERS)
+    choices = DIARIZATION_SPEAKER_CHOICES
+    index = choices.index(current) if current in choices else 0
+    DIARIZATION_SPEAKERS = choices[(index + 1) % len(choices)]
+    save_audio_config()
+    return DIARIZATION_SPEAKERS
+
+
+def diarization_speakers_setting_state(value):
+    """``(description, badge, colour)`` for the speaker-count row."""
+    value = normalize_diarization_speakers(value)
+    if value == "auto":
+        return "Auto-detect the speaker count", "[AUTO]", "cyan"
+    return f"Expecting {value} speakers", f"[{value}]", "cyan"
+
+
+def normalize_diarization_model(value) -> str:
+    """A registry model id, validated against :data:`DIARIZATION_MODELS`.
+
+    Unknown values warn and fall back to the shipped default (the
+    ``normalize_formatter_model`` policy): the setting names *what to load*, so a
+    typo should name the default and carry on rather than silently switching the
+    feature off and looking like a broken model.
+    """
+    fallback = DIARIZATION_DEFAULT_MODEL
+    if value is None:
+        return fallback
+    text = str(value).strip().lower()
+    if not text:
+        return fallback
+    if text not in DIARIZATION_MODELS:
+        logger.warning(
+            "Unknown diarization model %r; using %r (known: %s)",
+            text, fallback, ", ".join(DIARIZATION_MODELS))
+        return fallback
+    return text
+
+
+def get_diarization_model() -> str:
+    return DIARIZATION_MODEL
+
+
+def set_diarization_model(value) -> str:
+    global DIARIZATION_MODEL
+    DIARIZATION_MODEL = normalize_diarization_model(value)
+    save_audio_config()
+    return DIARIZATION_MODEL
+
+
+def cycle_diarization_model() -> str:
+    index = DIARIZATION_MODELS.index(DIARIZATION_MODEL) if DIARIZATION_MODEL in DIARIZATION_MODELS else -1
+    return set_diarization_model(DIARIZATION_MODELS[(index + 1) % len(DIARIZATION_MODELS)])
+
+
+def diarization_model_setting_state(model: str = DIARIZATION_MODEL):
+    return f"Model: {model}", "[MODEL]", "cyan"
+
+
 def meeting_elapsed_label(seconds) -> str:
     """``MM:SS`` (or ``H:MM:SS`` past an hour) for the meeting timer."""
     try:
@@ -2696,6 +2878,24 @@ def select_settings_picker():
             "keywords": "meeting spill memory temp file threshold minutes long recording buffer disk",
         },
         {
+            "id": "diarization",
+            "icon": "🗣️ ",
+            "title": "Speaker Labels",
+            "keywords": "diarization diarize speaker speakers labels who said meeting transcript separation",
+        },
+        {
+            "id": "diarization_speakers",
+            "icon": "🔢 ",
+            "title": "Speaker Count",
+            "keywords": "diarization speakers count number hint auto known how many people",
+        },
+        {
+            "id": "diarization_model",
+            "icon": "🧠 ",
+            "title": "Speaker Model",
+            "keywords": "diarization model backend sherpa onnx speaker embed which model swap",
+        },
+        {
             "id": "structure",
             "icon": "☰ ",
             "title": "List Formatting",
@@ -2843,6 +3043,12 @@ def select_settings_picker():
             return "Start a meeting capture", "[START]", "yellow"
         elif item_id == "meeting_spill":
             return meeting_spill_setting_state(MEETING_SPILL_MINUTES)
+        elif item_id == "diarization":
+            return diarization_setting_state(DIARIZATION)
+        elif item_id == "diarization_speakers":
+            return diarization_speakers_setting_state(DIARIZATION_SPEAKERS)
+        elif item_id == "diarization_model":
+            return diarization_model_setting_state(DIARIZATION_MODEL)
         elif item_id == "formatter":
             # The labels live in formatter_setting_state() so they can be held to
             # the ratatui ones by a source-level parity guard, the same way the
@@ -3032,6 +3238,12 @@ def select_settings_picker():
                     toggle_meeting_capture()
                 elif item_id == "meeting_spill":
                     cycle_meeting_spill_minutes()
+                elif item_id == "diarization":
+                    toggle_diarization()
+                elif item_id == "diarization_speakers":
+                    cycle_diarization_speakers()
+                elif item_id == "diarization_model":
+                    cycle_diarization_model()
                 elif item_id == "formatter":
                     toggle_formatter()
                 elif item_id == "formatter_model":

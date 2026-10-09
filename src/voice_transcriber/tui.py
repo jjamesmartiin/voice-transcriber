@@ -140,6 +140,9 @@ class VoiceTranscriberTUI:
         self.cleanup_mode = "full"
         self.meeting_mode = "off"
         self.meeting_spill_minutes = 10
+        self.diarization = "off"
+        self.diarization_speakers = "auto"
+        self.diarization_model = "diarization"
         self.formatter = "off"
         self.formatter_model = "s1-mini"
         self.formatter_style = "semi-formal"
@@ -169,6 +172,9 @@ class VoiceTranscriberTUI:
         self.on_toggle_meeting = None
         self.on_cycle_meeting = None
         self.on_cycle_meeting_spill = None
+        self.on_cycle_diarization = None
+        self.on_cycle_diarization_speakers = None
+        self.on_cycle_diarization_model = None
         self.on_cycle_formatter = None
         self.on_cycle_formatter_model = None
         self.on_cycle_formatter_style = None
@@ -246,7 +252,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, meeting_mode=None, meeting_spill_minutes=None, formatter=None, formatter_model=None, formatter_style=None, formatter_context=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, meeting_mode=None, meeting_spill_minutes=None, diarization=None, diarization_speakers=None, diarization_model=None, formatter=None, formatter_model=None, formatter_style=None, formatter_context=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -272,6 +278,12 @@ class VoiceTranscriberTUI:
                 self.meeting_mode = meeting_mode
             if meeting_spill_minutes is not None:
                 self.meeting_spill_minutes = int(meeting_spill_minutes)
+            if diarization is not None:
+                self.diarization = diarization
+            if diarization_speakers is not None:
+                self.diarization_speakers = diarization_speakers
+            if diarization_model is not None:
+                self.diarization_model = diarization_model
             if formatter is not None:
                 self.formatter = formatter
             if formatter_model is not None:

@@ -227,6 +227,8 @@ class MeetingPipeline:
         diarizer: Callable[..., list] | None = None,
         transcriber: Callable[[np.ndarray], str] | None = None,
         post_processor: Callable[[str], str] | None = None,
+        diarization_gate: Callable[[], bool] | None = None,
+        speakers_hint: Callable[[], Any] | None = None,
         on_done: Callable[[MeetingTranscript], None] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         poll_s: float = DEFAULT_POLL_S,
@@ -243,6 +245,12 @@ class MeetingPipeline:
         self._diarizer = diarizer
         self._transcriber = transcriber
         self._post_processor = post_processor
+        # Optional live gates: the engine injects the diarization on/off setting
+        # and the speaker-count hint so D6 can change them without a restart.
+        # ``None`` keeps the pre-D6 behaviour (always diarize, auto count), which
+        # is what the model-free tests rely on.
+        self._diarization_gate = diarization_gate
+        self._speakers_hint = speakers_hint
         self._on_done = on_done
         self._sleep = sleep
         self._poll_s = max(0.0, float(poll_s))
@@ -402,15 +410,32 @@ class MeetingPipeline:
 
     # -- stages ------------------------------------------------------------
     def _diarize(self, samples: np.ndarray) -> list:
+        # The setting is hot: read it at run time, not construction time, so a
+        # user can switch speaker labels off without restarting. ``None`` means
+        # no gate was injected and the pass always runs (pre-D6 behaviour).
+        if self._diarization_gate is not None:
+            try:
+                if not self._diarization_gate():
+                    return []
+            except Exception:
+                logger.warning("diarization gate failed; treating as off", exc_info=True)
+                return []
+        num_speakers = None
+        if self._speakers_hint is not None:
+            try:
+                num_speakers = _diarize_mod.parse_speakers(self._speakers_hint())
+            except Exception:
+                num_speakers = None
+        kwargs: dict = {"progress": self._on_diarize_progress}
+        if num_speakers is not None:
+            kwargs["num_speakers"] = num_speakers
         try:
             if self._diarizer is not None:
                 return list(self._diarizer(
-                    samples, TARGET_SAMPLE_RATE,
-                    progress=self._on_diarize_progress,
+                    samples, TARGET_SAMPLE_RATE, **kwargs,
                 ))
             return list(_diarize_mod.diarize(
-                samples, TARGET_SAMPLE_RATE,
-                progress=self._on_diarize_progress,
+                samples, TARGET_SAMPLE_RATE, **kwargs,
             ))
         except Exception:
             # Diarization is an enhancement: a broken backend must still leave a

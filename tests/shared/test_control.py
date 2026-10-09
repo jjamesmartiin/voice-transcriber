@@ -31,6 +31,9 @@ _VALUE_VERBS = {
     "punctuation": "full",
     "structure": "inline",
     "cleanup": "artifacts",
+    "diarization": "on",
+    "diarization-speakers": "auto",
+    "diarization-model": "diarization",
 }
 
 
@@ -683,6 +686,20 @@ class TestVerbCatalogue:
         for key in (
             "meeting", "meeting_setting", "meeting_state", "meeting_elapsed_s",
             "meeting_progress", "meeting_spill_minutes",
+        ):
+            assert key in control.VERBS["status"]["returns"]
+
+    def test_diarization_verbs_are_in_the_catalogue(self):
+        """Speaker labels are scriptable, and the status advertises the keys."""
+        assert control.VERBS["diarization"]["choices"] == ["off", "on"]
+        assert control.VERBS["diarization"]["toggles"] is True
+        assert control.VERBS["diarization-speakers"]["choices"] == [
+            "auto", "2", "3", "4", "5", "6", "7", "8",
+        ]
+        assert control.VERBS["diarization-model"]["required"] is True
+        for key in (
+            "diarization", "diarization_setting", "diarization_speakers",
+            "diarization_model",
         ):
             assert key in control.VERBS["status"]["returns"]
 

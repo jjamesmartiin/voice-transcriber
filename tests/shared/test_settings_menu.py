@@ -289,6 +289,9 @@ class TestResetToDefaults:
             "PUNCTUATION_MODE",
             "MEETING",
             "MEETING_SPILL_MINUTES",
+            "DIARIZATION",
+            "DIARIZATION_SPEAKERS",
+            "DIARIZATION_MODEL",
         ):
             assert name in t2.DEFAULT_SETTINGS
 
@@ -364,6 +367,9 @@ class TestResetToDefaults:
             "typing_wpm": "TYPING_WPM",
             "meeting": "MEETING",
             "meeting_spill_minutes": "MEETING_SPILL_MINUTES",
+            "diarization": "DIARIZATION",
+            "diarization_speakers": "DIARIZATION_SPEAKERS",
+            "diarization_model": "DIARIZATION_MODEL",
         }
 
         for example_key, default_key in key_map.items():
