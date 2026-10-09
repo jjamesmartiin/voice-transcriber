@@ -147,12 +147,23 @@ def _start_stub(tmp_path: Path, **env) -> tuple[subprocess.Popen, str]:
     raise RuntimeError("stub server never became healthy")
 
 
+#: The real implementation, captured before the autouse `_isolate` fixture stubs
+#: it, so a test that has `_candidate_model_dirs` as its subject can restore it.
+_REAL_CANDIDATE_MODEL_DIRS = llama_server._candidate_model_dirs
+
+
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
     llama_server.reset()
     for variable in (llama_server.ENV_SERVER_URL, llama_server.ENV_BINARY,
                      llama_server.ENV_MODEL_PATH, llama_server.ENV_THREADS):
         monkeypatch.delenv(variable, raising=False)
+    # Neutralise the conventional install path too. Whether *this* machine happens
+    # to have the weights downloaded must not change what these tests assert, or
+    # they pass on a bare host and fail on a developer's, which is worse than no
+    # test. `stub_env` sets ENV_MODEL_PATH, which is consulted first, so it still
+    # works with this in place.
+    monkeypatch.setattr(llama_server, "_candidate_model_dirs", lambda: [])
     formatter.reset_backend_cache()
     yield
     llama_server.reset()
@@ -188,6 +199,54 @@ def test_importing_the_backend_does_not_import_llama_cpp():
 # ---------------------------------------------------------------------------
 def test_unavailable_without_a_binary_or_model():
     assert llama_server.available() is False
+
+
+def test_the_conventional_install_path_is_found(tmp_path, monkeypatch):
+    """An installed model must be findable without an env var.
+
+    Regression: `_model_path()` only consulted ``VT_FORMATTER_MODEL_PATH`` and the
+    model registry, and the registry has no formatter spec until C6 - so on a
+    machine where the weights *were* downloaded, `formatter: on` still did
+    nothing. Same failure as the backend default, found the same way.
+    """
+    monkeypatch.setattr(llama_server, "_candidate_model_dirs", lambda: [str(tmp_path)])
+    name = llama_server.DEFAULT_MODEL_FILENAMES[0]
+    (tmp_path / name).write_bytes(b"GGUF")
+    assert llama_server._model_path() == str(tmp_path / name)
+
+
+def test_an_explicit_path_still_wins(tmp_path, monkeypatch):
+    explicit = tmp_path / "elsewhere.gguf"
+    explicit.write_bytes(b"GGUF")
+    monkeypatch.setenv(llama_server.ENV_MODEL_PATH, str(explicit))
+    monkeypatch.setattr(llama_server, "_candidate_model_dirs", lambda: [str(tmp_path)])
+    (tmp_path / llama_server.DEFAULT_MODEL_FILENAMES[0]).write_bytes(b"GGUF")
+    assert llama_server._model_path() == str(explicit)
+
+
+def test_the_registry_accessors_raising_does_not_lose_the_fallback(tmp_path, monkeypatch):
+    """`models_dir()` raises KeyError for an unregistered name, not returns None.
+
+    One shared try around the registry lookups let that abort the conventional
+    path - which is the only one that can succeed before C6 registers a spec.
+    """
+    import model_download
+
+    def _raise(*_args, **_kwargs):
+        raise KeyError("unknown model 'formatter'")
+
+    monkeypatch.setattr(model_download, "models_dir", _raise)
+    monkeypatch.setattr(model_download, "get_spec", _raise)
+    monkeypatch.setattr(llama_server, "DEFAULT_MODEL_FILENAMES", ("x.gguf",))
+    # The fixture stubbed this out; put the real one back, it is the subject here.
+    monkeypatch.setattr(llama_server, "_candidate_model_dirs",
+                        _REAL_CANDIDATE_MODEL_DIRS)
+    dirs = llama_server._candidate_model_dirs()
+    assert any(str(model_download.get_data_dir()) in directory for directory in dirs), dirs
+    name = "x.gguf"
+    (tmp_path / name).write_bytes(b"GGUF")
+    monkeypatch.setattr(llama_server, "_candidate_model_dirs", lambda: [str(tmp_path)])
+    assert llama_server._model_path() == str(tmp_path / name)
 
 
 def test_unavailable_with_a_binary_but_no_model(tmp_path, monkeypatch):
