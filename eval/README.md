@@ -165,8 +165,8 @@ reference is empty); it is reported only via the hallucination rate.
 Regenerated 2026-10-09 with `number_digits=false`, `skip_slm=True`, 100 ms blocks,
 all 154 clips, `eval/results.json`. The exact command and all settings are recorded
 in `results.json` → `meta` (`backend`, `int8_dynamic`, `number_digits`, `blocks_ms`,
-`skip_slm`, `git_rev`, `config_source`, `invocation`), so the baseline is
-self-describing rather than depending on this paragraph:
+`skip_slm`, `git_rev`, `config_source`, `invocation`, `env`, `reproduce`), so the
+baseline is self-describing rather than depending on this paragraph:
 
 ```bash
 nix develop --command env PYTHONPATH=$PWD/src VT_INT8_DYNAMIC=1 \
@@ -176,19 +176,29 @@ nix develop --command env PYTHONPATH=$PWD/src VT_INT8_DYNAMIC=1 \
 
 | slice | n | WER | CER | exact | latency |
 |---|---|---|---|---|---|
-| clean | 44 | 2.22% | 0.97% | 79.55% | 0.46 s |
-| accented | 22 | 9.42% | 3.65% | 36.36% | 0.52 s |
-| noisy | 24 | 2.73% | 1.58% | 75.00% | 0.44 s |
-| long | 12 | 2.19% | 0.75% | 33.33% | 1.94 s |
-| technical | 28 | 4.26% | 1.62% | 82.14% | 0.56 s |
-| technical_noisy | 12 | 0.64% | 0.25% | 91.67% | 0.60 s |
-| **overall (speech)** | **142** | **3.57%** | **1.42%** | **69.72%** | |
+| clean | 44 | 2.07% | 0.72% | 81.82% | 0.42 s |
+| accented | 22 | 9.42% | 3.65% | 36.36% | 0.41 s |
+| noisy | 24 | 2.73% | 1.58% | 75.00% | 0.38 s |
+| long | 12 | 2.19% | 0.75% | 33.33% | 1.54 s |
+| technical | 28 | 4.52% | 2.07% | 82.14% | 0.45 s |
+| technical_noisy | 12 | 0.64% | 0.25% | 91.67% | 0.48 s |
+| **overall (speech)** | **142** | **3.57%** | **1.43%** | **70.42%** | |
 | silence | 12 | — | — | — | hallucination **0/12** |
 
 > The previous baseline recorded **5.10%** WER with `git_rev` unrecorded. It no longer
 > reproduced: 85 of 154 hypotheses changed with the refs identical, because the app
 > (post-processor / chunker) improved underneath it. The table above is the
 > current, reproducing number. See `docs/TODO-parity.md` §4E.
+>
+> `normalize()` used to call `post_processor.set_number_digits_enabled(True)` and
+> never restore it, so in a `number_digits=false` run only clip 1 was actually
+> transcribed with number words; the rest ran in digits mode. Fixed 2026-10-09
+> (`convert_number_words_to_digits(..., mode="digits")` is now applied locally and
+> the scorer writes no product state). 17 of 154 hypotheses changed -- `3`→`three`,
+> `2`→`two`, `1st`→`first`, `16th`→`sixteenth` -- with overall WER unchanged at
+> 3.57% (the scorer normalises both sides), CER 1.42%→1.43% and exact
+> 69.72%→70.42%. The `long` slice did not move. Pinned by
+> `tests/shared/test_eval_score.py`.
 
 Latency is per-clip wall time (after model load) and is shown only as context;
 this harness is about accuracy, not a latency benchmark.
