@@ -6,6 +6,15 @@
 # NOTE: config.yaml is gitignored, so local secrets stay out of git.
 
 # ------------------------------------------------------------------------------
+# ASR Backend
+# Speech-recognition backend that transcribes audio. Changing it needs a restart.
+# Available Options:
+#   - "cohere"   : Cohere Transcribe (default; the most accurate on the eval set)
+#   - "parakeet" : Parakeet TDT 0.6B v3 (faster and smaller, less accurate)
+# Default: "cohere"
+model_backend: "cohere"
+
+# ------------------------------------------------------------------------------
 # Audio Notification Mute Setting
 # Controls whether audio cue sounds (pop/chime) play when transcription finishes.
 # Available Options:
@@ -356,6 +365,17 @@ secondary_device_name: null
 #   - "secondary" : Force use of secondary device only
 # Default: "auto"
 override_mode: "auto"
+
+# ------------------------------------------------------------------------------
+# Push-to-Talk Hotkey Binds
+# The chord(s) that start dictation. Managed at runtime with the `hotkey`
+# control verb or Settings -> Push-to-Talk Keys. Key names are OS-neutral.
+# Available Options:
+#   - A list of {keys, action} entries; action is always "dictate".
+# Default: [{"keys": ["alt", "shift"], "action": "dictate"}]
+hotkeys:
+  - keys: [alt, shift]
+    action: dictate
 
 # ------------------------------------------------------------------------------
 # Custom Word & Phrase Dictionary Replacements

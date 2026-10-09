@@ -14,6 +14,114 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import t2  # noqa: E402
+import keybinds  # noqa: E402
+
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # Python 3.10, which the app still supports
+    tomllib = None
+
+
+# --- example-config parity ---------------------------------------------------
+#
+# The examples are documentation, so the only way to keep them honest is to
+# derive the key set from the code (DEFAULT_SETTINGS, the model-choice lists)
+# and check **both** directions: every shipped setting is documented, and every
+# documented key is a real setting. A hand-written map cannot fail for a key it
+# never lists - which is exactly how eight new settings went uncovered.
+#
+# The YAML example is the fully annotated reference and is asserted to carry the
+# shipped default for every key. The TOML example is a real, supported format
+# (`get_config_file` searches `config.toml` first) but a minimal template with
+# sample values, so it is asserted to document every key rather than to carry the
+# defaults.
+
+EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "config/example-config"
+
+#: Both examples are checked. The TOML one needs ``tomllib`` (3.11+), the same
+#: gate the app's own TOML loader has, so it is skipped on 3.10.
+EXAMPLE_NAMES = ["config.yaml.example"] + (
+    ["config.toml.example"] if tomllib is not None else []
+)
+
+#: Settings whose config-file key is not just the lowercased name.
+_EXAMPLE_RENAMES = {
+    "PUNCTUATION_MODE": "preset",
+    "NUMBER_MODE": "number_digits",
+    "MODEL_BACKEND": "model_backend",
+    "HOTKEY_BINDS": "hotkeys",
+}
+
+#: A setting may be documented under any of these spellings.
+_EXAMPLE_ALIASES = {
+    "PUNCTUATION_MODE": ("preset", "punctuation_mode"),
+}
+
+#: Keys an example may carry that are not DEFAULT_SETTINGS entries: optional
+#: device hints, and the dictionary, which has its own loader.
+_EXAMPLE_EXTRAS = {
+    "primary_device_name",
+    "secondary_device_name",
+    "dictionary",
+    "dictionary_file",
+}
+
+#: Derived runtime mirrors, deliberately not file keys.
+_DERIVED_SETTINGS = {"NUMBER_DIGITS"}
+
+
+def _load_example(path: Path) -> dict:
+    text = path.read_text(encoding="utf-8")
+    if ".toml" in path.suffixes:
+        assert tomllib is not None
+        return tomllib.loads(text)
+    import yaml
+
+    return yaml.safe_load(text) or {}
+
+
+def _expected_example_keys() -> dict:
+    """Every setting -> the config-file key(s) that may document it."""
+    expected = {}
+    for setting in t2.DEFAULT_SETTINGS:
+        if setting in _DERIVED_SETTINGS:
+            continue
+        expected[setting] = _EXAMPLE_ALIASES.get(
+            setting, (_EXAMPLE_RENAMES.get(setting, setting.lower()),)
+        )
+    return expected
+
+
+def _normalize_example_value(setting: str, value):
+    if setting == "PUNCTUATION_MODE":
+        return t2.get_canonical_preset_name(value)
+    if setting == "NUMBER_MODE" and isinstance(value, bool):
+        return "digits" if value else "words"
+    if setting == "HOTKEY_BINDS":
+        return keybinds.parse_binds(value)
+    return value
+
+
+def _assert_example_covers_every_setting(documented: dict, name: str) -> None:
+    expected = _expected_example_keys()
+    accepted_all = {key for keys in expected.values() for key in keys}
+
+    for setting, accepted in expected.items():
+        present = [key for key in accepted if key in documented]
+        assert present, f"{name} no longer documents {accepted[0]!r} ({setting})"
+        if name.endswith(".yaml.example"):
+            key = present[0]
+            got = _normalize_example_value(setting, documented[key])
+            wanted = t2.DEFAULT_SETTINGS[setting]
+            assert got == wanted, (
+                f"{name} documents {key}={documented[key]!r} but the shipped "
+                f"default for {setting} is {wanted!r}"
+            )
+
+    unknown = sorted(set(documented) - accepted_all - _EXAMPLE_EXTRAS)
+    assert unknown == [], (
+        f"{name} documents keys that are not shipped settings: {unknown}"
+    )
 
 
 @pytest.fixture
@@ -340,49 +448,28 @@ class TestResetToDefaults:
         assert t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"] == t2.DEFAULT_PUNCTUATION_MODE
 
     def test_example_config_documents_the_shipped_defaults(self):
-        """A copied config.yaml.example must behave exactly like the defaults."""
-        import yaml
+        """Both example configs must document every shipped setting.
 
-        example = Path(__file__).resolve().parents[2] / "config/example-config/config.yaml.example"
-        documented = yaml.safe_load(example.read_text())
-
-        key_map = {
-            "is_muted": "IS_MUTED",
-            "auto_type": "AUTO_TYPE",
-            "output_mode": "OUTPUT_MODE",
-            "auto_type_trailing_space": "AUTO_TYPE_TRAILING_SPACE",
-            "auto_type_auto_punctuate": "AUTO_TYPE_AUTO_PUNCTUATE",
-            "copy_to_clipboard": "COPY_TO_CLIPBOARD",
-            "preset": "PUNCTUATION_MODE",
-            "language": "LANGUAGE",
-            "enable_slm": "ENABLE_SLM",
-            "wait_for_model_on_startup": "WAIT_FOR_MODEL_ON_STARTUP",
-            "number_digits": "NUMBER_MODE",
-            "serial_collapse": "SERIAL_COLLAPSE",
-            "spell_command": "SPELL_COMMAND",
-            "keep_bluetooth_handsfree": "KEEP_BLUETOOTH_HANDSFREE",
-            "middle_click_enabled": "MIDDLE_CLICK_ENABLED",
-            "sound_theme": "SOUND_THEME",
-            "ui_theme": "UI_THEME",
-            "typing_wpm": "TYPING_WPM",
-            "meeting": "MEETING",
-            "meeting_spill_minutes": "MEETING_SPILL_MINUTES",
-            "diarization": "DIARIZATION",
-            "diarization_speakers": "DIARIZATION_SPEAKERS",
-            "diarization_model": "DIARIZATION_MODEL",
-        }
-
-        for example_key, default_key in key_map.items():
-            assert example_key in documented, f"config.yaml.example lost '{example_key}'"
-            value = documented[example_key]
-            if default_key == "PUNCTUATION_MODE":
-                value = t2.get_canonical_preset_name(value)
-            elif default_key == "NUMBER_MODE" and isinstance(value, bool):
-                value = "digits" if value else "words"
-            assert value == t2.DEFAULT_SETTINGS[default_key], (
-                f"config.yaml.example documents {example_key}={value!r} but the "
-                f"shipped default is {t2.DEFAULT_SETTINGS[default_key]!r}"
+        The key set is derived from ``DEFAULT_SETTINGS`` (plus the model-choice
+        lists), not a hand-written map, so adding a setting without documenting
+        it fails here. It also checks that every documented key is a real
+        setting. The YAML example must additionally carry the shipped default
+        for every key; the TOML template only has to cover the keys.
+        """
+        for name in EXAMPLE_NAMES:
+            _assert_example_covers_every_setting(
+                _load_example(EXAMPLES_DIR / name), name
             )
+
+    def test_the_example_choices_are_real(self):
+        """Documented model/hotkey choices must be ones the code registers."""
+        for name in EXAMPLE_NAMES:
+            documented = _load_example(EXAMPLES_DIR / name)
+            assert documented["formatter_model"] in t2.FORMATTER_MODELS
+            assert documented["diarization_model"] in t2.DIARIZATION_MODELS
+            assert documented["model_backend"] in t2.transcribe2.BACKENDS
+            assert keybinds.parse_binds(documented["hotkeys"]) == \
+                t2.DEFAULT_SETTINGS["HOTKEY_BINDS"]
 
 
 def _make_app(monkeypatch, recording=False):
