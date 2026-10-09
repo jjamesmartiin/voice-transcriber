@@ -616,20 +616,57 @@ Detail: [`plan-diarization.md`](plan-diarization.md).
 
 ### 4E. ASR bake-off — Parakeet vs Cohere
 
-Detail: [`plan-parity-roadmap.md`](plan-parity-roadmap.md) §3.1.
-**Cheapest way to change the app's future: one backend module + one eval run.**
+Detail: [`asr-bakeoff.md`](asr-bakeoff.md). **DONE.** Verdict: **keep Cohere as the default.**
 
-- [ ] **E1** Add Parakeet TDT 0.6B v3 as a third entry in `transcribe2.BACKENDS`.
-      *Done = the module and its tests exist and pass with no weights present.*
-- [!] **E2** Run `eval/score.py --json` and compare against `eval/results.json`.
-      **Measure WER/CER *and* wall-clock RTF *and* peak RSS together** — accuracy alone
-      repeats the mistake the Cohere-vs-whisper comparison deliberately avoided.
-      *Done = a written verdict with all three numbers.* (~490 MB download.)
-- [!] **E3** If Cohere is kept: evaluate the **sherpa-onnx int8 ONNX** path, which drops the
-      `torch` dependency entirely (~0.7–1 GB installed) and unifies ASR+VAD+punctuation+
-      diarization on one runtime, with no change to the transcript.
-- [ ] **E4** Feed the outcome back into 4D — specifically whether §3's "diarize first, then
-      transcribe each turn" survives.
+| | Cohere default | Cohere `--int8` | Parakeet |
+| --- | --- | --- | --- |
+| WER / CER / exact | **3.35 / 1.40 / 71.1 %** | 3.57 / 1.42 / 69.7 % | 9.52 / 6.84 / 50.7 % |
+| RTF (Σdur/Σlat) | 7.35× | 13.48× | **36.44×** |
+| peak RSS | 4.69 GiB | **22.15 GiB** | **1.57 GiB** |
+| silence hallucination | 0/12 | 0/12 | 0/12 |
+
+Parakeet is 5× faster and 3× smaller and still loses, because it is ~1.9× the errors on the
+*fair* comparison (whole-clip, batcher bypassed: 2.65 % vs 4.93 %) and Cohere wins **every**
+slice. Measured on the real 154-clip set, all three configs, fresh.
+
+- [x] **E1** Parakeet TDT 0.6B v3 added as a second `transcribe2.BACKENDS` entry.
+      `DEFAULT_BACKEND` stays `cohere`. 19 model-free tests, model-free by construction —
+      no `sherpa_onnx` at import, pinned by a subprocess test.
+- [x] **E2** The bake-off, with **all three axes measured together** as the plan required —
+      accuracy *and* RTF *and* peak RSS. The plan's warning was well placed: accuracy alone
+      would have missed that Parakeet is 5× faster and 3× smaller in memory, which is the
+      whole reason the question was worth asking.
+      *The comparison is unfair to Parakeet as measured, and the doc says so:* its pipeline
+      WER is ~2× its whole-clip WER because the micro-batcher's energy-cut chunks make the
+      TDT decoder emit zero tokens for some segments — proven by feeding the same five
+      chunks to both backends (Cohere transcribes all five, Parakeet empties three). So the
+      honest headline is the whole-clip pair, and Parakeet would need a `micro_batcher`
+      change to be judged fairly. It still loses.
+- [ ] **E3** *(now applicable — Cohere is kept)* Evaluate the **sherpa-onnx int8 ONNX** path
+      for Cohere: it drops the `torch` dependency (~0.7–1 GiB installed) and unifies
+      ASR+VAD+punctuation+diarization on one runtime. **Newly motivated by E2:** Cohere's
+      *existing* `--int8` option (torch dynamic quantisation) peaks at **22.15 GiB**, so the
+      ONNX path is now the plausible way to get int8 at all — but note that is a different
+      mechanism from what the flag does today. ~2.9 GB download.
+- [x] **E4** **§3's "diarize first, then transcribe each turn" design survives.** Cohere
+      stays the default and has no timestamps at all, so nothing changes. Worth recording
+      that the question was answered the other way too: Parakeet has **no native word
+      timestamps** (every `words`/`segment_*` field is empty), only token
+      `timestamps`/`durations` from which word boundaries are *reconstructible* from
+      space-prefixed word-pieces. So even on the backend that would have changed the design,
+      the answer would have been "usable, not native" rather than a clean yes.
+
+**Two findings from E that are not about Parakeet at all:**
+
+1. **`eval/results.json` is stale.** Re-running its exact config gives **3.57 %** WER, not
+   the recorded 5.10 %; the refs are identical but **85 of 154** hypotheses differ, so the app
+   changed underneath the baseline (post-processor/chunker drift since `b7f9ad4`). The app
+   improving is good news; a recorded baseline that no longer reproduces is not, because
+   A4/C7 want to gate regressions against it. **It needs regenerating.**
+2. **Silence did not hallucinate.** The plan warned sherpa-onnx needed its own silence guard
+   because the decoder hallucinated on silence — that did not reproduce (0/12, and the raw
+   decoder gives 0/12 too, so the guard is not what produces the zero). Worth knowing before
+   anyone builds machinery for a problem that is not there.
 
 ---
 
