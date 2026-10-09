@@ -642,6 +642,64 @@ def test_notice_formal_names_are_not_the_console_labels():
     assert spec.license_title != spec.license_name
 
 
+def test_s1_mini_notice_is_pinned_to_the_published_wording():
+    """The S1-mini NOTICE is a legal artifact and must never drift.
+
+    Its ADDITIONAL TERM requires the exact name '"S1-mini" by "Superwhisper"',
+    so the *upstream* NOTICE ships byte-for-byte through ``spec.notice_file``
+    instead of a generated one, which would paraphrase the operative clause.
+    Pinned here the same way the Cohere NOTICE is.
+    """
+    spec = model_download.get_spec("formatter")
+    assert spec.notice_file == "config/licenses/S1-mini-NOTICE.txt"
+    notice = (REPO_ROOT / spec.notice_file).read_text(encoding="utf-8")
+    assert notice == (
+        "S1-mini-GGUF\n"
+        "Copyright 2026 Superwhisper\n"
+        "\n"
+        "GGUF conversions of S1-mini, which is itself a derivative of Qwen3-0.6B,\n"
+        "Copyright 2024 Alibaba Cloud, licensed under the Apache License, Version 2.0.\n"
+        "\n"
+        "Any use, distribution, or integration of this model, whether unmodified or\n"
+        "as part of a derivative work or product, must continue to identify it by its\n"
+        'original name, "S1-mini" by "Superwhisper", using that exact capitalization.\n'
+        "This restates the ADDITIONAL TERM of the LICENSE file, which is the\n"
+        "operative text.\n"
+    )
+
+
+def test_s1_mini_licence_carries_provenance_and_the_full_upstream_text():
+    """The committed licence is the upstream text plus verifiable provenance."""
+    spec = model_download.get_spec("formatter")
+    lic = (REPO_ROOT / spec.license_file).read_text(encoding="utf-8")
+    assert spec.repo_id in lic, "provenance must name the source repo"
+    assert spec.revision in lic, "provenance must pin the revision"
+    assert spec.digests["s1-mini-q4_k_m.gguf"] in lic, "provenance must pin the digest"
+    # The full upstream text is retained: Apache-2.0 *and* the additional term.
+    assert "Apache License" in lic
+    assert "Version 2.0" in lic
+    assert "ADDITIONAL TERM" in lic
+    assert '"S1-mini" by "Superwhisper"' in lic
+
+
+def test_diarization_licences_and_provenance_are_committed():
+    """Both graphs' licences ship, with the digests that verify them."""
+    spec = model_download.get_spec("diarization")
+    lic = (REPO_ROOT / spec.license_file).read_text(encoding="utf-8")
+    assert "MIT License" in lic                 # pyannote segmentation
+    assert "Copyright (c) 2022 CNRS" in lic
+    assert "Apache License" in lic              # 3D-Speaker embedding
+    assert "recongition" in lic, "the upstream (misspelled) asset URL is provenance"
+    assert spec.repo_id in lic
+    for digest in spec.digests.values():
+        assert digest in lic, f"provenance must pin {digest}"
+
+    notice = (REPO_ROOT / spec.notice_file).read_text(encoding="utf-8")
+    assert "pyannote" in notice
+    assert "3D-Speaker" in notice
+    assert "MIT" in notice and "Apache" in notice
+
+
 def test_manifest_listing_missing_parts_is_skipped(monkeypatch, tmp_path):
     """Regression: a manifest whose parts are absent must never be chosen.
 
