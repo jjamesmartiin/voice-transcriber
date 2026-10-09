@@ -899,6 +899,36 @@ slice. Measured on the real 154-clip set, all three configs, fresh.
       control-API tests.*
       **Residual gaps:** `socket.getaddrinfo` is not guarded (DNS could still leak), and asyncio
       connects go through the loop's own `sock_connect`, bypassing the guard.
+- [ ] **X6** ⚠️ **A second `tests/shared` hermeticity hole — a "model-free" test loads the real
+      462 MiB formatter and leaks a `llama-server` on every run.** Found 2026-10-09 while
+      reviewing the eval merge, and **pre-existing**: it fails identically at `2140c50` in a
+      clean detached worktree, so it is not a regression from this session.
+
+      `tests/shared/test_formatter_settings.py::test_no_backend_means_the_text_passes_through`
+      was written against the **dropped C4 in-process backend**, whose module "is not
+      installed", and it deliberately does not stub the backend. Both of its premises died:
+      C3 shipped `llama-server` as the real backend and C2 added the
+      conventional-install-path fallback, so `FORMATTER_MODEL="s1-mini"` resolves the real
+      GGUF on any machine that has ever done a first-run install. Measured: `available("s1-mini")`
+      returns `True`, `_model_path` returns the installed `.gguf`, and the pipeline returns a
+      *formatted* transcript while the file's docstring still promises "Model-free throughout …
+      nothing here needs the 462 MiB GGUF".
+
+      Two consequences beyond the wrong assertion:
+      * **It leaks a process per run.** 42 orphaned `llama-server` processes (12 threads each)
+        were reparented to `systemd --user` before being killed. The user's *real* server is a
+        child of the live engine (pid given by `ps --ppid <engine>`), so orphans are
+        distinguishable by parent — never blanket-`pkill` these.
+      * **It is load-dependent, which is why it survived.** A preceding failed spawn arms
+        `_state["spawn_failed_at"]`, after which `available()` returns `False` for
+        `_SPAWN_RETRY_COOLDOWN_S` (60 s) — so a loaded machine makes the test pass. It reported
+        all-green in at least three separate runs before it was caught. **A green run of this
+        tier is not evidence.**
+
+      *Done = the test forces "no backend available" by construction (`available() -> False`,
+      not "the machine has no model"), any other test in the file that can reach the real
+      backend is fixed too, and a pin proves the shared tier cannot spawn a real server —
+      verified by running the tier twice and showing `pgrep -c llama-server` does not grow.*
 
 ---
 
