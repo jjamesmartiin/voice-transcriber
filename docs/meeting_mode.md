@@ -55,6 +55,8 @@ catalogue — do not treat the names below as an exhaustive list.
 | `diarization` | `off`, `on` | `off` | Speaker labels for meeting transcripts (D6). `off` never loads the diarization model and never runs the pass, so a meeting is transcribed as one speaker. Unknown values fail safe to `off` (the pass loads a model; a typo must not turn it on). |
 | `diarization_speakers` | `auto`, `2`–`8` | `auto` | Optional expected speaker count hint. Everything is more accurate, and clustering much cheaper, when the count is known — but it is only a hint. Out-of-range or unparseable values fall back to `auto`, never to a guessed count. |
 | `diarization_model` | registry name | `diarization` | Which diarization model bundle to load (the `diarization` `ModelSpec` in `model_download.py`). The model is startup-loaded like `model_backend`, so changing it needs a restart; the `diarization` **mode** above is hot. Unknown names warn and fall back to the shipped default. |
+| `meeting_output_dir` | path | `meetings` | Where the finished transcript is written. Repo-relative by default, so a checkout's transcripts land in `<repo>/meetings/` (gitignored); an absolute path is used as-is. `VT_MEETING_OUTPUT_DIR` always wins. |
+| `meeting_output_format` | `text`, `json`, `markdown` | `text` | The artifact form. `text` is byte-identical to the pre-D5 artifact; `json` is one object per turn; `markdown` is a headed Markdown document. Unknown values fall back to `text`. |
 
 `status` reports the pair `meeting` (effective) and `meeting_setting`
 (configured), in the same configured-vs-effective style as `structure_mode` /
@@ -64,10 +66,12 @@ gate (for example diarization being switched off in D6) cannot quietly turn one
 into the other.
 
 Env overrides: `VT_MEETING`, `VT_MEETING_SPILL_MINUTES`, `VT_DIARIZATION`,
-`VT_DIARIZATION_SPEAKERS`, `VT_DIARIZATION_MODEL`.
+`VT_DIARIZATION_SPEAKERS`, `VT_DIARIZATION_MODEL`, `VT_MEETING_OUTPUT_DIR`,
+`VT_MEETING_OUTPUT_FORMAT`.
 
 Config keys: `meeting`, `meeting_spill_minutes`, `diarization`,
-`diarization_speakers`, `diarization_model`.
+`diarization_speakers`, `diarization_model`, `meeting_output_dir`,
+`meeting_output_format`.
 
 The diarization keys are a meeting-mode **enhancement**, not a second feature
 gate. Enabling `meeting` alone still captures and transcribes, but as a single
@@ -86,6 +90,44 @@ Until the registry entry ships a download path, treat speaker labels as
 available only where the weights have been installed manually — they are not a
 first-run experience. This is deliberate D7 research recorded rather than
 implied away.
+
+### The speakers map is transcript metadata, edited on the meeting screen
+
+The **speakers map** turns a numeric label into a name: `Speaker 2` becomes
+`Priya`. It is an **ordered, editable list of names** — entry 1 names speaker 1,
+entry 2 names speaker 2, and so on. There is deliberately no `S1`/`S2` concept in
+the UI; it is just names. A slot left blank, or a speaker past the end of the
+list, falls back to the readable `Speaker N` label, so a partial map still
+renders.
+
+**This is the one editable thing that is not in the settings modal, and that is
+on purpose.** The repo invariant is "the settings modal is the only
+configuration entry point", and this is not configuration: a speaker name is
+per-meeting **transcript metadata**, like the transcript text itself. It is
+therefore implemented as a distinct *meeting-screen* action, not a settings row
+(`select_speaker_editor()` in `t2.py`, reached through the `on_open_speaker_editor`
+seam), and it is never written to `config/config.yaml`.
+
+Because the meeting screen has its own action, it has its own terminal key map,
+scoped strictly to that screen:
+
+| Key | Meeting screen | Everywhere else (unchanged) |
+| --- | --- | --- |
+| `Space` / `Enter` | start/stop the meeting capture | start/stop dictation |
+| `s` / `S` | open the speaker-name editor | open the settings modal |
+| `Esc` | quit | quit |
+| `q` / `Ctrl+C` | quit | quit |
+| `,` | (not bound) | open the settings modal |
+| `r` | (not bound) | reset the terminal |
+
+Outside the meeting screen the global contract is exactly what it always was:
+`Space`/`Enter` record, `s`/`S`/`,` settings, `r` reset, `q`/`Esc`/`Ctrl+C` quit.
+Both halves are pinned by `tests/shared/test_meeting_screen.py`.
+
+The map is live: it is read at render time, so a name changed while the pipeline
+is still transcribing turns is applied to the finished document. The control API
+also exposes it as metadata (`speakers`, aliases `speaker-names` / `speaker-map`)
+for scripting, and `status` reports it as `speakers`.
 
 ## Progress state
 

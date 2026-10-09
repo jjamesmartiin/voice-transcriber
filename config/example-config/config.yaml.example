@@ -156,6 +156,20 @@ diarization_speakers: "auto"
 # Default: "diarization"
 diarization_model: "diarization"
 
+# Where the finished transcript is written. Repo-relative by default, so a
+# checkout's transcripts land in <repo>/meetings/ (gitignored); an absolute path
+# is used as-is. Env: VT_MEETING_OUTPUT_DIR (always wins).
+# Default: "meetings"
+meeting_output_dir: "meetings"
+
+# The form of the finished transcript:
+#   - "text"     : the plain [Speaker] transcript (default, byte-identical to
+#                  the pre-D5 artifact)
+#   - "json"     : one object per turn, with the speaker name map applied
+#   - "markdown" : a headed Markdown document
+# Env: VT_MEETING_OUTPUT_FORMAT. Default: "text"
+meeting_output_format: "text"
+
 # ------------------------------------------------------------------------------
 # On-Device Formatter (optional local language model)
 # An optional second pass that rewrites the cleaned transcript the way a cloud

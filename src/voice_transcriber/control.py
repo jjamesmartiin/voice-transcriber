@@ -115,6 +115,7 @@ VERBS: dict[str, dict] = {
             "meeting_transcript", "meeting_transcript_path", "meeting_speakers",
             "diarization", "diarization_setting", "diarization_speakers",
             "diarization_model",
+            "meeting_output_dir", "meeting_output_format", "speakers",
             "ui_theme", "middle_click",
             "last_transcription",
         ],
@@ -215,6 +216,24 @@ VERBS: dict[str, dict] = {
         "choices": ["diarization"],
         "required": True,
         "returns": ["diarization_model"],
+    },
+    "meeting-output": {
+        "summary": "Set (or report) the folder meeting transcripts are written to",
+        "value": "folder",
+        "aliases": ["meeting-output-dir", "meeting-output-folder"],
+        "returns": ["meeting_output_dir"],
+    },
+    "meeting-format": {
+        "summary": "Set the transcript form (text, json, or markdown); omit to cycle",
+        "value": "format",
+        "choices": ["text", "json", "markdown"],
+        "returns": ["meeting_output_format"],
+    },
+    "speakers": {
+        "summary": "List or set the meeting speaker names (ordered, comma-separated metadata)",
+        "value": "names",
+        "aliases": ["speaker-names", "speaker-map"],
+        "returns": ["speakers"],
     },
     "meeting-start": {
         "summary": "Start a meeting capture (requires meeting mode on; does not inject text)",

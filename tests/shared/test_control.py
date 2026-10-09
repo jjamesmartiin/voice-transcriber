@@ -34,6 +34,9 @@ _VALUE_VERBS = {
     "diarization": "on",
     "diarization-speakers": "auto",
     "diarization-model": "diarization",
+    "meeting-output": "/tmp/vt-transcripts",
+    "meeting-format": "text",
+    "speakers": "Priya, Sam",
 }
 
 
@@ -701,6 +704,14 @@ class TestVerbCatalogue:
             "diarization", "diarization_setting", "diarization_speakers",
             "diarization_model",
         ):
+            assert key in control.VERBS["status"]["returns"]
+
+    def test_meeting_artifact_and_speaker_verbs_are_in_the_catalogue(self):
+        """D5: the output location/form and the speakers map are scriptable."""
+        assert control.VERBS["meeting-output"]["value"] == "folder"
+        assert control.VERBS["meeting-format"]["choices"] == ["text", "json", "markdown"]
+        assert control.VERBS["speakers"]["value"] == "names"
+        for key in ("meeting_output_dir", "meeting_output_format", "speakers"):
             assert key in control.VERBS["status"]["returns"]
 
     def test_structure_verb_reports_both_modes(self):

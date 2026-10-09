@@ -106,6 +106,13 @@ class SimpleVoiceTranscriber:
         # docs/meeting_mode.md). Constructed here so `status` can report it from
         # the first control request; it opens no device until `meeting-start`.
         self.meeting = meeting.MeetingSession(on_change=self._on_meeting_change)
+        # The speakers map is transcript metadata, not app config: an ordered list
+        # of names applied to speaker indices when the transcript is rendered. It
+        # is edited live from the meeting screen, so it lives on the engine and is
+        # read at render time through a getter (a meeting can be renamed while it
+        # is still being processed).
+        self.speaker_names = []
+        t2.register_speaker_hooks(get=self.get_speaker_names, set=self.set_speaker_names)
         # The batch pipeline that turns a finished capture into a transcript
         # (docs/meeting_pipeline.md). It runs on the session's finalize daemon
         # thread, yields to dictation between turns and is cancelled when the
@@ -120,6 +127,11 @@ class SimpleVoiceTranscriber:
             # speaker labels does not need a restart.
             diarization_gate=lambda: t2.get_diarization() == "on",
             speakers_hint=lambda: t2.get_diarization_speakers(),
+            # D5: output location + form are settings read at write time, and the
+            # speakers map is live metadata read at render time.
+            output_dir_getter=lambda: t2.get_meeting_output_dir(),
+            output_format_getter=lambda: t2.get_meeting_output_format(),
+            speaker_names_getter=lambda: list(getattr(self, "speaker_names", [])),
             on_done=self._on_meeting_transcript,
         )
         self.meeting.set_audio_consumer(self.meeting_pipeline.process)
@@ -285,6 +297,8 @@ class SimpleVoiceTranscriber:
             diarization=getattr(t2, 'get_diarization', lambda: 'off')(),
             diarization_speakers=getattr(t2, 'get_diarization_speakers', lambda: 'auto')(),
             diarization_model=getattr(t2, 'get_diarization_model', lambda: 'diarization')(),
+            meeting_output_dir=getattr(t2, 'get_meeting_output_dir', lambda: 'meetings')(),
+            meeting_output_format=getattr(t2, 'get_meeting_output_format', lambda: 'text')(),
             formatter=getattr(t2, 'get_formatter', lambda: 'off')(),
             formatter_model=getattr(t2, 'get_formatter_model', lambda: 's1-mini')(),
             formatter_style=getattr(t2, 'get_formatter_style', lambda: 'semi-formal')(),
@@ -330,6 +344,10 @@ class SimpleVoiceTranscriber:
         self.tui.on_cycle_diarization = self._on_tui_cycle_diarization
         self.tui.on_cycle_diarization_speakers = self._on_tui_cycle_diarization_speakers
         self.tui.on_cycle_diarization_model = self._on_tui_cycle_diarization_model
+        self.tui.on_cycle_meeting_output_format = self._on_tui_cycle_meeting_output_format
+        self.tui.on_set_meeting_output_dir = self._on_tui_set_meeting_output_dir
+        self.tui.on_open_speaker_editor = self.open_speaker_editor
+        self.tui.on_set_speaker_names = self._on_tui_set_speaker_names
         self.tui.on_cycle_formatter = self._on_tui_cycle_formatter
         self.tui.on_cycle_formatter_model = self._on_tui_cycle_formatter_model
         self.tui.on_cycle_formatter_style = self._on_tui_cycle_formatter_style
@@ -651,6 +669,51 @@ class SimpleVoiceTranscriber:
         """The live meeting session, or ``None`` on a partially-built engine."""
         return getattr(self, "meeting", None)
 
+    # -- the speakers map (live transcript metadata) -----------------------
+    def get_speaker_names(self):
+        """The live ordered speaker-name list (may be empty)."""
+        return list(getattr(self, "speaker_names", []))
+
+    def set_speaker_names(self, names):
+        """Replace the live speakers map with a normalised ordered list."""
+        import t2
+        self.speaker_names = t2.normalize_speaker_names(names)
+        return list(self.speaker_names)
+
+    def open_speaker_editor(self):
+        """Open the meeting screen's speaker-name editor.
+
+        Deliberately not routed through the settings modal: a speaker name is
+        metadata for one transcript, and this must be usable while a meeting is
+        still recording or being processed. The editor writes straight back
+        through the hooks, so the map stays live.
+        """
+        import t2
+        if hasattr(self, "tui") and self.tui:
+            self.tui._pause_live()
+        try:
+            changed = t2.select_speaker_editor()
+            if changed and hasattr(self, "tui") and self.tui:
+                self.tui.print_event(
+                    "🗣️ Speakers", "Speaker names updated.", level="success"
+                )
+            t2.reset_terminal()
+        except Exception as exc:
+            if hasattr(self, "tui") and self.tui:
+                self.tui.print_error("Speakers Error", str(exc))
+            import t2 as _t2
+            _t2.reset_terminal()
+        finally:
+            if hasattr(self, "tui") and self.tui:
+                self.tui._resume_live()
+                # Return to the live meeting view rather than READY if a capture
+                # is still running; the session's own ticker refreshes it.
+                session = self._meeting_session()
+                if session is not None and session.status().state == "recording":
+                    self.tui.update_state("MEETING")
+                else:
+                    self.tui.update_state("READY")
+
     def _on_meeting_change(self, status):
         """Push a meeting status snapshot into the TUI (elapsed timer + %)."""
         tui = getattr(self, "tui", None)
@@ -813,6 +876,32 @@ class SimpleVoiceTranscriber:
         new_model = t2.cycle_diarization_model()
         self._sync_tui_state()
         self.tui.print_event("🧠 Speaker Model", f"Using {new_model}", level="info")
+
+    def _on_tui_cycle_diarization_model(self):
+        import t2
+        new_model = t2.cycle_diarization_model()
+        self._sync_tui_state()
+        self.tui.print_event("🧠 Speaker Model", f"Using {new_model}", level="info")
+
+    def _on_tui_cycle_meeting_output_format(self):
+        import t2
+        fmt = t2.cycle_meeting_output_format()
+        self._sync_tui_state()
+        self.tui.print_event("📄 Transcript Form", f"Writing {fmt}", level="info")
+
+    def _on_tui_set_meeting_output_dir(self, path):
+        import t2
+        new_path = t2.set_meeting_output_dir(path)
+        self._sync_tui_state()
+        self.tui.print_event("📁 Transcript Folder", f"Saved to {new_path}", level="info")
+
+    def _on_tui_set_speaker_names(self, names):
+        """Set the live speakers map from the meeting screen / ratatui bridge."""
+        import t2
+        self.set_speaker_names(names)
+        self.tui.print_event(
+            "🗣️ Speakers", f"{len(t2.normalize_speaker_names(names))} name(s) set", level="info"
+        )
 
     def _on_tui_reset_defaults(self):
         """Restore every user-tunable setting to its shipped default."""
@@ -1454,6 +1543,15 @@ class SimpleVoiceTranscriber:
             "diarization_model": getattr(
                 t2, "get_diarization_model", lambda: "diarization"
             )(),
+            "meeting_output_dir": getattr(
+                t2, "get_meeting_output_dir", lambda: "meetings"
+            )(),
+            "meeting_output_format": getattr(
+                t2, "get_meeting_output_format", lambda: "text"
+            )(),
+            # The live speakers map (transcript metadata, edited on the meeting
+            # screen). An ordered list; index i names speaker i.
+            "speakers": self.get_speaker_names(),
             "meeting_state": status.state if status is not None else "idle",
             "meeting_stage": getattr(status, "stage", "idle") if status is not None else "idle",
             "meeting_elapsed_s": status.elapsed_s if status is not None else 0.0,
@@ -1826,6 +1924,34 @@ class SimpleVoiceTranscriber:
             t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)
+
+        # -- meeting artifact: output location, form, and the speakers map --
+        if verb in ("meeting-output", "meeting-output-dir", "meeting_output_dir"):
+            if value is not None and str(value).strip():
+                t2.set_meeting_output_dir(value)
+                t2.save_audio_config()
+                self._sync_tui_state()
+            return self._control_status(
+                verb, meeting_output_dir=t2.get_meeting_output_dir()
+            )
+
+        if verb in ("meeting-format", "meeting-output-format", "meeting_format"):
+            if value is not None and str(value).strip():
+                t2.set_meeting_output_format(value)
+            else:
+                t2.cycle_meeting_output_format()
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(
+                verb, meeting_output_format=t2.get_meeting_output_format()
+            )
+
+        if verb in ("speakers", "speaker-names", "speaker-map"):
+            # The speakers map is transcript metadata, not app config: setting it
+            # does not touch the config file.
+            if value is not None:
+                self.set_speaker_names(value)
+            return self._control_status(verb, speakers=self.get_speaker_names())
 
         if verb in ("formatter", "formatter-mode"):
             need_value()

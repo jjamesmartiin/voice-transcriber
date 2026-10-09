@@ -109,6 +109,10 @@ class RatatuiTui:
         self.on_cycle_diarization = None
         self.on_cycle_diarization_speakers = None
         self.on_cycle_diarization_model = None
+        self.on_cycle_meeting_output_format = None
+        self.on_set_meeting_output_dir = None
+        self.on_open_speaker_editor = None
+        self.on_set_speaker_names = None
         self.on_set_punctuation = None
         self.on_reset_defaults = None
         self.on_reset_terminal = None
@@ -327,6 +331,22 @@ class RatatuiTui:
         elif cmd == "cycle_diarization_model":
             if getattr(self, "on_cycle_diarization_model", None):
                 self.on_cycle_diarization_model()
+        elif cmd in ("cycle_meeting_output_format", "cycle_meeting_format"):
+            if getattr(self, "on_cycle_meeting_output_format", None):
+                self.on_cycle_meeting_output_format()
+        elif cmd in ("set_meeting_output_dir", "set_meeting_output_folder"):
+            path = msg.get("path") or msg.get("value")
+            if path is not None and getattr(self, "on_set_meeting_output_dir", None):
+                self.on_set_meeting_output_dir(path)
+        elif cmd in ("open_speaker_editor", "edit_speakers"):
+            if getattr(self, "on_open_speaker_editor", None):
+                self.on_open_speaker_editor()
+        elif cmd in ("set_speakers", "set_speaker_names"):
+            names = msg.get("speakers")
+            if names is None:
+                names = msg.get("value")
+            if getattr(self, "on_set_speaker_names", None):
+                self.on_set_speaker_names(names)
         elif cmd == "cycle_typing_wpm" and getattr(self, "on_cycle_typing_wpm", None):
             self.on_cycle_typing_wpm()
         elif cmd == "set_typing_wpm":
@@ -620,6 +640,7 @@ class RatatuiTui:
                          sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None,
                          meeting_mode=None, meeting_spill_minutes=None,
                          diarization=None, diarization_speakers=None, diarization_model=None,
+                         meeting_output_dir=None, meeting_output_format=None,
                          formatter=None, formatter_model=None, formatter_style=None, formatter_context=None,
                          trailing_space=None, auto_punctuate=None, number_digits=None,
                          number_mode=None, serial_collapse=None, spell_command=None,
@@ -670,6 +691,12 @@ class RatatuiTui:
         if diarization_model is not None:
             self.diarization_model = diarization_model
             msg["diarization_model"] = diarization_model
+        if meeting_output_dir is not None:
+            self.meeting_output_dir = meeting_output_dir
+            msg["meeting_output_dir"] = meeting_output_dir
+        if meeting_output_format is not None:
+            self.meeting_output_format = meeting_output_format
+            msg["meeting_output_format"] = meeting_output_format
         if formatter is not None:
             self.formatter = formatter
             msg["formatter"] = formatter

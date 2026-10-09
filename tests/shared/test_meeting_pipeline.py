@@ -586,6 +586,102 @@ def test_artifact_has_a_header_and_labelled_turns(tmp_path):
     assert "[Speaker 2] General Kenobi." in content
 
 
+def test_speaker_names_are_applied_and_unnamed_fall_back(tmp_path):
+    """D5: names replace the numeric label; a blank slot keeps ``Speaker N``."""
+    turns = [Turn(0.0, 2.0, 0), Turn(2.0, 4.0, 1), Turn(4.0, 6.0, 2)]
+    pipeline, _ = _make_pipeline(
+        tmp_path,
+        turns=turns,
+        texts=["one", "two", "three"],
+        speaker_names_getter=lambda: ["Priya", "", "Bo"],
+    )
+
+    result = pipeline.process(_audio(6.0), 16000)
+
+    assert result.labelled is True
+    body = Path(result.path).read_text(encoding="utf-8")
+    assert "[Priya] one" in body
+    assert "[Speaker 2] two" in body  # blank slot -> readable fallback
+    assert "[Bo] three" in body
+
+
+def test_json_output_is_per_turn_with_names(tmp_path):
+    turns = [Turn(0.0, 2.0, 0), Turn(2.0, 4.0, 1)]
+    pipeline, _ = _make_pipeline(
+        tmp_path,
+        turns=turns,
+        texts=["hello", "hi"],
+        speaker_names_getter=lambda: ["Priya", "Sam"],
+        output_format_getter=lambda: "json",
+    )
+
+    result = pipeline.process(_audio(4.0), 16000)
+
+    assert str(result.path).endswith(".json")
+    import json as _json
+    payload = _json.loads(Path(result.path).read_text(encoding="utf-8"))
+    assert payload["speakers"] == 2
+    assert [t["name"] for t in payload["turns"]] == ["Priya", "Sam"]
+    assert [t["text"] for t in payload["turns"]] == ["hello", "hi"]
+    assert payload["turns"][0]["speaker"] == 0  # 0-based in the machine form
+
+
+def test_markdown_output_with_names(tmp_path):
+    turns = [Turn(0.0, 2.0, 0), Turn(2.0, 4.0, 1)]
+    pipeline, _ = _make_pipeline(
+        tmp_path,
+        turns=turns,
+        texts=["hello", "hi"],
+        speaker_names_getter=lambda: ["Priya"],
+        output_format_getter=lambda: "markdown",
+    )
+
+    result = pipeline.process(_audio(4.0), 16000)
+
+    assert str(result.path).endswith(".md")
+    body = Path(result.path).read_text(encoding="utf-8")
+    assert body.startswith("# Meeting transcript")
+    assert "**Priya:** hello" in body
+    assert "**Speaker 2:** hi" in body  # past the end of the map
+
+
+def test_output_format_defaults_to_the_byte_identical_text_form(tmp_path):
+    """The shipped form has not changed: no getter means the plain transcript."""
+    turns = [Turn(0.0, 2.0, 0), Turn(2.0, 4.0, 1)]
+    pipeline, _ = _make_pipeline(tmp_path, turns=turns, texts=["a", "b"])
+
+    result = pipeline.process(_audio(4.0), 16000)
+
+    assert str(result.path).endswith(".txt")
+    body = Path(result.path).read_text(encoding="utf-8")
+    assert body.startswith("Meeting transcript\n")
+    assert "[Speaker 1] a" in body and "[Speaker 2] b" in body
+
+
+def test_output_dir_setting_is_used_when_no_explicit_dir(tmp_path, monkeypatch):
+    """The output-dir getter is consulted; env still overrides it."""
+    target = tmp_path / "from-setting"
+    pipeline = mp.MeetingPipeline(
+        diarizer=_scripted([Turn(0.0, 1.0, 0)]),
+        transcriber=lambda segment: "x",
+        post_processor=_identity_post,
+        output_dir_getter=lambda: str(target),
+    )
+    result = pipeline.process(_audio(1.0), 16000)
+    assert str(target) in str(result.path)
+
+    env_target = tmp_path / "from-env"
+    monkeypatch.setenv(mp.OUTPUT_DIR_ENV, str(env_target))
+    pipeline2 = mp.MeetingPipeline(
+        diarizer=_scripted([Turn(0.0, 1.0, 0)]),
+        transcriber=lambda segment: "x",
+        post_processor=_identity_post,
+        output_dir_getter=lambda: str(target),
+    )
+    result2 = pipeline2.process(_audio(1.0), 16000)
+    assert str(env_target) in str(result2.path)
+
+
 # ---------------------------------------------------------------------------
 # End-to-end: session capture -> pipeline -> status, plus spill cleanup
 # ---------------------------------------------------------------------------
