@@ -11,9 +11,10 @@ Written 2026-10-08, at a point where context was getting long.
 
 ## 0. Session 2 state — 2026-10-09 (read this before §1)
 
-**Interrupted mid-flight by a network pause.** Nothing is lost: every worktree is
-on disk, and every commit is on **github** under `wip/feature-parity-2026-10`.
-`git.jdm.cx` (gitea) stopped resolving — re-push when it is back.
+**Interrupted mid-flight by a network pause — the interrupted work was then recovered,
+verified and merged.** Nothing is lost. Every worktree is clean and every commit is on
+**github** under `wip/feature-parity-2026-10`. `git.jdm.cx` (gitea) stopped resolving —
+re-push when it is back.
 
 **`main` is deliberately untouched** so no release can fire (`release.yml`
 triggers only on `v*` tags, verified). This session's owner decisions are recorded
@@ -26,21 +27,23 @@ in [`TODO-parity.md`](TODO-parity.md) **§1b as `S1`–`S12`**.
 | `wip/feature-parity-2026-10` | **Integration branch.** Docs: §1b decisions, D7/DER design, E3 verification, the regenerated eval baseline, X6. `work/parity-eval` merged. |
 | `work/parity-eval` | **Merged.** Baseline regenerated 5.10 %→3.57 % on a clean tree with self-describing `meta`; `eval/review_report.py` → `eval/report.html` (per-clip audio + ref + hyp + diff). |
 | `work/parity-formatter` | **MERGED into the integration branch.** 6 commits: C6a registry (adds `FORMATTER` **and `DIARIZATION`** specs, `_model_path` through the registry), C6b first-use prompt with the size, C6c publish path, C9 licence/NOTICE + provenance, C8 docs/CHANGELOG, and the X6 fix + guard pins. |
-| `work/parity-meeting` | **Not merged.** 2 commits: `6c01795` A6 (reset takes effect immediately), `da619d6` D6 (diarization settings on every Python surface). |
+| `work/parity-meeting` | **MERGED.** 3 commits: `6c01795` A6 (reset takes effect immediately), `da619d6` D6 (diarization settings on every Python surface), `20f73fb` D5a (the live speaker map + a repo-local output directory). The ratatui half is still open. |
+| `work/parity-e3flake` | **MERGED.** 1 commit: the narrow `sherpa-onnx` **1.13.3** override. It makes the toolchain *capable* of Cohere Transcribe; it does **not** implement the E3 ASR backend. |
 
-### Uncommitted WIP — **do not delete these worktrees**
+### Working tree state
 
-Nothing is committed here; the files persist on disk, so recovery is just
-*look at the tree*, not *reconstruct it*. (The formatter worktree is now clean —
-its WIP was finished, squashed and merged.)
+**All five worktrees are clean — nothing is uncommitted.** The three that were interrupted
+mid-flight were checkpointed, finished, verified, reworded into proper commits and merged, so
+no recovery depends on an uncommitted file.
 
-| Worktree | WIP |
-| --- | --- |
-| `../voice-transcriber-meeting` | **D5a (large):** ~1017 insertions — `t2.py` (+327), `meeting_pipeline.py` (+185), `main.py` (+126), `control.py`, `tui.py`, `tui_ratatui.py`, `config/example-config/`, `.gitignore`, `docs/meeting_mode.md`, plus tests (`test_config_sync.py` +156, `test_meeting_pipeline.py` +96) and a **new `tests/shared/test_meeting_screen.py`**. This is the live speaker map + repo-local output dir. |
-| `../voice-transcriber-e3flake` | `flake.nix` + `flake.lock` — the narrow `sherpa-onnx` override. **Most valuable uncommitted artefact of the session; see §0.1.** |
+The integration branch is **green on the new devshell**: `tests/shared + tests/linux +
+tests/wsl + tests/windows` **1613 passed, 3 skipped**, `ruff check src/ tests/` clean, and the
+`llama-server` process count is unchanged across runs (no X6 leak).
 
-The integration branch is **green**: `tests/shared` 1451 passed, 3 skipped, `ruff check src/ tests/`
-clean. It was red only because of X6, which is now fixed and pinned.
+A note for whoever resumes: three times this session an interrupted agent left behind a
+"do not merge as-is" checkpoint commit. Verifying the work and *rewording* the message before
+merging matters — a commit that says it must not be merged, sitting in the permanent history,
+is worse than no checkpoint at all.
 
 ### 0.1 Expensive findings — do not re-derive
 
@@ -69,18 +72,18 @@ clean. It was red only because of X6, which is now fixed and pinned.
 
 ### Queue on resume
 
-1. `tests/shared` is **green on the integration branch** (1451 passed). X6 — the pre-existing
-   leak that made it red — is fixed and its guards are now themselves pinned; see §0.1.
-2. Merge `work/parity-meeting` next — its D6 commit is complete but its **D5a is an unverified
-   checkpoint**, so run the suite before trusting it — then `work/parity-e3flake`, which has
-   never been verified at all (its flake change was interrupted mid-flight).
-3. Spawn the **Rust/TUI worker** for the live speaker editor — it needs the frozen contract
-   the meeting worker was about to produce (control verbs, `status` fields, bridge messages,
-   label strings).
-4. **D7** implementation (design recorded in `TODO-parity.md` §4D).
-5. **X1–X4** plus the adversarial red-team pass (S5).
-6. Cleanup: obsolete worktrees/branches, the stray 3 GB `models/vt-model-dl-*`, and the E3
-   scratch tarball (delete the 1.58 GiB `.tar.bz2`, keep the extracted tree).
+1. Spawn the **Rust/TUI worker** for the live speaker editor. It needs the frozen contract
+   (control verbs, `status` fields, bridge message shapes, label strings) **derived from the
+   merged D5a code** — the interrupted meeting worker never wrote it down. Everything else in
+   D5 is done.
+2. **D7** implementation — design recorded in `TODO-parity.md` §4D (a self-contained DER in
+   `eval/`, the synthetic espeak fixture as a regression smoke gate, and AMI SDM recorded as
+   the future *real* number).
+3. **X1–X4** (the cross-cutting gates) plus the adversarial red-team pass (S5).
+4. Cleanup: the merged `work/*` branches, the obsolete `feat/structured-formatting` /
+   `refactor/model-registry` branches and their worktrees, the stray 3 GB `models/vt-model-dl-*`,
+   the E3 scratch tarball (delete the 1.58 GiB `.tar.bz2`, keep the extracted tree), and a
+   re-push to gitea once `git.jdm.cx` resolves again.
 
 ---
 

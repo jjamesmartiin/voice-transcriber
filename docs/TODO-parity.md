@@ -136,7 +136,7 @@ Capture exists (D2) and diarization exists (D3), but nothing joins them up yet.
 
 ### 2b. Needed before this can ship
 
-- [ ] **C6** — publish the model bundle + the first-use download prompt that states the size;
+- [~] **C6** — publish the model bundle + the first-use download prompt that states the size;
       this is also where the model registry gains its `formatter` spec, which is currently the
       one thing `llama_server._model_path()` reaches past. **The same change registers a
       `diarization` spec** (pyannote segmentation tarball + 3D-Speaker embedding, ~46.6 MB,
@@ -144,6 +144,14 @@ Capture exists (D2) and diarization exists (D3), but nothing joins them up yet.
       all — the weights at `~/.local/share/vt/models/diarization/` were placed by hand for the
       D3 spike — so it is a ship blocker for workstream D. Verified coordinates are in the
       research pass recorded under D7 in §4D.
+      **Code DONE 2026-10-09; publication still outstanding.** The registry carries both the
+      `formatter` and `diarization` specs, `_model_path()` resolves through it instead of reaching
+      past it, `ensure_model_async()` states the size on first use and never blocks the caller, and
+      the release scripts handle every registered model with the parts-first / `SHA256SUMS`-last
+      ordering intact. Verified: a real diarization bundle was packaged and then installed fully
+      offline, with no network. **Not done: uploading anything** — no release asset was published,
+      so "a clean machine can enable the formatter and work offline" is true of the *code path*
+      but not yet of a shipped artifact.
 - [ ] **C9** — licence obligations: the licence + `NOTICE` into `config/licenses/`, and the
       exact model naming (**"S1-mini" by "Superwhisper"**) on every surface that names it.
 - [ ] **C8** — the documentation set: spec doc, README requirements table, `architecture.md`,
@@ -314,7 +322,7 @@ Mostly implemented; **the open work is integration, not features.**
 
       `off` and `inline` are provably untouched — they flatten every pause to a space, pinned
       by a test. 1197 passed, 2 skipped; ruff clean; `cargo test` 51 passed.
-- [ ] **A6** *(new, found while doing C5)* **"Reset to Defaults" does not take effect until the
+- [x] **A6** *(new, found while doing C5)* **"Reset to Defaults" does not take effect until the
       next launch, and its punctuation target differs from the first-run default.**
       `t2.reset_to_defaults()` assigns `PUNCTUATION_MODE` but never pushes it to the
       post-processor, which keeps its own copy - so the running app carries on with the old
@@ -336,8 +344,12 @@ Mostly implemented; **the open work is integration, not features.**
       order-dependent leakage in several tests that mutate settings globals
       (`test_settings_menu.py`, `test_time_saved.py`) without restoring the renderer's copies.
       Chasing that destabilised the suite for no C5 benefit, so it was reverted and recorded
-      instead. *Done = the reset pushes every setting it changes, one place owns the two
-      defaults, and the leaking fixtures restore what they touch.*
+      instead. **DONE 2026-10-09 (`6c01795`)**: the reset now pushes every setting it changes, so
+      it takes effect immediately, and one place owns the defaults. Per owner decision **S7** the
+      reset target is the most-compatible configuration that still gives useful corrections —
+      formatter off, diarization off, cheap deterministic corrections on — so a weak machine is
+      fine by default and the heavy models are opt-in. Verified: `tests/shared` green, including
+      the previously order-dependent `test_settings_menu.py` and `test_time_saved.py`.
 - [ ] **A4** Extend `eval/` with a `formatting` slice: input transcript → expected output,
       **including the four Wispr reference fixtures** from formatter §4.
       *Done = the parity gate is a regression test, not a one-off comparison.*
@@ -566,9 +578,16 @@ Detail: [`plan-on-device-formatter.md`](plan-on-device-formatter.md).
 - [ ] **C6** Publish the model bundle + first-use download prompt stating the size.
       *Done = a clean machine can enable the formatter and then work offline.*
 - [ ] **C7** `eval/` parity gate + latency numbers per hardware tier (A4 overlaps).
-- [ ] **C8** Docs: spec doc, README requirements table, `architecture.md`, `TODO.md` notes.
-- [ ] **C9** Licence obligations (§5.5): commit the licence + NOTICE to `config/licenses/`,
+- [x] **C8** Docs: spec doc, README requirements table, `architecture.md`, `TODO.md` notes.
+      **DONE 2026-10-09** — README requirements + model-weight + licence sections, `architecture.md`
+      rows, the `TODO.md` unverified-platforms note, and a `CHANGELOG.md` entry.
+- [x] **C9** Licence obligations (§5.5): commit the licence + NOTICE to `config/licenses/`,
       and use the exact name **"S1-mini" by "Superwhisper"** wherever the model is named.
+      **DONE 2026-10-09** for both the formatter and the diarization models, with provenance
+      (repo + revision + digest) recorded alongside and pinned by tests.
+      ⚠️ **Known gap:** the interactive settings label and `status.formatter_model` still render
+      the machine id `s1-mini` rather than "S1-mini" by "Superwhisper". Those live in `t2.py`
+      and `tui-rs/`, so they belong to the Rust/TUI follow-up, not this task.
 
 ### 4D. Diarization — meeting mode
 
@@ -698,8 +717,17 @@ two-voice meeting (espeak `en+m3` / `en+f4`, four turns A-B-A-B) produced:
       deferred to D6 because the repo's rule is that a toggle lands in **both** TUIs including
       `tui-rs`, which D4 must not touch.
       *Done = a real meeting produces a readable labelled transcript the user can rename.*
-- [ ] **D6** Settings (`diarization`, `diarization_speakers`, `diarization_model`).
-      *Done = `off` byte-identical; single-speaker `auto` adds no label; both TUIs.*
+      **Python side DONE 2026-10-09 (`20f73fb`, D5a):** the live speaker map, the repo-local
+      gitignored output-directory **setting**, the scriptable control verbs, and the optional
+      JSON-per-turn / Markdown forms — per owner decisions **S2/S3/S8**. **Still open: the ratatui
+      half**, which needs the frozen bridge contract (control verbs, `status` fields, message
+      shapes, label strings) derived from that code.
+- [x] **D6** Settings (`diarization`, `diarization_speakers`, `diarization_model`).
+      **DONE 2026-10-09 (`da619d6`)** on every **Python** surface — `config.yaml` + the documented
+      example, `t2` globals / `DEFAULT_SETTINGS` / load / save / `VT_DIARIZATION*` env, control
+      verbs + `status`, `main.py` dispatch, both Python TUIs, and tests. `off` is byte-identical
+      to today, and unknown values fail safe to `off`. The **ratatui** rows travel with the
+      Rust/TUI follow-up, because the repo rule is that a toggle reaches both frontends.
 - [ ] **D7** Eval entry + DER recorded next to the ASR numbers; `docs/TODO.md` verification
       notes for unverified platforms. **Researched 2026-10-09; design decided, not yet
       implemented.**
