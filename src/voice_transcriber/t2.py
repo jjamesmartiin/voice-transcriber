@@ -133,7 +133,22 @@ HOTKEY_BINDS = keybinds.parse_binds(None)  # Push-to-talk chords; default is hol
 KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
 UI_THEME = "auto"
-PUNCTUATION_MODE = "full"
+#: The shipped punctuation preset — the ONE owner for this default.
+#: ``PUNCTUATION_MODE`` (the runtime/config fallback), ``DEFAULT_SETTINGS`` (the
+#: "Reset to Defaults" target) and the config-file fallback in
+#: ``load_audio_config`` all read this constant, so the first-run default and
+#: the reset target cannot drift apart again. They did until A6: the module
+#: global said ``full`` while ``DEFAULT_SETTINGS`` said ``no_punctuation``, and
+#: the reset therefore disagreed with a fresh install (and with the value a
+#: config file with no ``preset`` key produced).
+#:
+#: Chosen value: ``full``. It is the most useful deterministic correction (it
+#: produces standard, complete sentences rather than stripping punctuation),
+#: it costs nothing on a weak machine because the post-processor is pure Python,
+#: and it is what a fresh install already did. The heavier, opt-in features
+#: (formatter, meeting/diarization) stay off; only the cheap corrections are on.
+DEFAULT_PUNCTUATION_MODE = "full"
+PUNCTUATION_MODE = DEFAULT_PUNCTUATION_MODE
 PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "aesthetic_lowercase", "gen_z"]
 #: Structured output (spoken lists -> bullets). "off" is the shipped default.
 STRUCTURE_MODE = "off"
@@ -204,12 +219,10 @@ DEFAULT_SETTINGS = {
     'KEEP_BLUETOOTH_HANDSFREE': True,
     'SOUND_THEME': "proximity",
     'UI_THEME': "red",
-    # NOTE: deliberately NOT the same as the module global above, which is
-    # "full". "Reset to Defaults" targets "no_punctuation" as a product
-    # decision - pinned by test_settings_menu.py
-    # ::test_shipped_defaults_are_the_intended_baseline. Do not "fix" this to
-    # match the global; the two are intended to differ.
-    'PUNCTUATION_MODE': "no_punctuation",
+    # The shipped preset is one value in one place (DEFAULT_PUNCTUATION_MODE),
+    # so the reset target and the first-run default are the same by construction.
+    # See the comment on that constant for why `full` and not `no_punctuation`.
+    'PUNCTUATION_MODE': DEFAULT_PUNCTUATION_MODE,
     'STRUCTURE_MODE': "off",
     'CLEANUP_MODE': "full",
     'MEETING': "off",
@@ -865,7 +878,7 @@ def load_audio_config(file_path=None):
             MODEL_BACKEND = _load_model_backend(config.get('model_backend'))
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
 
-            raw_punct = config.get('preset') or config.get('mode_preset') or config.get('punctuation_mode') or config.get('formatting_level') or 'full'
+            raw_punct = config.get('preset') or config.get('mode_preset') or config.get('punctuation_mode') or config.get('formatting_level') or DEFAULT_PUNCTUATION_MODE
             PUNCTUATION_MODE = get_canonical_preset_name(raw_punct)
 
             env_punct = os.environ.get("VT_PRESET", "").strip().lower() or os.environ.get("VT_PUNCTUATION_MODE", "").strip().lower()
@@ -1236,12 +1249,16 @@ def reset_to_defaults() -> dict:
         globals()[name] = value
     NUMBER_DIGITS = (NUMBER_MODE != "words")
     set_number_digits(NUMBER_MODE)
-    # NOTE: the punctuation preset is deliberately *not* pushed to the
-    # post-processor here. Doing so is arguably more correct (otherwise the reset
-    # only takes effect on the next launch, while the file already says otherwise,
-    # because save_audio_config() below persists it), but it is a behaviour change
-    # outside the formatter work and it perturbs several order-dependent tests.
-    # Tracked as A6 in docs/TODO-parity.md rather than smuggled in here.
+    # Push every setting that has a runtime copy, in the same order a config
+    # load does. Without this the reset only took effect on the next launch
+    # while save_audio_config() below already wrote the new values to disk - the
+    # delayed-action surprise A6 was filed for. The post-processor keeps its own
+    # copies of the punctuation, structure, cleanup, number, serial, spell and
+    # formatter state, so all of them must be re-published, not just the
+    # globals assigned above.
+    set_punctuation_mode(PUNCTUATION_MODE)
+    set_serial_collapse(SERIAL_COLLAPSE)
+    set_spell_command(SPELL_COMMAND)
     _push_structure_mode()
     _push_cleanup_mode()
     _push_formatter_settings()

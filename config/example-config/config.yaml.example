@@ -75,8 +75,8 @@ copy_to_clipboard: false
 #   - "aesthetic_lowercase" : All lowercase (even 'i'), but internal/expressive punctuation kept (no trailing period).
 #   - "gen_z"               : Pure Gen Z mode: all lowercase, zero punctuation, zero grammar enforcement.
 # (Backwards-compatible aliases: punctuation_mode: "full" | "no_terminal_period" | "no_punctuation" | "lowercase_no_punctuation")
-# Default: "autocorrect"
-preset: "autocorrect"
+# Default: "default"
+preset: "default"
 
 # ------------------------------------------------------------------------------
 # List Formatting (Structured Output)

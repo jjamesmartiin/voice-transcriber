@@ -228,6 +228,32 @@ class TestResetToDefaults:
         assert t2.UI_THEME == t2.DEFAULT_SETTINGS["UI_THEME"]
         assert t2.PUNCTUATION_MODE == t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"]
 
+    def test_reset_takes_effect_immediately(self, cfg, monkeypatch):
+        """A reset must reach the runtime, not only the config file (A6).
+
+        ``t2`` delegates to ``post_processor``, which keeps its own copies of
+        the punctuation/cleanup/number/serial/spell/formatter state. Assigning
+        the ``t2`` globals alone left the running app on the old preset until
+        the next launch even though the file already said otherwise.
+        """
+        import post_processor as pp
+
+        # Move every runtime copy away from the defaults...
+        t2.set_punctuation_mode("gen_z")
+        t2.set_cleanup_mode("off")
+        t2.set_number_digits("words")
+        t2.set_serial_collapse(False)
+        t2.set_spell_command(False)
+
+        t2.reset_to_defaults()
+
+        # ...and confirm the reset pushed the shipped values straight through.
+        assert pp.get_punctuation_mode() == t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"]
+        assert pp.get_cleanup_mode() == t2.DEFAULT_SETTINGS["CLEANUP_MODE"]
+        assert pp.get_number_digits_mode() == t2.DEFAULT_SETTINGS["NUMBER_MODE"]
+        assert pp.get_serial_collapse() is t2.DEFAULT_SETTINGS["SERIAL_COLLAPSE"]
+        assert pp.get_spell_command() is t2.DEFAULT_SETTINGS["SPELL_COMMAND"]
+
     def test_reset_keeps_microphone_and_unknown_keys(self, cfg, monkeypatch):
         import json
 
@@ -267,20 +293,48 @@ class TestResetToDefaults:
             assert name in t2.DEFAULT_SETTINGS
 
     def test_shipped_defaults_are_the_intended_baseline(self):
-        """The reset target is a product decision, not an incidental value."""
+        """The reset target is a product decision, not an incidental value.
+
+        A6 (2026-10-09) resolved the old deliberate divergence between
+        ``DEFAULT_SETTINGS['PUNCTUATION_MODE']`` and the module global: the reset
+        target is now the most compatible configuration that still gives the
+        most useful *cheap* corrections. Formatter and meeting/diarization stay
+        off (models are opt-in), the deterministic corrections stay on, and the
+        punctuation preset is ``full`` - standard complete sentences produced by
+        pure-Python post-processing, which costs nothing on a weak machine.
+        """
         assert t2.DEFAULT_SETTINGS["OUTPUT_MODE"] == "type_fast"
         assert t2.DEFAULT_SETTINGS["IS_MUTED"] is True  # start muted
         assert t2.DEFAULT_SETTINGS["MIDDLE_CLICK_ENABLED"] is False  # opt-in
-        assert t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"] == "no_punctuation"
+        assert t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"] == "full"
         assert t2.DEFAULT_SETTINGS["NUMBER_MODE"] == "auto"
         assert t2.DEFAULT_SETTINGS["UI_THEME"] == "red"
         assert t2.DEFAULT_SETTINGS["AUTO_TYPE_AUTO_PUNCTUATE"] is False
+
+        # Heavyweight, model-backed features stay off by default: a reset must
+        # produce a configuration that runs on a weak computer.
+        assert t2.DEFAULT_SETTINGS["FORMATTER"] == "off"
+        assert t2.DEFAULT_SETTINGS["MEETING"] == "off"
+        # Cheap deterministic corrections stay on.
+        assert t2.DEFAULT_SETTINGS["CLEANUP_MODE"] == "full"
+        assert t2.DEFAULT_SETTINGS["SERIAL_COLLAPSE"] is True
+        assert t2.DEFAULT_SETTINGS["SPELL_COMMAND"] is True
 
         # Derived mirrors must agree with their source of truth.
         mode = t2.DEFAULT_SETTINGS["OUTPUT_MODE"]
         assert t2.DEFAULT_SETTINGS["AUTO_TYPE"] == (mode in ("type", "type_fast"))
         assert t2.DEFAULT_SETTINGS["COPY_TO_CLIPBOARD"] == (mode not in ("type", "type_fast"))
         assert t2.DEFAULT_SETTINGS["NUMBER_DIGITS"] == (t2.DEFAULT_SETTINGS["NUMBER_MODE"] != "words")
+
+    def test_punctuation_default_has_one_owner(self):
+        """The reset target and the first-run default are the same value.
+
+        Before A6 they were two hardcoded literals (``no_punctuation`` vs
+        ``full``) plus a third in ``load_audio_config``'s fallback. All three
+        now read ``DEFAULT_PUNCTUATION_MODE``.
+        """
+        assert t2.PUNCTUATION_MODE == t2.DEFAULT_PUNCTUATION_MODE
+        assert t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"] == t2.DEFAULT_PUNCTUATION_MODE
 
     def test_example_config_documents_the_shipped_defaults(self):
         """A copied config.yaml.example must behave exactly like the defaults."""

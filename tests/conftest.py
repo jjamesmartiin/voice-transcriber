@@ -46,6 +46,65 @@ os.environ.setdefault("VT_LOG_FILE", str(_TEST_LOG_FILE))
 _TEST_STATS_FILE = Path(tempfile.gettempdir()) / f"vt-stats-tests-{os.getpid()}.json"
 os.environ.setdefault("VT_STATS_FILE", str(_TEST_STATS_FILE))
 
+@pytest.fixture(autouse=True)
+def _isolate_runtime_settings():
+    """Stop a test's settings mutation leaking into the next one.
+
+    ``t2`` delegates to ``post_processor``, which keeps its own copy of the
+    punctuation / structure / cleanup / number / serial / spell / formatter
+    modes. ``monkeypatch`` restores ``t2``'s globals but cannot reach across
+    into that module, so a test that calls ``load_audio_config()`` or
+    ``reset_to_defaults()`` used to leave the renderer in whatever state it
+    ended in. That order-dependent leakage is exactly why A6 was reverted once;
+    restoring both sides around every test keeps the suite order-independent.
+
+    Only modules already imported are touched, so this cannot force an import
+    order on a test that deliberately controls it (the diarization and ASR
+    backends pin their own import behaviour in subprocesses).
+    """
+    modules = {}
+    for key in ("t2", "voice_transcriber.t2"):
+        mod = sys.modules.get(key)
+        if mod is not None:
+            modules["t2"] = mod
+            break
+    for key in ("post_processor", "voice_transcriber.post_processor"):
+        mod = sys.modules.get(key)
+        if mod is not None:
+            modules["pp"] = mod
+            break
+
+    t2_attrs = (
+        "PUNCTUATION_MODE", "STRUCTURE_MODE", "CLEANUP_MODE", "NUMBER_MODE",
+        "NUMBER_DIGITS", "SERIAL_COLLAPSE", "SPELL_COMMAND",
+        "FORMATTER", "FORMATTER_MODEL", "FORMATTER_STYLE", "FORMATTER_CONTEXT",
+        "MEETING", "MEETING_SPILL_MINUTES", "TYPING_WPM",
+        "DIARIZATION", "DIARIZATION_SPEAKERS", "DIARIZATION_MODEL",
+    )
+    pp_attrs = (
+        "_PUNCTUATION_MODE", "_STRUCTURE_MODE", "_CLEANUP_MODE",
+        "_number_digits_mode", "_serial_collapse", "_spell_command",
+        "_FORMATTER_ENABLED", "_FORMATTER_MODEL", "_FORMATTER_STYLE",
+        "_FORMATTER_CONTEXT",
+    )
+    saved = []
+    t2_mod = modules.get("t2")
+    if t2_mod is not None:
+        for name in t2_attrs:
+            if hasattr(t2_mod, name):
+                saved.append((t2_mod, name, getattr(t2_mod, name)))
+    pp_mod = modules.get("pp")
+    if pp_mod is not None:
+        for name in pp_attrs:
+            if hasattr(pp_mod, name):
+                saved.append((pp_mod, name, getattr(pp_mod, name)))
+
+    yield
+
+    for mod, name, value in saved:
+        setattr(mod, name, value)
+
+
 class PowerCpuMonitor:
     """Utility class to measure CPU utilization and ACPI battery power consumption."""
     def __init__(self, sample_interval=0.05):
