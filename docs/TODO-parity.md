@@ -314,7 +314,30 @@ Detail: [`plan-on-device-formatter.md`](plan-on-device-formatter.md).
       `load_backend` returns `None` for them, which is the fail-safe.
 - [!] **C2** **M2 — the end-to-end proof.** Run the GGUF behind `llama-server` and point the
       **existing** `VT_VLLM_URL` client at it. *Done = the four §4 fixtures produce
-      non-empty, sane output.* Needs the 462 MiB download.
+      non-empty, sane output.* The 462 MiB download is **done** (see below).
+
+      **The plan's model coordinates are wrong and must be corrected before this runs.**
+      Verified against the Hub API on 2026-10-08:
+
+      | Plan says | Reality |
+      | --- | --- |
+      | `superwhisper/s1-mini`, `revision="v1"` | The repo has **no `v1` tag** - refs are `main` only, and `resolve/v1/config.json` returns **404**. Pin by commit sha instead. |
+      | "a 462 MiB Q4 GGUF" in that repo | That repo ships **no GGUF at all** - only `model.safetensors` (~1.4 GiB, bf16, Qwen3 0.6B). The quant lives in a **separate repo**, `superwhisper/s1-mini-GGUF`. |
+
+      The corrected, verified coordinates - the "462 MiB" figure itself was right:
+
+      ```
+      repo    : superwhisper/s1-mini-GGUF
+      revision: 34add00a48a2e5d24e5a4ee5405a99620a3a240c   (branch main; no tags exist)
+      file    : s1-mini-q4_k_m.gguf
+      size    : 484,219,808 bytes = 461.8 MiB
+      sha256  : 3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634
+      ```
+
+      Also present: `s1-mini-f16.gguf` (1,509,347,232 bytes), and `LICENSE`/`NOTICE` alongside.
+      Both are already downloaded to `~/.local/share/vt/models/formatter/` and the quant's
+      sha256 was verified against the Hub's LFS oid independently, plus the magic (`GGUF`) and
+      header version (**3** - the version the plan pins as the contract).
 - [~] **C3** `formatters/llama_server.py` — the **shipped** backend: spawn/attach, process
       lifecycle, kill-on-timeout. **CODE DONE in `6299947`** — 34 tests, driven by a stub server
       that speaks just enough of the OpenAI API, so the real subprocess path and the real
@@ -390,8 +413,12 @@ Detail: [`plan-diarization.md`](plan-diarization.md).
       past a threshold**, progress state. *Done = a 10-minute recording completes without
       exhausting memory and `status` reports progress.*
 - [!] **D3** Spike: real sherpa-onnx weights on a two-voice clip. *Done = a turn list plus a
-      measured RTF.* (~40 MB download.) **Settle workstream E first** — if the ASR gains
-      native timestamps, §3's whole design changes.
+      measured RTF.* **Models downloaded and verified** to `~/.local/share/vt/models/diarization/`
+      (SHA256SUMS written): the pyannote segmentation tarball (6,958,444 bytes) and the
+      3D-Speaker embedding (39,593,761 bytes) - both matching the plan's stated ~6.96 MB and
+      ~40 MB. `diarizers/sherpa_onnx.py` itself is not written yet, so this is unblocked but not
+      started. **Settle workstream E first** - if the ASR gains native timestamps, §3's whole
+      design changes.
 - [ ] **D4** Turn slicing → per-turn ASR → per-turn post-processing.
       *Done = a two-voice E2E asserts correct turn count and ordering, not just words.*
 - [ ] **D5** Output artifact + speakers map. *Done = a real meeting produces a readable
