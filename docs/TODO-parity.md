@@ -777,8 +777,47 @@ slice. Measured on the real 154-clip set, all three configs, fresh.
       for Cohere: it drops the `torch` dependency (~0.7–1 GiB installed) and unifies
       ASR+VAD+punctuation+diarization on one runtime. **Newly motivated by E2:** Cohere's
       *existing* `--int8` option (torch dynamic quantisation) peaks at **22.15 GiB**, so the
-      ONNX path is now the plausible way to get int8 at all — but note that is a different
-      mechanism from what the flag does today. ~2.9 GB download.
+      ONNX path is the plausible way to get int8 at all — a different mechanism from what the
+      flag does today. ~2.9 GB download. **Downloaded and verified 2026-10-09; implementation
+      is blocked on a genuine prerequisite.**
+
+      **Verified measurements** — scratch dir `/home/jamesm/models-e3/cohere-onnx-int8/`,
+      deliberately outside every path the app resolves, so it cannot be picked up:
+
+      | Item | Measured |
+      | --- | --- |
+      | Release asset | `github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01.tar.bz2` |
+      | Tarball | 1,699,791,751 B, sha256 `bd582588…4206d` — **matches GitHub's declared digest exactly** |
+      | Extracted | 2,889,366,679 B = 2.89 GB / 2.69 GiB (plan's ~2.9 GB is right) |
+      | Files | `encoder.int8.onnx` (3,090,822 B) + **`encoder.int8.onnx.data`** (2,731,503,072 B — external weights, must sit beside the graph), `decoder.int8.onnx` (153,250,705 B), `tokens.txt` (207,437 B, 16,384 entries), `test_wavs/*.wav` |
+      | HF mirror | `csukuangfj2/sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01` @ `156a470c…`; all 8 LFS files byte-identical (measured sha256 == declared LFS oid) |
+      | Loads? | real `onnxruntime` 1.27.1 sessions created for encoder + decoder; metadata `model_type: cohere-transcribe-03-2026`, `onnx.infer: onnxruntime.quant` |
+      | Decodes? | `en.wav` → "Ask not what your country can do for you…", **RTF 0.145** (matches upstream's 0.135 @ 2 threads) |
+
+      ⚠️ **BLOCKER — the pinned sherpa-onnx cannot load it.** `flake.lock`'s nixpkgs rev
+      `832efc09…` provides **sherpa-onnx 1.12.25**, which has **no Cohere support at all**
+      (`OfflineCohereTranscribeModelConfig` absent, no `cohere_transcribe` field, no
+      `from_cohere_transcribe`). The plan's claim "present in the nixpkgs-packaged v1.13.3" is
+      **false for this lock.** The current registry nixpkgs carries **1.13.8**, which works — so
+      E3 needs the flake's nixpkgs (or just `sherpa-onnx`) raised to ≥1.13.x. That is a wide
+      blast-radius change (python, torch, onnxruntime all move), so it is an **owner decision**
+      recorded in §7 item 8, not a footnote. A cheaper option worth trying first: override only
+      `python3Packages.sherpa-onnx` rather than bumping the whole input.
+
+      **Three further corrections to the plan:**
+      - the released variant name is **date-suffixed** — the bare
+        `sherpa-onnx-cohere-transcribe-14-lang-int8` does not exist in that release;
+      - **`test_wavs/ja.wav` is corrupt** — a 145-byte JSON error body
+        (`{"Code":109901010007,…}`, "failed to fetch model file, content is empty") in **both**
+        the tarball and the mirror. Any smoke test must avoid it; the other 8 wavs are valid RIFF;
+      - the upstream model is Apache-2.0 but **gated** (`CohereLabs/…`); the converted mirror and
+        the released tarball carry **no licence file at all**. If this weight ever ships,
+        attribution must be added explicitly — the same class of debt as S1-mini (S11).
+
+      **Load settings**, read from 1.13.8's live signature rather than docs:
+      `OfflineRecognizer.from_cohere_transcribe(encoder=…, decoder=…, tokens=…, language="en",
+      use_punct=True, use_itn=True, num_threads=4, provider="cpu")`. **`language` is required** —
+      `""` constructs without error and then returns empty text.
 - [x] **E4** **§3's "diarize first, then transcribe each turn" design survives.** Cohere
       stays the default and has no timestamps at all, so nothing changes. Worth recording
       that the question was answered the other way too: Parakeet has **no native word
@@ -869,3 +908,12 @@ None of these block §2. They block a *release*.
    github; `main` untouched.
 7. ~~Regenerate `eval/results.json`~~ — **RESOLVED (S6):** in flight, with a human-verifiable
    review artifact and a self-describing `meta`.
+8. **E3's prerequisite: raise `sherpa-onnx` to ≥1.13.x.** The pinned devshell is **1.12.25**,
+   which has no Cohere support, so the ONNX path cannot even load the model that has just been
+   downloaded and verified. Options: (a) bump the flake's `nixpkgs` input — correct but wide
+   blast radius, python/torch/onnxruntime all move; (b) override only
+   `python3Packages.sherpa-onnx` to 1.13.x — smaller, but needs its own hash pin and may fight
+   the 1.12.25-native package; (c) drop E3 and accept Cohere's 22.15 GiB `--int8` peak. This
+   interacts with **X2** (the torch/onnxruntime decision must not land in two workstreams) and
+   with **D**, which uses the same library for diarization at 1.12.25 — so if the bump happens,
+   diarization must be re-verified against it in the same change.
