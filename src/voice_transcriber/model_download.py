@@ -1,19 +1,22 @@
 """
 First-run model acquisition from GitHub Releases — no Hugging Face required.
 
-CohereLabs/cohere-transcribe-03-2026 is Apache-2.0 licensed, so the weights are
-mirrored as split-xz GitHub Release assets (see scripts/prepare_model_release.py).
-When the app needs the Cohere backend and no local copy exists, this module
-downloads the parts, verifies their SHA-256, decompresses/concatenates them, and
-installs them so the backend can load fully offline afterwards
-(local_files_only=True).
+A single :class:`ModelSpec` registry (see :data:`MODELS`) declares every
+redistributable model: its upstream repo/revision, the release-asset prefix, the
+SHA-256 of each redistributed file, its license and its install directory.
+CohereLabs/cohere-transcribe-03-2026 is the first entry; a GGUF formatter and
+ONNX diarization graphs are declared here the same way. When the app needs a
+model and no local copy exists, this module downloads the parts, verifies their
+SHA-256, decompresses/concatenates them, and installs them so the backend can
+load fully offline afterwards (local_files_only=True). Verification is driven by
+the spec's ``digests`` map and never assumes a particular filename.
 
-Install location (see cohere_models_dir): when the app runs from a git
-checkout of this repository, the weights unpack into <repo>/models/cohere so it
-is obvious they belong to / came from this project; read-only installs (Nix
-store, AppImage) fall back to ~/.local/share/vt/models/cohere. A SOURCE.json
-provenance file is written next to the weights recording the origin repo,
-release tag, sha256, license, and install date.
+Install location (see :func:`models_dir`): when the app runs from a git checkout
+of this repository, the weights unpack into ``<repo>/models/<target_subdir>`` so
+it is obvious they belong to / came from this project; read-only installs (Nix
+store, AppImage) fall back to ``~/.local/share/vt/models/<target_subdir>``. A
+SOURCE.json provenance file is written next to the weights recording the origin
+repo, release tag, sha256, license, and install date.
 
 Pure stdlib: urllib for download, lzma for decompression, tarfile for extract.
 
@@ -25,6 +28,7 @@ Env knobs:
                           jjamesmartiin/voice-transcriber)
   XDG_DATA_HOME           (standard) relocates the per-user fallback for testing
 """
+import dataclasses
 import hashlib
 import lzma
 import os
@@ -38,28 +42,149 @@ import time
 import urllib.error
 import urllib.request
 
-REPO_ID = "CohereLabs/cohere-transcribe-03-2026"
-REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
-SAFETENSORS_SHA256 = "987bd3e141c7bfdb5a78f5db11397ee7737308357e6cc0a3f36a4979b158137a"
+
+@dataclasses.dataclass(frozen=True)
+class ModelSpec:
+    """Everything the installer and the publisher need to know about one model.
+
+    This registry is the single declaration home for every model constant: a
+    repo id, revision, digest, bundle tag, license or target directory is
+    written down here and nowhere else. ``tests/shared/test_model_download.py``
+    pins that no other module duplicates those values.
+
+    Verification is deliberately format-agnostic: ``digests`` maps *each*
+    redistributed file to its SHA-256, so a ``model.safetensors`` HF snapshot, a
+    single ``.gguf`` formatter and a set of ``.onnx`` diarization graphs all flow
+    through the same installer without a special case. Adding a model is adding
+    an entry to :data:`MODELS`; the packager and publisher read the entry.
+    """
+
+    name: str                        # registry key, e.g. "cohere"
+    display_name: str                # human label used in console messages
+    description: str                 # one provenance line, used in NOTICE
+    repo_id: str                     # source Hugging Face repo id
+    revision: str                    # pinned upstream revision
+    asset_prefix: str                # release prefix: "<prefix>.partN.xz"
+    bundle_tag: str                  # GitHub release tag hosting the assets
+    release_base: str                # base URL the installer downloads from
+    package_files: tuple = ()        # files the packager stages into the tar
+    required_local: tuple = ()       # minimal set meaning "loadable locally"
+    digests: dict = dataclasses.field(default_factory=dict)  # file -> sha256
+    license_file: str = ""           # repo-relative license to ship
+    license_name: str = ""           # short license label (NOTICE, provenance)
+    target_subdir: str = ""          # <models root>/<target_subdir>
+    download_hint: str = ""          # size hint shown in the download prompt
+    # Formal names for the legal NOTICE artifact only. These are deliberately
+    # separate from ``display_name``/``license_name``: console messages want a
+    # short label ("Cohere Transcribe"), whereas a NOTICE is a legal artifact
+    # and must keep the exact wording it has always shipped with. Empty means
+    # "fall back to the short label".
+    notice_title: str = ""           # formal model name on the NOTICE
+    license_title: str = ""          # formal license name on the NOTICE
+
 
 # Single source of truth for the publishing target: scripts/publish_model_bundle.sh
-# reads these back out of this module so it cannot drift from the client.
+# reads these back out of the registry so it cannot drift from the client.
 REPO_SLUG = "jjamesmartiin/voice-transcriber"
 _REPO_URL = f"https://github.com/{REPO_SLUG}"
 
-# Weights are addressed by *model revision*, never by app release. REVISION is
-# compiled into the binary and already names the asset files, so every app
+# Weights are addressed by *model revision*, never by app release. The revision
+# is compiled into the binary and already names the asset files, so every app
 # version resolves to the same bundle: publishing weights is a once-per-revision
-# job, not a once-per-version one. Bumping REVISION renames the tag, which is
-# what forces a fresh publish when (and only when) the weights actually change.
-MODEL_BUNDLE_TAG = f"model-cohere-{REVISION[:12]}"
-DEFAULT_RELEASE_BASE = f"{_REPO_URL}/releases/download/{MODEL_BUNDLE_TAG}"
+# job, not a once-per-version one. Bumping the revision renames the tag, which
+# is what forces a fresh publish when (and only when) the weights actually
+# change.
+_COHERE_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
+_COHERE_SHA256 = "987bd3e141c7bfdb5a78f5db11397ee7737308357e6cc0a3f36a4979b158137a"
+_COHERE_TAG = f"model-cohere-{_COHERE_REVISION[:12]}"
 
-# Minimal set whose presence means "a local copy exists and can be loaded".
-_REQUIRED_LOCAL = [
-    "config.json", "model.safetensors", "tokenizer.json",
-    "modeling_cohere_asr.py", "processor_config.json",
-]
+COHERE = ModelSpec(
+    name="cohere",
+    display_name="Cohere Transcribe",
+    description="Automatic Speech Recognition model by Cohere / Cohere Labs.",
+    repo_id="CohereLabs/cohere-transcribe-03-2026",
+    revision=_COHERE_REVISION,
+    asset_prefix=f"cohere-transcribe-{_COHERE_REVISION}",
+    bundle_tag=_COHERE_TAG,
+    release_base=f"{_REPO_URL}/releases/download/{_COHERE_TAG}",
+    package_files=(
+        "config.json",
+        "generation_config.json",
+        "model.safetensors",
+        "modeling_cohere_asr.py",
+        "configuration_cohere_asr.py",
+        "processing_cohere_asr.py",
+        "tokenization_cohere_asr.py",
+        "processor_config.json",
+        "preprocessor_config.json",
+        "tokenizer_config.json",
+        "tokenizer.json",
+        "tokenizer.model",
+        "special_tokens_map.json",
+    ),
+    required_local=(
+        "config.json", "model.safetensors", "tokenizer.json",
+        "modeling_cohere_asr.py", "processor_config.json",
+    ),
+    digests={"model.safetensors": _COHERE_SHA256},
+    license_file="config/licenses/Cohere-Apache-2.0.txt",
+    license_name="Apache-2.0",
+    # Pinned so the published NOTICE stays byte-identical to every release so
+    # far: "2B" is part of the formal name, and a NOTICE cites the license by
+    # its full title rather than the SPDX id used in console/provenance text.
+    notice_title="Cohere Transcribe 2B",
+    license_title="the Apache License, Version 2.0",
+    target_subdir="cohere",
+    download_hint="~2.8 GB (~3.9 GB uncompressed on disk)",
+)
+
+#: The registry. A future GGUF formatter and the ONNX diarization graphs each
+#: add one entry here and inherit the whole installer/publisher pipeline.
+MODELS: dict = {COHERE.name: COHERE}
+
+# --- Backward-compatible constant aliases (deprecated) ---------------------
+# Kept so existing callers, docs and the publisher's constant import keep
+# working unchanged. New code should read a ModelSpec out of MODELS instead.
+REPO_ID = COHERE.repo_id
+REVISION = COHERE.revision
+SAFETENSORS_SHA256 = COHERE.digests["model.safetensors"]
+MODEL_BUNDLE_TAG = COHERE.bundle_tag
+DEFAULT_RELEASE_BASE = COHERE.release_base
+_REQUIRED_LOCAL = list(COHERE.required_local)
+
+
+def get_spec(name):
+    """Return the :class:`ModelSpec` registered under ``name``.
+
+    Raises ``KeyError`` (never a silent ``None``) for an unknown model so a typo
+    fails at the call site instead of installing nothing.
+    """
+    try:
+        return MODELS[name]
+    except KeyError:
+        known = ", ".join(sorted(MODELS))
+        raise KeyError(f"unknown model {name!r} (known: {known})") from None
+
+
+def _resolved_spec(name, revision=None):
+    """Return the spec for ``name``, allowing a legacy revision override.
+
+    The override recomputes the revision-derived constants and exists only for
+    the deprecated ``*_cohere`` aliases and the tests written against them; a
+    real registry entry always pins its own revision.
+    """
+    spec = get_spec(name)
+    if not revision or revision == spec.revision:
+        return spec
+    template = spec.asset_prefix.replace(spec.revision, "{revision}")
+    bundle_tag = f"model-{spec.name}-{revision[:12]}"
+    return dataclasses.replace(
+        spec,
+        revision=revision,
+        asset_prefix=template.format(revision=revision),
+        bundle_tag=bundle_tag,
+        release_base=f"{_REPO_URL}/releases/download/{bundle_tag}",
+    )
 
 _status_handler = None  # set by the app: fn(stage: str, pct: int, text: str)
 
@@ -124,50 +249,62 @@ def find_repo_root():
     return None
 
 
-def cohere_models_dir():
-    """Preferred writable install target for the Cohere model.
+def models_dir(name):
+    """Preferred writable install target for the model registered as ``name``.
 
-    Order: $VT_MODEL_DIR override -> <repo checkout>/models/cohere (so the
-    weights live visibly inside the project it came from) -> per-user data dir
-    (~/.local/share/vt/models/cohere) for read-only installs (Nix/AppImage).
+    Order: $VT_MODEL_DIR override -> <repo checkout>/models/<target_subdir> (so
+    the weights live visibly inside the project they came from) -> per-user data
+    dir (~/.local/share/vt/models/<target_subdir>) for read-only installs
+    (Nix/AppImage).
     """
+    return _models_dir_for(get_spec(name))
+
+
+def _models_dir_for(spec):
+    """Implementation of :func:`models_dir` for a resolved spec."""
     override = os.environ.get("VT_MODEL_DIR", "").strip()
     if override:
         return os.path.abspath(override)
+    subdir = spec.target_subdir
     if getattr(sys, "frozen", False):
         exe_dir = os.path.dirname(sys.executable)
         for cand in [
-            os.path.join(exe_dir, "models", "cohere"),
-            os.path.join(exe_dir, "model", "cohere"),
+            os.path.join(exe_dir, "models", subdir),
+            os.path.join(exe_dir, "model", subdir),
             os.path.join(exe_dir, "models"),
             exe_dir,
         ]:
-            if os.path.isdir(cand) and is_local_model_complete(cand):
+            if os.path.isdir(cand) and is_model_complete(spec.name, cand):
                 return cand
         if hasattr(sys, "_MEIPASS"):
             for cand in [
-                os.path.join(sys._MEIPASS, "models", "cohere"),
+                os.path.join(sys._MEIPASS, "models", subdir),
                 os.path.join(sys._MEIPASS, "models"),
                 sys._MEIPASS,
             ]:
-                if os.path.isdir(cand) and is_local_model_complete(cand):
+                if os.path.isdir(cand) and is_model_complete(spec.name, cand):
                     return cand
-        exe_models = os.path.join(exe_dir, "models", "cohere")
+        exe_models = os.path.join(exe_dir, "models", subdir)
         if os.path.isdir(exe_models) or os.access(exe_dir, os.W_OK):
             return exe_models
     root = find_repo_root()
     if root:
-        repo_dir = os.path.join(root, "models", "cohere")
+        repo_dir = os.path.join(root, "models", subdir)
         # writable now? (no side effects: don't create anything on lookup)
         if os.path.isdir(repo_dir):
             if os.access(repo_dir, os.W_OK):
                 return repo_dir
         elif os.access(root, os.W_OK):
             return repo_dir
-    return os.path.join(get_data_dir(), "models", "cohere")
+    return os.path.join(get_data_dir(), "models", subdir)
 
 
-def _write_provenance(dest, base_url, resolved_url=None, source_kind="remote"):
+def cohere_models_dir():
+    """Deprecated alias for ``models_dir("cohere")``."""
+    return models_dir("cohere")
+
+
+def _write_provenance(spec, dest, base_url, resolved_url=None, source_kind="remote"):
     """Write SOURCE.json next to the weights so their origin is unambiguous."""
     import datetime as _dt
     release_tag = None
@@ -176,18 +313,25 @@ def _write_provenance(dest, base_url, resolved_url=None, source_kind="remote"):
         if m:
             release_tag = m.group(1)
     info = {
-        "model": REPO_ID,
-        "revision": REVISION,
-        "model_safetensors_sha256": SAFETENSORS_SHA256,
+        "model": spec.repo_id,
+        "revision": spec.revision,
+    }
+    # Keep the Cohere-era key for a safetensors snapshot; a format-agnostic spec
+    # (GGUF / ONNX) records its whole digest map instead.
+    if "model.safetensors" in spec.digests:
+        info["model_safetensors_sha256"] = spec.digests["model.safetensors"]
+    if set(spec.digests) != {"model.safetensors"}:
+        info["digests"] = dict(spec.digests)
+    info.update({
         "download_url_base": base_url,
         "release_tag": release_tag,
         "source_kind": source_kind,
-        "license": "Apache-2.0 (see LICENSE and NOTICE in this directory)",
+        "license": spec.license_name + " (see LICENSE and NOTICE in this directory)",
         "installed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
-        "note": "Weights mirrored from the " + REPO_ID + " HF snapshot via the "
+        "note": "Weights mirrored from the " + spec.repo_id + " HF snapshot via the "
                 "voice-transcriber GitHub release, so the app runs without a "
                 "Hugging Face account.",
-    }
+    })
     try:
         with open(os.path.join(dest, "SOURCE.json"), "w") as f:
             import json as _json
@@ -197,20 +341,22 @@ def _write_provenance(dest, base_url, resolved_url=None, source_kind="remote"):
         print(f"(could not write SOURCE.json provenance: {e})")
 
 
-def _release_base():
-    return os.environ.get("VT_MODEL_RELEASE_BASE", DEFAULT_RELEASE_BASE).rstrip("/")
+def _release_base(spec):
+    return os.environ.get("VT_MODEL_RELEASE_BASE", spec.release_base).rstrip("/")
 
 
-def _release_candidates(primary):
+def _release_candidates(primary, canonical=None):
     """Base URLs to try, most-preferred first, without duplicates.
 
     `primary` is whatever the caller asked for (an explicit base_url, the
-    VT_MODEL_RELEASE_BASE override, or the revision-derived bundle tag). The
-    canonical bundle is appended as a fallback so an explicit or relocated base
-    degrades to the real one instead of failing.
+    VT_MODEL_RELEASE_BASE override, or the revision-derived bundle tag) and
+    `canonical` is the spec's own bundle URL. The canonical bundle is appended as
+    a fallback so an explicit or relocated base degrades to the real one instead
+    of failing.
     """
+    fallback = DEFAULT_RELEASE_BASE if canonical is None else canonical
     out = []
-    for cand in (primary, DEFAULT_RELEASE_BASE):
+    for cand in (primary, fallback):
         c = (cand or "").rstrip("/")
         if c and c not in out:
             out.append(c)
@@ -245,11 +391,17 @@ def _asset_exists(url):
     return False
 
 
-def is_local_model_complete(directory=None):
-    """True when a loadable local copy already exists (offline-ready)."""
-    directory = directory or cohere_models_dir()
+def is_model_complete(name, directory=None):
+    """True when a loadable local copy of ``name`` already exists (offline-ready)."""
+    spec = get_spec(name)
+    directory = directory or models_dir(name)
     return all(os.path.exists(os.path.join(directory, f))
-               for f in _REQUIRED_LOCAL)
+               for f in spec.required_local)
+
+
+def is_local_model_complete(directory=None):
+    """Deprecated alias for ``is_model_complete("cohere", directory)``."""
+    return is_model_complete("cohere", directory)
 
 
 def _http_get(url, dest, descr):
@@ -425,16 +577,17 @@ def _extract_bundle_archive(path, dest):
         f"unsupported model bundle archive {path!r} (use a directory, .zip or .tar)")
 
 
-def install_from_local_bundle(source, dest=None, revision=REVISION):
-    """Install the Cohere model from a local split bundle, with no network.
+def install_model_from_local_bundle(name, source, dest=None, revision=None):
+    """Install the model registered as ``name`` from a local split bundle, offline.
 
-    ``source`` is either a directory holding ``cohere-transcribe-<rev>.partN.xz``
-    plus ``SHA256SUMS``, or a ``.zip`` / ``.tar[.*]`` archive containing them.
-    The parts are verified, decompressed, concatenated and extracted exactly as
-    the network installer does, so an airgapped host needs no extra tooling.
+    ``source`` is either a directory holding ``<asset_prefix>.partN.xz`` plus
+    ``SHA256SUMS``, or a ``.zip`` / ``.tar[.*]`` archive containing them. The
+    parts are verified, decompressed, concatenated and extracted exactly as the
+    network installer does, so an airgapped host needs no extra tooling.
     """
-    dest = dest or cohere_models_dir()
-    prefix = f"cohere-transcribe-{revision}"
+    spec = _resolved_spec(name, revision)
+    dest = dest or _models_dir_for(spec)
+    prefix = spec.asset_prefix
     tmp_extract = None
     try:
         if os.path.isdir(source):
@@ -452,16 +605,16 @@ def install_from_local_bundle(source, dest=None, revision=REVISION):
                 f"no {prefix}.partN.xz entries in any SHA256SUMS under {bundle_dir}")
 
         part_paths = {}
-        for name in manifest:
-            part = os.path.join(bundle_dir, name)
+        for part_name in manifest:
+            part = os.path.join(bundle_dir, part_name)
             if not os.path.isfile(part):
-                raise FileNotFoundError(f"bundle {source!r} is missing {name}")
-            part_paths[name] = part
+                raise FileNotFoundError(f"bundle {source!r} is missing {part_name}")
+            part_paths[part_name] = part
 
-        print(f"Installing Cohere model from local bundle {source} "
+        print(f"Installing {spec.display_name} model from local bundle {source} "
               f"({len(part_paths)} part(s))...", flush=True)
         return _assemble_parts(
-            part_paths, manifest, dest,
+            spec, part_paths, manifest, dest,
             origin=os.path.abspath(source), source_kind="local",
         )
     finally:
@@ -469,13 +622,21 @@ def install_from_local_bundle(source, dest=None, revision=REVISION):
             shutil.rmtree(tmp_extract, ignore_errors=True)
 
 
-def _assemble_parts(part_paths, manifest, dest, origin,
+def install_from_local_bundle(source, dest=None, revision=None):
+    """Deprecated alias for ``install_model_from_local_bundle("cohere", ...)``."""
+    return install_model_from_local_bundle("cohere", source, dest=dest,
+                                           revision=revision)
+
+
+def _assemble_parts(spec, part_paths, manifest, dest, origin,
                     resolved_url=None, source_kind="remote"):
     """Verify, decompress, concatenate and extract verified parts into ``dest``.
 
     ``part_paths`` maps each manifest filename to an existing local path; the
     caller owns those files and they are never deleted here. ``origin`` is
     recorded in SOURCE.json (a release URL online, a filesystem path offline).
+    Verification is driven by ``spec.digests`` and never assumes a particular
+    filename, so a GGUF or ONNX artifact installs through this same path.
     """
     part_names = sorted(manifest)
     dest_parent = os.path.dirname(os.path.abspath(dest))
@@ -503,19 +664,27 @@ def _assemble_parts(part_paths, manifest, dest, origin,
                 tf.extractall(staging, filter="data")
             else:
                 tf.extractall(staging)
-        weights = os.path.join(staging, "model.safetensors")
-        got = _sha256_file(weights)
-        if got != SAFETENSORS_SHA256:
-            raise RuntimeError(
-                f"Extracted model.safetensors sha256 {got} does not match the "
-                f"expected {SAFETENSORS_SHA256}. Aborting.")
-        if not is_local_model_complete(staging):
+        # Verify every redistributed file against the spec's digest map. Nothing
+        # assumes the artifact is called model.safetensors: a GGUF or ONNX spec
+        # carries its own filenames and hashes.
+        for fname, expected in spec.digests.items():
+            path = os.path.join(staging, fname)
+            if not os.path.exists(path):
+                raise RuntimeError(
+                    f"Extracted archive is missing {fname} (listed in the "
+                    f"{spec.name} digest map). Aborting.")
+            got = _sha256_file(path)
+            if got != expected:
+                raise RuntimeError(
+                    f"Extracted {fname} sha256 {got} does not match the "
+                    f"expected {expected}. Aborting.")
+        if not is_model_complete(spec.name, staging):
             raise RuntimeError("Extracted model directory is missing required files.")
 
         if os.path.isdir(dest):
             shutil.rmtree(dest)
         shutil.move(staging, dest)
-        _write_provenance(dest, origin, resolved_url, source_kind=source_kind)
+        _write_provenance(spec, dest, origin, resolved_url, source_kind=source_kind)
         print(f"Model installed at {dest}. Loading fully offline from now on.\n"
               f"Origin recorded in {os.path.join(dest, 'SOURCE.json')}.")
         return dest
@@ -523,22 +692,22 @@ def _assemble_parts(part_paths, manifest, dest, origin,
         shutil.rmtree(tmp_root, ignore_errors=True)
 
 
-def _print_manual_install_instructions(dest):
+def _print_manual_install_instructions(spec, dest):
     """Print clear instructions for manual model installation."""
     print("\n" + "=" * 68)
-    print("  TO MANUALLY INSTALL THE COHERE TRANSCRIBE MODEL:")
+    print(f"  TO MANUALLY INSTALL THE {spec.display_name.upper()} MODEL:")
     print("  1. Download the split model parts and SHA256SUMS from GitHub:")
-    print(f"     https://github.com/jjamesmartiin/voice-transcriber/releases/tag/{MODEL_BUNDLE_TAG}")
+    print(f"     {_REPO_URL}/releases/tag/{spec.bundle_tag}")
     print("  2. Decompress and extract the archive directly into:")
     print(f"     {dest}")
-    print("     (Required: model.safetensors, config.json, tokenizer.json, etc.)")
+    print(f"     (Required: {', '.join(spec.required_local)})")
     print("  Or set the VT_MODEL_DIR environment variable to your model folder.")
     print("=" * 68 + "\n", flush=True)
 
 
-def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
+def ensure_model(name, dest=None, base_url=None, revision=None):
     """
-    Make sure a loadable local Cohere model exists at `dest`.
+    Make sure a loadable local copy of ``name`` exists at `dest`.
 
     Offline first: if a split bundle is present on disk (``VT_MODEL_SOURCE_DIR``
     or a ``model-bundle/`` directory next to the app), it is installed with no
@@ -548,8 +717,9 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
     or None if auto-download is disabled / failed (caller may fall back to the
     Hugging Face path or surface an error).
     """
-    dest = dest or cohere_models_dir()
-    if is_local_model_complete(dest):
+    spec = _resolved_spec(name, revision)
+    dest = dest or _models_dir_for(spec)
+    if is_model_complete(spec.name, dest):
         return dest
 
     # Airgapped path: install from a bundle carried on disk before ever
@@ -557,8 +727,8 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
     local_source, explicit = _local_model_source()
     if local_source:
         try:
-            installed = install_from_local_bundle(local_source, dest=dest,
-                                                  revision=revision)
+            installed = install_model_from_local_bundle(
+                spec.name, local_source, dest=dest, revision=spec.revision)
         except Exception as e:
             print(f"Local model bundle install failed: {e}", flush=True)
             installed = None
@@ -572,30 +742,30 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
     auto_env = os.environ.get("VT_AUTO_DOWNLOAD_MODEL", "").strip().lower()
     if auto_env in ("0", "false", "no", "off"):
         print("VT_AUTO_DOWNLOAD_MODEL=0: skipping automatic model download.")
-        _print_manual_install_instructions(dest)
+        _print_manual_install_instructions(spec, dest)
         return None
 
     if auto_env not in ("1", "true", "yes", "always"):
         if sys.stdin and hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
             try:
                 print("\n" + "-" * 68)
-                print("  Cohere Transcribe model weights are not installed.")
+                print(f"  {spec.display_name} model weights are not installed.")
                 print(f"  Target location: {dest}")
-                print("  Download size: ~2.8 GB (~3.9 GB uncompressed on disk).")
+                print(f"  Download size: {spec.download_hint}.")
                 print("-" * 68)
                 ans = input("  Would you like to download them automatically from GitHub now? [Y/n]: ").strip().lower()
                 if ans and ans not in ("y", "yes"):
                     print("  Automatic download cancelled.")
-                    _print_manual_install_instructions(dest)
+                    _print_manual_install_instructions(spec, dest)
                     return None
             except (EOFError, KeyboardInterrupt):
                 print("\n  Download cancelled.")
-                _print_manual_install_instructions(dest)
+                _print_manual_install_instructions(spec, dest)
                 return None
 
-    prefix = f"cohere-transcribe-{revision}"
-    primary_base = (base_url or _release_base()).rstrip("/")
-    candidates = _release_candidates(primary_base)
+    prefix = spec.asset_prefix
+    primary_base = (base_url or _release_base(spec)).rstrip("/")
+    candidates = _release_candidates(primary_base, spec.release_base)
 
     manifest = None
     resolved_url = None
@@ -629,27 +799,33 @@ def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
         print(f"Could not fetch model manifest from release assets ({candidates}).")
         for f in failures:
             print(f"  - {f}")
-        _print_manual_install_instructions(dest)
+        _print_manual_install_instructions(spec, dest)
         return None
-    print(f"Downloading Cohere model parts from {base_url} (Apache-2.0 release asset)...")
+    print(f"Downloading {spec.display_name} model parts from {base_url} "
+          f"({spec.license_name} release asset)...")
 
     os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
     tmp_root = tempfile.mkdtemp(prefix="vt-model-dl-", dir=os.path.dirname(os.path.abspath(dest)))
     try:
         part_paths = {}
-        for name in sorted(manifest):
-            part_xz = os.path.join(tmp_root, name)
-            _http_get(f"{base_url}/{name}", part_xz, name)
-            part_paths[name] = part_xz
-        return _assemble_parts(part_paths, manifest, dest,
+        for part_name in sorted(manifest):
+            part_xz = os.path.join(tmp_root, part_name)
+            _http_get(f"{base_url}/{part_name}", part_xz, part_name)
+            part_paths[part_name] = part_xz
+        return _assemble_parts(spec, part_paths, manifest, dest,
                                origin=base_url, resolved_url=resolved_url,
                                source_kind="remote")
     except Exception as e:
         print(f"Model auto-download failed: {e}", flush=True)
-        _print_manual_install_instructions(dest)
+        _print_manual_install_instructions(spec, dest)
         return None
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
+    """Deprecated alias for ``ensure_model("cohere", ...)``."""
+    return ensure_model("cohere", dest=dest, base_url=base_url, revision=revision)
 
 
 if __name__ == "__main__":
@@ -660,29 +836,39 @@ if __name__ == "__main__":
     console_text.harden_standard_streams()
     parser = argparse.ArgumentParser(
         prog="python -m src.model_download",
-        description="Download and verify Cohere model assets from GitHub release.",
+        description="Download and verify model assets from a GitHub release.",
     )
-    parser.add_argument("--dest", default=None, help="Target installation directory (default: models/cohere)")
+    parser.add_argument("--model", default="cohere",
+                        help="Model to install, by registry name (default: cohere). "
+                             "See `help --json`; the registry lives in this module.")
+    parser.add_argument("--dest", default=None,
+                        help="Target installation directory (default: the registry's target for --model)")
     parser.add_argument("--verify-only", action="store_true", help="Only verify existing local model files")
     parser.add_argument("--from", dest="source", default=None,
                         help="Install from a local split bundle (directory or .zip/.tar) instead of downloading")
     args = parser.parse_args()
 
-    target = args.dest or cohere_models_dir()
+    try:
+        spec = get_spec(args.model)
+    except KeyError as e:
+        print(f"✕ {e}")
+        sys.exit(2)
+
+    target = args.dest or models_dir(args.model)
     if args.verify_only:
-        if is_local_model_complete(target):
-            print(f"✓ Cohere model at {target} is complete and valid.")
+        if is_model_complete(args.model, target):
+            print(f"✓ {spec.name.capitalize()} model at {target} is complete and valid.")
             sys.exit(0)
         else:
-            print(f"✕ Cohere model at {target} is missing or incomplete.")
+            print(f"✕ {spec.name.capitalize()} model at {target} is missing or incomplete.")
             sys.exit(1)
 
     if args.source:
-        result = install_from_local_bundle(args.source, dest=target)
+        result = install_model_from_local_bundle(args.model, args.source, dest=target)
     else:
-        result = ensure_local_cohere(dest=target)
+        result = ensure_model(args.model, dest=target)
     if result:
-        print(f"✓ Cohere model ready at {result}")
+        print(f"✓ {spec.name.capitalize()} model ready at {result}")
         sys.exit(0)
     else:
         print("✕ Model download or verification failed.")
