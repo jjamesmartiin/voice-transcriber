@@ -24,19 +24,40 @@ Written 2026-10-08, at a point where context was getting long.
 
 **If `TODO-parity.md` §2 ever contradicts §4, §4 wins.** That drift happened once.
 
+### The evidence base is in a *different repo* — `/home/jamesm/gitprojects/pi-browser-benchmark`
+
+Nothing above explains **why** any of this is being built. That is here, and a fresh session
+will not find it by looking in `voice-transcriber`:
+
+| Path | What it holds |
+| --- | --- |
+| `results/WISPR-FLOW-REPORT.md` | **The reverse-engineered findings.** How Wispr Flow's demo was probed, the WebSocket protocol, and that its post-processing is server-side and content-driven rather than tab-driven |
+| `results/wispr-flow-dataset.json` | The recorded responses |
+| `bench/wispr/*.js` | The probe harness (WAV synthesis, mic injection via a `getUserMedia` override, the WS client, WER scoring) |
+| `plans/VOICE-TRANSCRIBER-FEATURE-PARITY.md` | The original parity plan, before it was split into the workstreams |
+
+**The four reference fixtures** — the list, retraction, email and long utterances — are the
+acceptance criterion for formatter parity. They are recorded in
+`docs/plan-on-device-formatter.md` §4 with Wispr's exact outputs, and asserted live by
+`tests/e2e/test_formatter_e2e.py`. Regenerate the audio with the TTS recipe in §5.
+
 ---
 
 ## 2. Where things actually stand
 
 **Git**
 
-- `main` is at `db0767a`, working tree clean.
-- **`main` is 46 commits ahead of `home/main` (gitea) — nothing has been pushed this
-  session.** 34 of those 46 are this session's work. **Pushing is the single highest-value
-  action remaining**: everything else here is recoverable, an unpushed history on one disk
-  is not.
+- `main` is at `92775f2`, working tree clean.
+- **`main` is 50 commits ahead of `home/main` (gitea) — nothing has been pushed this
+  session.** 38 of those 50 are this session's work.
 - Remotes: `home`/`gitea` → `gitea@git.jdm.cx:jamesm/voice-transcriber.git`,
   `github` → `git@github.com:jjamesmartiin/voice-transcriber.git`.
+
+> ⚠️ **Do not push without asking.** The user has deliberately deferred it ("don't push yet
+> since it's not ready"), so this is a *known, chosen* state rather than an oversight. Flag it
+> as the biggest risk — everything else on this list is recoverable and an unpushed history
+> on one disk is not — but the decision is theirs. `main` tracks `home`/`gitea`; `github` is
+> push-only, so a push needs to name the remote.
 
 **Health at the time of writing**
 
@@ -135,6 +156,71 @@ timeout 1500 unshare -rn -- sh -c 'ip link set lo up 2>/dev/null; cd <repo> && \
   nix develop --command python -m pytest tests/shared tests/linux tests/wsl tests/windows -q'
 ```
 
+### Running the app, and driving features without the TUI
+
+There is a **control API** — the engine listens on a Unix socket and `main.py` is itself the
+client. This is how features are scripted and tested, and it needs no display:
+
+```bash
+nix develop --command python src/main.py toggle     # start recording, or stop if recording
+nix develop --command python src/main.py status     # state, device, model, and every setting
+nix develop --command python src/main.py help --json  # THE authoritative verb catalogue
+
+# meeting mode (D2/D4) — off by default, so enable it first:
+nix develop --command python src/main.py meeting on
+nix develop --command python src/main.py meeting-start
+nix develop --command python src/main.py meeting-stop    # processing continues in the background
+nix develop --command python src/main.py status          # meeting_stage / % / partial transcript
+
+# the formatter (C5)
+nix develop --command python src/main.py formatter on
+nix develop --command python src/main.py formatter-model s1-mini
+```
+
+**`help --json` is the catalogue — never trust a hardcoded verb list in a doc**, including
+this one.
+
+### Generating test audio (and the voice-pair trap)
+
+```bash
+# The repo's documented TTS recipe. -w writes a WAV.
+nix run nixpkgs#espeak-ng -- -v en-us -s 155 -w out.wav "<text>"
+
+# For DIARIZATION you need two voices that actually separate. This pair works
+# (≈85 Hz male vs ≈250 Hz female); a first attempt with en-us vs en-gb+f3
+# collapsed to one speaker even at num_speakers=2.
+nix run nixpkgs#espeak-ng -- -v en+m3 -p 20 -s 145 -w a.wav "<speaker A>"
+nix run nixpkgs#espeak-ng -- -v en+f4 -p 85 -s 190 -w b.wav "<speaker B>"
+```
+Concatentate turns with ~0.7 s of silence between them, resample to **16 kHz mono float32**,
+and you have a labelled fixture with known ground-truth boundaries. That is exactly what the
+diarization benchmark and the D4 verification used.
+
+### Reproducing the meeting-mode proof
+
+The full recipe is in `docs/TODO-parity.md` §4D (D4). In short: build an A-B-A-B clip with the
+voice pair above, then call `MeetingPipeline().process(audio, 16000)` directly with
+`VT_MEETING_OUTPUT_DIR` set, and read the file it writes. Expected: 4 turns, correct speaker
+ordering, all turns transcribed verbatim, no `*.tmp` left behind.
+
+### The rules this repo enforces — a new agent will be judged on these
+
+1. **Every feature is a toggle, and `off` is byte-identical to today.** Not "equivalent" —
+   byte-identical, pinned by a test.
+2. **No behaviour may be reachable only by editing config.** Every key lands in
+   `config/config.yaml` *and* the documented example, `t2.DEFAULT_SETTINGS`, the environment,
+   the control API, **both** TUIs (`tui.py`/`tui_ratatui.py` *and* `tui-rs/`), and the tests.
+   `help --json` is the catalogue.
+3. **`src/` must not depend on `eval/`**, and nothing in `src/` may gain a network dependency
+   at run time. The product is offline-first; the models are a separate, explicit download.
+4. **Unknown values fail safe**: formatter/diarization fall back to `off`; `cleanup_mode`
+   falls back to the shipped behaviour. The reasons for that asymmetry are in
+   `docs/cleanup_modes.md`.
+5. **`ruff check src/ tests/` must be clean**, and `tests/shared` must pass with no network —
+   there is an autouse hermeticity guard that turns a stray connect into a hard failure.
+6. Commit messages carry the *reasoning* and the verification, not just the change. Look at
+   any recent commit on `main` for the house style.
+
 ### Traps, each of which cost real time
 
 1. **`unshare -rn` creates a netns with loopback DOWN.** Every network-touching
@@ -186,7 +272,24 @@ timeout 1500 unshare -rn -- sh -c 'ip link set lo up 2>/dev/null; cd <repo> && \
 ## 6. Findings this session that were expensive to establish
 
 Summarised here so they are not re-derived; full detail in `TODO-parity.md` §6 and the
-benchmark docs.
+benchmark docs. Also worth knowing: **five confident plan claims turned out to be wrong**, so
+when a plan asserts a fact, check it before building on it.
+
+### The working agreement with the user
+
+Worth knowing up front, because it shapes how this went:
+
+- **Autonomy is wanted, with decisions surfaced.** The user asked for work to proceed
+  autonomously — including delegating parallel workstreams to subagents — and to be brought in
+  only for genuine questions or design forks. Every time that was honoured it produced a
+  better outcome; twice a "safe" assumption would have been wrong (the `formatter_model`
+  default, and the list-casing rule — where checking the evidence reversed the answer).
+- **Push only on request.** See §2.
+- **Verification is expected, not asserted.** "Tests pass" and "the feature works" are treated
+  as different claims; the user asked directly whether things actually function. That is why
+  the meeting-mode proof in §3 was run on real audio rather than trusted from stubs.
+- **Metered connectivity matters.** Large downloads were originally avoided for that reason;
+  if a task needs >100 MB, say so before starting it.
 
 **The plans contained several confident claims that were wrong.** All were caught by
 checking against reality, and all are corrected in place:
@@ -222,14 +325,44 @@ checking against reality, and all are corrected in place:
 
 ## 7. What is left, briefly
 
-Full detail in `TODO-parity.md` §2. The shape of it:
+Full detail in `TODO-parity.md` §2 — that is the authoritative list, and this is the shape of
+it as of this snapshot.
 
-1. **Push** (§2).
-2. **D4** — in flight (§3).
-3. **D5–D7** — the transcript artifact and speakers map, the diarization settings, and a
-   recorded DER.
-4. **C6, C9, C8, X3** — publishing the model bundle, licence notices and the exact
-   "S1-mini" by "Superwhisper" naming, the docs set, and the changelog.
-5. **A4/C7, X1, X2, X4** — the recorded `eval/` parity gate, a CI check that `src/`
-   imports nothing from `eval/`, and the Windows/macOS-unverified log.
-6. **Cleanup** — the worktrees and branches in §2.
+**Done:** A (all of A1–A5), B (all), C0–C5 + C10, D0–D4, E1/E2/E4, X5. **C4 was dropped by
+decision** and **M3b with it** — see C4 for why.
+
+Still open, roughly in priority order:
+
+1. **Push** (§2). 50 commits, nothing on any remote.
+2. **D5's remainder** — the speakers map (renamable `Speaker 2` → `Priya`), optional
+   JSON/Markdown forms, and a *setting* for the output directory. The artifact itself landed
+   with D4.
+3. **D6** — `diarization`, `diarization_speakers`, `diarization_model` across every surface
+   (this is also what unblocks the output-directory setting above).
+4. **D7** — an `eval/` entry and a recorded **DER** next to the ASR numbers.
+5. **C6, C9, C8, X3** — publishing the model bundle plus the first-use download prompt,
+   licence notices into `config/licenses/` and the exact "S1-mini" by "Superwhisper" naming,
+   the docs set, and the changelog.
+6. **A4/C7, X1, X2, X4** — the recorded `eval/` parity gate (blocked on regenerating
+   `eval/results.json`, which no longer reproduces), a CI check that `src/` imports nothing
+   from `eval/`, and the Windows/macOS-unverified log.
+7. **E3** — the sherpa-onnx int8 ONNX path for Cohere (~2.9 GB), now applicable and newly
+   motivated by the `--int8` option peaking at 22 GiB.
+8. **Cleanup** — the worktrees and branches in §2; the stray 3 GB `vt-model-dl-*` directory.
+
+---
+
+## 8. How to use this document
+
+It is a snapshot, so **it will go stale** — `TODO-parity.md` §2 and §4 are the living
+versions. If you learn something expensive, put it in the right place:
+
+| Kind of thing | Where it goes |
+| --- | --- |
+| A task, or a decision not to re-litigate | `TODO-parity.md` §1/§4 |
+| A measurement | the relevant `*-benchmark.md` |
+| A correction to a plan's confident claim | the plan itself, in place, with what was actually true |
+| A trap or process lesson | §5 here, or rewrite this file |
+
+The one habit that mattered most this session: **when a plan made a confident factual claim,
+check it against reality before building on it.** Five of them were wrong.
