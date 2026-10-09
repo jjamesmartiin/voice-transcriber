@@ -25,19 +25,22 @@ in [`TODO-parity.md`](TODO-parity.md) **§1b as `S1`–`S12`**.
 | --- | --- |
 | `wip/feature-parity-2026-10` | **Integration branch.** Docs: §1b decisions, D7/DER design, E3 verification, the regenerated eval baseline, X6. `work/parity-eval` merged. |
 | `work/parity-eval` | **Merged.** Baseline regenerated 5.10 %→3.57 % on a clean tree with self-describing `meta`; `eval/review_report.py` → `eval/report.html` (per-clip audio + ref + hyp + diff). |
-| `work/parity-formatter` | **Not merged.** 5 commits: C6a registry (adds `FORMATTER` **and `DIARIZATION`** specs, `_model_path` through the registry), C6b first-use prompt with the size, C6c publish path, C9 licence/NOTICE + provenance, C8 docs/CHANGELOG. |
+| `work/parity-formatter` | **MERGED into the integration branch.** 6 commits: C6a registry (adds `FORMATTER` **and `DIARIZATION`** specs, `_model_path` through the registry), C6b first-use prompt with the size, C6c publish path, C9 licence/NOTICE + provenance, C8 docs/CHANGELOG, and the X6 fix + guard pins. |
 | `work/parity-meeting` | **Not merged.** 2 commits: `6c01795` A6 (reset takes effect immediately), `da619d6` D6 (diarization settings on every Python surface). |
 
 ### Uncommitted WIP — **do not delete these worktrees**
 
 Nothing is committed here; the files persist on disk, so recovery is just
-*look at the tree*, not *reconstruct it*.
+*look at the tree*, not *reconstruct it*. (The formatter worktree is now clean —
+its WIP was finished, squashed and merged.)
 
 | Worktree | WIP |
 | --- | --- |
 | `../voice-transcriber-meeting` | **D5a (large):** ~1017 insertions — `t2.py` (+327), `meeting_pipeline.py` (+185), `main.py` (+126), `control.py`, `tui.py`, `tui_ratatui.py`, `config/example-config/`, `.gitignore`, `docs/meeting_mode.md`, plus tests (`test_config_sync.py` +156, `test_meeting_pipeline.py` +96) and a **new `tests/shared/test_meeting_screen.py`**. This is the live speaker map + repo-local output dir. |
-| `../voice-transcriber-formatter` | The **X6 fix**: `tests/shared/conftest.py` + `tests/shared/test_formatter_settings.py`. |
 | `../voice-transcriber-e3flake` | `flake.nix` + `flake.lock` — the narrow `sherpa-onnx` override. **Most valuable uncommitted artefact of the session; see §0.1.** |
+
+The integration branch is **green**: `tests/shared` 1451 passed, 3 skipped, `ruff check src/ tests/`
+clean. It was red only because of X6, which is now fixed and pinned.
 
 ### 0.1 Expensive findings — do not re-derive
 
@@ -66,11 +69,11 @@ Nothing is committed here; the files persist on disk, so recovery is just
 
 ### Queue on resume
 
-1. `tests/shared` is **RED on the integration branch — pre-existing**, not from this session
-   (it fails identically at `2140c50` in a clean detached worktree). Fix in flight in
-   `work/parity-formatter`.
-2. Merge `work/parity-formatter` → `work/parity-meeting` → `work/parity-e3flake`, in that
-   order, re-running the suite at each step.
+1. `tests/shared` is **green on the integration branch** (1451 passed). X6 — the pre-existing
+   leak that made it red — is fixed and its guards are now themselves pinned; see §0.1.
+2. Merge `work/parity-meeting` next — its D6 commit is complete but its **D5a is an unverified
+   checkpoint**, so run the suite before trusting it — then `work/parity-e3flake`, which has
+   never been verified at all (its flake change was interrupted mid-flight).
 3. Spawn the **Rust/TUI worker** for the live speaker editor — it needs the frozen contract
    the meeting worker was about to produce (control verbs, `status` fields, bridge messages,
    label strings).
