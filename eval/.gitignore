@@ -1,0 +1,3 @@
+# Derived from results.json + manifest.jsonl; regenerate with
+#   nix develop --command python eval/review_report.py
+review.json

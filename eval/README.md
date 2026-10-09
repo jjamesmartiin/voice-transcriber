@@ -75,6 +75,15 @@ Key flags:
 | `--number-digits` / `--no-number-digits` | override `number_digits` from `config/config.yaml` |
 | `--json OUT` | write full per-clip results + aggregates |
 | `--verbose` | don't silence model/pipeline stdout |
+| `--no-skip-slm` | run the optional SLM rewrite pass (default: skip it) |
+
+The JSON `meta` block records the full configuration and the exact invocation so
+a baseline can state how it was produced: `backend`, `int8_dynamic`,
+`number_digits` (+ `number_digits_config`), `blocks_ms`, `skip_slm`, `device`,
+`git_rev`/`git_dirty`, `config_source` (path + whether it loaded), `manifest`,
+`invocation` (argv), `env` (the relevant environment variables, verbatim), and
+`reproduce` (a single copy-pasteable shell line). Extra keys are additive; older
+result JSON files that predate them still load.
 
 The app's **real config is honoured**: `number_digits` is read from
 `config/config.yaml` (currently `false`) and applied via
@@ -100,21 +109,59 @@ reference is empty); it is reported only via the hallucination rate.
 
 ## Baseline (reference machine, CPU, `VT_INT8_DYNAMIC=1`)
 
-Produced with `number_digits=false`, 100 ms blocks, `eval/results.json`:
+Regenerated 2026-10-09 with `number_digits=false`, `skip_slm=True`, 100 ms blocks,
+all 154 clips, `eval/results.json`. The exact command and all settings are recorded
+in `results.json` → `meta` (`backend`, `int8_dynamic`, `number_digits`, `blocks_ms`,
+`skip_slm`, `git_rev`, `config_source`, `invocation`), so the baseline is
+self-describing rather than depending on this paragraph:
+
+```bash
+nix develop --command env PYTHONPATH=$PWD/src VT_INT8_DYNAMIC=1 \
+  python eval/score.py --backend cohere --int8 --no-number-digits \
+  --blocks-ms 100 --json eval/results.json
+```
 
 | slice | n | WER | CER | exact | latency |
 |---|---|---|---|---|---|
-| clean | 44 | 2.81% | 1.43% | 70.45% | 0.84 s |
-| accented | 22 | 12.32% | 7.66% | 13.64% | 1.02 s |
-| noisy | 24 | 3.01% | 1.24% | 70.83% | 0.85 s |
-| long | 12 | 1.78% | 0.87% | 50.00% | 3.27 s |
-| technical | 28 | 8.44% | 5.46% | 50.00% | 1.04 s |
-| technical_noisy | 12 | 8.12% | 4.52% | 50.00% | 0.86 s |
-| **overall (speech)** | **142** | **5.10%** | **2.97%** | **54.23%** | |
+| clean | 44 | 2.22% | 0.97% | 79.55% | 0.46 s |
+| accented | 22 | 9.42% | 3.65% | 36.36% | 0.52 s |
+| noisy | 24 | 2.73% | 1.58% | 75.00% | 0.44 s |
+| long | 12 | 2.19% | 0.75% | 33.33% | 1.94 s |
+| technical | 28 | 4.26% | 1.62% | 82.14% | 0.56 s |
+| technical_noisy | 12 | 0.64% | 0.25% | 91.67% | 0.60 s |
+| **overall (speech)** | **142** | **3.57%** | **1.42%** | **69.72%** | |
 | silence | 12 | — | — | — | hallucination **0/12** |
+
+> The previous baseline recorded **5.10%** WER with `git_rev` unrecorded. It no longer
+> reproduced: 85 of 154 hypotheses changed with the refs identical, because the app
+> (post-processor / chunker) improved underneath it. The table above is the
+> current, reproducing number. See `docs/TODO-parity.md` §4E.
 
 Latency is per-clip wall time (after model load) and is shown only as context;
 this harness is about accuracy, not a latency benchmark.
+
+## Review report (human-verifiable, no model run)
+
+`review_report.py` turns a recorded results JSON + the manifest into a single
+self-contained page for checking **what the audio was** against **what was
+transcribed**: every clip gets an inline `<audio>` player (referenced by relative
+path — the WAVs are not embedded), the reference, the hypothesis, a word-level
+diff, and per-clip WER, plus a per-slice roll-up.
+
+Regenerate it from the recorded results **without re-running the model**:
+
+```bash
+nix develop --command python eval/review_report.py
+```
+
+Inputs default to `eval/results.json` + `eval/manifest.jsonl`; outputs are
+`eval/report.html` (committed — the human artifact) and `eval/review.json`
+(machine readable, **gitignored**: it is pure derived data whose only inputs are
+`results.json` + `manifest.jsonl`, so tracking it would add ~500 KiB of diff
+noise to every future results change). Both paths are overridable with
+`--out`/`--json`. The diff compares whitespace tokens on a lowercased `[a-z0-9]`
+key, so case/punctuation-only differences (which scoring normalisation ignores)
+are not flagged.
 
 ## What this set covers
 
