@@ -23,9 +23,12 @@ problems there the first time, and the same fix applies here.
 from __future__ import annotations
 
 import importlib
+import logging
 import re
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Backend registry
@@ -542,7 +545,16 @@ def format_text(
         if elapsed > timeout_s:
             return original
 
-        if validate(original, candidate, structure=structure) is not None:
+        reason = validate(original, candidate, structure=structure)
+        if reason is not None:
+            # A rejected rewrite returns exactly what `formatter: off` returns, so
+            # without this line a discarded answer is invisible - and that
+            # ambiguity already hid two guardrail false-positives that threw away
+            # correct model output and looked like "the model did nothing". Local
+            # log only (file handler, 0600; see logging_setup).
+            logger.warning(
+                "formatter rewrite rejected (%s): %s",
+                model or DEFAULT_MODEL, reason)
             return original
         # Applied before validation, not after, so the text that was checked is the
         # text that is returned. Casing does not affect canonical tokens, so this

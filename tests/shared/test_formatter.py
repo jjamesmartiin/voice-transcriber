@@ -16,6 +16,7 @@ The two halves that matter equally:
 Hermeticity: tests/shared/conftest.py blocks real non-loopback connects, so a
 backend that tried to reach a network endpoint fails loudly here.
 """
+import logging
 import sys
 import time
 import types
@@ -589,3 +590,21 @@ def test_the_pipeline_returns_formatted_text_end_to_end(monkeypatch):
 
     name = install_fake(monkeypatch, rewrite)
     assert formatter.format_text(WISPR_RETRACTION_IN, backend=name) == WISPR_RETRACTION_OUT
+
+
+def test_a_rejected_rewrite_logs_the_reason(caplog, monkeypatch):
+    """A guardrail rejection must be recoverable from the log, not silent.
+
+    The fallback returns exactly what `formatter: off` returns, so a discarded
+    answer used to be indistinguishable from the formatter not running - the
+    ambiguity that hid two guardrail false-positives which threw away correct
+    model output. The reason and the model id must reach the log.
+    """
+    name = install_fake(monkeypatch, lambda text, **kw: "Buy milk and also bread.")
+
+    with caplog.at_level(logging.WARNING, logger="formatter"):
+        result = formatter.format_text("buy milk", backend=name, model="s1-mini")
+
+    assert result == "buy milk", "the invalid rewrite must still be discarded"
+    assert "absent from the input" in caplog.text
+    assert "s1-mini" in caplog.text
