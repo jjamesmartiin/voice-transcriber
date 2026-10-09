@@ -133,7 +133,22 @@ HOTKEY_BINDS = keybinds.parse_binds(None)  # Push-to-talk chords; default is hol
 KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
 UI_THEME = "auto"
-PUNCTUATION_MODE = "full"
+#: The shipped punctuation preset — the ONE owner for this default.
+#: ``PUNCTUATION_MODE`` (the runtime/config fallback), ``DEFAULT_SETTINGS`` (the
+#: "Reset to Defaults" target) and the config-file fallback in
+#: ``load_audio_config`` all read this constant, so the first-run default and
+#: the reset target cannot drift apart again. They did until A6: the module
+#: global said ``full`` while ``DEFAULT_SETTINGS`` said ``no_punctuation``, and
+#: the reset therefore disagreed with a fresh install (and with the value a
+#: config file with no ``preset`` key produced).
+#:
+#: Chosen value: ``full``. It is the most useful deterministic correction (it
+#: produces standard, complete sentences rather than stripping punctuation),
+#: it costs nothing on a weak machine because the post-processor is pure Python,
+#: and it is what a fresh install already did. The heavier, opt-in features
+#: (formatter, meeting/diarization) stay off; only the cheap corrections are on.
+DEFAULT_PUNCTUATION_MODE = "full"
+PUNCTUATION_MODE = DEFAULT_PUNCTUATION_MODE
 PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "aesthetic_lowercase", "gen_z"]
 #: Structured output (spoken lists -> bullets). "off" is the shipped default.
 STRUCTURE_MODE = "off"
@@ -151,6 +166,33 @@ MEETING_MODES = ["off", "on"]
 #: Temp-file spill threshold for a long meeting capture, in minutes. Default 10.
 MEETING_SPILL_MINUTES = 10
 MEETING_SPILL_CHOICES = [5, 10, 20, 30, 60]
+#: Speaker diarization for meeting mode (docs/plan-diarization.md sec 6). "off"
+#: is the shipped default, so a meeting capture without the pass is
+#: byte-identical to a build without the feature and the dictation path is never
+#: touched. Unknown values fail safe to "off" because the pass loads a model: a
+#: typo must not switch it on by accident.
+DIARIZATION = "off"
+DIARIZATION_MODES = ["off", "on"]
+#: Speaker-count hint: "auto" or an exact 2-8. A known count makes clustering
+#: cheaper and more accurate, so it is offered but never required.
+DIARIZATION_SPEAKERS = "auto"
+DIARIZATION_SPEAKER_CHOICES = ["auto", 2, 3, 4, 5, 6, 7, 8]
+#: Registry name of the diarization model bundle
+#: (``model_download.MODELS["diarization"]``). The bundle is startup-loaded like
+#: ``model_backend``, so changing it needs a restart; the *mode* is hot.
+DIARIZATION_MODEL = "diarization"
+DIARIZATION_MODELS = ["diarization"]
+#: Shipped default model id (mirrors the registry spec name).
+DIARIZATION_DEFAULT_MODEL = DIARIZATION_MODELS[0]
+#: Where meeting transcripts are written. Repo-relative by default so a
+#: checkout's transcripts live in the project (and are gitignored); an absolute
+#: path, or ``$VT_MEETING_OUTPUT_DIR``, overrides it.
+MEETING_OUTPUT_DIR = "meetings"
+#: Output form for the transcript artifact. "text" is the shipped default and is
+#: byte-identical to the pre-D5 artifact; ``json`` is one object per turn and
+#: ``markdown`` is a headed Markdown document.
+MEETING_OUTPUT_FORMATS = ["text", "json", "markdown"]
+MEETING_OUTPUT_FORMAT = "text"
 #: Optional on-device formatter (docs/plan-on-device-formatter.md). "off" is the
 #: shipped default and means the dictation path is byte-identical to a build
 #: without the feature.
@@ -204,16 +246,19 @@ DEFAULT_SETTINGS = {
     'KEEP_BLUETOOTH_HANDSFREE': True,
     'SOUND_THEME': "proximity",
     'UI_THEME': "red",
-    # NOTE: deliberately NOT the same as the module global above, which is
-    # "full". "Reset to Defaults" targets "no_punctuation" as a product
-    # decision - pinned by test_settings_menu.py
-    # ::test_shipped_defaults_are_the_intended_baseline. Do not "fix" this to
-    # match the global; the two are intended to differ.
-    'PUNCTUATION_MODE': "no_punctuation",
+    # The shipped preset is one value in one place (DEFAULT_PUNCTUATION_MODE),
+    # so the reset target and the first-run default are the same by construction.
+    # See the comment on that constant for why `full` and not `no_punctuation`.
+    'PUNCTUATION_MODE': DEFAULT_PUNCTUATION_MODE,
     'STRUCTURE_MODE': "off",
     'CLEANUP_MODE': "full",
     'MEETING': "off",
     'MEETING_SPILL_MINUTES': 10,
+    'DIARIZATION': "off",
+    'DIARIZATION_SPEAKERS': "auto",
+    'DIARIZATION_MODEL': DIARIZATION_DEFAULT_MODEL,
+    'MEETING_OUTPUT_DIR': "meetings",
+    'MEETING_OUTPUT_FORMAT': "text",
     'FORMATTER': "off",
     'FORMATTER_MODEL': "s1-mini",
     'FORMATTER_STYLE': "semi-formal",
@@ -813,7 +858,7 @@ def _normalize_bool(value, default: bool = False) -> bool:
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, MEETING, MEETING_SPILL_MINUTES, FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, TYPING_WPM, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, MEETING, MEETING_SPILL_MINUTES, DIARIZATION, DIARIZATION_SPEAKERS, DIARIZATION_MODEL, MEETING_OUTPUT_DIR, MEETING_OUTPUT_FORMAT, FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, TYPING_WPM, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -865,7 +910,7 @@ def load_audio_config(file_path=None):
             MODEL_BACKEND = _load_model_backend(config.get('model_backend'))
             KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
 
-            raw_punct = config.get('preset') or config.get('mode_preset') or config.get('punctuation_mode') or config.get('formatting_level') or 'full'
+            raw_punct = config.get('preset') or config.get('mode_preset') or config.get('punctuation_mode') or config.get('formatting_level') or DEFAULT_PUNCTUATION_MODE
             PUNCTUATION_MODE = get_canonical_preset_name(raw_punct)
 
             env_punct = os.environ.get("VT_PRESET", "").strip().lower() or os.environ.get("VT_PUNCTUATION_MODE", "").strip().lower()
@@ -892,6 +937,35 @@ def load_audio_config(file_path=None):
             env_meeting_spill = os.environ.get("VT_MEETING_SPILL_MINUTES", "").strip().lower()
             if env_meeting_spill:
                 MEETING_SPILL_MINUTES = normalize_meeting_spill_minutes(env_meeting_spill)
+
+            DIARIZATION = normalize_diarization(config.get('diarization', 'off'))
+            env_diarization = os.environ.get("VT_DIARIZATION", "").strip().lower()
+            if env_diarization:
+                DIARIZATION = normalize_diarization(env_diarization)
+
+            DIARIZATION_SPEAKERS = normalize_diarization_speakers(
+                config.get('diarization_speakers', 'auto'))
+            env_diarization_speakers = os.environ.get("VT_DIARIZATION_SPEAKERS", "").strip().lower()
+            if env_diarization_speakers:
+                DIARIZATION_SPEAKERS = normalize_diarization_speakers(env_diarization_speakers)
+
+            DIARIZATION_MODEL = normalize_diarization_model(
+                config.get('diarization_model', DIARIZATION_MODEL))
+            env_diarization_model = os.environ.get("VT_DIARIZATION_MODEL", "").strip().lower()
+            if env_diarization_model:
+                DIARIZATION_MODEL = normalize_diarization_model(env_diarization_model)
+
+            MEETING_OUTPUT_DIR = str(
+                config.get('meeting_output_dir', MEETING_OUTPUT_DIR)).strip() or MEETING_OUTPUT_DIR
+            env_meeting_output_dir = os.environ.get("VT_MEETING_OUTPUT_DIR", "").strip()
+            if env_meeting_output_dir:
+                MEETING_OUTPUT_DIR = env_meeting_output_dir
+
+            MEETING_OUTPUT_FORMAT = normalize_meeting_output_format(
+                config.get('meeting_output_format', 'text'))
+            env_meeting_output_format = os.environ.get("VT_MEETING_OUTPUT_FORMAT", "").strip().lower()
+            if env_meeting_output_format:
+                MEETING_OUTPUT_FORMAT = normalize_meeting_output_format(env_meeting_output_format)
 
             FORMATTER = normalize_formatter_enabled(config.get('formatter', 'off'))
             env_formatter = os.environ.get("VT_FORMATTER", "").strip().lower()
@@ -1193,6 +1267,11 @@ def save_audio_config(file_path=None):
             'cleanup_mode': CLEANUP_MODE,
             'meeting': MEETING,
             'meeting_spill_minutes': MEETING_SPILL_MINUTES,
+            'diarization': DIARIZATION,
+            'diarization_speakers': DIARIZATION_SPEAKERS,
+            'diarization_model': DIARIZATION_MODEL,
+            'meeting_output_dir': MEETING_OUTPUT_DIR,
+            'meeting_output_format': MEETING_OUTPUT_FORMAT,
             'formatter': FORMATTER,
             'formatter_model': FORMATTER_MODEL,
             'formatter_style': FORMATTER_STYLE,
@@ -1236,12 +1315,16 @@ def reset_to_defaults() -> dict:
         globals()[name] = value
     NUMBER_DIGITS = (NUMBER_MODE != "words")
     set_number_digits(NUMBER_MODE)
-    # NOTE: the punctuation preset is deliberately *not* pushed to the
-    # post-processor here. Doing so is arguably more correct (otherwise the reset
-    # only takes effect on the next launch, while the file already says otherwise,
-    # because save_audio_config() below persists it), but it is a behaviour change
-    # outside the formatter work and it perturbs several order-dependent tests.
-    # Tracked as A6 in docs/TODO-parity.md rather than smuggled in here.
+    # Push every setting that has a runtime copy, in the same order a config
+    # load does. Without this the reset only took effect on the next launch
+    # while save_audio_config() below already wrote the new values to disk - the
+    # delayed-action surprise A6 was filed for. The post-processor keeps its own
+    # copies of the punctuation, structure, cleanup, number, serial, spell and
+    # formatter state, so all of them must be re-published, not just the
+    # globals assigned above.
+    set_punctuation_mode(PUNCTUATION_MODE)
+    set_serial_collapse(SERIAL_COLLAPSE)
+    set_spell_command(SPELL_COMMAND)
     _push_structure_mode()
     _push_cleanup_mode()
     _push_formatter_settings()
@@ -1937,6 +2020,306 @@ def meeting_spill_setting_state(minutes: int):
     """``(description, badge, colour)`` for the spill-threshold row."""
     minutes = normalize_meeting_spill_minutes(minutes)
     return f"Spills to disk past {minutes} min", "[SPILL]", "cyan"
+
+
+# -- diarization (speaker labels for meeting mode) -------------------------
+# The diarization *mode* is hot (it only decides whether to run the pass); the
+# *model* is startup-loaded, like model_backend. The values here are the
+# settings only - the pass itself lives in ``diarize.py`` and is wired into the
+# meeting pipeline by the engine.
+
+def normalize_diarization(value) -> str:
+    """Map a user value onto ``off``/``on``; unknown means ``off``.
+
+    Fail-safe off: the pass loads a model, so a typo must not turn it on by
+    accident (the same policy as ``normalize_meeting``).
+    """
+    if value is None:
+        return "off"
+    text = str(value).strip().lower()
+    return "on" if text in ("on", "true", "yes", "enabled", "1") else "off"
+
+
+def get_diarization() -> str:
+    """The configured diarization toggle ("off"/"on")."""
+    return DIARIZATION
+
+
+def set_diarization(mode) -> str:
+    """Set and persist the diarization toggle."""
+    global DIARIZATION
+    DIARIZATION = normalize_diarization(mode)
+    save_audio_config()
+    return DIARIZATION
+
+
+def toggle_diarization() -> str:
+    """Cycle off -> on -> off and persist."""
+    global DIARIZATION
+    index = DIARIZATION_MODES.index(DIARIZATION) if DIARIZATION in DIARIZATION_MODES else 0
+    DIARIZATION = DIARIZATION_MODES[(index + 1) % len(DIARIZATION_MODES)]
+    save_audio_config()
+    return DIARIZATION
+
+
+def diarization_setting_state(mode: str):
+    """``(description, badge, colour)`` for the settings modal's speaker row."""
+    if normalize_diarization(mode) == "on":
+        return "Labels who said what in meeting transcripts", "[ON]", "green"
+    return "Off: one speaker per transcript", "[OFF]", "dim white"
+
+
+def normalize_diarization_speakers(value):
+    """Canonicalise the speaker-count hint: ``"auto"`` or an int in 2..8.
+
+    An out-of-range or unparseable value keeps auto-detection rather than
+    guessing a count, because a wrong hint is more damaging than none.
+    """
+    if value is None or isinstance(value, bool):
+        return "auto"
+    if isinstance(value, int):
+        return value if 2 <= value <= 8 else "auto"
+    text = str(value).strip().lower()
+    if text in ("", "auto", "none"):
+        return "auto"
+    try:
+        num = int(text)
+    except (TypeError, ValueError):
+        return "auto"
+    return num if 2 <= num <= 8 else "auto"
+
+
+def get_diarization_speakers():
+    """The configured speaker-count hint: ``"auto"`` or an int."""
+    return DIARIZATION_SPEAKERS
+
+
+def set_diarization_speakers(value):
+    """Set and persist the speaker-count hint; unknown values mean auto."""
+    global DIARIZATION_SPEAKERS
+    DIARIZATION_SPEAKERS = normalize_diarization_speakers(value)
+    save_audio_config()
+    return DIARIZATION_SPEAKERS
+
+
+def cycle_diarization_speakers():
+    """Cycle auto -> 2 -> 3 ... -> 8 -> auto and persist."""
+    global DIARIZATION_SPEAKERS
+    current = normalize_diarization_speakers(DIARIZATION_SPEAKERS)
+    choices = DIARIZATION_SPEAKER_CHOICES
+    index = choices.index(current) if current in choices else 0
+    DIARIZATION_SPEAKERS = choices[(index + 1) % len(choices)]
+    save_audio_config()
+    return DIARIZATION_SPEAKERS
+
+
+def diarization_speakers_setting_state(value):
+    """``(description, badge, colour)`` for the speaker-count row."""
+    value = normalize_diarization_speakers(value)
+    if value == "auto":
+        return "Auto-detect the speaker count", "[AUTO]", "cyan"
+    return f"Expecting {value} speakers", f"[{value}]", "cyan"
+
+
+def normalize_diarization_model(value) -> str:
+    """A registry model id, validated against :data:`DIARIZATION_MODELS`.
+
+    Unknown values warn and fall back to the shipped default (the
+    ``normalize_formatter_model`` policy): the setting names *what to load*, so a
+    typo should name the default and carry on rather than silently switching the
+    feature off and looking like a broken model.
+    """
+    fallback = DIARIZATION_DEFAULT_MODEL
+    if value is None:
+        return fallback
+    text = str(value).strip().lower()
+    if not text:
+        return fallback
+    if text not in DIARIZATION_MODELS:
+        logger.warning(
+            "Unknown diarization model %r; using %r (known: %s)",
+            text, fallback, ", ".join(DIARIZATION_MODELS))
+        return fallback
+    return text
+
+
+def get_diarization_model() -> str:
+    return DIARIZATION_MODEL
+
+
+def set_diarization_model(value) -> str:
+    global DIARIZATION_MODEL
+    DIARIZATION_MODEL = normalize_diarization_model(value)
+    save_audio_config()
+    return DIARIZATION_MODEL
+
+
+def cycle_diarization_model() -> str:
+    index = DIARIZATION_MODELS.index(DIARIZATION_MODEL) if DIARIZATION_MODEL in DIARIZATION_MODELS else -1
+    return set_diarization_model(DIARIZATION_MODELS[(index + 1) % len(DIARIZATION_MODELS)])
+
+
+def diarization_model_setting_state(model: str = DIARIZATION_MODEL):
+    return f"Model: {model}", "[MODEL]", "cyan"
+
+
+# -- meeting artifact: output location, form, and the speakers map --------
+# The output directory and form are app *config* (settings modal + config file +
+# control verb). The speakers map is transcript *metadata* and deliberately NOT
+# here: it is edited live from the meeting screen. See the hooks below.
+
+def get_meeting_output_dir() -> str:
+    """The configured transcript directory (repo-relative by default)."""
+    return MEETING_OUTPUT_DIR
+
+
+def set_meeting_output_dir(value) -> str:
+    """Set and persist the transcript directory; empty means the default."""
+    global MEETING_OUTPUT_DIR
+    text = str(value).strip() if value is not None else ""
+    MEETING_OUTPUT_DIR = text or "meetings"
+    save_audio_config()
+    return MEETING_OUTPUT_DIR
+
+
+def meeting_output_dir_setting_state(path: str = MEETING_OUTPUT_DIR):
+    return f"Saved to {path}", "[DIR]", "cyan"
+
+
+def normalize_meeting_output_format(value) -> str:
+    """Canonicalise the artifact form; unknown values fall back to ``text``.
+
+    Fail safe to the shipped form: a typo must not produce a format the user did
+    not ask for (mirroring ``normalize_cleanup_mode``'s fallback-to-shipped
+    policy, not the formatter's fallback-to-default).
+    """
+    text = str(value).strip().lower() if value is not None else ""
+    if text in ("md", "markdown"):
+        return "markdown"
+    if text == "json":
+        return "json"
+    return "text"
+
+
+def get_meeting_output_format() -> str:
+    """The configured transcript form ("text"/"json"/"markdown")."""
+    return MEETING_OUTPUT_FORMAT
+
+
+def set_meeting_output_format(value) -> str:
+    global MEETING_OUTPUT_FORMAT
+    MEETING_OUTPUT_FORMAT = normalize_meeting_output_format(value)
+    save_audio_config()
+    return MEETING_OUTPUT_FORMAT
+
+
+def cycle_meeting_output_format() -> str:
+    global MEETING_OUTPUT_FORMAT
+    index = (MEETING_OUTPUT_FORMATS.index(MEETING_OUTPUT_FORMAT)
+             if MEETING_OUTPUT_FORMAT in MEETING_OUTPUT_FORMATS else 0)
+    MEETING_OUTPUT_FORMAT = MEETING_OUTPUT_FORMATS[(index + 1) % len(MEETING_OUTPUT_FORMATS)]
+    save_audio_config()
+    return MEETING_OUTPUT_FORMAT
+
+
+def meeting_output_format_setting_state(fmt: str = MEETING_OUTPUT_FORMAT):
+    return f"Transcript form: {normalize_meeting_output_format(fmt)}", "[FORM]", "cyan"
+
+
+# -- the speakers map (transcript metadata, not app config) ---------------
+# This is the one editable thing that is NOT in the settings modal, on purpose:
+# a speaker name is metadata about one meeting's transcript, not a setting of
+# the app. It is edited live from the meeting screen (the ``s`` key) and read by
+# the pipeline when it renders labels. The engine registers the hooks so the
+# modal-layer editor can read and write the engine's list without importing it.
+
+def normalize_speaker_names(value) -> list:
+    """Coerce a value into an ordered list of non-empty speaker names.
+
+    Accepts a list/tuple of names or a comma-separated string (the control-API
+    form). Whitespace is stripped and empty entries dropped, so a trailing comma
+    cannot create a nameless slot that would swallow a speaker.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        items = value.split(",")
+    elif isinstance(value, (list, tuple)):
+        items = list(value)
+    else:
+        return []
+    names: list = []
+    for item in items:
+        text = str(item).strip()
+        if text:
+            names.append(text)
+    return names
+
+
+def add_speaker_name(names, name, index=None) -> list:
+    """Return ``names`` with ``name`` inserted (at ``index``, or appended)."""
+    result = list(names)
+    text = str(name).strip()
+    if not text:
+        return result
+    if index is None or index >= len(result):
+        result.append(text)
+    else:
+        result.insert(max(0, int(index)), text)
+    return result
+
+
+def rename_speaker_name(names, index, name) -> list:
+    """Return ``names`` with the entry at ``index`` replaced (blank clears it)."""
+    result = list(names)
+    if not 0 <= int(index) < len(result):
+        return result
+    result[int(index)] = str(name).strip()
+    return result
+
+
+def remove_speaker_name(names, index) -> list:
+    result = list(names)
+    if 0 <= int(index) < len(result):
+        del result[int(index)]
+    return result
+
+
+def move_speaker_name(names, index, delta) -> list:
+    """Return ``names`` with the entry moved by ``delta`` slots (clamped)."""
+    result = list(names)
+    idx = int(index)
+    if not 0 <= idx < len(result):
+        return result
+    target = max(0, min(len(result) - 1, idx + int(delta)))
+    if target != idx:
+        result.insert(target, result.pop(idx))
+    return result
+
+
+#: Hooks the engine registers so the meeting screen can read/write the map.
+_SPEAKER_HOOKS = {"get": None, "set": None}
+
+
+def register_speaker_hooks(get=None, set=None) -> None:  # noqa: A002 - mirrors set_* setters
+    """Let the meeting-screen editor reach the engine's live speakers map."""
+    _SPEAKER_HOOKS["get"] = get
+    _SPEAKER_HOOKS["set"] = set
+
+
+def get_speaker_names() -> list:
+    """The live speakers map from the engine, or an empty list if unwired."""
+    hook = _SPEAKER_HOOKS.get("get")
+    return list(hook()) if callable(hook) else []
+
+
+def set_speaker_names(names):
+    """Replace the live speakers map through the engine hook."""
+    hook = _SPEAKER_HOOKS.get("set")
+    if callable(hook):
+        hook(normalize_speaker_names(names))
+        return True
+    return False
 
 
 def meeting_elapsed_label(seconds) -> str:
@@ -2679,6 +3062,36 @@ def select_settings_picker():
             "keywords": "meeting spill memory temp file threshold minutes long recording buffer disk",
         },
         {
+            "id": "diarization",
+            "icon": "🗣️ ",
+            "title": "Speaker Labels",
+            "keywords": "diarization diarize speaker speakers labels who said meeting transcript separation",
+        },
+        {
+            "id": "diarization_speakers",
+            "icon": "🔢 ",
+            "title": "Speaker Count",
+            "keywords": "diarization speakers count number hint auto known how many people",
+        },
+        {
+            "id": "diarization_model",
+            "icon": "🧠 ",
+            "title": "Speaker Model",
+            "keywords": "diarization model backend sherpa onnx speaker embed which model swap",
+        },
+        {
+            "id": "meeting_output_dir",
+            "icon": "📁 ",
+            "title": "Transcript Folder",
+            "keywords": "meeting transcript output directory folder path save location where written meetings",
+        },
+        {
+            "id": "meeting_output_format",
+            "icon": "📄 ",
+            "title": "Transcript Form",
+            "keywords": "meeting transcript output format form text json markdown md artifact",
+        },
+        {
             "id": "structure",
             "icon": "☰ ",
             "title": "List Formatting",
@@ -2826,6 +3239,16 @@ def select_settings_picker():
             return "Start a meeting capture", "[START]", "yellow"
         elif item_id == "meeting_spill":
             return meeting_spill_setting_state(MEETING_SPILL_MINUTES)
+        elif item_id == "diarization":
+            return diarization_setting_state(DIARIZATION)
+        elif item_id == "diarization_speakers":
+            return diarization_speakers_setting_state(DIARIZATION_SPEAKERS)
+        elif item_id == "diarization_model":
+            return diarization_model_setting_state(DIARIZATION_MODEL)
+        elif item_id == "meeting_output_dir":
+            return meeting_output_dir_setting_state(MEETING_OUTPUT_DIR)
+        elif item_id == "meeting_output_format":
+            return meeting_output_format_setting_state(MEETING_OUTPUT_FORMAT)
         elif item_id == "formatter":
             # The labels live in formatter_setting_state() so they can be held to
             # the ratatui ones by a source-level parity guard, the same way the
@@ -3015,6 +3438,28 @@ def select_settings_picker():
                     toggle_meeting_capture()
                 elif item_id == "meeting_spill":
                     cycle_meeting_spill_minutes()
+                elif item_id == "diarization":
+                    toggle_diarization()
+                elif item_id == "diarization_speakers":
+                    cycle_diarization_speakers()
+                elif item_id == "diarization_model":
+                    cycle_diarization_model()
+                elif item_id == "meeting_output_dir":
+                    console.clear()
+                    console.print()
+                    console.print("[bold cyan]📁 Transcript Folder[/bold cyan]")
+                    console.print(f"[dim white]Current folder: {MEETING_OUTPUT_DIR}[/dim white]\n")
+                    console.print("Enter the folder for meeting transcripts (relative to the repo, or absolute):")
+                    console.print("[dim white](Press Enter without typing to keep the current folder)[/dim white]")
+                    try:
+                        val_str = input("❯ ").strip()
+                        if val_str:
+                            set_meeting_output_dir(val_str)
+                    except (ValueError, EOFError, KeyboardInterrupt):
+                        pass
+                    console.clear()
+                elif item_id == "meeting_output_format":
+                    cycle_meeting_output_format()
                 elif item_id == "formatter":
                     toggle_formatter()
                 elif item_id == "formatter_model":
@@ -3091,6 +3536,115 @@ def select_settings_picker():
         elif len(key) == 1 and key.isprintable():
             query += key
             selected_idx = 0
+
+
+def select_speaker_editor():
+    """Edit the meeting's speaker names: an ordered, editable list of names.
+
+    This is deliberately NOT part of the settings modal. A speaker name is
+    transcript **metadata** for one meeting, not an app setting, so it gets its
+    own action on the meeting screen (the ``s`` key). The list order is the
+    speaker order the transcript uses: entry 1 names speaker 1, and so on. There
+    is no "Speaker 1/2" concept in the UI - it is just names; the renderer falls
+    back to a readable ``Speaker N`` for any slot left unnamed.
+
+    Keys: up/down move, Enter renames, ``a`` adds, ``d`` deletes, ``J``/``K``
+    reorder, ``s``/Esc saves, ``q``/Ctrl+C cancels. Changes are applied to the
+    engine as they are made, so the map stays live even if this is closed with
+    ``q``. Returns True when names were changed, False otherwise.
+    """
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich import box
+
+    console = Console()
+    names = get_speaker_names()
+    changed = False
+    selected = 0
+
+    def _commit():
+        nonlocal changed
+        if set_speaker_names(names):
+            changed = True
+
+    while True:
+        console.clear()
+        table = Table(box=None, padding=(0, 1), show_header=False, expand=True)
+        table.add_column("Ind", justify="right", width=2)
+        table.add_column("Name", ratio=1)
+        if not names:
+            table.add_row("", "[dim]No speakers yet - press 'a' to add a name[/dim]")
+        for i, name in enumerate(names):
+            marker = "❯ " if i == selected else "  "
+            style = "bold cyan" if i == selected else "white"
+            table.add_row(marker, f"[{style}]{name}[/{style}]")
+        footer = (
+            "  [cyan][↑/↓][/cyan] Select   [green][Enter][/green] Rename   "
+            "[green][a][/green] Add   [red][d][/red] Delete   "
+            "[cyan][J/K][/cyan] Reorder   [green][s/Esc][/green] Save   "
+            "[red][q][/red] Cancel"
+        )
+        console.print(Panel(
+            table,
+            title="🗣️  Speakers for this meeting",
+            subtitle=footer,
+            border_style="cyan",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        ))
+        console.print(
+            "[dim]Names apply in order: the first name labels the first speaker. "
+            "Leave a slot out to keep the default 'Speaker N' label.[/dim]"
+        )
+
+        key = _read_key()
+        if key in ("ESC", "s", "S") or key == "ENTER":
+            if key == "ENTER":
+                if names:
+                    console.print("New name for this speaker (blank to clear):")
+                    try:
+                        value = input("❯ ")
+                    except (EOFError, KeyboardInterrupt):
+                        value = ""
+                    names = rename_speaker_name(names, selected, value)
+                    if not (value or "").strip() and selected < len(names):
+                        names = remove_speaker_name(names, selected)
+                        selected = max(0, min(selected, len(names) - 1))
+                    _commit()
+                continue
+            _commit()
+            console.clear()
+            return changed
+        if key in ("q", "CTRL_C"):
+            console.clear()
+            return changed
+        if key in ("UP", "K"):
+            selected = max(0, selected - 1)
+        elif key in ("DOWN", "J"):
+            selected = min(max(0, len(names) - 1), selected + 1)
+        elif key == "a":
+            console.print("Name for the new speaker:")
+            try:
+                value = input("❯ ")
+            except (EOFError, KeyboardInterrupt):
+                value = ""
+            names = add_speaker_name(names, value)
+            if names:
+                selected = len(names) - 1
+            _commit()
+        elif key == "d" and names:
+            names = remove_speaker_name(names, selected)
+            selected = max(0, min(selected, len(names) - 1))
+            _commit()
+        elif key == "J":
+            names = move_speaker_name(names, selected, 1)
+            selected = min(max(0, len(names) - 1), selected + 1)
+            _commit()
+        elif key == "K":
+            names = move_speaker_name(names, selected, -1)
+            selected = max(0, selected - 1)
+            _commit()
 
 
 def select_audio_device():

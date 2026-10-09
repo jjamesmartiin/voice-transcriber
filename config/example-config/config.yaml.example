@@ -75,8 +75,8 @@ copy_to_clipboard: false
 #   - "aesthetic_lowercase" : All lowercase (even 'i'), but internal/expressive punctuation kept (no trailing period).
 #   - "gen_z"               : Pure Gen Z mode: all lowercase, zero punctuation, zero grammar enforcement.
 # (Backwards-compatible aliases: punctuation_mode: "full" | "no_terminal_period" | "no_punctuation" | "lowercase_no_punctuation")
-# Default: "autocorrect"
-preset: "autocorrect"
+# Default: "default"
+preset: "default"
 
 # ------------------------------------------------------------------------------
 # List Formatting (Structured Output)
@@ -133,6 +133,42 @@ meeting: "off"
 # `python src/main.py meeting-spill <minutes>` (1-240).
 # Env: VT_MEETING_SPILL_MINUTES. Default: 10
 meeting_spill_minutes: 10
+
+# ------------------------------------------------------------------------------
+# Diarization / Speaker Labels (meeting mode enhancement)
+# Splits a meeting recording into speaker turns so the transcript can say who
+# is talking. Off by default: the pass loads a local model, so a typo or a
+# missing download must never turn it on by accident (unknown values fail safe
+# to "off"). Selectable at runtime via 'Speaker Labels' in the settings modal,
+# or `python src/main.py diarization <off|on>`. Env: VT_DIARIZATION.
+# Default: "off"
+diarization: "off"
+
+# Optional hint for how many speakers to expect. Everything is more accurate
+# (and clustering is much cheaper) when the count is known, but it is never
+# required: "auto" lets the model decide. Selectable at runtime via 'Speaker
+# Count', or `python src/main.py diarization-speakers <auto|2..8>`.
+# Env: VT_DIARIZATION_SPEAKERS. Default: "auto"
+diarization_speakers: "auto"
+
+# Which diarization model bundle to load. The model is startup-loaded (a change
+# needs a restart; the on/off mode above is hot). Env: VT_DIARIZATION_MODEL.
+# Default: "diarization"
+diarization_model: "diarization"
+
+# Where the finished transcript is written. Repo-relative by default, so a
+# checkout's transcripts land in <repo>/meetings/ (gitignored); an absolute path
+# is used as-is. Env: VT_MEETING_OUTPUT_DIR (always wins).
+# Default: "meetings"
+meeting_output_dir: "meetings"
+
+# The form of the finished transcript:
+#   - "text"     : the plain [Speaker] transcript (default, byte-identical to
+#                  the pre-D5 artifact)
+#   - "json"     : one object per turn, with the speaker name map applied
+#   - "markdown" : a headed Markdown document
+# Env: VT_MEETING_OUTPUT_FORMAT. Default: "text"
+meeting_output_format: "text"
 
 # ------------------------------------------------------------------------------
 # On-Device Formatter (optional local language model)

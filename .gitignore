@@ -44,5 +44,10 @@ config/dictionary.user.json
 # the name ignored wherever it lands.
 stats.json
 
+# Meeting-mode transcripts. The shipped `meeting_output_dir` default is
+# `<repo>/meetings/`, so transcripts are visible in the project but never
+# committed.
+/meetings/
+
 __pycache__/
 *.pyc

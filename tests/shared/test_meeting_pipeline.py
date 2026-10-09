@@ -241,6 +241,79 @@ def test_labels_are_present_for_multiple_speakers(tmp_path):
     assert "[Speaker 1]" in result.text and "[Speaker 2]" in result.text
 
 
+def test_diarization_off_skips_the_pass(tmp_path):
+    """D6: diarization off never calls the backend and yields the one-speaker doc.
+
+    This is the byte-identity pin: with the setting off the pipeline behaves
+    exactly like a build without the pass, and the same fixture labels speakers
+    once it is on.
+    """
+    calls = {"n": 0}
+
+    def diarizer(audio, sample_rate, *, progress=None):
+        calls["n"] += 1
+        return [Turn(0.0, 2.0, 0), Turn(2.0, 4.0, 1)]
+
+    off_pipeline = mp.MeetingPipeline(
+        diarizer=diarizer,
+        transcriber=lambda segment: "hello",
+        post_processor=_identity_post,
+        output_dir=str(tmp_path / "off"),
+        diarization_gate=lambda: False,
+    )
+    off_transcript = off_pipeline.process(_audio(4.0), 16000)
+
+    assert calls["n"] == 0, "the backend must not be loaded or called when off"
+    assert off_transcript.speaker_count == 1
+    assert "[Speaker" not in off_transcript.text
+
+    on_pipeline = mp.MeetingPipeline(
+        diarizer=diarizer,
+        transcriber=lambda segment: "hello",
+        post_processor=_identity_post,
+        output_dir=str(tmp_path / "on"),
+        diarization_gate=lambda: True,
+    )
+    on_transcript = on_pipeline.process(_audio(4.0), 16000)
+
+    assert calls["n"] == 1
+    assert on_transcript.speaker_count == 2
+    assert "[Speaker 1]" in on_transcript.text
+
+
+def test_speakers_hint_is_passed_through(tmp_path):
+    """D6: an exact speaker count is a hint, auto means let the backend decide."""
+    seen = {}
+
+    def diarizer(audio, sample_rate, *, progress=None, num_speakers=None):
+        seen["num_speakers"] = num_speakers
+        return [Turn(0.0, 1.0, 0)]
+
+    pipeline = mp.MeetingPipeline(
+        diarizer=diarizer,
+        transcriber=lambda segment: "x",
+        post_processor=_identity_post,
+        output_dir=str(tmp_path),
+        diarization_gate=lambda: True,
+        speakers_hint=lambda: 3,
+    )
+    pipeline.process(_audio(1.0), 16000)
+    assert seen["num_speakers"] == 3
+
+    # "auto" is passed through as no hint at all (the backend's num_clusters=-1).
+    seen.clear()
+    auto_pipeline = mp.MeetingPipeline(
+        diarizer=diarizer,
+        transcriber=lambda segment: "x",
+        post_processor=_identity_post,
+        output_dir=str(tmp_path),
+        diarization_gate=lambda: True,
+        speakers_hint=lambda: "auto",
+    )
+    auto_pipeline.process(_audio(1.0), 16000)
+    assert seen["num_speakers"] is None
+
+
 def test_audio_is_resampled_to_16k_mono(tmp_path):
     seen = {}
 
@@ -511,6 +584,102 @@ def test_artifact_has_a_header_and_labelled_turns(tmp_path):
     assert "Speakers: 2" in content
     assert "[Speaker 1] Hello there." in content
     assert "[Speaker 2] General Kenobi." in content
+
+
+def test_speaker_names_are_applied_and_unnamed_fall_back(tmp_path):
+    """D5: names replace the numeric label; a blank slot keeps ``Speaker N``."""
+    turns = [Turn(0.0, 2.0, 0), Turn(2.0, 4.0, 1), Turn(4.0, 6.0, 2)]
+    pipeline, _ = _make_pipeline(
+        tmp_path,
+        turns=turns,
+        texts=["one", "two", "three"],
+        speaker_names_getter=lambda: ["Priya", "", "Bo"],
+    )
+
+    result = pipeline.process(_audio(6.0), 16000)
+
+    assert result.labelled is True
+    body = Path(result.path).read_text(encoding="utf-8")
+    assert "[Priya] one" in body
+    assert "[Speaker 2] two" in body  # blank slot -> readable fallback
+    assert "[Bo] three" in body
+
+
+def test_json_output_is_per_turn_with_names(tmp_path):
+    turns = [Turn(0.0, 2.0, 0), Turn(2.0, 4.0, 1)]
+    pipeline, _ = _make_pipeline(
+        tmp_path,
+        turns=turns,
+        texts=["hello", "hi"],
+        speaker_names_getter=lambda: ["Priya", "Sam"],
+        output_format_getter=lambda: "json",
+    )
+
+    result = pipeline.process(_audio(4.0), 16000)
+
+    assert str(result.path).endswith(".json")
+    import json as _json
+    payload = _json.loads(Path(result.path).read_text(encoding="utf-8"))
+    assert payload["speakers"] == 2
+    assert [t["name"] for t in payload["turns"]] == ["Priya", "Sam"]
+    assert [t["text"] for t in payload["turns"]] == ["hello", "hi"]
+    assert payload["turns"][0]["speaker"] == 0  # 0-based in the machine form
+
+
+def test_markdown_output_with_names(tmp_path):
+    turns = [Turn(0.0, 2.0, 0), Turn(2.0, 4.0, 1)]
+    pipeline, _ = _make_pipeline(
+        tmp_path,
+        turns=turns,
+        texts=["hello", "hi"],
+        speaker_names_getter=lambda: ["Priya"],
+        output_format_getter=lambda: "markdown",
+    )
+
+    result = pipeline.process(_audio(4.0), 16000)
+
+    assert str(result.path).endswith(".md")
+    body = Path(result.path).read_text(encoding="utf-8")
+    assert body.startswith("# Meeting transcript")
+    assert "**Priya:** hello" in body
+    assert "**Speaker 2:** hi" in body  # past the end of the map
+
+
+def test_output_format_defaults_to_the_byte_identical_text_form(tmp_path):
+    """The shipped form has not changed: no getter means the plain transcript."""
+    turns = [Turn(0.0, 2.0, 0), Turn(2.0, 4.0, 1)]
+    pipeline, _ = _make_pipeline(tmp_path, turns=turns, texts=["a", "b"])
+
+    result = pipeline.process(_audio(4.0), 16000)
+
+    assert str(result.path).endswith(".txt")
+    body = Path(result.path).read_text(encoding="utf-8")
+    assert body.startswith("Meeting transcript\n")
+    assert "[Speaker 1] a" in body and "[Speaker 2] b" in body
+
+
+def test_output_dir_setting_is_used_when_no_explicit_dir(tmp_path, monkeypatch):
+    """The output-dir getter is consulted; env still overrides it."""
+    target = tmp_path / "from-setting"
+    pipeline = mp.MeetingPipeline(
+        diarizer=_scripted([Turn(0.0, 1.0, 0)]),
+        transcriber=lambda segment: "x",
+        post_processor=_identity_post,
+        output_dir_getter=lambda: str(target),
+    )
+    result = pipeline.process(_audio(1.0), 16000)
+    assert str(target) in str(result.path)
+
+    env_target = tmp_path / "from-env"
+    monkeypatch.setenv(mp.OUTPUT_DIR_ENV, str(env_target))
+    pipeline2 = mp.MeetingPipeline(
+        diarizer=_scripted([Turn(0.0, 1.0, 0)]),
+        transcriber=lambda segment: "x",
+        post_processor=_identity_post,
+        output_dir_getter=lambda: str(target),
+    )
+    result2 = pipeline2.process(_audio(1.0), 16000)
+    assert str(env_target) in str(result2.path)
 
 
 # ---------------------------------------------------------------------------

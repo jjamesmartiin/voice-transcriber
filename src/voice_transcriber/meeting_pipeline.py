@@ -36,6 +36,7 @@ event) and runs on a daemon thread, so it can never block app exit.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import logging
 import os
 import threading
@@ -82,26 +83,49 @@ DEFAULT_POLL_S = 0.1
 # Output location (models_dir-style resolution, no settings key required)
 # ---------------------------------------------------------------------------
 
-def meeting_output_dir(explicit: str | os.PathLike | None = None) -> str:
+def _repo_root() -> str | None:
+    """The checkout root when running from one; ``None`` for an installed app."""
+    try:
+        from voice_transcriber import model_download
+        return model_download.find_repo_root()
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
+def meeting_output_dir(
+    explicit: str | os.PathLike | None = None,
+    *,
+    setting: str | os.PathLike | None = None,
+) -> str:
     """Directory the transcript artifact is written to.
 
-    Resolution order mirrors :func:`model_download.models_dir`:
+    Resolution order:
 
-    1. an explicit argument (the seam tests and a future setting use);
-    2. ``$VT_MEETING_OUTPUT_DIR``;
-    3. ``<per-user data dir>/meetings``.
+    1. an explicit argument (the seam tests and the pipeline's own override use);
+    2. ``$VT_MEETING_OUTPUT_DIR`` (an env override always beats config, as
+       everywhere else);
+    3. the ``meeting_output_dir`` setting (repo-relative by default: ``meetings``);
+    4. ``<repo checkout>/meetings``, or ``<per-user data dir>/meetings`` for a
+       read-only install with no checkout (Nix/AppImage).
 
-    A settings key was deliberately **not** added (D6's module will own the full
-    configuration). ``VT_MEETING_OUTPUT_DIR`` is the supported override, so the
-    location is configurable without a key that would have to land in every
-    surface -- including the ratatui frontend, which this milestone is scoped
-    out of.
+    A relative setting is resolved against the repo root when there is one, so
+    the shipped default (``meetings``) lands inside the project and is
+    gitignored, rather than in a user data dir the user has to go looking for.
     """
     if explicit:
         return os.path.abspath(os.path.expanduser(str(explicit)))
     override = os.environ.get(OUTPUT_DIR_ENV, "").strip()
     if override:
         return os.path.abspath(os.path.expanduser(override))
+    configured = "" if setting is None else str(setting).strip()
+    if configured:
+        expanded = os.path.expanduser(configured)
+        if os.path.isabs(expanded):
+            return os.path.abspath(expanded)
+        return os.path.abspath(os.path.join(_repo_root() or os.getcwd(), expanded))
+    root = _repo_root()
+    if root:
+        return os.path.join(root, OUTPUT_DIR_NAME)
     from voice_transcriber import model_download
 
     return os.path.join(model_download.get_data_dir(), OUTPUT_DIR_NAME)
@@ -223,10 +247,15 @@ class MeetingPipeline:
         stage_callback: Callable[[str], None] | None = None,
         cancel_event: threading.Event | None = None,
         output_dir: str | os.PathLike | None = None,
+        output_dir_getter: Callable[[], Any] | None = None,
+        output_format_getter: Callable[[], Any] | None = None,
         sample_rate: int = TARGET_SAMPLE_RATE,
         diarizer: Callable[..., list] | None = None,
         transcriber: Callable[[np.ndarray], str] | None = None,
         post_processor: Callable[[str], str] | None = None,
+        diarization_gate: Callable[[], bool] | None = None,
+        speakers_hint: Callable[[], Any] | None = None,
+        speaker_names_getter: Callable[[], Any] | None = None,
         on_done: Callable[[MeetingTranscript], None] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         poll_s: float = DEFAULT_POLL_S,
@@ -239,10 +268,22 @@ class MeetingPipeline:
         self._stage_callback = stage_callback
         self._cancel = cancel_event if cancel_event is not None else threading.Event()
         self._output_dir = output_dir
+        # D5: the output location and form are settings read at write time, and
+        # the speakers map is live metadata read at render time. ``None`` keeps
+        # the pre-D5 behaviour (data-dir location, text form, numeric labels).
+        self._output_dir_getter = output_dir_getter
+        self._output_format_getter = output_format_getter
+        self._speaker_names_getter = speaker_names_getter
         self._sample_rate = int(sample_rate)
         self._diarizer = diarizer
         self._transcriber = transcriber
         self._post_processor = post_processor
+        # Optional live gates: the engine injects the diarization on/off setting
+        # and the speaker-count hint so D6 can change them without a restart.
+        # ``None`` keeps the pre-D6 behaviour (always diarize, auto count), which
+        # is what the model-free tests rely on.
+        self._diarization_gate = diarization_gate
+        self._speakers_hint = speakers_hint
         self._on_done = on_done
         self._sleep = sleep
         self._poll_s = max(0.0, float(poll_s))
@@ -362,10 +403,11 @@ class MeetingPipeline:
             )
 
         speakers = len({item.speaker for item in produced})
+        speaker_names = self._speaker_names()
         if cancelled:
             # A cancelled run leaves no artifact; the partial transcript stays in
             # memory so ``status`` can still show what got done.
-            body = self._render_body(produced, labelled)
+            body = self._render_body(produced, labelled, speaker_names)
             return MeetingTranscript(
                 turns=produced,
                 text=body,
@@ -379,11 +421,14 @@ class MeetingPipeline:
             )
 
         self._set_stage("rendering")
-        rendered = self._render(produced, labelled, duration, created_text)
+        fmt = self._output_format()
+        rendered = self._render(
+            produced, labelled, duration, created_text, speaker_names, fmt
+        )
         path: str | None = None
         error: str | None = None
         try:
-            path = self._write(rendered, created)
+            path = self._write(rendered, created, fmt)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             logger.warning("could not write the meeting transcript: %s", exc)
@@ -402,15 +447,32 @@ class MeetingPipeline:
 
     # -- stages ------------------------------------------------------------
     def _diarize(self, samples: np.ndarray) -> list:
+        # The setting is hot: read it at run time, not construction time, so a
+        # user can switch speaker labels off without restarting. ``None`` means
+        # no gate was injected and the pass always runs (pre-D6 behaviour).
+        if self._diarization_gate is not None:
+            try:
+                if not self._diarization_gate():
+                    return []
+            except Exception:
+                logger.warning("diarization gate failed; treating as off", exc_info=True)
+                return []
+        num_speakers = None
+        if self._speakers_hint is not None:
+            try:
+                num_speakers = _diarize_mod.parse_speakers(self._speakers_hint())
+            except Exception:
+                num_speakers = None
+        kwargs: dict = {"progress": self._on_diarize_progress}
+        if num_speakers is not None:
+            kwargs["num_speakers"] = num_speakers
         try:
             if self._diarizer is not None:
                 return list(self._diarizer(
-                    samples, TARGET_SAMPLE_RATE,
-                    progress=self._on_diarize_progress,
+                    samples, TARGET_SAMPLE_RATE, **kwargs,
                 ))
             return list(_diarize_mod.diarize(
-                samples, TARGET_SAMPLE_RATE,
-                progress=self._on_diarize_progress,
+                samples, TARGET_SAMPLE_RATE, **kwargs,
             ))
         except Exception:
             # Diarization is an enhancement: a broken backend must still leave a
@@ -472,24 +534,83 @@ class MeetingPipeline:
         return _diarize_mod.should_label(turns)
 
     # -- rendering ---------------------------------------------------------
+    # -- live settings, read at render/write time --------------------------
+    def _speaker_names(self) -> list:
+        if self._speaker_names_getter is None:
+            return []
+        try:
+            return list(self._speaker_names_getter() or [])
+        except Exception:
+            logger.debug("speaker-name getter failed", exc_info=True)
+            return []
+
+    def _output_format(self) -> str:
+        fmt = "text"
+        if self._output_format_getter is not None:
+            try:
+                fmt = str(self._output_format_getter() or "text").strip().lower()
+            except Exception:
+                fmt = "text"
+        return fmt if fmt in ("text", "json", "markdown") else "text"
+
+    def _output_setting(self):
+        if self._output_dir_getter is None:
+            return None
+        try:
+            return self._output_dir_getter()
+        except Exception:
+            logger.debug("output-dir getter failed", exc_info=True)
+            return None
+
+    # -- rendering ---------------------------------------------------------
     @staticmethod
-    def _render_body(turns: list[TranscriptTurn], labelled: bool) -> str:
+    def speaker_label(index: int, names: list) -> str:
+        """The label for a speaker: a name when one is set, else ``Speaker N``.
+
+        The speakers map is an ordered list of names; index *i* names speaker
+        *i*. A slot left blank (or an index past the end of the list) falls back
+        to the readable numeric label, so a partial map still renders.
+        """
+        try:
+            idx = int(index)
+        except (TypeError, ValueError):
+            idx = 0
+        if 0 <= idx < len(names):
+            name = str(names[idx]).strip()
+            if name:
+                return name
+        return f"Speaker {idx + 1}"
+
+    @classmethod
+    def _render_body(cls, turns: list, labelled: bool, speaker_names=None) -> str:
+        names = list(speaker_names or [])
         lines: list[str] = []
         for turn in turns:
             text = (turn.text or "").strip()
             if labelled:
-                lines.append(f"[Speaker {turn.speaker + 1}] {text}".rstrip())
+                lines.append(f"[{cls.speaker_label(turn.speaker, names)}] {text}".rstrip())
             else:
                 lines.append(text)
         return "\n".join(lines)
 
     def _render(
         self,
-        turns: list[TranscriptTurn],
+        turns: list,
         labelled: bool,
         duration: float,
         created_text: str,
+        speaker_names=None,
+        fmt: str = "text",
     ) -> str:
+        names = list(speaker_names or [])
+        if fmt == "json":
+            return self._render_json(turns, labelled, duration, created_text, names)
+        if fmt == "markdown":
+            return self._render_markdown(turns, labelled, duration, created_text, names)
+        return self._render_text(turns, labelled, duration, created_text, names)
+
+    @classmethod
+    def _render_text(cls, turns, labelled, duration, created_text, names) -> str:
         speakers = len({turn.speaker for turn in turns})
         header = (
             "Meeting transcript\n"
@@ -497,17 +618,64 @@ class MeetingPipeline:
             f"Duration: {format_duration(duration)}\n"
             f"Speakers: {speakers}\n"
         )
-        return header + "\n" + self._render_body(turns, labelled) + "\n"
+        return header + "\n" + cls._render_body(turns, labelled, names) + "\n"
 
-    def _write(self, rendered: str, created: _dt.datetime) -> str:
+    @classmethod
+    def _render_markdown(cls, turns, labelled, duration, created_text, names) -> str:
+        speakers = len({turn.speaker for turn in turns})
+        lines = [
+            "# Meeting transcript",
+            "",
+            f"- **Date:** {created_text}",
+            f"- **Duration:** {format_duration(duration)}",
+            f"- **Speakers:** {speakers}",
+            "",
+        ]
+        for turn in turns:
+            text = (turn.text or "").strip()
+            if labelled:
+                lines.append(
+                    f"**{cls.speaker_label(turn.speaker, names)}:** {text}".rstrip()
+                )
+            else:
+                lines.append(text)
+        return "\n".join(lines) + "\n"
+
+    @classmethod
+    def _render_json(cls, turns, labelled, duration, created_text, names) -> str:
+        speakers = len({turn.speaker for turn in turns})
+        payload = {
+            "date": created_text,
+            "duration": format_duration(duration),
+            "duration_s": round(float(duration), 3),
+            "speakers": speakers,
+            "labelled": bool(labelled),
+            "turns": [
+                {
+                    "speaker": int(turn.speaker),
+                    "name": cls.speaker_label(turn.speaker, names) if labelled else None,
+                    "start": round(float(turn.start), 3),
+                    "end": round(float(turn.end), 3),
+                    "text": (turn.text or "").strip(),
+                    "overlap": bool(getattr(turn, "overlap", False)),
+                }
+                for turn in turns
+            ],
+        }
+        return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+    _EXTENSIONS = {"text": ".txt", "json": ".json", "markdown": ".md"}
+
+    def _write(self, rendered: str, created: _dt.datetime, fmt: str = "text") -> str:
         """Write the transcript atomically. Leaves no temp file on any path."""
-        directory = meeting_output_dir(self._output_dir)
+        directory = meeting_output_dir(self._output_dir, setting=self._output_setting())
         os.makedirs(directory, exist_ok=True)
         base = "meeting-" + created.strftime("%Y%m%d-%H%M%S")
-        path = os.path.join(directory, base + ".txt")
+        ext = self._EXTENSIONS.get(fmt, ".txt")
+        path = os.path.join(directory, base + ext)
         counter = 1
         while os.path.exists(path):
-            path = os.path.join(directory, f"{base}-{counter}.txt")
+            path = os.path.join(directory, f"{base}-{counter}{ext}")
             counter += 1
         temp = f"{path}.{os.getpid()}.tmp"
         try:
