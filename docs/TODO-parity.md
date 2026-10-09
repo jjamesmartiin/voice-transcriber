@@ -94,6 +94,25 @@ ever becomes confusing, the options are to make the two mutually exclusive, or t
 `status`. Recorded here so the next person to see two rewrites in one transcript knows it is
 expected.
 
+### 1b. Owner decisions, 2026-10-09 session (do not re-litigate)
+
+Labelled `S*` to avoid colliding with the `D*` rows above and the `D` workstream tasks.
+
+| # | Decision | Detail |
+| --- | --- | --- |
+| S1 | **Do not push `main`.** Work happens on the integration branch `wip/feature-parity-2026-10`; `main` stays local and unchanged. | The 52-commit history is now on **gitea and github** under that branch. `release.yml` only fires on `v*` tags, so a branch push cannot cut a release — but the owner wants main kept clean regardless. |
+| S2 | **The speaker map is live-editable inside the meeting screen**, not the settings modal. | In the meeting screen: `Space`/`Enter` start/stop, `Esc` quits, `s` opens a vim/CSV-style editor for speaker names. Implemented as distinct transcript *metadata* editing; the global terminal key contract outside that screen is unchanged. Recorded because it touches the "settings modal is the only config entry point" invariant — the justification is that names are transcript data, not app config. |
+| S3 | **Abandon S1/S2 numbering in the UI.** The speakers map is an ordered, editable list of names. | Unnamed speakers still need a readable fallback (`Speaker N`) so a transcript is never label-less. |
+| S4 | **D7 is to be researched, not guessed.** | Best available approach for a recorded DER, chosen on evidence. |
+| S5 | **Run adversarial/red-team agents over the project**, not only over the formatter. | A first-class task, not an afterthought. |
+| S6 | **`eval/results.json` gets regenerated — and the review must be human-verifiable.** | The owner validates *what the audio was* against *what was transcribed*: an artifact showing per-clip audio, reference, hypothesis and diff. Also make `meta` self-describing so the baseline can never silently rot again. |
+| S7 | **"Reset to Defaults" targets the most-compatible configuration that still gives useful corrections.** | Formatter off, meeting/diarization off, cheap deterministic corrections on. Nothing heavyweight by default — a weak machine must still be fine; users opt in. One owner for the two defaults (this supersedes the `DEFAULT_SETTINGS` vs module-global divergence). |
+| S8 | **Meeting output directory is repo-local and gitignored.** | Default `<repo>/meetings/`, still overridable by `VT_MEETING_OUTPUT_DIR`, and becomes a real setting. |
+| S9 | **The formatter defaults off; manual opt-in only.** | No RAM auto-detection unless it is trivial and cannot break anything. The UI may *state* the requirement. |
+| S10 | **E3 is in scope now** — the ~3 GB int8 ONNX download is approved. | Re-run the bake-off on the ONNX path and fit the result into the run order. |
+| S11 | **S1-mini attribution strategy is deferred.** | Validate the whole pipeline and clean up the repo first. The licence/NOTICE *file* obligation still ships with the formatter (C9); only the strategic revisit waits. |
+| S12 | **Parallel workstreams via subagents, one git worktree each**, disjoint file ownership stated in the brief. | Manager keeps context small; workers commit in their own worktree. |
+
 ---
 
 ## 2. What is actually left — grouped by what it blocks
@@ -786,9 +805,18 @@ Reference material, not tasks. Each took a research pass or a live experiment.
 None of these block §2. They block a *release*.
 
 1. **S1-mini attribution** — the licence requires crediting **"S1-mini" by "Superwhisper"**, a
-   competitor, in our UI. Accepted temporarily (D4). When do we revisit, and is the exit a
-   self-fine-tune on Qwen3.5-2B using `eval/`?
-2. **Diarization label style** — `[Speaker 1]`, `Speaker 1:`, or user-assigned names?
-3. **Meeting-mode output location** — a configured directory, or alongside a chosen file?
-4. **Should the formatter default on** for users with sufficient RAM? (Currently: no.)
-5. **Workstream E outcome** — keep Cohere, or switch to Parakeet? This changes C and D.
+   competitor, in our UI. Accepted temporarily (D4). **Deferred by S11:** revisit only after the
+   pipeline is validated and the repo is clean. Exit candidate: a self-fine-tune on Qwen3.5-2B
+   using `eval/`.
+2. ~~Diarization label style~~ — **RESOLVED (S2/S3):** user-assigned names, edited live from the
+   meeting screen as an ordered list; `Speaker N` only as the unnamed fallback.
+3. ~~Meeting-mode output location~~ — **RESOLVED (S8):** a repo-local, gitignored configured
+   directory (`<repo>/meetings/` by default).
+4. ~~Should the formatter default on for high-RAM users?~~ — **RESOLVED (S9):** no. Off by
+   default, manual opt-in, no auto-detection.
+5. ~~Workstream E outcome~~ — **RESOLVED (E2):** keep Cohere; the bake-off is in
+   [`asr-bakeoff.md`](asr-bakeoff.md). E3 (the int8 ONNX path) is now in scope (S10).
+6. ~~Push~~ — **RESOLVED (S1):** history parked on `wip/feature-parity-2026-10` on gitea and
+   github; `main` untouched.
+7. ~~Regenerate `eval/results.json`~~ — **RESOLVED (S6):** in flight, with a human-verifiable
+   review artifact and a self-describing `meta`.
