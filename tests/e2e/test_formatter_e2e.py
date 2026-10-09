@@ -156,10 +156,10 @@ def _pipeline(pp, text: str, *, structure: str, context: str) -> str:
 def test_backend_candidate_is_non_empty_and_sane_for_every_fixture(server):
     """The four fixtures all produce real output -- the M2 exit criterion.
 
-    Deliberately asserts the *backend* answer, because two of the four are
-    discarded by a guardrail false-positive before they reach the user (see the
-    xfails below). "Sane" here means: non-empty, no refusal/meta text, no
-    reasoning-block leakage, and substantially the same words as the input.
+    Asserts the *backend* answer directly rather than the pipeline output, so it
+    keeps testing the model even when the parity assertions below are xfailed.
+    "Sane" here means: non-empty, no refusal/meta text, no reasoning-block
+    leakage, and substantially the same words as the input.
     """
     import formatter
     from voice_transcriber.formatters import llama_server
@@ -222,12 +222,47 @@ def test_long_fixture_matches_wispr_end_to_end(formatter_on):
     assert "hikes" in out and "nightlife" not in out
 
 
+# NOTE (2026-10-08): the guardrail false-positives these three used to xfail on
+# were fixed in ceb42d0 - `_canonical_tokens()` no longer glues letters to digits
+# (so "seven PM" vs "7pm" compares equal), and `_render_items()` no longer stacks
+# a second bullet on a list the formatter already marked. The pipeline now returns
+# the model's answer for all four fixtures instead of falling back to the
+# unformatted transcript. What still differs from Wispr is cosmetic, and the
+# reasons below say which kind.
+
+
+def test_the_guardrails_no_longer_discard_the_models_answer(formatter_on):
+    """Regression for ceb42d0, from the outside.
+
+    A guardrail rejection is indistinguishable from the formatter being switched
+    off: both return the cleaned-but-unformatted transcript. So the honest way to
+    pin the fix is to assert the two differ - before it, these two fixtures came
+    back byte-identical to the unformatted text while the model had in fact
+    answered correctly.
+    """
+    pp = formatter_on
+    for text, structure, context in ((RETRACTION_IN, "off", "general"),
+                                     (EMAIL_IN, "off", "email"),
+                                     (LIST_IN, "blocks", "general")):
+        formatted = _pipeline(pp, text, structure=structure, context=context)
+        pp.set_formatter_settings(enabled=False)
+        unformatted = pp.clean_speech_transcription(
+            text, skip_slm=True, cleanup_mode="full", structure_mode=structure)
+        pp.set_formatter_settings(enabled=True, model="llama-server",
+                                  style="semi-formal", context=context)
+        assert formatted != unformatted, (
+            "the pipeline returned the unformatted transcript, which is exactly "
+            "what a guardrail rejection looks like from outside")
+        assert "- -" not in formatted, formatted
+
+
 @pytest.mark.xfail(
-    reason="formatter.validate() canonicalises the input 'seven PM' to "
-           "['7','pm'] but the model's '7pm' to ['7pm'], so its correct answer "
-           "is rejected as invented text and the pipeline falls back. Number "
-           "normalisation is an allowed transformation -- guardrail bug in "
-           "src/voice_transcriber/formatter.py.",
+    reason="cosmetic parity, no longer a guardrail failure: the model writes "
+           "'7pm' where Wispr writes '7 pm'. The rejection that used to discard "
+           "this answer was fixed in ceb42d0, so the pipeline now returns it. "
+           "What is left is a whitespace-only difference, which sec 4's "
+           "equivalence rule (b) 'collapsing whitespace' arguably already "
+           "permits - it is an open parity decision, tracked in TODO-parity.md.",
     strict=False,
 )
 def test_retraction_matches_wispr_end_to_end(formatter_on):
@@ -236,9 +271,9 @@ def test_retraction_matches_wispr_end_to_end(formatter_on):
 
 
 @pytest.mark.xfail(
-    reason="same guardrail false-positive, on the model's '3pm' vs the input's "
-           "'three PM'. Once fixed, the email layout below is what the model "
-           "already produces.",
+    reason="same whitespace-only difference as the retraction fixture: the model "
+           "writes '3pm' where Wispr writes '3 pm'. The guardrail rejection was "
+           "fixed in ceb42d0; the email layout itself already matches.",
     strict=False,
 )
 def test_email_layout_matches_wispr_end_to_end(formatter_on):
@@ -247,11 +282,12 @@ def test_email_layout_matches_wispr_end_to_end(formatter_on):
 
 
 @pytest.mark.xfail(
-    reason="with structure_mode on, the model's '- Milk for the cake' is passed "
-           "through process_structure_blocks(), which keeps the existing marker "
-           "as part of the item body and prepends another: '- - Milk for the "
-           "cake'. _render_items() only strips 'step one'-style labels, not a "
-           "'- ' marker -- integration bug in post_processor.py.",
+    reason="casing, NOT whitespace, so sec 4's equivalence rule does not cover "
+           "it: the model capitalises each list item ('- Milk for the cake') "
+           "where Wispr keeps the spoken case ('- milk for the cake'). The "
+           "double-bullet bug is fixed (ceb42d0); whether sentence-casing list "
+           "items is a defect or an improvement is an open parity decision, "
+           "tracked in TODO-parity.md.",
     strict=False,
 )
 def test_list_matches_wispr_end_to_end(formatter_on):

@@ -312,19 +312,44 @@ Detail: [`plan-on-device-formatter.md`](plan-on-device-formatter.md).
         content comparison: the marker is structure, not a word.
       `s1-mini` / `llama-server` are registered but their modules land in C2/C3;
       `load_backend` returns `None` for them, which is the fail-safe.
-- [!] **C2** **M2 — the end-to-end proof.** Run the GGUF behind `llama-server` and point the
-      **existing** `VT_VLLM_URL` client at it. *Done = the four §4 fixtures produce
-      non-empty, sane output.* The 462 MiB download is **done** (see below).
+- [x] **C2** **M2 — the end-to-end proof.** **DONE.** All four §4 fixtures now run through the
+      real code path against the real GGUF. `tests/e2e/test_formatter_e2e.py` skips cleanly
+      when the weights are absent; `docs/formatter-benchmark.md` holds the measurements.
 
-      **The plan's model coordinates are wrong and must be corrected before this runs.**
-      Verified against the Hub API on 2026-10-08:
+      Measured warm (12 threads, Ryzen AI 9 HX PRO 370): pipeline wall **135.6 ms**
+      (retraction), 225.6 ms (list), 235.0 ms (email), 441.7 ms (long) — **9–29 % of the
+      1.5 s SLA**, well inside the §9 budget, and the 3 s internal timeout was never
+      approached. Cold start spawn→healthy 0.776 s. Peak RSS 150.9 MiB. Byte-identical
+      across 3 runs.
+
+      **The run's value was what it broke.** It found two bugs that were discarding
+      *correct* model answers (fixed in `ceb42d0`):
+      * `_canonical_tokens()` glued letters to digits, so the input "seven PM"
+        canonicalised to `[7, pm]` and the model's "7pm" to `[7pm]` — guardrail 2 called the
+        model's own number normalisation invented content and the pipeline fell back.
+      * `_render_items()` never stripped a marker the text already carried, so a list the
+        formatter had already produced came out `- - Milk for the cake`.
+
+      Worth remembering for future guardrail work: **a rejection is indistinguishable from
+      the formatter being switched off** — both return the cleaned-but-unformatted
+      transcript. That is why the bugs looked like "the model did nothing" rather than
+      like failures, and why the e2e suite now asserts formatted ≠ unformatted.
+
+      Also fixed here: `llama_server._model_path()` had **no fallback to the conventional
+      install path**, so a model that *was* installed stayed unfindable and `formatter: on`
+      did nothing without `VT_FORMATTER_MODEL_PATH` — the same class of bug as the backend
+      default. The registry accessors raise `KeyError` for an unregistered name, so each
+      lookup is isolated or the missing spec aborts the path that works.
+
+      **The plan's model coordinates were wrong** (corrected here on 2026-10-08, verified
+      against the Hub API):
 
       | Plan says | Reality |
       | --- | --- |
-      | `superwhisper/s1-mini`, `revision="v1"` | The repo has **no `v1` tag** - refs are `main` only, and `resolve/v1/config.json` returns **404**. Pin by commit sha instead. |
-      | "a 462 MiB Q4 GGUF" in that repo | That repo ships **no GGUF at all** - only `model.safetensors` (~1.4 GiB, bf16, Qwen3 0.6B). The quant lives in a **separate repo**, `superwhisper/s1-mini-GGUF`. |
+      | `superwhisper/s1-mini`, `revision="v1"` | The repo has **no `v1` tag** — refs are `main` only, and `resolve/v1/config.json` returns **404**. Pin by commit sha instead. |
+      | "a 462 MiB Q4 GGUF" in that repo | That repo ships **no GGUF at all** — only `model.safetensors` (~1.4 GiB, bf16, Qwen3 0.6B). The quant lives in a **separate repo**, `superwhisper/s1-mini-GGUF`. |
 
-      The corrected, verified coordinates - the "462 MiB" figure itself was right:
+      The corrected, verified coordinates — the "462 MiB" figure itself was right:
 
       ```
       repo    : superwhisper/s1-mini-GGUF
@@ -334,10 +359,26 @@ Detail: [`plan-on-device-formatter.md`](plan-on-device-formatter.md).
       sha256  : 3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634
       ```
 
-      Also present: `s1-mini-f16.gguf` (1,509,347,232 bytes), and `LICENSE`/`NOTICE` alongside.
-      Both are already downloaded to `~/.local/share/vt/models/formatter/` and the quant's
-      sha256 was verified against the Hub's LFS oid independently, plus the magic (`GGUF`) and
-      header version (**3** - the version the plan pins as the contract).
+      Also present: `s1-mini-f16.gguf` (1,509,347,232 bytes), plus `LICENSE`/`NOTICE`. Both
+      are downloaded to `~/.local/share/vt/models/formatter/`; the quant's sha256 was verified
+      independently against the Hub's LFS oid, along with the magic (`GGUF`) and header
+      version (**3** — the version the plan pins as the contract).
+- [ ] **C10** *(new, found by C2)* **Open parity decision: two cosmetic deviations from
+      Wispr.** After `ceb42d0` all four fixtures return the model's real answer; what still
+      differs is rendering:
+
+      | fixture | ours | Wispr | kind |
+      | --- | --- | --- | --- |
+      | `retraction` | `…lobby at 7pm.` | `…lobby at 7 pm.` | whitespace only |
+      | `email` | `…meet at 3pm on Friday?` | `…meet at 3 pm on Friday?` | whitespace only |
+      | `list` | `- Milk for the cake` | `- milk for the cake` | **casing** |
+
+      §4's equivalence rule already collapses whitespace, so the first two are arguably
+      already equivalent and those xfail markers are simply too strict. The third is *not*
+      covered: the model sentence-cases each list item where Wispr keeps the spoken case.
+      Sentence-casing bullets is conventional style, but the criterion is literal equality.
+      Needs a product call, then the three xfail markers get resolved one way or the other.
+      *Done = each deviation either fixed or explicitly accepted in §4.*
 - [~] **C3** `formatters/llama_server.py` — the **shipped** backend: spawn/attach, process
       lifecycle, kill-on-timeout. **CODE DONE in `6299947`** — 34 tests, driven by a stub server
       that speaks just enough of the OpenAI API, so the real subprocess path and the real
@@ -409,16 +450,51 @@ Detail: [`plan-diarization.md`](plan-diarization.md).
         because the required behaviour is identical: one speaker, one transcript.
       The fake backend is also a fault injector (`SCRIPT`/`FAILURE`/`AVAILABLE`/`DELAY_S`), so
       the fail-safe paths are tested against behaviour, not against a mock's assumptions.
-- [ ] **D2** Meeting capture lifecycle: start/stop verbs, long capture, **temp-file spill
-      past a threshold**, progress state. *Done = a 10-minute recording completes without
-      exhausting memory and `status` reports progress.*
-- [!] **D3** Spike: real sherpa-onnx weights on a two-voice clip. *Done = a turn list plus a
-      measured RTF.* **Models downloaded and verified** to `~/.local/share/vt/models/diarization/`
-      (SHA256SUMS written): the pyannote segmentation tarball (6,958,444 bytes) and the
-      3D-Speaker embedding (39,593,761 bytes) - both matching the plan's stated ~6.96 MB and
-      ~40 MB. `diarizers/sherpa_onnx.py` itself is not written yet, so this is unblocked but not
-      started. **Settle workstream E first** - if the ASR gains native timestamps, §3's whole
-      design changes.
+- [x] **D2** Meeting capture lifecycle: start/stop verbs, long capture, **temp-file spill
+      past a threshold**, progress state. **DONE.** New `src/voice_transcriber/meeting.py`:
+      a `MeetingState` machine (idle → recording → processing), an `AudioSpillBuffer` holding
+      a hot in-memory tail while spilling to a temp file past the threshold, and a
+      `MeetingSession` owning its own stop/capture/finalise threads — it deliberately never
+      reuses `t2.stop_recording`, so a long capture cannot disturb push-to-talk. `on_audio`
+      is the D4 hand-off seam and `on_change` the TUI ticker seam.
+
+      **Spill threshold: 10 minutes**, in the platform temp dir, always deleted. Arithmetic
+      is in-module: 16 000 frames/s × 4 B = 64 000 B/s, so 10 min ≈ 38.4 MB and an hour
+      ≈ 230.4 MB — the whole point being to keep the resident tail bounded rather than
+      accumulate an hour.
+
+      **Decisions taken** (the plan left these open in §12): start/stop are the control-verb
+      contract with a settings-modal action in the Rich TUI; `status` reports `meeting`,
+      `meeting_setting`, `meeting_state`, `meeting_elapsed_s`, `meeting_progress` and
+      `meeting_spill_minutes`; and the percentage is a *batch-phase* metric (0 while
+      recording) because a live capture has no known total, with elapsed time conveying
+      progress meanwhile. D4 drives the percentage from the diarizer callback.
+
+      **Known gap, deliberately accepted:** the ratatui frontend mirrors the two settings
+      rows and renders the meeting state, but has no capture *action* row — a ratatui user
+      starts via the control API. Recorded in `docs/meeting_mode.md` rather than papered over.
+- [x] **D3** Real `diarizers/sherpa_onnx.py` + a spike on real weights. **DONE.**
+
+      Implements the D1 contract with a lazy cached import (the no-`sherpa_onnx`-at-import
+      property is pinned by a subprocess test and still holds), one engine cached per config,
+      `num_speakers=None → num_clusters=-1`, thresholds forwarded and no merging of our own,
+      and the caller's `progress` handed to `process()` through a one-line adapter because the
+      library requires an `int` return while the contract callback returns `None`. Input is
+      resampled to `engine.sample_rate` rather than assuming 16 kHz.
+
+      **Measured** on a synthetic two-voice 16 kHz clip (20.653 s), sherpa-onnx 1.12.25:
+      **RTF 0.145** with a known speaker count and **0.296** with auto-detection — both inside
+      §7's ≤0.3 target. Peak RSS ~260 MB. Boundaries matched all 4 synthetic turns with the
+      expected A,B,A,B ordering. On a monologue, auto found a **single** speaker, so
+      `should_label()` stays off — the failure mode §11 names as most likely to annoy users.
+
+      **Plan correction, verified against the installed 1.12.25:** `window_shift_ratio` does
+      **not** exist on `OfflineSpeakerSegmentationPyannoteModelConfig` — passing it raises
+      `TypeError` — and result items carry no `.overlap`, so that field is always `False`.
+      §4.1's example code is wrong on both counts and has been corrected there.
+      The obsolete D1 assertion that `load_backend("sherpa-onnx") is None` was split into
+      "an absent backend still degrades to `None`" (using names that stay absent after the
+      merge) and "the shipped backend exists and satisfies the contract".
 - [ ] **D4** Turn slicing → per-turn ASR → per-turn post-processing.
       *Done = a two-voice E2E asserts correct turn count and ordering, not just words.*
 - [ ] **D5** Output artifact + speakers map. *Done = a real meeting produces a readable

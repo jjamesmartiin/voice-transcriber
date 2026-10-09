@@ -162,7 +162,7 @@ import sherpa_onnx
 config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
     segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
         pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
-            model=SEG_ONNX, window_shift_ratio=0.1
+            model=SEG_ONNX
         ),
     ),
     embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=EMB_ONNX),
@@ -179,6 +179,17 @@ result = sd.process(audio, callback=progress_cb).sort_by_start_time()
 for r in result:
     ...                                             # r.start, r.end, r.speaker
 ```
+
+> **Corrections after implementing this (D3), verified against sherpa-onnx 1.12.25:**
+> * `window_shift_ratio` **does not exist** on
+>   `OfflineSpeakerSegmentationPyannoteModelConfig` — it takes `model` only, and passing the
+>   extra keyword raises `TypeError`. The earlier draft of this snippet carried it.
+> * Result items have **no `.overlap` attribute**, so `Turn.overlap` is always `False` on
+>   this backend. The field stays in the dataclass (the contract is shared) but nothing
+>   should read it as meaningful yet.
+> * The `progress` callback must return an `int` for the library, while the D1 contract's
+>   callback returns `None`, so the backend adapts it in one line rather than changing
+>   either interface.
 
 Four things this settles, each of which was an open design question in the previous
 revision:

@@ -164,29 +164,74 @@ def _binary() -> str | None:
     return which("llama-server")
 
 
-def _model_path() -> str | None:
-    """Locate the GGUF: explicit override, then the model registry.
+#: Conventional GGUF filename, used when the registry has no formatter spec yet
+#: (milestone C6). Mirrors the file the release bundle installs.
+DEFAULT_MODEL_FILENAMES = ("s1-mini-q4_k_m.gguf",)
 
-    The registry does not carry a formatter spec yet (milestone C6), so in a
-    stock build this returns ``None`` unless the environment names a file - and
-    the backend reports itself unavailable, which is correct.
+#: Subdirectory under the app's data dir where the formatter weights live.
+DEFAULT_MODEL_SUBDIR = "formatter"
+
+
+def _candidate_model_dirs() -> list[str]:
+    """Directories to look in for the GGUF, most specific first.
+
+    Each lookup is isolated: the registry accessors raise ``KeyError`` for a name
+    that is not registered yet, and one shared ``try`` would let the missing spec
+    abort the conventional path too - which is the only one that can succeed
+    before milestone C6 adds the formatter spec.
+    """
+    dirs: list[str] = []
+    try:
+        from voice_transcriber import model_download
+    except Exception:
+        return dirs
+    try:
+        registry_dir = model_download.models_dir("formatter")
+        if registry_dir:
+            dirs.append(str(registry_dir))
+    except Exception:
+        pass  # KeyError until C6 registers a formatter spec
+    try:
+        dirs.append(os.path.join(str(model_download.get_data_dir()),
+                                 "models", DEFAULT_MODEL_SUBDIR))
+    except Exception:
+        pass
+    return dirs
+
+
+def _model_path() -> str | None:
+    """Locate the GGUF: explicit override, then the registry, then the install path.
+
+    The registry is the real answer, but a stock build carries no formatter spec
+    yet (milestone C6). Without the conventional-location fallback a model that
+    *is* installed stays unfindable, so ``formatter: on`` would silently do
+    nothing unless the user also set ``VT_FORMATTER_MODEL_PATH`` - the same
+    failure this backend's own default had before it was pointed at the shipping
+    path. Filenames come from the spec when there is one, so the registry remains
+    the single declaration home once it exists.
     """
     override = (os.environ.get(ENV_MODEL_PATH) or "").strip()
     if override:
         return override if os.path.exists(override) else None
+
+    spec = None
     try:
         from voice_transcriber import model_download
         spec = model_download.get_spec("formatter")
-        directory = model_download.models_dir("formatter")
     except Exception:
-        return None
-    if spec is None or directory is None:
-        return None
-    for name in getattr(spec, "required_local", ()) or ():
-        if str(name).endswith(".gguf"):
-            candidate = os.path.join(str(directory), str(name))
+        pass
+
+    names = [str(name) for name in (getattr(spec, "required_local", ()) or ())
+             if str(name).endswith(".gguf")]
+    if not names:
+        names = list(DEFAULT_MODEL_FILENAMES)
+
+    for directory in _candidate_model_dirs():
+        for name in names:
+            candidate = os.path.join(directory, name)
             if os.path.exists(candidate):
                 return candidate
+    return None
     return None
 
 

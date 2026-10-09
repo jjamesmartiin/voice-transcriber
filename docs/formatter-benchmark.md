@@ -104,7 +104,21 @@ No fixture produced invented content, a summary, or a refusal. The failures are
 
 ---
 
-## 3. Blockers found (both in files this milestone must not edit)
+## 3. Blockers found — **both fixed in `ceb42d0`**
+
+> **Status (2026-10-08):** both blockers below were real and both are now fixed on
+> `main` in `ceb42d0`, exactly as suggested, with regression tests. The sections are
+> kept as written because they are the reproduction record.
+>
+> Consequence worth knowing: before the fix, a **guardrail rejection was
+> indistinguishable from the formatter being switched off** — both return the
+> cleaned-but-unformatted transcript. So the retraction and email fixtures looked
+> "unchanged" while the model had actually answered correctly. The e2e suite now
+> pins that directly
+> (`test_the_guardrails_no_longer_discard_the_models_answer`: formatted output must
+> differ from unformatted output).
+>
+> What remains is §3.3.
 
 ### 3.1 Guardrail false-rejects the model's times — `src/voice_transcriber/formatter.py`
 
@@ -150,6 +164,27 @@ markers). The formatter output and the structure stage must not both number the 
 
 Both fixes are prerequisites for the four fixtures matching Wispr; without them M2's
 acceptance criterion is only met at the model level, not at the rendered level.
+
+### 3.3 What still differs from Wispr — cosmetic, and one open decision
+
+After `ceb42d0` the pipeline returns the model's real answer for all four fixtures, so
+these are deviations in *rendering*, not answers being discarded:
+
+| fixture | ours | Wispr | kind |
+| --- | --- | --- | --- |
+| `retraction` | `…lobby at 7pm.` | `…lobby at 7 pm.` | whitespace only |
+| `email` | `…meet at 3pm on Friday?` | `…meet at 3 pm on Friday?` | whitespace only |
+| `list` | `- Milk for the cake` | `- milk for the cake` | **casing** |
+
+The first two are whitespace-only, and §4's equivalence rule already collapses
+whitespace — so under a charitable reading of the plan they are *already equivalent*, and
+the xfail markers may just be too strict. The third is **not** covered by that rule:
+the model sentence-cases each list item where Wispr keeps the spoken case.
+
+Whether sentence-casing list items is a defect or an improvement is a product call, not a
+measurement, and it is tracked as an open parity decision in `docs/TODO-parity.md`. Note
+the two fixtures disagree about which we'd want: capitalising bullet items is conventional
+style, but the plan's criterion is literal equality with Wispr.
 
 ---
 
