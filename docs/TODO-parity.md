@@ -15,6 +15,10 @@ needed to pick it back up is here or one link away.
 
 ## 0. Where things stand
 
+> **Resuming after a context reset?** Read [`handoff.md`](handoff.md) first — it carries the
+> working state, the in-flight branches, the environment traps and the process lessons that
+> are not in this file. This file stays the task list; that one is the session handoff.
+
 _Snapshot: 2026-10-08 (later than the first revision of this file — see the note below)._
 
 Everything below is committed on `main` and the working tree is clean.
@@ -48,6 +52,7 @@ ever disagree with §4 again, **§4 wins**.
 
 | File | What |
 | --- | --- |
+| `docs/handoff.md` | **session handoff** — state, in-flight branches, traps, lessons |
 | `docs/plan-parity-roadmap.md` | entry point: workstreams, order, non-negotiables |
 | `docs/plan-diarization.md` | meeting-mode diarization, sherpa-onnx, alternatives assessed |
 | `docs/plan-on-device-formatter.md` | S1-mini formatter, swappable backend, exact contract |
