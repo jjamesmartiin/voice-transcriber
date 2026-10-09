@@ -3,6 +3,11 @@
 # ==============================================================================
 # Copy this file to 'config.toml' (in root directory or config/ directory) to override defaults.
 # Format: TOML
+# NOTE: the YAML example (config.yaml.example) is the fully annotated reference;
+# this file documents the same keys in TOML form.
+
+# Speech-recognition backend: "cohere" (default) or "parakeet". Needs a restart.
+model_backend = "cohere"
 
 # Controls whether audio cue sounds play on transcription complete
 is_muted = true
@@ -22,6 +27,9 @@ auto_type_auto_punctuate = true
 # Automatically copy transcribed text to clipboard
 copy_to_clipboard = true
 
+# Middle mouse button acts as an extra push-to-talk trigger
+middle_click_enabled = false
+
 # Punctuation & Formatting Mode
 # Options:
 #   - "full"                     : Standard full capitalization and terminal punctuation (periods, questions, commas)
@@ -29,6 +37,17 @@ copy_to_clipboard = true
 #   - "no_punctuation"           : Strips all punctuation marks, preserving capitalization
 #   - "lowercase_no_punctuation" : Strips all punctuation and lowercases all words
 punctuation_mode = "full"
+
+# Spoken-list formatting: "off" (default, flat prose), "inline" (marker-only
+# "- one. - two."), or "blocks" (real bullets and paragraph breaks). Typed output
+# is downgraded to "inline" because a newline is an Enter keypress.
+structure_mode = "off"
+
+# How much the post-processing pass may change the words: "off" (verbatim),
+# "artifacts" (drop filler/stutters/hallucinations only), or "full" (default;
+# also resolves self-corrections). Number/date formatting, the dictionary, casing
+# and punctuation are separate settings, not gated by this.
+cleanup_mode = "full"
 
 # Convert spoken number words to digits. Options: auto (consecutive digit
 # chains only; ordinals and small isolated counts read as words, e.g.
@@ -56,14 +75,59 @@ keep_bluetooth_handsfree = true
 # Sound cue theme: "proximity", "pop", "chime", or "silent"
 sound_theme = "proximity"
 
+# Terminal UI theme: "auto" or green/cyan/blue/magenta/yellow/red/white
+ui_theme = "red"
+
 # Average typing speed (WPM) for estimated time saved calculations (default: 40).
 # The all-time total lives outside the config, in <data dir>/stats.json.
 typing_wpm = 40
+
+# Dictation language (the English post-processor expects "en")
+language = "en"
+
+# ------------------------------------------------------------------------------
+# Meeting Mode & Speaker Diarization
+# ------------------------------------------------------------------------------
+# Long, non-injecting capture; transcripts are written to a document instead of
+# typed. Off by default (off is byte-identical to a build without the feature).
+meeting = "off"
+# In-memory spill threshold, in minutes (1-240)
+meeting_spill_minutes = 10
+# Where the finished transcript is written (repo-relative by default, gitignored)
+meeting_output_dir = "meetings"
+# Artifact form: "text" (default), "json" (one object per turn), or "markdown"
+meeting_output_format = "text"
+
+# Label who spoke in a meeting transcript. Off never loads the model and
+# produces a single-speaker document.
+diarization = "off"
+# Optional expected speaker count: "auto" (default) or 2-8
+diarization_speakers = "auto"
+# Registry name of the diarization bundle; startup-loaded (needs a restart)
+diarization_model = "diarization"
+
+# ------------------------------------------------------------------------------
+# On-Device Formatter (optional local language model)
+# ------------------------------------------------------------------------------
+# Rewrites the transcript with a local llama-server. Off by default.
+formatter = "off"
+# Registry name of the formatter model bundle
+formatter_model = "s1-mini"
+# Writing style: "casual", "semi-casual", "semi-formal" (default), or "formal"
+formatter_style = "semi-formal"
+# What the text is for: "general" (default) or "email"
+formatter_context = "general"
 
 # Device selection: primary/secondary device names (null/omitted for default)
 override_mode = "auto"
 # primary_device_name = "USB Audio"
 # secondary_device_name = "Built-in Microphone"
+
+# Push-to-talk binds: one [[hotkeys]] table per chord. Managed at runtime with
+# the `hotkey` control verb or Settings -> Push-to-Talk Keys.
+[[hotkeys]]
+keys = ["alt", "shift"]
+action = "dictate"
 
 # Custom Word & Technical Phrase Dictionary (case-insensitive Trie replacement)
 [dictionary]
