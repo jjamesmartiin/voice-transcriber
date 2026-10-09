@@ -393,6 +393,56 @@ def test_packager_selects_a_registry_model():
     assert model_download.REVISION not in text
 
 
+def _load_packager():
+    """Import scripts/prepare_model_release.py without it being a package."""
+    import importlib.util
+    path = REPO_ROOT / "scripts" / "prepare_model_release.py"
+    module_spec = importlib.util.spec_from_file_location("_vt_packager", path)
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module
+
+
+def test_cohere_notice_is_pinned_to_the_published_wording():
+    """The NOTICE is a legal artifact and must never drift.
+
+    It ships inside the release archive, so a change is a change to a
+    published artifact. The refactor that introduced ``display_name``
+    substituted the *console* labels into it and silently did two things: it
+    dropped "2B" from the formal model name, and it replaced "the Apache
+    License, Version 2.0" with the SPDX id "Apache-2.0". Neither is a runtime
+    behaviour change, so no other test could catch it - hence pinning the
+    exact bytes here.
+    """
+    spec = model_download.get_spec("cohere")
+    expected = (
+        "Cohere Transcribe 2B (cohere-transcribe-03-2026)\n"
+        "Automatic Speech Recognition model by Cohere / Cohere Labs.\n"
+        f"Revision: {spec.revision}\n"
+        f"Source: https://huggingface.co/{spec.repo_id}\n"
+        "\n"
+        "This model is licensed under the Apache License, Version 2.0 "
+        "(see the LICENSE file in this directory).\n"
+        "Weights mirrored for distribution via the voice-transcriber GitHub release."
+    )
+    assert _load_packager().build_notice(spec) == expected
+
+
+def test_notice_formal_names_are_not_the_console_labels():
+    """A NOTICE cites the formal names, not the short console labels.
+
+    If the two ever collapse back together this test says why that matters.
+    """
+    spec = model_download.get_spec("cohere")
+    assert spec.notice_title == "Cohere Transcribe 2B"
+    assert spec.license_title == "the Apache License, Version 2.0"
+    # The console labels stay short; provenance keeps the SPDX id.
+    assert spec.display_name == "Cohere Transcribe"
+    assert spec.license_name == "Apache-2.0"
+    assert spec.notice_title != spec.display_name
+    assert spec.license_title != spec.license_name
+
+
 def test_manifest_listing_missing_parts_is_skipped(monkeypatch, tmp_path):
     """Regression: a manifest whose parts are absent must never be chosen.
 

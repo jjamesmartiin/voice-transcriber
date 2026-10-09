@@ -45,12 +45,12 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def build_notice(spec):
     """The NOTICE shipped beside the license inside the release archive."""
     return (
-        f"{spec.display_name} ({spec.repo_id.rsplit('/', 1)[-1]})\n"
+        f"{spec.notice_title or spec.display_name} ({spec.repo_id.rsplit('/', 1)[-1]})\n"
         f"{spec.description}\n"
         f"Revision: {spec.revision}\n"
         f"Source: https://huggingface.co/{spec.repo_id}\n"
         "\n"
-        f"This model is licensed under {spec.license_name} "
+        f"This model is licensed under {spec.license_title or spec.license_name} "
         "(see the LICENSE file in this directory).\n"
         "Weights mirrored for distribution via the voice-transcriber GitHub release."
     )

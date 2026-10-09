@@ -74,6 +74,13 @@ class ModelSpec:
     license_name: str = ""           # short license label (NOTICE, provenance)
     target_subdir: str = ""          # <models root>/<target_subdir>
     download_hint: str = ""          # size hint shown in the download prompt
+    # Formal names for the legal NOTICE artifact only. These are deliberately
+    # separate from ``display_name``/``license_name``: console messages want a
+    # short label ("Cohere Transcribe"), whereas a NOTICE is a legal artifact
+    # and must keep the exact wording it has always shipped with. Empty means
+    # "fall back to the short label".
+    notice_title: str = ""           # formal model name on the NOTICE
+    license_title: str = ""          # formal license name on the NOTICE
 
 
 # Single source of truth for the publishing target: scripts/publish_model_bundle.sh
@@ -122,6 +129,11 @@ COHERE = ModelSpec(
     digests={"model.safetensors": _COHERE_SHA256},
     license_file="config/licenses/Cohere-Apache-2.0.txt",
     license_name="Apache-2.0",
+    # Pinned so the published NOTICE stays byte-identical to every release so
+    # far: "2B" is part of the formal name, and a NOTICE cites the license by
+    # its full title rather than the SPDX id used in console/provenance text.
+    notice_title="Cohere Transcribe 2B",
+    license_title="the Apache License, Version 2.0",
     target_subdir="cohere",
     download_hint="~2.8 GB (~3.9 GB uncompressed on disk)",
 )
