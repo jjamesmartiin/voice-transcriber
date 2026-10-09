@@ -529,6 +529,67 @@ def test_packager_selects_a_registry_model():
     assert "--model" in text
     assert "spec.asset_prefix" in text
     assert model_download.REVISION not in text
+    # It can locate an install the app itself made, so a machine that never
+    # touched the HF cache can still package.
+    assert "find_installed_model_dir" in text
+
+
+def test_packager_tars_nested_files_and_ships_a_verbatim_notice(tmp_path):
+    """A spec may nest package files and ship its own NOTICE verbatim.
+
+    Diarization's segmentation graph lives in a subdirectory, and S1-mini's
+    upstream NOTICE carries an operative naming clause that a generated NOTICE
+    would paraphrase, so both capabilities are load-bearing.
+    """
+    notice_text = 'S1-mini-GGUF\nCopyright 2026 Superwhisper\n'
+    notice_path = tmp_path / "NOTICE.upstream"
+    notice_path.write_text(notice_text, encoding="utf-8")
+    files = {"seg/model.onnx": b"ONNX-weights", "embed.onnx": b"EMB"}
+    spec = _synthetic_spec(files=files, notice_file=str(notice_path))
+    model_dir = tmp_path / "model"
+    for name, data in files.items():
+        path = model_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    packager = _load_packager()
+    tar_path = tmp_path / "model.tar"
+    packager.build_tar(spec, str(model_dir), str(tmp_path / "staging"), str(tar_path))
+
+    with tarfile.open(tar_path, "r") as tf:
+        names = tf.getnames()
+        assert "seg/model.onnx" in names, names
+        assert "embed.onnx" in names, names
+        assert tf.extractfile("NOTICE").read().decode() == notice_text
+
+
+def test_packager_falls_back_to_the_registry_install_dir(monkeypatch, tmp_path):
+    """A machine that installed through the app can package without --model-dir."""
+    spec = _synthetic_spec()
+    for req in spec.package_files:
+        (tmp_path / req).write_bytes(b"x")
+    monkeypatch.setattr(model_download, "models_dir", lambda name: str(tmp_path))
+    packager = _load_packager()
+    assert packager.find_installed_model_dir(spec) == str(tmp_path)
+    # A directory missing a declared file is not an install.
+    (tmp_path / spec.package_files[0]).unlink()
+    assert packager.find_installed_model_dir(spec) is None
+
+
+def test_install_from_a_bundle_with_a_nested_package_file(monkeypatch, tmp_path):
+    """The format-agnostic installer handles a nested layout (diarization)."""
+    files = {"seg/model.onnx": b"ONNX-weights", "embed.onnx": b"EMB"}
+    spec = _synthetic_spec(files=files)
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    bundle = _make_bundle(tmp_path, spec.asset_prefix, files)
+    dest = tmp_path / "dest"
+
+    result = model_download.install_model_from_local_bundle(
+        spec.name, str(bundle), dest=str(dest))
+
+    assert result == str(dest)
+    assert (dest / "seg" / "model.onnx").read_bytes() == files["seg/model.onnx"]
+    assert model_download.is_model_complete(spec.name, str(dest))
 
 
 def _load_packager():
