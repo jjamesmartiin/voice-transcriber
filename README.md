@@ -32,17 +32,17 @@
 
 ## 📊 Benchmark & Accuracy
 
-Voice Transcriber is evaluated with a reproducible test suite in `eval/` across 154 speech and silence clips, scoring the real streaming pipeline with dynamic INT8 quantization on CPU:
+Voice Transcriber is evaluated with a reproducible test suite in `eval/` across 154 speech and silence clips, scoring the real streaming pipeline with dynamic INT8 quantization on CPU. The recorded configuration is written into `eval/results.json` itself — backend, int8, number digits, block size, git revision, and a single copy-pasteable `reproduce` command — so these numbers can be re-derived rather than taken on trust:
 
 | Dataset Slice | Sample Count (N) | Word Error Rate (WER) | Character Error Rate (CER) | Exact Match Rate | Silence Hallucination |
 | :--- | ---: | ---: | ---: | ---: | ---: |
-| **Clean read speech** | 44 | **2.81%** | 1.43% | 70.5% | — |
-| **Noisy speech (5–20 dB SNR)** | 24 | **3.01%** | 1.24% | 70.8% | — |
-| **Long-form speech (15–40s)** | 12 | **1.78%** | 0.87% | 50.0% | — |
-| **Technical vocabulary** | 28 | **8.44%** | 5.46% | 50.0% | — |
-| **Technical + background noise** | 12 | 8.12% | 4.52% | 50.0% | — |
-| **Accented meeting speech** | 22 | 12.32% | 7.66% | 13.6% | — |
-| **Overall Speech Pipeline** | **142** | **5.10%** | **2.97%** | **54.2%** | — |
+| **Clean read speech** | 44 | **2.07%** | 0.72% | 81.8% | — |
+| **Noisy speech (5–20 dB SNR)** | 24 | **2.73%** | 1.58% | 75.0% | — |
+| **Long-form speech (15–40s)** | 12 | **2.19%** | 0.75% | 33.3% | — |
+| **Technical vocabulary** | 28 | **4.52%** | 2.07% | 82.1% | — |
+| **Technical + background noise** | 12 | 0.64% | 0.25% | 91.7% | — |
+| **Accented meeting speech** | 22 | 9.42% | 3.65% | 36.4% | — |
+| **Overall Speech Pipeline** | **142** | **3.57%** | **1.43%** | **70.4%** | — |
 | **Silence / Quiet Room Gate** | **12** | — | — | — | **0 / 12 (0.0%)** |
 
 > **Latency Breakdown**: Streaming VAD: `0 ms` · Post-Processor: `~16 µs` · Cohere CPU Inference: `~0.15x RTF` (~0.7s on 5s audio) · End-to-End Delivery: `< 1.0 s`.  
