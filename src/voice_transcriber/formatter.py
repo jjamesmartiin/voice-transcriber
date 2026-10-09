@@ -293,11 +293,20 @@ def _canonical_tokens(text: str) -> list[str]:
     Case, punctuation, contractions and number words are all folded so that
     "seven PM" and "7 pm" compare equal. Whatever survives is real content, and
     guardrail 2 requires all of it to be present in the input.
+
+    **Letters and digits are split into separate tokens.** Matching ``[a-z0-9]+``
+    kept them glued, so the *input* "seven PM" canonicalised to ``[7, pm]`` while
+    the model's "7pm" canonicalised to ``[7pm]`` - and guardrail 2 then rejected a
+    perfectly correct number normalisation as invented content. The e2e run caught
+    this on the retraction and email fixtures, where the model's answer was right
+    and got thrown away, so the pipeline fell back to the unformatted transcript.
+    Splitting on the boundary is the correct reading anyway: "7pm" and "7 pm" are
+    the same words, and the model is explicitly allowed to change that spacing.
     """
     lowered = (text or "").lower().replace("\u2019", "'")
     for contraction, expansion in _CONTRACTIONS.items():
         lowered = lowered.replace(contraction, expansion)
-    return [_NUMBER_WORDS.get(tok, tok) for tok in re.findall(r"[a-z0-9]+", lowered)]
+    return [_NUMBER_WORDS.get(tok, tok) for tok in re.findall(r"[a-z]+|[0-9]+", lowered)]
 
 
 def _contains_subsequence(haystack: list[str], needle: list[str]) -> bool:

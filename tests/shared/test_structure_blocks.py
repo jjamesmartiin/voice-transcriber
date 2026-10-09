@@ -320,3 +320,26 @@ def test_pause_is_a_boundary_directly():
     assert pp._pause_is_a_boundary("First we plan,") is False
     assert pp._pause_is_a_boundary("") is False
     assert pp._pause_is_a_boundary("   ") is False
+
+
+# ---------------------------------------------------------------------------
+# A list that already carries markers must not be bulleted twice
+# ---------------------------------------------------------------------------
+# The on-device formatter emits finished list markup when it was asked for lists,
+# and this stage then renders it again. Before the fix the result was
+# "- - Milk for the cake": found by the real-model e2e run, which is why the
+# `list` fixture is listed as failing there.
+
+@pytest.mark.parametrize("text,expected", [
+    ("- milk\n- eggs", "- milk\n- eggs"),
+    ("1. milk\n2. eggs", "1. milk\n2. eggs"),
+])
+def test_an_already_marked_list_is_not_bulleted_twice(text, expected):
+    out = pp.process_structure_blocks(text, mode="blocks")
+    assert out == expected
+    assert "- -" not in out
+
+
+def test_stripping_the_marker_spares_a_real_hyphenated_value():
+    """The marker only counts when whitespace follows it, so -5 is not a bullet."""
+    assert pp.process_structure_blocks("-5 degrees", mode="blocks") == "-5 degrees"

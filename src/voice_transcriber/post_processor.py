@@ -2854,10 +2854,20 @@ def _tidy_blocks(text: str, mode: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text)
 
 
+#: A marker the text may already carry when it reaches this stage. The on-device
+#: formatter emits finished list markup when it was asked for lists, and the
+#: structure stage then renders it again - which stacked a second bullet on top
+#: ("- - Milk for the cake"). Strip the existing marker so the list is rendered
+#: exactly once, whoever produced it. Requires trailing whitespace, so a real
+#: hyphenated value like "-5 degrees" is left alone.
+_EXISTING_LIST_MARKER_REGEX = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
+
+
 def _render_items(items: list[str], mode: str, numbered: bool) -> str:
     lines = []
     for position, item in enumerate(items, start=1):
         body = _NUMBER_LABEL_PREFIX_REGEX.sub("", item, count=1) if numbered else item
+        body = _EXISTING_LIST_MARKER_REGEX.sub("", body, count=1)
         body = body.strip()
         marker = f"{position}. " if numbered else "- "
         if mode == "blocks":

@@ -192,6 +192,52 @@ def test_canonicalisation_strips_punctuation_and_case():
     assert formatter._canonical_tokens("don't") == ["do", "not"]
 
 
+def test_canonicalisation_splits_the_letter_digit_boundary():
+    """Regression for a guardrail that threw away correct answers.
+
+    Matching ``[a-z0-9]+`` kept letters glued to digits, so the *input*
+    "seven PM" canonicalised to ``[7, pm]`` while the model's "7pm" canonicalised
+    to ``[7pm]``. Guardrail 2 then reported the model's own number normalisation
+    as invented content. The real-model e2e run found it on the retraction and
+    email fixtures, where the answer was right and got discarded, so the pipeline
+    silently fell back to the unformatted transcript.
+    """
+    assert formatter._canonical_tokens("7pm") == ["7", "pm"]
+    assert formatter._canonical_tokens("seven PM") == formatter._canonical_tokens("7pm")
+    assert formatter._canonical_tokens("WPA2") == ["wpa", "2"]
+    assert formatter._canonical_tokens("ABC123") == ["abc", "123"]
+
+
+@pytest.mark.parametrize("original,candidate", [
+    ("meet me at seven PM", "Meet me at 7pm."),
+    ("meet me at seven PM", "Meet me at 7 pm."),
+    ("it is three PM", "It is 3pm."),
+    ("call me at five thirty", "Call me at 5:30."),
+])
+def test_number_normalisation_across_the_boundary_is_accepted(original, candidate):
+    assert formatter.validate(original, candidate) is None
+
+
+@pytest.mark.parametrize("original,candidate", [
+    # The tokeniser does not fold ordinals ("twentieth" vs "20th") or serial
+    # collapse ("W P A 2" vs "WPA2"). Both are left rejected here on purpose
+    # rather than quietly accommodated, because both transformations are
+    # deterministic stages that run *before* the formatter - so the model never
+    # actually sees the split form, and accepting them would widen guardrail 2
+    # to license word-joining for a case that cannot arise.
+    ("the meeting is on october twentieth", "The meeting is on October 20th."),
+    ("the code is W P A 2", "The code is WPA2."),
+])
+def test_transformations_that_run_before_the_formatter_are_not_licensed(original, candidate):
+    assert formatter.validate(original, candidate) is not None
+
+
+def test_folding_the_boundary_still_admits_no_invented_content():
+    """The fix must loosen only the boundary, not the no-new-content rule."""
+    assert formatter.validate("buy milk", "Buy milk and bread 7pm.") is not None
+    assert formatter.validate("the code is wpa 2", "The code is wpa2 plus more.") is not None
+
+
 # ---------------------------------------------------------------------------
 # Guardrail 1 - length ceiling
 # ---------------------------------------------------------------------------
