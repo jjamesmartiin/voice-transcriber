@@ -47,9 +47,10 @@ acceptance criterion for formatter parity. They are recorded in
 
 **Git**
 
-- `main` is at `92775f2`, working tree clean.
-- **`main` is 50 commits ahead of `home/main` (gitea) — nothing has been pushed this
-  session.** 38 of those 50 are this session's work.
+- `main` is at `cd8e9ca`, working tree clean.
+- **`main` is far ahead of `home/main` (gitea) and nothing has been pushed this session** —
+  51 commits at the time of writing, 38 of them this session's.
+  **Re-check rather than trust that number:** `git rev-list --count home/main..main`.
 - Remotes: `home`/`gitea` → `gitea@git.jdm.cx:jamesm/voice-transcriber.git`,
   `github` → `git@github.com:jjamesmartiin/voice-transcriber.git`.
 
@@ -69,6 +70,9 @@ cargo clippy -D warnings clean
 e2e (real GGUF)          8 passed
 meeting mode             verified end to end on real two-voice audio
 ```
+
+These are a snapshot too — re-run §5's invocations rather than trusting them, because a
+test count that only ever goes up is how a regression gets missed.
 
 **Branch / worktree inventory**
 
