@@ -25,10 +25,13 @@ Usage
   PYTHONPATH=$PWD/src $PY eval/score.py --limit 3       # smoke test
   PYTHONPATH=$PWD/src $PY eval/score.py --slice clean --slice technical
   PYTHONPATH=$PWD/src $PY eval/score.py --no-int8       # A/B int8 vs fp32
+  PYTHONPATH=$PWD/src $PY eval/score.py --backend parakeet --json eval/parakeet.json
   PYTHONPATH=$PWD/src $PY eval/score.py --json eval/results.json
 
-The app's real config is read from config/config.yaml (number_digits).
-VT_INT8_DYNAMIC is honoured; --int8/--no-int8 override it.
+The app's real config is read from config/config.yaml (number_digits and
+model_backend). --backend overrides model_backend; an absent --backend uses the
+configured backend, which defaults to the shipped one (cohere).
+VT_INT8_DYNAMIC is honoured (Cohere only); --int8/--no-int8 override it.
 """
 
 from __future__ import annotations
@@ -207,6 +210,9 @@ def main():
     ap.add_argument("--ids", default="", help="comma-separated clip ids")
     ap.add_argument("--blocks-ms", type=int, default=100, help="audio feed block size (ms)")
     ap.add_argument("--device", default="cpu")
+    ap.add_argument("--backend", default="",
+                    help="ASR backend to score (overrides config model_backend); "
+                         "defaults to the configured/shipped backend")
     ap.add_argument("--int8", dest="int8", action="store_true", default=None,
                     help="force VT_INT8_DYNAMIC=1")
     ap.add_argument("--no-int8", dest="int8", action="store_false",
@@ -227,13 +233,23 @@ def main():
     elif args.int8 is False:
         os.environ["VT_INT8_DYNAMIC"] = "0"
 
-    # ---- app config -> number_digits ----
+    # ---- app config -> number_digits, and the backend selection ----
     cfg = load_app_config()
     num_digits = cfg.get("number_digits", False)
     if args.num_digits is not None:
         num_digits = args.num_digits
     from post_processor import set_number_digits_enabled  # noqa: E402
     set_number_digits_enabled(bool(num_digits))
+
+    # Backend: --backend wins, else the app's config value, else the shipped
+    # default. Resolved through the same registry the app uses (t2._load_model_
+    # backend -> transcribe2.set_backend), so there is one selection mechanism.
+    import transcribe2  # noqa: E402
+    try:
+        backend_name = transcribe2.set_backend(args.backend or cfg.get("model_backend"))
+    except transcribe2.UnknownBackendError as e:
+        eprint(f"[score] {e}")
+        return 2
 
     # ---- read + filter manifest ----
     entries = []
@@ -262,7 +278,7 @@ def main():
     eprint("Voice Transcriber accuracy evaluation")
     eprint("=" * 72)
     eprint(f"clips        : {len(entries)} ({', '.join(f'{k}={v}' for k, v in sorted(counts.items()))})")
-    eprint(f"backend      : cohere  (VT_INT8_DYNAMIC={os.environ.get('VT_INT8_DYNAMIC', '0')})")
+    eprint(f"backend      : {backend_name}  (VT_INT8_DYNAMIC={os.environ.get('VT_INT8_DYNAMIC', '0')})")
     eprint(f"number_digits: {bool(num_digits)} (config value: {cfg.get('number_digits', False)})")
     eprint(f"feed block   : {args.blocks_ms} ms")
 
@@ -272,7 +288,6 @@ def main():
 
     with redirect:
         t0 = time.perf_counter()
-        import transcribe2
         transcribe2.get_model(device=args.device)
         eprint(f"model loaded  : {time.perf_counter() - t0:.1f} s")
 
@@ -393,7 +408,7 @@ def main():
             "meta": {
                 "n_clips": len(results),
                 "slices": dict(counts),
-                "backend": "cohere",
+                "backend": backend_name,
                 "int8_dynamic": os.environ.get("VT_INT8_DYNAMIC", "0"),
                 "number_digits": bool(num_digits),
                 "norm_numbers": args.norm_numbers,
