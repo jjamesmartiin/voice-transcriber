@@ -29,6 +29,7 @@ LOG_FILE = logging_setup.configure_logging()
 import hal
 import control
 import meeting
+import meeting_pipeline
 import stats
 import console_text
 from tui import VoiceTranscriberTUI
@@ -105,6 +106,19 @@ class SimpleVoiceTranscriber:
         # docs/meeting_mode.md). Constructed here so `status` can report it from
         # the first control request; it opens no device until `meeting-start`.
         self.meeting = meeting.MeetingSession(on_change=self._on_meeting_change)
+        # The batch pipeline that turns a finished capture into a transcript
+        # (docs/meeting_pipeline.md). It runs on the session's finalize daemon
+        # thread, yields to dictation between turns and is cancelled when the
+        # engine quits. Wired after construction because it needs the session's
+        # own progress/cancel seams.
+        self.meeting_pipeline = meeting_pipeline.MeetingPipeline(
+            is_dictating=lambda: bool(getattr(self, "recording", False)),
+            progress=self.meeting.set_progress,
+            stage_callback=self.meeting.set_stage,
+            cancel_event=self.meeting.cancel_event,
+            on_done=self._on_meeting_transcript,
+        )
+        self.meeting.set_audio_consumer(self.meeting_pipeline.process)
 
         # Cumulative session stats for time saved tracking
         self.session_words = 0
@@ -639,13 +653,39 @@ class SimpleVoiceTranscriber:
                     f"{t2.meeting_elapsed_label(status.elapsed_s)} · {status.progress_pct}%",
                 )
             elif status.state == "processing":
-                tui.update_state("MEETING", f"finishing · {status.progress_pct}%")
+                stage = getattr(status, "stage", "") or "processing"
+                tui.update_state("MEETING", f"{stage} · {status.progress_pct}%")
             elif not getattr(self, "recording", False):
                 ready = getattr(self, "_model_ready_event", None)
                 if ready is None or ready.is_set():
                     tui.update_state("READY")
         except Exception as exc:  # a TUI that is going away must not break capture
             logger.debug("meeting TUI update failed: %s", exc)
+
+    def _on_meeting_transcript(self, transcript):
+        """Surface the finished meeting document (path, speakers, errors)."""
+        self.last_meeting_transcript = transcript
+        tui = getattr(self, "tui", None)
+        if tui is None:
+            return
+        try:
+            if getattr(transcript, "cancelled", False):
+                tui.print_event("⏹ Meeting", "Processing cancelled.", level="warning")
+            elif getattr(transcript, "error", None):
+                tui.print_event(
+                    "⚠️ Meeting",
+                    f"Transcript processing failed: {transcript.error}",
+                    level="warning",
+                )
+            elif getattr(transcript, "path", None):
+                speakers = getattr(transcript, "speaker_count", 0)
+                tui.print_event(
+                    "📝 Meeting",
+                    f"Transcript saved ({speakers} speaker(s)): {transcript.path}",
+                    level="info",
+                )
+        except Exception as exc:
+            logger.debug("meeting transcript callback failed: %s", exc)
 
     def _on_tui_toggle_meeting(self):
         """Start or stop a meeting capture (settings modal / control API)."""
@@ -1362,15 +1402,23 @@ class SimpleVoiceTranscriber:
         configured = getattr(t2, "get_meeting", lambda: "off")()
         session = self._meeting_session()
         status = session.status() if session is not None else None
+        pipeline = getattr(self, "meeting_pipeline", None)
+        transcript = pipeline.last_transcript if pipeline is not None else None
         return {
             "meeting": configured,
             "meeting_setting": configured,
             "meeting_state": status.state if status is not None else "idle",
+            "meeting_stage": getattr(status, "stage", "idle") if status is not None else "idle",
             "meeting_elapsed_s": status.elapsed_s if status is not None else 0.0,
             "meeting_progress": status.progress_pct if status is not None else 0,
             "meeting_spill_minutes": getattr(
                 t2, "get_meeting_spill_minutes", lambda: 10
             )(),
+            # The finished document, kept in memory so a caller can read it back
+            # over the control API without touching the filesystem.
+            "meeting_transcript": getattr(transcript, "text", "") if transcript else "",
+            "meeting_transcript_path": getattr(transcript, "path", None) if transcript else None,
+            "meeting_speakers": getattr(transcript, "speaker_count", 0) if transcript else 0,
         }
 
     def _refresh_lifetime_stats(self, words=0, time_saved_sec=0.0, record_session=False):
