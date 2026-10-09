@@ -336,6 +336,43 @@ def has_content_words(text: str) -> bool:
     return bool(_canonical_tokens(_filler_regex().sub(" ", text or "")))
 
 
+#: A rendered list-item line: marker, then the item body. Used to touch only the
+#: body's first letter.
+_LIST_ITEM_LINE_RE = re.compile(r"^([ \t]*(?:[-*+]|\d+[.)])[ \t]+)(\S.*)$", re.MULTILINE)
+
+
+def _restore_list_item_casing(candidate: str, original: str) -> str:
+    """Conform a list item's first letter to how the transcript had it.
+
+    The model sentence-cases each item, which reads as a list of independent
+    sentences. When the items are fragments completing an introducer - "I want to
+    grab three things at the grocery store: milk for the cake, eggs for
+    breakfast, and white bread" - they are grammatically part of that sentence, so
+    lowercase is the conventional treatment, and it is what the reference output
+    does.
+
+    Only the **first letter of an item whose first word the transcript already had
+    in lowercase** is touched, so a proper noun is safe: if the speaker's text says
+    "Netherlands", that word is not in the lowercase set and the item keeps its
+    capital. This is a casing *restoration*, not an invention - the formatter's
+    input is the authority on how the speaker's words were spelled.
+    """
+    lowercase_words = set(re.findall(r"\b[a-z][\w'\u2019-]*", original or ""))
+    if not lowercase_words:
+        return candidate
+
+    def fix(match: re.Match) -> str:
+        marker, body = match.group(1), match.group(2)
+        if not body[:1].isupper():
+            return match.group(0)
+        first = re.match(r"[\w'\u2019-]+", body)
+        if first is None or first.group(0).lower() not in lowercase_words:
+            return match.group(0)
+        return f"{marker}{body[0].lower()}{body[1:]}"
+
+    return _LIST_ITEM_LINE_RE.sub(fix, candidate)
+
+
 def validate(original: str, candidate: str, *, structure: str | None = None) -> str | None:
     """Check a candidate against every guardrail.
 
@@ -460,6 +497,10 @@ def format_text(
 
         if validate(original, candidate, structure=structure) is not None:
             return original
+        # Applied before validation, not after, so the text that was checked is the
+        # text that is returned. Casing does not affect canonical tokens, so this
+        # cannot change a verdict either way.
+        candidate = _restore_list_item_casing(candidate, original)
         return candidate
     except Exception:
         return original

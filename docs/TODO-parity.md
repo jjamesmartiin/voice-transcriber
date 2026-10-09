@@ -363,22 +363,30 @@ Detail: [`plan-on-device-formatter.md`](plan-on-device-formatter.md).
       are downloaded to `~/.local/share/vt/models/formatter/`; the quant's sha256 was verified
       independently against the Hub's LFS oid, along with the magic (`GGUF`) and header
       version (**3** — the version the plan pins as the contract).
-- [ ] **C10** *(new, found by C2)* **Open parity decision: two cosmetic deviations from
-      Wispr.** After `ceb42d0` all four fixtures return the model's real answer; what still
-      differs is rendering:
+- [x] **C10** **Parity deviations — RESOLVED.** Both were fixed with deterministic rules rather
+      than imitation, and **all four §4 fixtures now match the reference output** (8/8 e2e).
 
-      | fixture | ours | Wispr | kind |
-      | --- | --- | --- | --- |
-      | `retraction` | `…lobby at 7pm.` | `…lobby at 7 pm.` | whitespace only |
-      | `email` | `…meet at 3pm on Friday?` | `…meet at 3 pm on Friday?` | whitespace only |
-      | `list` | `- Milk for the cake` | `- milk for the cake` | **casing** |
+      The investigation inverted the original framing, which is the part worth keeping:
 
-      §4's equivalence rule already collapses whitespace, so the first two are arguably
-      already equivalent and those xfail markers are simply too strict. The third is *not*
-      covered: the model sentence-cases each list item where Wispr keeps the spoken case.
-      Sentence-casing bullets is conventional style, but the criterion is literal equality.
-      Needs a product call, then the three xfail markers get resolved one way or the other.
-      *Done = each deviation either fixed or explicitly accepted in §4.*
+      * **The app already had a convention and the model was the outlier.**
+        `tests/shared/test_post_processor.py` pins `convert_number_words_to_digits("five pm") ==
+        "5 PM"`, and `grep -E "[0-9](am|pm)" src/` found **nothing** - the compact `7pm` form
+        existed nowhere in the codebase until the formatter produced it. So this was not a
+        Wispr-matching preference: the formatter's output was **internally inconsistent with the
+        deterministic path**, i.e. the same app writing the same time two ways. Fixed with
+        `post_processor.normalize_clock_spacing()`, which must run **after** the formatter (the
+        first attempt put it before and it never saw the model's output).
+      * **The list-casing call was originally wrong, and worth being explicit about.**
+        Sentence-casing bullet items is conventional for a *displayed list of independent
+        sentences*; it is **not** conventional for colon-introduced fragments, which are
+        grammatically part of the introducer ("I want to grab three things: milk for the cake,
+        eggs for breakfast, and white bread"). Wispr's lowercase was the better form and ours
+        was the outlier. Fixed with `formatter._restore_list_item_casing()`, which conforms an
+        item's first letter to how the transcript had it - so proper nouns survive, because only
+        words the transcript already had in lowercase are touched.
+
+      Both rules are deterministic, live in `tests/shared` as well as the e2e suite, and are
+      independent of the model.
 - [~] **C3** `formatters/llama_server.py` — the **shipped** backend: spawn/attach, process
       lifecycle, kill-on-timeout. **CODE DONE in `6299947`** — 34 tests, driven by a stub server
       that speaks just enough of the OpenAI API, so the real subprocess path and the real

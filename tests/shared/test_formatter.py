@@ -239,6 +239,51 @@ def test_folding_the_boundary_still_admits_no_invented_content():
 
 
 # ---------------------------------------------------------------------------
+# List-item initial casing is restored from the transcript
+# ---------------------------------------------------------------------------
+# The model sentence-cases each bullet, which reads as a list of independent
+# sentences. For a colon-introduced list of fragments they are part of that
+# sentence, so lowercase is conventional and is what the reference output does.
+INTRO = ("I want to grab three things at the grocery store: milk for the cake, "
+         "eggs for breakfast, and white bread.")
+
+
+def test_list_item_casing_follows_the_transcript():
+    candidate = "- Milk for the cake\n- Eggs for breakfast\n- White bread"
+    assert formatter._restore_list_item_casing(candidate, INTRO) == (
+        "- milk for the cake\n- eggs for breakfast\n- white bread")
+
+
+def test_list_item_casing_spares_a_proper_noun():
+    """Only an item whose first word was already lowercase in the transcript moves."""
+    candidate = "- Netherlands\n- Belgium\n- Milk"
+    original = "I visited Netherlands and Belgium, and bought milk."
+    assert formatter._restore_list_item_casing(candidate, original) == (
+        "- Netherlands\n- Belgium\n- milk")
+
+
+def test_list_item_casing_ignores_already_lowercase_items():
+    candidate = "- milk\n- eggs"
+    assert formatter._restore_list_item_casing(candidate, INTRO) == candidate
+
+
+def test_numbered_items_are_restored_too():
+    candidate = "1. Milk for the cake\n2. Eggs for breakfast"
+    assert formatter._restore_list_item_casing(candidate, INTRO) == (
+        "1. milk for the cake\n2. eggs for breakfast")
+
+
+def test_list_item_casing_is_applied_by_format_text(monkeypatch):
+    """End to end through the entry point, so the wiring is covered too."""
+    def rewrite(text, **kwargs):
+        return "- Milk for the cake\n- Eggs for breakfast\n- White bread"
+
+    name = install_fake(monkeypatch, rewrite)
+    assert formatter.format_text(INTRO, backend=name, structure="lists") == (
+        "- milk for the cake\n- eggs for breakfast\n- white bread")
+
+
+# ---------------------------------------------------------------------------
 # Guardrail 1 - length ceiling
 # ---------------------------------------------------------------------------
 def test_guardrail_1_rejects_runaway_output():

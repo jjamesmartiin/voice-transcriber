@@ -222,13 +222,21 @@ def test_long_fixture_matches_wispr_end_to_end(formatter_on):
     assert "hikes" in out and "nightlife" not in out
 
 
-# NOTE (2026-10-08): the guardrail false-positives these three used to xfail on
-# were fixed in ceb42d0 - `_canonical_tokens()` no longer glues letters to digits
-# (so "seven PM" vs "7pm" compares equal), and `_render_items()` no longer stacks
-# a second bullet on a list the formatter already marked. The pipeline now returns
-# the model's answer for all four fixtures instead of falling back to the
-# unformatted transcript. What still differs from Wispr is cosmetic, and the
-# reasons below say which kind.
+# NOTE (2026-10-08): these three used to xfail, first on guardrail false-positives
+# (fixed in ceb42d0) and then on two cosmetic deviations (fixed by the two rules
+# below). They are plain assertions now - which is exactly the point of having
+# written them as xfail: the gap stayed visible instead of being smoothed over.
+#
+# The two rendering rules that closed it:
+#   * `post_processor.normalize_clock_spacing()` puts a space between a digit and
+#     am/pm. This app already writes "5 PM" (there is a test pinning it) and
+#     nothing in src/ ever produced "7pm", so the formatter's output was
+#     internally inconsistent with the deterministic path - independently of what
+#     the reference product does.
+#   * `formatter._restore_list_item_casing()` conforms a bullet's first letter to
+#     how the transcript had it, so colon-introduced fragments read as fragments.
+#     Proper nouns are untouched, because only words the transcript already had in
+#     lowercase are affected.
 
 
 def test_the_guardrails_no_longer_discard_the_models_answer(formatter_on):
@@ -256,40 +264,16 @@ def test_the_guardrails_no_longer_discard_the_models_answer(formatter_on):
         assert "- -" not in formatted, formatted
 
 
-@pytest.mark.xfail(
-    reason="cosmetic parity, no longer a guardrail failure: the model writes "
-           "'7pm' where Wispr writes '7 pm'. The rejection that used to discard "
-           "this answer was fixed in ceb42d0, so the pipeline now returns it. "
-           "What is left is a whitespace-only difference, which sec 4's "
-           "equivalence rule (b) 'collapsing whitespace' arguably already "
-           "permits - it is an open parity decision, tracked in TODO-parity.md.",
-    strict=False,
-)
 def test_retraction_matches_wispr_end_to_end(formatter_on):
     out = _pipeline(formatter_on, RETRACTION_IN, structure="off", context="general")
     assert " ".join(out.split()) == " ".join(RETRACTION_WISPR.split())
 
 
-@pytest.mark.xfail(
-    reason="same whitespace-only difference as the retraction fixture: the model "
-           "writes '3pm' where Wispr writes '3 pm'. The guardrail rejection was "
-           "fixed in ceb42d0; the email layout itself already matches.",
-    strict=False,
-)
 def test_email_layout_matches_wispr_end_to_end(formatter_on):
     out = _pipeline(formatter_on, EMAIL_IN, structure="off", context="email")
     assert " ".join(out.split()) == " ".join(EMAIL_WISPR.split())
 
 
-@pytest.mark.xfail(
-    reason="casing, NOT whitespace, so sec 4's equivalence rule does not cover "
-           "it: the model capitalises each list item ('- Milk for the cake') "
-           "where Wispr keeps the spoken case ('- milk for the cake'). The "
-           "double-bullet bug is fixed (ceb42d0); whether sentence-casing list "
-           "items is a defect or an improvement is an open parity decision, "
-           "tracked in TODO-parity.md.",
-    strict=False,
-)
 def test_list_matches_wispr_end_to_end(formatter_on):
     out = _pipeline(formatter_on, LIST_IN, structure="blocks", context="general")
     assert " ".join(out.split()) == " ".join(LIST_WISPR.split())

@@ -3152,6 +3152,27 @@ def _resolves_corrections() -> bool:
     return _CLEANUP_MODE == "full"
 
 
+#: A digit run butted straight against an am/pm marker, e.g. "7pm", "12:30am".
+#: The leading ``\b`` matters: without it, a code like "A4pm" would be split too.
+_CLOCK_AMPM_REGEX = re.compile(r"\b(\d{1,2})(am|pm)\b", re.IGNORECASE)
+
+
+def normalize_clock_spacing(text: str) -> str:
+    """Put a space between a clock digit and its ``am``/``pm`` marker.
+
+    The app's own number conversion already writes ``5 PM`` (there is a test
+    pinning exactly that), and nothing in ``src/`` ever emitted ``7pm`` until the
+    on-device formatter did. Rather than leave the same app writing the same time
+    two ways, the compact form is normalised to the spaced one.
+
+    Only the spacing is touched - the model's ``pm`` stays lowercase, which is
+    what the reference output has anyway.
+    """
+    if not text:
+        return text
+    return _CLOCK_AMPM_REGEX.sub(r"\1 \2", text)
+
+
 def clean_speech_transcription(
     text: str,
     skip_slm: bool = False,
@@ -3389,6 +3410,15 @@ def clean_speech_transcription(
     #      rejected rather than silently rewritten (guardrail 3b in formatter.py).
     if not is_intermediate:
         cleaned = _apply_formatter(cleaned, structure_mode=structure_mode)
+
+    # 14c. Keep clock times spaced the way this app already writes them.
+    #      `convert_number_words_to_digits` emits "5 PM" (pinned by a test), and
+    #      nothing in src/ produced the compact form until the on-device formatter
+    #      did - so without this the same app writes the same time two ways. Has to
+    #      sit *after* the formatter, or it never sees what the model produced;
+    #      it is unconditional so the formatter-off path is covered too. Not gated
+    #      by cleanup_mode: this is how text *looks*, not which words survive.
+    cleaned = normalize_clock_spacing(cleaned)
 
     # 15. Structured output: spoken lists become bullets, spoken layout cues
     #     become breaks. Runs before the punctuation preset, which preserves

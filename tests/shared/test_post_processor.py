@@ -533,6 +533,42 @@ def test_the_trigger_must_be_adjacent_known_limitation(serial_settings):
     assert pp.process_serial_numbers("the code is I I I") == "the code is I I I"
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("it is 7pm", "it is 7 pm"),
+    ("meet at 7pm on Friday", "meet at 7 pm on Friday"),
+    ("at 12:30am", "at 12:30 am"),
+    ("call at 9AM.", "call at 9 AM."),
+    # Case is preserved - only the spacing changes.
+    ("doors at 11PM", "doors at 11 PM"),
+    # Already spaced: untouched.
+    ("5 PM already", "5 PM already"),
+    ("meet at 7 pm", "meet at 7 pm"),
+])
+def test_clock_spacing_is_normalised(number_mode, text, expected):
+    """This app writes "5 PM", so it must not also write "7pm".
+
+    `convert_number_words_to_digits` emits the spaced form - there is a test
+    pinning `"five pm" -> "5 PM"` - and nothing in src/ produced the compact form
+    until the on-device formatter did. Leaving both would have the same app
+    writing the same time two ways.
+    """
+    assert pp.normalize_clock_spacing(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    # A digit run butted against am/pm inside a longer token is not a clock.
+    "the A4pm code",
+    "ref X7pm9",
+])
+def test_clock_spacing_leaves_embedded_tokens_alone(number_mode, text):
+    assert pp.normalize_clock_spacing(text) == text
+
+
+def test_clock_spacing_survives_the_full_pipeline(number_mode):
+    assert pp.clean_speech_transcription("meet me at 5pm", skip_slm=True) == \
+        "meet me at 5 pm."
+
+
 def test_quantity_plus_article_survives_full_pipeline(serial_settings):
     # "150 to 170 a month" is a price, not a model code (F150 / XK94J still collapse).
     out = pp.clean_speech_transcription(
