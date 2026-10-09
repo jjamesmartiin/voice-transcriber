@@ -126,3 +126,63 @@ class TestEngineSpeakerMap:
         assert status["speakers"] == ["Priya"]
         assert status["meeting_output_dir"] == "meetings"
         assert status["meeting_output_format"] == "text"
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+RUST_MAIN = REPO_ROOT / "tui-rs" / "src" / "main.rs"
+RUST_SPEAKERS = REPO_ROOT / "tui-rs" / "src" / "speaker_picker.rs"
+
+
+class TestRatatuiMeetingScreen:
+    """The ratatui half of the same contract, pinned by source.
+
+    The Rust key map and the native speaker editor live in another language, so
+    the literals that matter are held here. Behavioural coverage is on the Rust
+    side (`main.rs::tests::test_meeting_screen_keys_differ` and
+    `speaker_picker::tests`); this is the drift guard.
+    """
+
+    def _implementation(self, path):
+        source = path.read_text(encoding="utf-8")
+        return source.split("\n#[cfg(test)]", 1)[0]
+
+    def test_meeting_screen_keys_are_scoped_to_the_meeting_state(self):
+        implementation = self._implementation(RUST_MAIN)
+        assert "RunState::Meeting" in implementation, (
+            "tui-rs/src/main.rs no longer branches on RunState::Meeting")
+        assert "Intent::ToggleMeeting" in implementation
+        assert "Intent::OpenSpeakerEditor" in implementation
+        # Space/Enter stop the capture through the engine, not dictation.
+        assert '"toggle_meeting"' in implementation
+        # The speaker editor is the native ratatui modal.
+        assert "run_speaker_picker" in implementation
+
+    def test_meeting_screen_leaves_the_settings_and_reset_keys_alone(self):
+        implementation = self._implementation(RUST_MAIN)
+        # Outside the meeting branch the global contract is untouched.
+        assert "Intent::OpenSettingsPicker" in implementation
+        assert "Intent::ResetTerminal" in implementation
+        assert '"toggle_record"' in implementation
+
+    def test_the_ratatui_speaker_editor_sends_the_ordered_list(self):
+        implementation = self._implementation(RUST_SPEAKERS)
+        assert "set_speakers" in implementation, (
+            "tui-rs/src/speaker_picker.rs no longer sends set_speakers")
+        assert '"speakers"' in implementation
+        # The editor is native; the Rich editor stays a Python concern.
+        assert "run_speaker_picker" in implementation
+
+
+class TestRatatuiSpeakerBridge:
+    def test_cfg_pushes_the_live_speakers_map_and_rust_parses_it(self):
+        from tui_ratatui import RatatuiTui
+
+        rat = RatatuiTui.__new__(RatatuiTui)
+        sent = []
+        rat._send = lambda msg: sent.append(msg)
+        rat.set_config_state(speakers=["Priya", "Sam"])
+        assert sent[-1] == {"t": "cfg", "speakers": ["Priya", "Sam"]}
+
+        # The Rust wire decodes the same field.
+        ipc = (REPO_ROOT / "tui-rs" / "src" / "ipc.rs").read_text(encoding="utf-8")
+        assert "speakers: Option<Vec<String>>" in ipc

@@ -39,6 +39,11 @@ pub enum SettingKind {
     CleanupMode,
     MeetingMode,
     MeetingSpill,
+    Diarization,
+    DiarizationSpeakers,
+    DiarizationModel,
+    MeetingOutputDir,
+    MeetingOutputFormat,
     Theme,
     Microphone,
     RescanMics,
@@ -54,7 +59,7 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 23] = [
+pub const SETTINGS: [SettingItem; 28] = [
     // NOTE: icons must be exactly one glyph whose *own* codepoint already
     // occupies its final width in every terminal - never a `U+FE0F`
     // variation-selector sequence and never a ZWJ sequence. Terminals that
@@ -117,6 +122,36 @@ pub const SETTINGS: [SettingItem; 23] = [
         icon: "•",
         title: "Meeting Spill",
         keywords: "meeting spill memory temp file threshold minutes long recording buffer disk",
+    },
+    SettingItem {
+        kind: SettingKind::Diarization,
+        icon: "•",
+        title: "Speaker Labels",
+        keywords: "diarization diarize speaker speakers labels who said meeting transcript separation",
+    },
+    SettingItem {
+        kind: SettingKind::DiarizationSpeakers,
+        icon: "•",
+        title: "Speaker Count",
+        keywords: "diarization speakers count number hint auto known how many people",
+    },
+    SettingItem {
+        kind: SettingKind::DiarizationModel,
+        icon: "•",
+        title: "Speaker Model",
+        keywords: "diarization model backend sherpa onnx speaker embed which model swap",
+    },
+    SettingItem {
+        kind: SettingKind::MeetingOutputDir,
+        icon: "•",
+        title: "Transcript Folder",
+        keywords: "meeting transcript output directory folder path save location where written meetings",
+    },
+    SettingItem {
+        kind: SettingKind::MeetingOutputFormat,
+        icon: "•",
+        title: "Transcript Form",
+        keywords: "meeting transcript output format form text json markdown md artifact",
     },
     SettingItem {
         kind: SettingKind::OutputMode,
@@ -203,6 +238,45 @@ pub const SETTINGS: [SettingItem; 23] = [
         keywords: "reset defaults factory restore revert shipped initial config settings default everything",
     },
 ];
+
+/// Canonicalise the speaker-count hint to ``"auto"`` or a digit ``2``-``8``,
+/// mirroring ``t2.normalize_diarization_speakers``. Anything else is auto: a
+/// wrong hint is more damaging than none.
+fn normalized_speaker_count(value: &str) -> &str {
+    match value {
+        "2" | "3" | "4" | "5" | "6" | "7" | "8" => value,
+        _ => "auto",
+    }
+}
+
+/// The speaker-count pill. The renderer takes ``&'static str``, so the badge is
+/// a static lookup over the fixed registry choices rather than a formatted
+/// string; the count itself lives in the description.
+fn speaker_count_badge(value: &str) -> &'static str {
+    match value {
+        "2" => "[2]",
+        "3" => "[3]",
+        "4" => "[4]",
+        "5" => "[5]",
+        "6" => "[6]",
+        "7" => "[7]",
+        "8" => "[8]",
+        _ => "[AUTO]",
+    }
+}
+
+/// The human label for a formatter model id. The stored config value stays the
+/// machine id (``s1-mini``); the licence requires the model be named
+/// ``"S1-mini" by "Superwhisper"`` wherever it is shown. The Python side
+/// derives the same string from the model registry and a source-level parity
+/// guard pins this literal (tests/shared/test_formatter_settings.py).
+fn formatter_model_display(model: &str) -> String {
+    if model == "s1-mini" {
+        "\"S1-mini\" by \"Superwhisper\"".to_string()
+    } else {
+        model.to_string()
+    }
+}
 
 impl SettingItem {
     pub fn value_and_badge(
@@ -402,6 +476,57 @@ impl SettingItem {
                 "[SPILL]",
                 Color::Cyan,
             ),
+            // Diarization labels (spec): "Off: one speaker per transcript",
+            // "Labels who said what in meeting transcripts", "Auto-detect the
+            // speaker count", "Expecting {n} speakers", "Model: {value}".
+            // Mirrored in t2.diarization_setting_state() and held by a
+            // source-level parity guard (tests/shared/test_config_sync.py).
+            SettingKind::Diarization => {
+                if app.diarization == "on" {
+                    (
+                        "Labels who said what in meeting transcripts".to_string(),
+                        "[ON]",
+                        Color::Green,
+                    )
+                } else {
+                    (
+                        "Off: one speaker per transcript".to_string(),
+                        "[OFF]",
+                        Color::DarkGray,
+                    )
+                }
+            }
+            SettingKind::DiarizationSpeakers => {
+                let count = normalized_speaker_count(&app.diarization_speakers);
+                if count == "auto" {
+                    (
+                        "Auto-detect the speaker count".to_string(),
+                        "[AUTO]",
+                        Color::Cyan,
+                    )
+                } else {
+                    (
+                        format!("Expecting {count} speakers"),
+                        speaker_count_badge(count),
+                        Color::Cyan,
+                    )
+                }
+            }
+            SettingKind::DiarizationModel => (
+                format!("Model: {}", app.diarization_model),
+                "[MODEL]",
+                Color::Cyan,
+            ),
+            SettingKind::MeetingOutputDir => (
+                format!("Saved to {}", app.meeting_output_dir),
+                "[DIR]",
+                Color::Cyan,
+            ),
+            SettingKind::MeetingOutputFormat => (
+                format!("Transcript form: {}", app.meeting_output_format),
+                "[FORM]",
+                Color::Cyan,
+            ),
             SettingKind::StructureMode => {
                 // Spec: docs/formatting.md. "blocks" emits real line breaks, and
                 // a newline is an Enter keypress, so the engine downgrades it to
@@ -446,7 +571,10 @@ impl SettingItem {
                 }
             }
             SettingKind::FormatterModel => (
-                format!("Model: {}", app.formatter_model),
+                // The stored value is the machine id ("s1-mini"); the display
+                // must be the licence-required label, so it goes through the
+                // same resolver the Python settings row uses.
+                format!("Model: {}", formatter_model_display(&app.formatter_model)),
                 "[MODEL]",
                 Color::Cyan,
             ),
@@ -699,6 +827,7 @@ fn fuzzy_subsequence(pattern: &str, target: &str) -> Option<usize> {
 pub enum SettingsPickerAction {
     Toggle(SettingKind),
     SetWpm(u32),
+    SetMeetingOutputDir(String),
     Close,
     Continue,
 }
@@ -716,6 +845,8 @@ pub struct SettingsPickerState {
     pub confirm_defaults: bool,
     /// Active WPM input buffer when prompt dialog is open.
     pub wpm_input: Option<String>,
+    /// Active transcript-folder input buffer when its prompt is open.
+    pub dir_input: Option<String>,
 }
 
 impl SettingsPickerState {
@@ -729,6 +860,7 @@ impl SettingsPickerState {
             defaults_done: false,
             confirm_defaults: false,
             wpm_input: None,
+            dir_input: None,
         }
     }
 
@@ -821,6 +953,41 @@ impl SettingsPickerState {
             }
         }
 
+        // Transcript-folder prompt: a free-text path, unlike the numeric WPM
+        // prompt. Enter submits (an empty value means the shipped default).
+        if let Some(ref mut input) = self.dir_input {
+            match key.code {
+                KeyCode::Esc => {
+                    self.dir_input = None;
+                    return SettingsPickerAction::Continue;
+                }
+                KeyCode::Enter => {
+                    let path = input.trim().to_string();
+                    self.dir_input = None;
+                    return SettingsPickerAction::SetMeetingOutputDir(path);
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                    return SettingsPickerAction::Continue;
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    input.clear();
+                    return SettingsPickerAction::Continue;
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.dir_input = None;
+                    return SettingsPickerAction::Continue;
+                }
+                KeyCode::Char(c) if !c.is_control() => {
+                    if input.chars().count() < 512 {
+                        input.push(c);
+                    }
+                    return SettingsPickerAction::Continue;
+                }
+                _ => return SettingsPickerAction::Continue,
+            }
+        }
+
         // Arming the destructive factory reset survives only until the next
         // keystroke that is not the confirming Enter/Space.
         let is_activate =
@@ -857,6 +1024,9 @@ impl SettingsPickerState {
                     if kind == SettingKind::TypingWpm {
                         self.wpm_input = Some(String::new());
                         SettingsPickerAction::Continue
+                    } else if kind == SettingKind::MeetingOutputDir {
+                        self.dir_input = Some(String::new());
+                        SettingsPickerAction::Continue
                     } else {
                         SettingsPickerAction::Toggle(kind)
                     }
@@ -872,6 +1042,9 @@ impl SettingsPickerState {
                         let kind = SETTINGS[idx].kind;
                         if kind == SettingKind::TypingWpm {
                             self.wpm_input = Some(String::new());
+                            return SettingsPickerAction::Continue;
+                        } else if kind == SettingKind::MeetingOutputDir {
+                            self.dir_input = Some(String::new());
                             return SettingsPickerAction::Continue;
                         } else {
                             return SettingsPickerAction::Toggle(kind);
@@ -1191,6 +1364,114 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
         ]);
         frame.render_widget(Paragraph::new(footer), p_chunks[4]);
     }
+
+    if let Some(ref input) = state.dir_input {
+        let prompt_w = 60u16.min(area.width.saturating_sub(4)).max(34);
+        let prompt_h = 7u16.min(area.height.saturating_sub(2)).max(5);
+        let px = (area.width.saturating_sub(prompt_w)) / 2;
+        let py = (area.height.saturating_sub(prompt_h)) / 2;
+        let prompt_area = Rect {
+            x: px,
+            y: py,
+            width: prompt_w,
+            height: prompt_h,
+        };
+
+        frame.render_widget(Clear, prompt_area);
+
+        let p_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(
+                Style::default()
+                    .fg(theme_color)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .title(Span::styled(
+                " 📁 Transcript Folder ",
+                Style::default()
+                    .fg(theme_color)
+                    .add_modifier(Modifier::BOLD),
+            ));
+
+        let p_inner = p_block.inner(prompt_area);
+        frame.render_widget(p_block, prompt_area);
+
+        let p_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Prompt label
+                Constraint::Length(1), // Divider
+                Constraint::Length(1), // Input
+                Constraint::Length(1), // Divider
+                Constraint::Length(1), // Footer
+            ])
+            .split(p_inner);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                " Folder meeting transcripts are written to:",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )])),
+            p_chunks[0],
+        );
+
+        let sep = Line::from(vec![Span::styled(
+            "─".repeat(p_inner.width as usize),
+            Style::default().fg(Color::DarkGray),
+        )]);
+        frame.render_widget(Paragraph::new(sep.clone()), p_chunks[1]);
+
+        let input_spans = if input.is_empty() {
+            vec![
+                Span::styled(
+                    " ❯ ",
+                    Style::default()
+                        .fg(theme_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    app.meeting_output_dir.clone(),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                Span::styled("█", Style::default().fg(theme_color)),
+                Span::styled(
+                    " (current; blank = meetings)",
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]
+        } else {
+            vec![
+                Span::styled(
+                    " ❯ ",
+                    Style::default()
+                        .fg(theme_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    input.clone(),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("█", Style::default().fg(theme_color)),
+            ]
+        };
+        frame.render_widget(Paragraph::new(Line::from(input_spans)), p_chunks[2]);
+        frame.render_widget(Paragraph::new(sep), p_chunks[3]);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" [Enter] ", Style::default().fg(Color::Green)),
+                Span::styled("Save   ", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("[Esc] ", Style::default().fg(Color::Red)),
+                Span::styled("Cancel", Style::default().add_modifier(Modifier::DIM)),
+            ])),
+            p_chunks[4],
+        );
+    }
 }
 
 /// Hand the screen over to a nested modal picker (theme / microphone).
@@ -1263,6 +1544,23 @@ pub fn run_settings_picker(
                             app.typing_wpm = val;
                             if let Some(w) = writer {
                                 if ipc::send_cmd_value(w, "set_typing_wpm", "wpm", &val.to_string())
+                                    .is_err()
+                                {
+                                    app.should_quit = true;
+                                }
+                            }
+                        }
+                        SettingsPickerAction::SetMeetingOutputDir(path) => {
+                            // The engine is authoritative: it normalises an empty
+                            // value back to the shipped default, and echoes the
+                            // resolved path in the next `cfg`.
+                            app.meeting_output_dir = if path.is_empty() {
+                                "meetings".to_string()
+                            } else {
+                                path.clone()
+                            };
+                            if let Some(w) = writer {
+                                if ipc::send_cmd_value(w, "set_meeting_output_dir", "path", &path)
                                     .is_err()
                                 {
                                     app.should_quit = true;
@@ -1369,6 +1667,47 @@ pub fn run_settings_picker(
                                             app.should_quit = true;
                                         }
                                     }
+                                }
+                                SettingKind::Diarization => {
+                                    app.cycle_diarization();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_diarization").is_err() {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
+                                SettingKind::DiarizationSpeakers => {
+                                    app.cycle_diarization_speakers();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_diarization_speakers")
+                                            .is_err()
+                                        {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
+                                SettingKind::DiarizationModel => {
+                                    app.cycle_diarization_model();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_diarization_model").is_err() {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
+                                SettingKind::MeetingOutputFormat => {
+                                    app.cycle_meeting_output_format();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_meeting_output_format")
+                                            .is_err()
+                                        {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
+                                SettingKind::MeetingOutputDir => {
+                                    // Enter/Space open the path prompt in
+                                    // `handle_key`, so this arm is unreachable.
+                                    // It exists only to keep the match total.
                                 }
                                 SettingKind::StructureMode => {
                                     app.cycle_structure_mode();
@@ -1855,6 +2194,111 @@ mod tests {
     }
 
     #[test]
+    fn test_diarization_and_output_previews_match_the_spec() {
+        // Spec: docs/meeting_mode.md, enforced on the Python side by
+        // tests/shared/test_config_sync.py (the label helpers) and the
+        // source-level parity guard there.
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        let idle = SettingsPickerState::new();
+
+        let diar = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::Diarization)
+            .unwrap();
+        app.diarization = "off".to_string();
+        assert_eq!(
+            diar.value_and_badge(&app, &idle),
+            (
+                "Off: one speaker per transcript".to_string(),
+                "[OFF]",
+                Color::DarkGray
+            )
+        );
+        app.diarization = "on".to_string();
+        assert_eq!(
+            diar.value_and_badge(&app, &idle),
+            (
+                "Labels who said what in meeting transcripts".to_string(),
+                "[ON]",
+                Color::Green
+            )
+        );
+
+        let count = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::DiarizationSpeakers)
+            .unwrap();
+        app.diarization_speakers = "auto".to_string();
+        assert_eq!(
+            count.value_and_badge(&app, &idle),
+            (
+                "Auto-detect the speaker count".to_string(),
+                "[AUTO]",
+                Color::Cyan
+            )
+        );
+        for n in 2..=8u32 {
+            app.diarization_speakers = n.to_string();
+            let (desc, badge, _) = count.value_and_badge(&app, &idle);
+            assert_eq!(desc, format!("Expecting {n} speakers"));
+            assert_eq!(badge, speaker_count_badge(&n.to_string()));
+        }
+        // An unknown hint is auto, never a guessed count.
+        app.diarization_speakers = "99".to_string();
+        assert_eq!(
+            count.value_and_badge(&app, &idle).0,
+            "Auto-detect the speaker count"
+        );
+
+        let model = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::DiarizationModel)
+            .unwrap();
+        app.diarization_model = "diarization".to_string();
+        assert_eq!(
+            model.value_and_badge(&app, &idle),
+            ("Model: diarization".to_string(), "[MODEL]", Color::Cyan)
+        );
+
+        let dir = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::MeetingOutputDir)
+            .unwrap();
+        app.meeting_output_dir = "/tmp/x".to_string();
+        assert_eq!(
+            dir.value_and_badge(&app, &idle),
+            ("Saved to /tmp/x".to_string(), "[DIR]", Color::Cyan)
+        );
+
+        let fmt = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::MeetingOutputFormat)
+            .unwrap();
+        app.meeting_output_format = "json".to_string();
+        assert_eq!(
+            fmt.value_and_badge(&app, &idle),
+            (
+                "Transcript form: json".to_string(),
+                "[FORM]",
+                Color::Cyan
+            )
+        );
+
+        // The local cycles only produce values the engine round-trips.
+        app.diarization = "off".to_string();
+        assert_eq!(app.cycle_diarization(), "on");
+        assert_eq!(app.cycle_diarization(), "off");
+        app.diarization_speakers = "auto".to_string();
+        assert_eq!(app.cycle_diarization_speakers(), "2");
+        app.diarization_speakers = "8".to_string();
+        assert_eq!(app.cycle_diarization_speakers(), "auto");
+        app.meeting_output_format = "text".to_string();
+        assert_eq!(app.cycle_meeting_output_format(), "json");
+        assert_eq!(app.cycle_meeting_output_format(), "markdown");
+        assert_eq!(app.cycle_meeting_output_format(), "text");
+    }
+
+    #[test]
     fn test_structure_previews_match_the_spec() {
         // Spec: docs/formatting.md, enforced on the Python side by
         // tests/shared/test_structure_blocks.py and
@@ -1929,9 +2373,15 @@ mod tests {
         for value in ["s1-mini", "llama-server"] {
             app.formatter_model = value.to_string();
             let (desc, badge, _) = model.value_and_badge(&app, &idle);
-            assert_eq!(desc, format!("Model: {value}"));
+            assert_eq!(desc, format!("Model: {}", formatter_model_display(value)));
             assert_eq!(badge, "[MODEL]");
         }
+        // C9: the machine id stays the stored value; only the display is the
+        // licence-required label.
+        assert_eq!(app.formatter_model, "llama-server");
+        app.formatter_model = "s1-mini".to_string();
+        let (desc, _, _) = model.value_and_badge(&app, &idle);
+        assert_eq!(desc, "Model: \"S1-mini\" by \"Superwhisper\"");
 
         let style = SETTINGS
             .iter()

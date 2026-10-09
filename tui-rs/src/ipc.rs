@@ -57,6 +57,30 @@ pub struct VuLevel {
 // channel message and `IpcEvent` already boxes it, so boxing the config fields
 // individually would add indirection without meaningfully reducing stack use.
 #[allow(clippy::large_enum_variant)]
+/// The speaker-count hint is either the string ``"auto"`` or an integer
+/// ``2``-``8``. Serde cannot decode that into one concrete type, so it is a
+/// union; `App` stores the canonical string form.
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum SpeakerCount {
+    Auto(String),
+    Count(u32),
+}
+
+impl SpeakerCount {
+    /// The canonical string form the settings row and status carry.
+    pub fn as_string(&self) -> String {
+        match self {
+            SpeakerCount::Auto(s) => s.clone(),
+            SpeakerCount::Count(n) => n.to_string(),
+        }
+    }
+}
+
+#[allow(clippy::large_enum_variant)] // protocol-shaped: one `Wire` per channel
+                                     // message and the channel holds at most a frame's worth, so
+                                     // boxing the growable `Cfg` fields would add an allocation per
+                                     // message for negligible stack savings.
 #[derive(Deserialize, Debug)]
 #[serde(tag = "t")]
 pub enum Wire {
@@ -130,6 +154,27 @@ pub enum Wire {
         /// Meeting capture in-memory spill threshold, in minutes (1-240).
         #[serde(default)]
         meeting_spill_minutes: Option<u32>,
+        /// Configured diarization toggle: "off" or "on". Meeting transcripts
+        /// are labelled per speaker when on (see docs/meeting_mode.md).
+        #[serde(default)]
+        diarization: Option<String>,
+        /// Speaker-count hint: the string "auto" or an integer 2-8. The wire
+        /// form is genuinely both, so it needs a union rather than a String.
+        #[serde(default)]
+        diarization_speakers: Option<SpeakerCount>,
+        /// Configured diarization model registry id, e.g. "diarization".
+        #[serde(default)]
+        diarization_model: Option<String>,
+        /// Where the finished transcript is written (repo-relative by default).
+        #[serde(default)]
+        meeting_output_dir: Option<String>,
+        /// The artifact form: "text", "json" or "markdown".
+        #[serde(default)]
+        meeting_output_format: Option<String>,
+        /// The live speakers map: ordered names, index *i* names speaker *i*.
+        /// Transcript metadata, not config (see docs/meeting_mode.md).
+        #[serde(default)]
+        speakers: Option<Vec<String>>,
         #[serde(default)]
         trailing_space: Option<bool>,
         #[serde(default)]

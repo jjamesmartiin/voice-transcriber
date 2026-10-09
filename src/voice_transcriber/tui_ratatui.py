@@ -640,7 +640,7 @@ class RatatuiTui:
                          sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None,
                          meeting_mode=None, meeting_spill_minutes=None,
                          diarization=None, diarization_speakers=None, diarization_model=None,
-                         meeting_output_dir=None, meeting_output_format=None,
+                         meeting_output_dir=None, meeting_output_format=None, speakers=None,
                          formatter=None, formatter_model=None, formatter_style=None, formatter_context=None,
                          trailing_space=None, auto_punctuate=None, number_digits=None,
                          number_mode=None, serial_collapse=None, spell_command=None,
@@ -697,6 +697,11 @@ class RatatuiTui:
         if meeting_output_format is not None:
             self.meeting_output_format = meeting_output_format
             msg["meeting_output_format"] = meeting_output_format
+        if speakers is not None:
+            # Transcript metadata, not config: the engine's ordered speaker-name
+            # list, pushed so the ratatui speaker editor seeds from it.
+            self.speaker_names = list(speakers)
+            msg["speakers"] = self.speaker_names
         if formatter is not None:
             self.formatter = formatter
             msg["formatter"] = formatter

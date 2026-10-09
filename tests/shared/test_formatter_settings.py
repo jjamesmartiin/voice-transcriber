@@ -435,8 +435,12 @@ def test_formatter_labels():
         "Off: deterministic cleanup only", "[OFF]", "dim white")
     assert t2.formatter_setting_state("on") == (
         "Rewrites the transcript on this machine", "[ON]", "green")
+    # C9: the stored value stays the machine id, but the settings row names the
+    # model the way its licence requires.
+    assert t2.get_formatter_model() == "s1-mini"
+    assert t2.formatter_model_display_name("s1-mini") == '"S1-mini" by "Superwhisper"'
     assert t2.formatter_model_setting_state("s1-mini") == (
-        "Model: s1-mini", "[MODEL]", "cyan")
+        'Model: "S1-mini" by "Superwhisper"', "[MODEL]", "cyan")
     assert t2.formatter_style_setting_state("formal") == (
         "Writing style: formal", "[STYLE]", "cyan")
     assert t2.formatter_context_setting_state("email") == (
@@ -477,6 +481,14 @@ def test_ratatui_formatter_labels_match_python():
     for command in ("cycle_formatter", "cycle_formatter_model",
                     "cycle_formatter_style", "cycle_formatter_context"):
         assert command in implementation, f"ratatui no longer sends {command}"
+
+    # C9: the ratatui row must render the licence label, not the machine id.
+    # The Rust literal escapes its quotes, so compare the escaped form.
+    label = t2.formatter_model_display_name("s1-mini")
+    assert "formatter_model_display" in implementation, (
+        "ratatui no longer resolves the formatter model display name")
+    assert label.replace('"', '\\"') in implementation, (
+        f"ratatui no longer shows {label!r}")
 
 
 # ---------------------------------------------------------------------------

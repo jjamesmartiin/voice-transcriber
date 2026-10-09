@@ -193,6 +193,17 @@ MEETING_OUTPUT_DIR = "meetings"
 #: ``markdown`` is a headed Markdown document.
 MEETING_OUTPUT_FORMATS = ["text", "json", "markdown"]
 MEETING_OUTPUT_FORMAT = "text"
+#: Canonical row titles for the meeting/diarization settings. They live here,
+#: rather than only in the modal's local defs, so the ratatui modal can be held
+#: to the exact same strings by a source-level parity guard
+#: (tests/shared/test_config_sync.py).
+MEETING_SETTINGS_TITLES = {
+    "diarization": "Speaker Labels",
+    "diarization_speakers": "Speaker Count",
+    "diarization_model": "Speaker Model",
+    "meeting_output_dir": "Transcript Folder",
+    "meeting_output_format": "Transcript Form",
+}
 #: Optional on-device formatter (docs/plan-on-device-formatter.md). "off" is the
 #: shipped default and means the dictation path is byte-identical to a build
 #: without the feature.
@@ -1767,6 +1778,28 @@ def normalize_formatter_model(value) -> str:
             text, fallback, ", ".join(FORMATTER_MODELS))
         return fallback
     return text
+
+
+def formatter_model_display_name(model=None) -> str:
+    """The human label for a formatter model id.
+
+    The machine id (``s1-mini``) stays the stored config value; every surface
+    that *names* the model shows the licence-required label (``"S1-mini" by
+    "Superwhisper"``). It is read out of the model registry's own
+    ``display_name`` so the settings row, the status reply and the model
+    download path cannot drift apart.
+    """
+    model = normalize_formatter_model(FORMATTER_MODEL if model is None else model)
+    try:
+        from model_download import MODELS, registry_name_for_model
+        registry_key = registry_name_for_model(model)
+        if registry_key is not None:
+            return MODELS[registry_key].display_name
+    except Exception:
+        logger.debug("formatter display-name lookup failed", exc_info=True)
+    return model
+
+
 def get_formatter() -> str:
     """The configured formatter mode ("off"/"on")."""
     return FORMATTER
@@ -1878,7 +1911,7 @@ def formatter_setting_state(enabled: str):
 
 
 def formatter_model_setting_state(model: str = FORMATTER_MODEL):
-    return f"Model: {model}", "[MODEL]", "cyan"
+    return f"Model: {formatter_model_display_name(model)}", "[MODEL]", "cyan"
 
 
 def formatter_style_setting_state(style: str = FORMATTER_STYLE):
@@ -3064,31 +3097,31 @@ def select_settings_picker():
         {
             "id": "diarization",
             "icon": "🗣️ ",
-            "title": "Speaker Labels",
+            "title": MEETING_SETTINGS_TITLES["diarization"],
             "keywords": "diarization diarize speaker speakers labels who said meeting transcript separation",
         },
         {
             "id": "diarization_speakers",
             "icon": "🔢 ",
-            "title": "Speaker Count",
+            "title": MEETING_SETTINGS_TITLES["diarization_speakers"],
             "keywords": "diarization speakers count number hint auto known how many people",
         },
         {
             "id": "diarization_model",
             "icon": "🧠 ",
-            "title": "Speaker Model",
+            "title": MEETING_SETTINGS_TITLES["diarization_model"],
             "keywords": "diarization model backend sherpa onnx speaker embed which model swap",
         },
         {
             "id": "meeting_output_dir",
             "icon": "📁 ",
-            "title": "Transcript Folder",
+            "title": MEETING_SETTINGS_TITLES["meeting_output_dir"],
             "keywords": "meeting transcript output directory folder path save location where written meetings",
         },
         {
             "id": "meeting_output_format",
             "icon": "📄 ",
-            "title": "Transcript Form",
+            "title": MEETING_SETTINGS_TITLES["meeting_output_format"],
             "keywords": "meeting transcript output format form text json markdown md artifact",
         },
         {
