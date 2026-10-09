@@ -272,6 +272,40 @@ def _model_path(model: str | None = None) -> str | None:
     return None
 
 
+def request_model(model: str | None = None) -> bool:
+    """Start a non-blocking first-use install of the formatter weights.
+
+    Called when the formatter is enabled and in use but the GGUF is absent.
+    Returns ``True`` when an install was started, ``False`` when there is nothing
+    to do. Every guard is deliberate:
+
+    * attach mode: the server is not ours and does not need our weights;
+    * no ``llama-server`` binary: the runtime is missing, so fetching weights
+      would not make the formatter work anyway;
+    * a model already resolves: nothing to fetch;
+    * the model id is not a redistributable registry entry: not ours to fetch.
+
+    The download itself runs on a daemon thread (see
+    :func:`model_download.ensure_model_async`), so neither the hotkey thread nor
+    the UI thread ever waits on it.
+    """
+    if (os.environ.get(ENV_SERVER_URL) or "").strip():
+        return False
+    if _binary() is None:
+        return False
+    if _model_path(model) is not None:
+        return False
+    try:
+        from voice_transcriber import model_download
+        registry_name = model_download.registry_name_for_model(
+            str(model or DEFAULT_MODEL_ID).strip().lower())
+        if not registry_name:
+            return False
+        return bool(model_download.ensure_model_async(registry_name))
+    except Exception:
+        return False
+
+
 def _threads() -> int:
     for variable in (ENV_THREADS, "VT_CPU_THREADS"):
         raw = (os.environ.get(variable) or "").strip()

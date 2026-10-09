@@ -20,6 +20,8 @@ import os
 import subprocess
 import sys
 import tarfile
+import threading
+import types
 import urllib.error
 import zipfile
 from pathlib import Path
@@ -186,6 +188,61 @@ def test_models_dir_prefers_an_existing_per_user_install(monkeypatch, tmp_path):
         (installed / req).unlink()
     assert model_download.models_dir("synthetic") == os.path.join(
         str(tmp_path), "repo", "models", "synthetic")
+
+
+def test_ensure_model_async_is_inert_without_a_status_handler(monkeypatch, tmp_path):
+    """No UI attached -> no background download (keeps shared tests hermetic)."""
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_status_handler", None)
+    called = []
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda *a, **k: called.append(a) or str(tmp_path))
+
+    assert model_download.ensure_model_async(spec.name, dest=str(tmp_path / "d")) is False
+    assert called == []
+
+
+def test_ensure_model_async_runs_the_install_on_a_daemon_thread(monkeypatch, tmp_path):
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_status_handler", lambda *a: None)
+    done = threading.Event()
+    calls = []
+
+    def fake_ensure(name, dest=None, base_url=None, revision=None):
+        calls.append((name, dest))
+        done.set()
+        return dest
+
+    monkeypatch.setattr(model_download, "ensure_model", fake_ensure)
+    dest = str(tmp_path / "d")
+    assert model_download.ensure_model_async(spec.name, dest=dest) is True
+    assert done.wait(5), "the background install never ran"
+    assert calls == [(spec.name, dest)]
+    # A completed install must not start a second one.
+    monkeypatch.setattr(model_download, "is_model_complete", lambda *a, **k: True)
+    assert model_download.ensure_model_async(spec.name, dest=dest) is False
+
+
+def test_the_download_prompt_states_the_size_before_fetching(capsys, monkeypatch, tmp_path):
+    """A clean machine must be told the size before anything downloads.
+
+    The prompt is answered "no" and the local-bundle probe is stubbed out, so
+    this proves the wording without touching the network or writing a file.
+    """
+    monkeypatch.setenv("VT_MODEL_DIR", str(tmp_path / "formatter"))
+    monkeypatch.delenv("VT_MODEL_SOURCE_DIR", raising=False)
+    monkeypatch.delenv("VT_MODEL_BUNDLE", raising=False)
+    monkeypatch.delenv("VT_AUTO_DOWNLOAD_MODEL", raising=False)
+    monkeypatch.setattr(model_download, "_local_model_source", lambda: (None, False))
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+
+    assert model_download.ensure_model("formatter") is None
+    out = capsys.readouterr().out
+    assert "Download size: ~462 MiB." in out, out
+    assert '"S1-mini" by "Superwhisper"' in out, out
 
 
 def test_is_model_complete_is_per_spec(monkeypatch, tmp_path):

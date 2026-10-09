@@ -38,6 +38,7 @@ import socket
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -890,13 +891,16 @@ def ensure_model(name, dest=None, base_url=None, revision=None):
         return None
 
     if auto_env not in ("1", "true", "yes", "always"):
+        # State the size *before* anything is fetched. With a terminal we also
+        # ask; without one the header is still printed, so a user reading the
+        # log is told what is about to be downloaded and how large it is.
+        print("\n" + "-" * 68)
+        print(f"  {spec.display_name} model weights are not installed.")
+        print(f"  Target location: {dest}")
+        print(f"  Download size: {spec.download_hint}.")
+        print("-" * 68)
         if sys.stdin and hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
             try:
-                print("\n" + "-" * 68)
-                print(f"  {spec.display_name} model weights are not installed.")
-                print(f"  Target location: {dest}")
-                print(f"  Download size: {spec.download_hint}.")
-                print("-" * 68)
                 ans = input("  Would you like to download them automatically from GitHub now? [Y/n]: ").strip().lower()
                 if ans and ans not in ("y", "yes"):
                     print("  Automatic download cancelled.")
@@ -965,6 +969,54 @@ def ensure_model(name, dest=None, base_url=None, revision=None):
         return None
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+#: Model names with a background install in flight, so a second utterance while
+#: the first download is still running does not start a duplicate.
+_async_inflight: set = set()
+_async_lock = threading.Lock()
+
+
+def ensure_model_async(name, dest=None, base_url=None, revision=None):
+    """Start installing ``name`` on a daemon thread; never blocks the caller.
+
+    This is the first-use path for an optional, large model: the caller (a
+    dictation, a settings change) must not wait for a ~462 MiB download, and the
+    hotkey/UI threads must never block on one. :func:`ensure_model` already
+    prints the download size and asks before fetching; running it on a
+    background thread keeps that prompt but moves the wait off the caller.
+
+    Returns ``True`` when an install was started (or was already in flight),
+    ``False`` when there is nothing to do - the model is already complete, or no
+    user-facing app is attached. The status-handler gate is deliberate: without
+    a handler there is no UI to tell, and the shared (model-free) test tier must
+    stay hermetic, so a background download is only ever started for a running
+    app.
+    """
+    spec = _resolved_spec(name, revision)
+    dest = dest or _models_dir_for(spec)
+    if is_model_complete(spec.name, dest):
+        return False
+    if _status_handler is None:
+        return False
+    with _async_lock:
+        if spec.name in _async_inflight:
+            return True
+        _async_inflight.add(spec.name)
+
+    def _install():
+        try:
+            ensure_model(spec.name, dest=dest, base_url=base_url)
+        except Exception as exc:  # never raise into a daemon thread
+            print(f"Background install of the {spec.display_name} model failed: {exc}",
+                  flush=True)
+        finally:
+            with _async_lock:
+                _async_inflight.discard(spec.name)
+
+    threading.Thread(target=_install, name=f"vt-model-install-{spec.name}",
+                     daemon=True).start()
+    return True
 
 
 def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):
