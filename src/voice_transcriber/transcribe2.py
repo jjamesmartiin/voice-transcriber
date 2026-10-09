@@ -17,8 +17,35 @@ from __future__ import annotations
 import gc
 import importlib
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# The inference lock
+# ---------------------------------------------------------------------------
+#
+# There is **one** ASR model instance in the process (a module-global singleton
+# in the active backend), and it has two independent producers: the dictation
+# micro-batcher, which transcribes from its own worker thread, and the meeting
+# pipeline, which transcribes each diarized turn after a capture ends. Sharing
+# one model is deliberate -- it costs no extra memory -- but inference on a
+# shared model is **not** safe to run concurrently. The Cohere backend installs
+# a cached ``processor.__call__`` and a tokenizer memo cache that hold real
+# per-call state (``transcribe_cohere.py``), so two overlapping calls can
+# interleave on that state.
+#
+# This lock is therefore held across **inference** at the dispatch layer every
+# caller passes through, so the dictation path is serialized automatically and
+# needs no change. The meeting pipeline is expected to hold the same lock
+# around its own per-turn calls so it can re-check the dictation flag *after*
+# taking the lock. It is re-entrant because ``transcribe_audio`` acquires it and
+# the pipeline may hold it while calling ``transcribe_audio``.
+#
+# The backend's own load (``get_model``/``preload_model``) is guarded by its own
+# lock and is deliberately **not** this one: a slow first load must never hold
+# up a second caller that only needs the already-loaded model.
+inference_lock = threading.RLock()
 
 
 class UnknownBackendError(ValueError):
@@ -117,13 +144,15 @@ def preload_model(device="cpu"):
 
 
 def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device="cpu", language="en"):
-    return get_backend().transcribe_audio(
-        audio_data=audio_data,
-        audio_path=audio_path,
-        sample_rate=sample_rate,
-        device=device,
-        language=language
-    )
+    # Serialize inference on the single shared model. See ``inference_lock``.
+    with inference_lock:
+        return get_backend().transcribe_audio(
+            audio_data=audio_data,
+            audio_path=audio_path,
+            sample_rate=sample_rate,
+            device=device,
+            language=language
+        )
 
 
 def get_model(device="cpu"):

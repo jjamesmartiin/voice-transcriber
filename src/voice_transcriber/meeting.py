@@ -142,6 +142,11 @@ class MeetingStatus:
     duration_s: float
     spill_minutes: float
     spilled: bool
+    #: Human-readable batch stage (``recording``, ``reading``, ``diarizing``,
+    #: ``transcribing``, ``rendering``, ``idle``). Empty when no pipeline has
+    #: reported one. A percentage alone is not enough: section 7 of the plan
+    #: names "no output for twenty minutes" as indistinguishable from a hang.
+    stage: str = "idle"
     error: str | None = None
 
     @property
@@ -451,6 +456,12 @@ class MeetingSession:
         self._buffer: AudioSpillBuffer | None = None
         self._state = MeetingState.IDLE
         self._stop = threading.Event()
+        #: Cancels a **processing** pipeline at its next turn boundary. Kept
+        #: separate from ``_stop`` (which ends capture) because the two happen
+        #: at different times and a quit while processing must not be confused
+        #: with a normal meeting stop.
+        self._cancel = threading.Event()
+        self._stage = "idle"
         self._capture_thread: threading.Thread | None = None
         self._finalize_thread: threading.Thread | None = None
         self._ticker_thread: threading.Thread | None = None
@@ -488,6 +499,40 @@ class MeetingSession:
         with self._lock:
             return self._buffer.temp_path if self._buffer is not None else None
 
+    @property
+    def cancel_event(self) -> threading.Event:
+        """The event a batch pipeline checks between turns to stop early.
+
+        A quit (or ``close()``) sets it; the next pipeline turn boundary then
+        returns instead of finishing the meeting. It is cleared on ``start()``,
+        so one cancelled meeting does not silence the next.
+        """
+        return self._cancel
+
+    def cancel(self) -> None:
+        """Ask the batch phase to stop at its next turn boundary. Idempotent."""
+        self._cancel.set()
+
+    def set_stage(self, stage: Any) -> str:
+        """Record the live batch stage and notify the UI. Returns the stage."""
+        text = str(stage or "").strip() or "idle"
+        with self._lock:
+            self._stage = text
+        self._notify()
+        return text
+
+    def set_audio_consumer(
+        self, consumer: Callable[[np.ndarray, int], None] | None
+    ) -> None:
+        """Replace the ``on_audio`` hand-off seam after construction.
+
+        The engine wires this to the batch pipeline, which needs the session's
+        own ``set_progress``/``cancel_event`` and therefore cannot be passed to
+        the constructor before the session exists.
+        """
+        with self._lock:
+            self._on_audio = consumer
+
     def status(self) -> MeetingStatus:
         with self._lock:
             elapsed = self._elapsed_s
@@ -502,6 +547,7 @@ class MeetingSession:
                 duration_s=round(self._duration_s, 3),
                 spill_minutes=float(self._spill_minutes),
                 spilled=bool(self._buffer is not None and self._buffer.spilled),
+                stage=self._stage,
                 error=self._error,
             )
 
@@ -530,12 +576,14 @@ class MeetingSession:
                 directory=self._directory,
             )
             self._stop.clear()
+            self._cancel.clear()
             self._error = None
             self._elapsed_s = 0.0
             self._progress_pct = 0
             self._processed = 0
             self._total = 0
             self._duration_s = 0.0
+            self._stage = "recording"
             self._device = device
             self._started_at = time.monotonic()
             self._state = MeetingState.RECORDING
@@ -580,10 +628,14 @@ class MeetingSession:
         return self.state is MeetingState.IDLE
 
     def close(self) -> None:
-        """Stop a running capture and make sure the temp file is gone."""
+        """Stop a running capture, cancel a batch phase, and remove the temp file."""
         with self._lock:
             if self._state is MeetingState.RECORDING:
                 self._stop.set()
+        # Set the batch cancel flag *before* joining: a long finalize is a
+        # daemon thread, but cancelling lets it stop at the next turn boundary
+        # instead of running the whole meeting out while the app is quitting.
+        self._cancel.set()
         for thread in (self._ticker_thread, self._capture_thread, self._finalize_thread):
             if thread is not None and thread.is_alive():
                 thread.join(timeout=5.0)
@@ -644,6 +696,7 @@ class MeetingSession:
                 return
             self._state = MeetingState.PROCESSING
             self._elapsed_s = time.monotonic() - self._started_at
+            self._stage = "reading"
             self._finalize_thread = threading.Thread(
                 target=self._finalize, name="vt-meeting-finalize", daemon=True
             )
@@ -666,7 +719,7 @@ class MeetingSession:
                 return
             audio = buffer.read_all(progress=self._on_read_progress)
             self._duration_s = len(audio) / float(buffer.sample_rate)
-            if self._on_audio is not None:
+            if self._on_audio is not None and not self._cancel.is_set():
                 try:
                     self._on_audio(audio, buffer.sample_rate)
                 except Exception:
@@ -687,6 +740,7 @@ class MeetingSession:
                 with self._lock:
                     self._buffer = None
                     self._state = MeetingState.IDLE
+                    self._stage = "idle"
                 self._notify()
 
     def _on_read_progress(self, processed: int, total: int) -> None:
