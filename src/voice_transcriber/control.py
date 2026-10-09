@@ -110,6 +110,8 @@ VERBS: dict[str, dict] = {
             "number_mode", "punctuation_mode", "structure_mode",
             "structure_setting", "cleanup_mode", "formatter", "formatter_setting",
             "formatter_model", "formatter_style", "formatter_context",
+            "meeting", "meeting_setting", "meeting_state", "meeting_elapsed_s",
+            "meeting_progress", "meeting_spill_minutes",
             "ui_theme", "middle_click",
             "last_transcription",
         ],
@@ -178,6 +180,26 @@ VERBS: dict[str, dict] = {
         "choices": ["off", "artifacts", "full"],
         "required": True,
         "returns": ["cleanup_mode"],
+    },
+    "meeting": {
+        "summary": "Enable long, non-injecting meeting capture (see docs/meeting_mode.md)",
+        "value": "state",
+        "choices": ["off", "on"],
+        "toggles": True,
+        "returns": ["meeting"],
+    },
+    "meeting-spill": {
+        "summary": "Set the meeting capture in-memory spill threshold in minutes (1-240)",
+        "value": "minutes",
+        "returns": ["meeting_spill_minutes"],
+    },
+    "meeting-start": {
+        "summary": "Start a meeting capture (requires meeting mode on; does not inject text)",
+        "returns": ["meeting_state", "meeting_elapsed_s", "meeting_progress"],
+    },
+    "meeting-stop": {
+        "summary": "Stop a meeting capture and read its audio back for the batch pipeline",
+        "returns": ["meeting_state", "meeting_elapsed_s", "meeting_progress"],
     },
     "formatter": {
         "summary": "Rewrite the transcript with an optional on-device model",

@@ -138,6 +138,8 @@ class VoiceTranscriberTUI:
         self.punctuation_mode = "full"
         self.structure_mode = "off"
         self.cleanup_mode = "full"
+        self.meeting_mode = "off"
+        self.meeting_spill_minutes = 10
         self.formatter = "off"
         self.formatter_model = "s1-mini"
         self.formatter_style = "semi-formal"
@@ -164,6 +166,9 @@ class VoiceTranscriberTUI:
         self.on_cycle_punctuation = None
         self.on_cycle_structure = None
         self.on_cycle_cleanup = None
+        self.on_toggle_meeting = None
+        self.on_cycle_meeting = None
+        self.on_cycle_meeting_spill = None
         self.on_cycle_formatter = None
         self.on_cycle_formatter_model = None
         self.on_cycle_formatter_style = None
@@ -241,7 +246,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, formatter=None, formatter_model=None, formatter_style=None, formatter_context=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, meeting_mode=None, meeting_spill_minutes=None, formatter=None, formatter_model=None, formatter_style=None, formatter_context=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -263,6 +268,10 @@ class VoiceTranscriberTUI:
                 self.structure_mode = structure_mode
             if cleanup_mode is not None:
                 self.cleanup_mode = cleanup_mode
+            if meeting_mode is not None:
+                self.meeting_mode = meeting_mode
+            if meeting_spill_minutes is not None:
+                self.meeting_spill_minutes = int(meeting_spill_minutes)
             if formatter is not None:
                 self.formatter = formatter
             if formatter_model is not None:
@@ -440,6 +449,13 @@ class VoiceTranscriberTUI:
             prompt.append(f" ({int(self.vu_level*100)}%) ", style="dim cyan")
             prompt.append("│ ", style="dim white")
             prompt.append("[Space] Stop · release Alt+Shift / Middle-Click if you used push-to-talk", style="dim white")
+
+        elif self.state == "MEETING":
+            prompt.append("MEETING ", style="bold white on blue")
+            prompt.append(" ", style="reset")
+            prompt.append(f"[{self.sub_state_text or '00:00 · 0%'}] ", style="bold cyan")
+            prompt.append("│ ", style="dim white")
+            prompt.append("long capture — nothing is typed", style="dim white")
 
         elif self.state == "PROCESSING":
             prompt.append(f"{spinner} PROCESSING AUDIO [{self.elapsed_time:04.1f}s] ", style="bold yellow")

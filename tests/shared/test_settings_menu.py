@@ -261,6 +261,8 @@ class TestResetToDefaults:
             "SOUND_THEME",
             "UI_THEME",
             "PUNCTUATION_MODE",
+            "MEETING",
+            "MEETING_SPILL_MINUTES",
         ):
             assert name in t2.DEFAULT_SETTINGS
 
@@ -306,6 +308,8 @@ class TestResetToDefaults:
             "sound_theme": "SOUND_THEME",
             "ui_theme": "UI_THEME",
             "typing_wpm": "TYPING_WPM",
+            "meeting": "MEETING",
+            "meeting_spill_minutes": "MEETING_SPILL_MINUTES",
         }
 
         for example_key, default_key in key_map.items():
