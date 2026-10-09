@@ -592,7 +592,7 @@ class TestEngineVerbs:
         blocking = {
             "start", "stop", "toggle", "settings", "mic", "theme",
             "reset-defaults", "reset-terminal", "quit", "set-mic", "mics",
-            "rescan-mics",
+            "rescan-mics", "meeting-start", "meeting-stop",
         }
         for verb in control.VERBS:
             if verb in blocking:
@@ -656,6 +656,7 @@ class TestVerbCatalogue:
         assert control.VERBS["middle-click"]["choices"] == ["on", "off"]
         assert control.VERBS["structure"]["choices"] == ["off", "inline", "blocks"]
         assert control.VERBS["cleanup"]["choices"] == ["off", "artifacts", "full"]
+        assert control.VERBS["meeting"]["choices"] == ["off", "on"]
         # A free-text value must not claim a closed set.
         assert "choices" not in control.VERBS["set-mic"]
         assert "choices" not in control.VERBS["theme"] or "auto" in control.VERBS["theme"]["choices"]
@@ -668,6 +669,22 @@ class TestVerbCatalogue:
         assert control.VERBS["spell"]["toggles"] is True
         assert control.VERBS["structure"]["required"] is True
         assert control.VERBS["cleanup"]["required"] is True
+        assert control.VERBS["meeting"]["toggles"] is True
+
+    def test_meeting_verbs_are_in_the_catalogue(self):
+        """Meeting mode is scriptable regardless of the UI (plan sec 12.4)."""
+        assert control.VERBS["meeting"]["value"] == "state"
+        assert control.VERBS["meeting-spill"]["value"] == "minutes"
+        assert "required" not in control.VERBS["meeting"]
+        assert control.VERBS["meeting-start"]["returns"] == [
+            "meeting_state", "meeting_elapsed_s", "meeting_progress"
+        ]
+        assert "meeting-stop" in control.VERBS
+        for key in (
+            "meeting", "meeting_setting", "meeting_state", "meeting_elapsed_s",
+            "meeting_progress", "meeting_spill_minutes",
+        ):
+            assert key in control.VERBS["status"]["returns"]
 
     def test_structure_verb_reports_both_modes(self):
         """The reply distinguishes the configured mode from the effective one.

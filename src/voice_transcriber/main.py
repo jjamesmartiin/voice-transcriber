@@ -28,6 +28,7 @@ LOG_FILE = logging_setup.configure_logging()
 # Import core modules
 import hal
 import control
+import meeting
 import stats
 import console_text
 from tui import VoiceTranscriberTUI
@@ -100,6 +101,11 @@ class SimpleVoiceTranscriber:
         self.copy_to_clipboard = False
         self.start_time = 0
 
+        # Meeting mode is a second, non-injecting capture lifecycle (see
+        # docs/meeting_mode.md). Constructed here so `status` can report it from
+        # the first control request; it opens no device until `meeting-start`.
+        self.meeting = meeting.MeetingSession(on_change=self._on_meeting_change)
+
         # Cumulative session stats for time saved tracking
         self.session_words = 0
         self.session_time_saved_sec = 0.0
@@ -117,6 +123,11 @@ class SimpleVoiceTranscriber:
         # Initialize the TUI frontend (ratatui if available, else Rich).
         self.tui = create_tui()
         self._wire_tui_callbacks()
+        # Let the settings modal start/stop the meeting capture, which the engine
+        # owns (it needs the mic and the TUI).
+        t2.register_meeting_hooks(
+            toggle=self._on_tui_toggle_meeting, status=self.meeting.status
+        )
 
         # Detect the host platform once and select HAL backends from it.
         self.platform = hal.detect_platform()
@@ -251,6 +262,8 @@ class SimpleVoiceTranscriber:
             punctuation_mode=getattr(t2, 'PUNCTUATION_MODE', 'full'),
             structure_mode=getattr(t2, 'get_structure_mode', lambda: 'off')(),
             cleanup_mode=getattr(t2, 'get_cleanup_mode', lambda: 'full')(),
+            meeting_mode=getattr(t2, 'get_meeting', lambda: 'off')(),
+            meeting_spill_minutes=getattr(t2, 'get_meeting_spill_minutes', lambda: 10)(),
             formatter=getattr(t2, 'get_formatter', lambda: 'off')(),
             formatter_model=getattr(t2, 'get_formatter_model', lambda: 's1-mini')(),
             formatter_style=getattr(t2, 'get_formatter_style', lambda: 'semi-formal')(),
@@ -290,6 +303,9 @@ class SimpleVoiceTranscriber:
         self.tui.on_set_punctuation = self._on_tui_set_punctuation_mode
         self.tui.on_cycle_structure = self._on_tui_cycle_structure_mode
         self.tui.on_cycle_cleanup = self._on_tui_cycle_cleanup_mode
+        self.tui.on_toggle_meeting = self._on_tui_toggle_meeting
+        self.tui.on_cycle_meeting = self._on_tui_cycle_meeting
+        self.tui.on_cycle_meeting_spill = self._on_tui_cycle_meeting_spill
         self.tui.on_cycle_formatter = self._on_tui_cycle_formatter
         self.tui.on_cycle_formatter_model = self._on_tui_cycle_formatter_model
         self.tui.on_cycle_formatter_style = self._on_tui_cycle_formatter_style
@@ -606,6 +622,92 @@ class SimpleVoiceTranscriber:
         self._sync_tui_state()
         self.tui.print_event("🧹 Cleanup Mode", f"Cleanup set to {new_mode}", level="info")
 
+    # -- meeting mode (a second, non-injecting capture lifecycle) ----------
+    def _meeting_session(self):
+        """The live meeting session, or ``None`` on a partially-built engine."""
+        return getattr(self, "meeting", None)
+
+    def _on_meeting_change(self, status):
+        """Push a meeting status snapshot into the TUI (elapsed timer + %)."""
+        tui = getattr(self, "tui", None)
+        if tui is None:
+            return
+        try:
+            if status.state == "recording":
+                tui.update_state(
+                    "MEETING",
+                    f"{t2.meeting_elapsed_label(status.elapsed_s)} · {status.progress_pct}%",
+                )
+            elif status.state == "processing":
+                tui.update_state("MEETING", f"finishing · {status.progress_pct}%")
+            elif not getattr(self, "recording", False):
+                ready = getattr(self, "_model_ready_event", None)
+                if ready is None or ready.is_set():
+                    tui.update_state("READY")
+        except Exception as exc:  # a TUI that is going away must not break capture
+            logger.debug("meeting TUI update failed: %s", exc)
+
+    def _on_tui_toggle_meeting(self):
+        """Start or stop a meeting capture (settings modal / control API)."""
+        import t2
+        session = self._meeting_session()
+        if session is None:
+            return
+        if t2.get_meeting() != "on":
+            self.tui.print_warning(
+                "Meeting Mode Off",
+                "Turn on Meeting Mode in Settings before starting a capture.",
+            )
+            return
+        if session.recording:
+            session.stop()
+            self.tui.print_event(
+                "⏹ Meeting",
+                "Stop requested — reading the recording back.",
+                level="info",
+            )
+            return
+        if session.processing:
+            self.tui.print_event(
+                "⏳ Meeting", "Still finishing the previous capture.", level="warning"
+            )
+            return
+        if getattr(self, "recording", False):
+            self.tui.print_warning(
+                "Recording",
+                "Cannot start a meeting while a dictation recording is active.",
+            )
+            return
+        try:
+            session.start(spill_minutes=t2.get_meeting_spill_minutes())
+        except meeting.MeetingStateError as exc:
+            self.tui.print_warning("Meeting", str(exc))
+            return
+        self.tui.update_state("MEETING", "00:00 · 0%")
+        self.tui.print_event(
+            "⏺ Meeting",
+            "Meeting capture started — audio is held, nothing is typed.",
+            level="info",
+        )
+
+    def _on_tui_cycle_meeting(self):
+        import t2
+        new_mode = t2.toggle_meeting()
+        self._sync_tui_state()
+        self.tui.print_event(
+            "🎙️ Meeting Mode", f"Meeting mode is now {new_mode.upper()}", level="info"
+        )
+
+    def _on_tui_cycle_meeting_spill(self):
+        import t2
+        minutes = t2.cycle_meeting_spill_minutes()
+        self._sync_tui_state()
+        self.tui.print_event(
+            "💾 Meeting Memory",
+            f"Capture spills to disk past {minutes} minutes",
+            level="info",
+        )
+
     def _on_tui_cycle_formatter(self):
         import t2
         new_mode = t2.toggle_formatter()
@@ -866,6 +968,11 @@ class SimpleVoiceTranscriber:
 
     def cleanup(self):
         """Clean up all resources."""
+        if getattr(self, 'meeting', None) is not None:
+            try:
+                self.meeting.close()
+            except Exception:
+                pass
         if getattr(self, 'control_server', None):
             self.control_server.stop()
         if hasattr(self, 'tui') and self.tui:
@@ -1240,7 +1347,30 @@ class SimpleVoiceTranscriber:
             "lifetime_transcriptions": getattr(self, "lifetime_transcriptions", 0),
             "lifetime_sessions": getattr(self, "lifetime_sessions", 0),
             "typing_wpm": getattr(t2, "TYPING_WPM", 40),
+            **self._meeting_fields(),
             **extra,
+        }
+
+    def _meeting_fields(self) -> dict:
+        """Meeting-mode keys for every status reply.
+
+        ``meeting`` (effective) and ``meeting_setting`` (configured) are the same
+        value today - there is no downgrade path yet - but they are reported as a
+        pair so that a future gate (for example diarization being off in D6)
+        cannot quietly turn one into the other.
+        """
+        configured = getattr(t2, "get_meeting", lambda: "off")()
+        session = self._meeting_session()
+        status = session.status() if session is not None else None
+        return {
+            "meeting": configured,
+            "meeting_setting": configured,
+            "meeting_state": status.state if status is not None else "idle",
+            "meeting_elapsed_s": status.elapsed_s if status is not None else 0.0,
+            "meeting_progress": status.progress_pct if status is not None else 0,
+            "meeting_spill_minutes": getattr(
+                t2, "get_meeting_spill_minutes", lambda: 10
+            )(),
         }
 
     def _refresh_lifetime_stats(self, words=0, time_saved_sec=0.0, record_session=False):
@@ -1366,6 +1496,31 @@ class SimpleVoiceTranscriber:
             self._sync_tui_state()
             current = keybinds.parse_binds(t2.HOTKEY_BINDS)
         return self._control_status(verb, hotkeys=[bind.chord for bind in current])
+
+    def _control_meeting_start(self):
+        """The scriptable form of the settings modal's Meeting Capture action."""
+        import t2
+        if t2.get_meeting() != "on":
+            raise ValueError("meeting mode is off; enable it with 'meeting on'")
+        session = self._meeting_session()
+        if session is None:
+            raise ValueError("meeting capture is unavailable")
+        if getattr(self, "recording", False):
+            raise ValueError("a dictation recording is active")
+        try:
+            session.start(spill_minutes=t2.get_meeting_spill_minutes())
+        except meeting.MeetingStateError as exc:
+            raise ValueError(str(exc)) from None
+        self.tui.update_state("MEETING", "00:00 · 0%")
+
+    def _control_meeting_stop(self):
+        session = self._meeting_session()
+        if session is None:
+            raise ValueError("meeting capture is unavailable")
+        try:
+            session.stop()
+        except meeting.MeetingStateError as exc:
+            raise ValueError(str(exc)) from None
 
     def handle_control(self, cmd, request):
         """Dispatch one control-API request.
@@ -1514,6 +1669,40 @@ class SimpleVoiceTranscriber:
             t2.set_cleanup_mode(value)
             t2.save_audio_config()
             self._sync_tui_state()
+            return self._control_status(verb)
+
+        # -- meeting mode: setting + lifecycle -----------------------------
+        if verb in ("meeting", "meeting-mode"):
+            state = self._control_on_off(value)
+            current = t2.get_meeting() == "on"
+            t2.set_meeting((not current) if state is None else state)
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(verb, meeting=t2.get_meeting())
+
+        if verb in ("meeting-spill", "meeting_spill"):
+            if value:
+                try:
+                    minutes = int(value)
+                except ValueError:
+                    raise ValueError(
+                        f"meeting-spill expects minutes, got {value!r}"
+                    ) from None
+                t2.set_meeting_spill_minutes(minutes)
+            else:
+                t2.cycle_meeting_spill_minutes()
+            t2.save_audio_config()
+            self._sync_tui_state()
+            return self._control_status(
+                verb, meeting_spill_minutes=t2.get_meeting_spill_minutes()
+            )
+
+        if verb in ("meeting-start", "meeting_start"):
+            self._control_meeting_start()
+            return self._control_status(verb)
+
+        if verb in ("meeting-stop", "meeting_stop"):
+            self._control_meeting_stop()
             return self._control_status(verb)
 
         if verb in ("formatter", "formatter-mode"):

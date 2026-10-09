@@ -37,6 +37,8 @@ pub enum SettingKind {
     FormatterStyle,
     FormatterContext,
     CleanupMode,
+    MeetingMode,
+    MeetingSpill,
     Theme,
     Microphone,
     RescanMics,
@@ -52,7 +54,7 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 21] = [
+pub const SETTINGS: [SettingItem; 23] = [
     // NOTE: icons must be exactly one glyph whose *own* codepoint already
     // occupies its final width in every terminal - never a `U+FE0F`
     // variation-selector sequence and never a ZWJ sequence. Terminals that
@@ -103,6 +105,18 @@ pub const SETTINGS: [SettingItem; 21] = [
         icon: "•",
         title: "Cleanup Mode",
         keywords: "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
+    },
+    SettingItem {
+        kind: SettingKind::MeetingMode,
+        icon: "•",
+        title: "Meeting Mode",
+        keywords: "meeting diarization speakers capture long recording minutes hours transcript notes",
+    },
+    SettingItem {
+        kind: SettingKind::MeetingSpill,
+        icon: "•",
+        title: "Meeting Spill",
+        keywords: "meeting spill memory temp file threshold minutes long recording buffer disk",
     },
     SettingItem {
         kind: SettingKind::OutputMode,
@@ -369,6 +383,25 @@ impl SettingItem {
                 };
                 (desc.to_string(), badge, color)
             }
+            SettingKind::MeetingMode => {
+                // Spec: docs/meeting_mode.md. "off" is the shipped default, so
+                // the dictation path is byte-identical to a build without the
+                // feature and `meeting-start` refuses to run.
+                if app.meeting_mode == "on" {
+                    (
+                        "Long, non-injecting capture".to_string(),
+                        "[ON]",
+                        Color::Green,
+                    )
+                } else {
+                    ("Off: dictation only".to_string(), "[OFF]", Color::DarkGray)
+                }
+            }
+            SettingKind::MeetingSpill => (
+                format!("Spills to disk past {} min", app.meeting_spill_minutes),
+                "[SPILL]",
+                Color::Cyan,
+            ),
             SettingKind::StructureMode => {
                 // Spec: docs/formatting.md. "blocks" emits real line breaks, and
                 // a newline is an Enter keypress, so the engine downgrades it to
@@ -1321,6 +1354,22 @@ pub fn run_settings_picker(
                                         }
                                     }
                                 }
+                                SettingKind::MeetingMode => {
+                                    app.cycle_meeting_mode();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_meeting").is_err() {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
+                                SettingKind::MeetingSpill => {
+                                    app.cycle_meeting_spill();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_meeting_spill").is_err() {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
                                 SettingKind::StructureMode => {
                                     app.cycle_structure_mode();
                                     if let Some(w) = writer {
@@ -1717,6 +1766,14 @@ mod tests {
             app.cleanup_mode = mode.to_string();
             check(&app, &idle, SettingKind::CleanupMode);
         }
+        for mode in ["off", "on"] {
+            app.meeting_mode = mode.to_string();
+            check(&app, &idle, SettingKind::MeetingMode);
+        }
+        for minutes in [5u32, 10, 20, 30, 60] {
+            app.meeting_spill_minutes = minutes;
+            check(&app, &idle, SettingKind::MeetingSpill);
+        }
         for theme in [
             Theme::Auto,
             Theme::Green,
@@ -1741,6 +1798,60 @@ mod tests {
         }
 
         assert!(clipped.is_empty(), "labels would be clipped: {clipped:?}");
+    }
+
+    #[test]
+    fn test_meeting_previews_match_the_spec() {
+        // Spec: docs/meeting_mode.md, enforced on the Python side by
+        // tests/shared/test_config_sync.py (the label helper) and the
+        // source-level parity guard there.
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        let idle = SettingsPickerState::new();
+
+        let mode_item = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::MeetingMode)
+            .unwrap();
+        let expected = [
+            ("off", "Off: dictation only", "[OFF]"),
+            ("on", "Long, non-injecting capture", "[ON]"),
+        ];
+        for (mode, desc, badge) in expected {
+            app.meeting_mode = mode.to_string();
+            let (got_desc, got_badge, _) = mode_item.value_and_badge(&app, &idle);
+            assert_eq!(got_desc, desc, "preview for meeting mode {mode}");
+            assert_eq!(got_badge, badge, "badge for meeting mode {mode}");
+        }
+
+        let spill_item = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::MeetingSpill)
+            .unwrap();
+        for minutes in [5u32, 10, 20, 30, 60] {
+            app.meeting_spill_minutes = minutes;
+            let (desc, badge, _) = spill_item.value_and_badge(&app, &idle);
+            assert_eq!(desc, format!("Spills to disk past {minutes} min"));
+            assert_eq!(badge, "[SPILL]");
+        }
+
+        // The local cycle must only produce values the engine knows, and round-trip.
+        app.meeting_mode = "off".to_string();
+        app.cycle_meeting_mode();
+        assert_eq!(app.meeting_mode, "on");
+        app.cycle_meeting_mode();
+        assert_eq!(app.meeting_mode, "off");
+
+        app.meeting_spill_minutes = 5;
+        app.cycle_meeting_spill();
+        assert_eq!(app.meeting_spill_minutes, 10);
+        app.cycle_meeting_spill();
+        assert_eq!(app.meeting_spill_minutes, 20);
+        app.cycle_meeting_spill();
+        assert_eq!(app.meeting_spill_minutes, 30);
+        app.cycle_meeting_spill();
+        assert_eq!(app.meeting_spill_minutes, 60);
+        app.cycle_meeting_spill();
+        assert_eq!(app.meeting_spill_minutes, 5);
     }
 
     #[test]

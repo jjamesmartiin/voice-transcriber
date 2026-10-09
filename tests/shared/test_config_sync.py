@@ -585,6 +585,123 @@ def test_cleanup_mode_env_override_and_unknown_value(tmp_path, monkeypatch):
     t2.set_cleanup_mode("full")
 
 
+def test_meeting_defaults_off_and_round_trips(tmp_path, monkeypatch):
+    """The meeting toggle persists, and "off" is the shipped default."""
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_MEETING", raising=False)
+
+    try:
+        t2.load_audio_config()
+        assert t2.get_meeting() == "off"
+
+        t2.set_meeting("on")
+        assert t2.get_meeting() == "on"
+        assert yaml.safe_load(config.read_text())["meeting"] == "on"
+
+        # A fresh load reads it back.
+        t2.MEETING = "off"
+        t2.load_audio_config()
+        assert t2.get_meeting() == "on"
+    finally:
+        monkeypatch.delenv("VT_MEETING", raising=False)
+        t2.set_meeting("off")
+
+
+def test_meeting_is_unknown_value_safe(tmp_path, monkeypatch):
+    """An unrecognised meeting value falls back to "off" (fail safe)."""
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"meeting": "wat"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_MEETING", raising=False)
+
+    t2.load_audio_config()
+    assert t2.get_meeting() == "off"
+
+
+def test_meeting_env_override_wins(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"meeting": "off"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    try:
+        monkeypatch.setenv("VT_MEETING", "on")
+        t2.load_audio_config()
+        assert t2.get_meeting() == "on"
+    finally:
+        monkeypatch.delenv("VT_MEETING", raising=False)
+        t2.set_meeting("off")
+
+
+def test_meeting_spill_default_round_trips_and_cycles(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_MEETING_SPILL_MINUTES", raising=False)
+
+    try:
+        t2.load_audio_config()
+        assert t2.get_meeting_spill_minutes() == 10
+
+        t2.set_meeting_spill_minutes(20)
+        assert t2.get_meeting_spill_minutes() == 20
+        assert yaml.safe_load(config.read_text())["meeting_spill_minutes"] == 20
+
+        # An out-of-range or unparseable value keeps the shipped default rather
+        # than disabling the memory cap.
+        assert t2.set_meeting_spill_minutes(999) == 10
+        assert t2.set_meeting_spill_minutes("ten") == 10
+
+        t2.set_meeting_spill_minutes(5)
+        assert t2.cycle_meeting_spill_minutes() == 10
+        assert t2.cycle_meeting_spill_minutes() == 20
+    finally:
+        t2.set_meeting_spill_minutes(10)
+
+
+def test_meeting_spill_env_override(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"meeting_spill_minutes": 10}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    try:
+        monkeypatch.setenv("VT_MEETING_SPILL_MINUTES", "30")
+        t2.load_audio_config()
+        assert t2.get_meeting_spill_minutes() == 30
+    finally:
+        monkeypatch.delenv("VT_MEETING_SPILL_MINUTES", raising=False)
+        t2.set_meeting_spill_minutes(10)
+
+
+def test_meeting_setting_labels_are_stable():
+    assert t2.meeting_setting_state("on") == (
+        "Long, non-injecting capture", "[ON]", "green"
+    )
+    assert t2.meeting_setting_state("off") == (
+        "Off: dictation only", "[OFF]", "dim white"
+    )
+    assert t2.meeting_setting_state("nonsense") == (
+        "Off: dictation only", "[OFF]", "dim white"
+    )
+    assert t2.meeting_spill_setting_state(10) == (
+        "Spills to disk past 10 min", "[SPILL]", "cyan"
+    )
+
+
+def test_meeting_elapsed_label():
+    assert t2.meeting_elapsed_label(0) == "00:00"
+    assert t2.meeting_elapsed_label(65) == "01:05"
+    assert t2.meeting_elapsed_label(3600) == "1:00:00"
+    assert t2.meeting_elapsed_label(3661) == "1:01:01"
+    assert t2.meeting_elapsed_label("bogus") == "00:00"
+
+
 def test_main_typing_formatting_options(monkeypatch):
     """Test that disabling trailing space and auto-punctuate works in main._do_process_recording."""
     from main import SimpleVoiceTranscriber
@@ -699,6 +816,34 @@ def test_ratatui_structure_labels_match_python():
         assert badge in implementation, (
             f"tui-rs/src/settings_picker.rs no longer shows the {badge} badge"
         )
+
+
+def test_ratatui_meeting_labels_match_python():
+    """The ratatui modal renders the meeting rows from another language.
+
+    Same source-scoped guard as the structure labels above: the Rust test
+    repeats these strings, so only the non-test half of the file is searched.
+    """
+    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
+    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    assert "SettingKind::MeetingMode" in implementation, (
+        "could not find the meeting row in tui-rs/src/settings_picker.rs - the "
+        "parity guard is looking in the wrong place"
+    )
+    assert "SettingKind::MeetingSpill" in implementation
+    for mode in ("off", "on"):
+        desc, badge, _ = t2.meeting_setting_state(mode)
+        assert desc in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows {desc!r} "
+            f"(meeting={mode})"
+        )
+        assert badge in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows the {badge} badge"
+        )
+    # The spill row's description is formatted at render time; pin the format
+    # string and the static badge.
+    assert "Spills to disk past {} min" in implementation
+    assert t2.meeting_spill_setting_state(10)[1] in implementation
 
 
 def test_the_naming_decision_is_recorded():

@@ -123,6 +123,13 @@ pub enum Wire {
         /// the pass may change the words (see docs/cleanup_modes.md).
         #[serde(default)]
         cleanup_mode: Option<String>,
+        /// Configured meeting-mode toggle: "off" or "on". Meeting capture is a
+        /// second, non-injecting lifecycle (see docs/meeting_mode.md).
+        #[serde(default)]
+        meeting_mode: Option<String>,
+        /// Meeting capture in-memory spill threshold, in minutes (1-240).
+        #[serde(default)]
+        meeting_spill_minutes: Option<u32>,
         #[serde(default)]
         trailing_space: Option<bool>,
         #[serde(default)]

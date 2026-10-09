@@ -103,6 +103,9 @@ class RatatuiTui:
         self.on_cycle_punctuation = None
         self.on_cycle_structure = None
         self.on_cycle_cleanup = None
+        self.on_toggle_meeting = None
+        self.on_cycle_meeting = None
+        self.on_cycle_meeting_spill = None
         self.on_set_punctuation = None
         self.on_reset_defaults = None
         self.on_reset_terminal = None
@@ -304,6 +307,14 @@ class RatatuiTui:
         elif cmd in ("cycle_cleanup", "cycle_cleanup_mode"):
             if getattr(self, "on_cycle_cleanup", None):
                 self.on_cycle_cleanup()
+        elif cmd in ("toggle_meeting", "toggle_meeting_capture") and getattr(self, "on_toggle_meeting", None):
+            self.on_toggle_meeting()
+        elif cmd in ("cycle_meeting", "cycle_meeting_mode"):
+            if getattr(self, "on_cycle_meeting", None):
+                self.on_cycle_meeting()
+        elif cmd in ("cycle_meeting_spill", "cycle_meeting_spill_minutes"):
+            if getattr(self, "on_cycle_meeting_spill", None):
+                self.on_cycle_meeting_spill()
         elif cmd == "cycle_typing_wpm" and getattr(self, "on_cycle_typing_wpm", None):
             self.on_cycle_typing_wpm()
         elif cmd == "set_typing_wpm":
@@ -595,6 +606,7 @@ class RatatuiTui:
 
     def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None,
                          sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None,
+                         meeting_mode=None, meeting_spill_minutes=None,
                          formatter=None, formatter_model=None, formatter_style=None, formatter_context=None,
                          trailing_space=None, auto_punctuate=None, number_digits=None,
                          number_mode=None, serial_collapse=None, spell_command=None,
@@ -630,6 +642,12 @@ class RatatuiTui:
         if cleanup_mode is not None:
             self.cleanup_mode = cleanup_mode
             msg["cleanup_mode"] = cleanup_mode
+        if meeting_mode is not None:
+            self.meeting_mode = meeting_mode
+            msg["meeting_mode"] = meeting_mode
+        if meeting_spill_minutes is not None:
+            self.meeting_spill_minutes = int(meeting_spill_minutes)
+            msg["meeting_spill_minutes"] = self.meeting_spill_minutes
         if formatter is not None:
             self.formatter = formatter
             msg["formatter"] = formatter

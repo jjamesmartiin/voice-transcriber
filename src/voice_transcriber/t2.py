@@ -143,6 +143,14 @@ STRUCTURE_MODES = ["off", "inline", "blocks"]
 #: word. See docs/cleanup_modes.md.
 CLEANUP_MODE = "full"
 CLEANUP_MODES = ["off", "artifacts", "full"]
+#: Meeting mode (docs/plan-diarization.md sec 5.2): a second, non-injecting
+#: capture lifecycle for minutes-to-hours recordings. "off" is the shipped
+#: default, so the dictation path is byte-identical to a build without it.
+MEETING = "off"
+MEETING_MODES = ["off", "on"]
+#: Temp-file spill threshold for a long meeting capture, in minutes. Default 10.
+MEETING_SPILL_MINUTES = 10
+MEETING_SPILL_CHOICES = [5, 10, 20, 30, 60]
 #: Optional on-device formatter (docs/plan-on-device-formatter.md). "off" is the
 #: shipped default and means the dictation path is byte-identical to a build
 #: without the feature.
@@ -194,6 +202,8 @@ DEFAULT_SETTINGS = {
     'PUNCTUATION_MODE': "no_punctuation",
     'STRUCTURE_MODE': "off",
     'CLEANUP_MODE': "full",
+    'MEETING': "off",
+    'MEETING_SPILL_MINUTES': 10,
     'FORMATTER': "off",
     'FORMATTER_MODEL': "s1-mini",
     'FORMATTER_STYLE': "semi-formal",
@@ -793,7 +803,7 @@ def _normalize_bool(value, default: bool = False) -> bool:
 
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, TYPING_WPM, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, MEETING, MEETING_SPILL_MINUTES, FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, TYPING_WPM, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -861,6 +871,17 @@ def load_audio_config(file_path=None):
             env_cleanup = os.environ.get("VT_CLEANUP_MODE", "").strip().lower()
             if env_cleanup:
                 CLEANUP_MODE = normalize_cleanup_mode(env_cleanup)
+
+            MEETING = normalize_meeting(config.get('meeting', 'off'))
+            env_meeting = os.environ.get("VT_MEETING", "").strip().lower()
+            if env_meeting:
+                MEETING = normalize_meeting(env_meeting)
+
+            MEETING_SPILL_MINUTES = normalize_meeting_spill_minutes(
+                config.get('meeting_spill_minutes', MEETING_SPILL_MINUTES))
+            env_meeting_spill = os.environ.get("VT_MEETING_SPILL_MINUTES", "").strip().lower()
+            if env_meeting_spill:
+                MEETING_SPILL_MINUTES = normalize_meeting_spill_minutes(env_meeting_spill)
 
             FORMATTER = normalize_formatter_enabled(config.get('formatter', 'off'))
             env_formatter = os.environ.get("VT_FORMATTER", "").strip().lower()
@@ -1160,6 +1181,8 @@ def save_audio_config(file_path=None):
             'preset': PUNCTUATION_MODE,
             'structure_mode': STRUCTURE_MODE,
             'cleanup_mode': CLEANUP_MODE,
+            'meeting': MEETING,
+            'meeting_spill_minutes': MEETING_SPILL_MINUTES,
             'formatter': FORMATTER,
             'formatter_model': FORMATTER_MODEL,
             'formatter_style': FORMATTER_STYLE,
@@ -1799,6 +1822,136 @@ def toggle_cleanup_mode() -> str:
     _push_cleanup_mode()
     save_audio_config()
     return CLEANUP_MODE
+
+
+# ---------------------------------------------------------------------------
+# Meeting mode (docs/plan-diarization.md sec 5.2)
+# ---------------------------------------------------------------------------
+# Meeting mode is a second capture lifecycle. Everything here is only the
+# *setting*: whether the feature may run at all, and how much audio the spill
+# buffer may hold in memory. The capture itself lives in
+# ``voice_transcriber.meeting`` and is owned by the engine; these settings are
+# read at ``meeting-start`` time. With MEETING == "off" the dictation path is
+# untouched, which is what keeps the dictation SLA provably unaffected.
+
+def normalize_meeting(value) -> str:
+    """Map a user value onto ``off``/``on``; unknown means ``off``.
+
+    Fail-safe off, like the formatter: this gates a feature that opens the
+    microphone for hours, so a typo must not switch it on by accident.
+    """
+    if value is None:
+        return "off"
+    text = str(value).strip().lower()
+    return "on" if text in ("on", "true", "yes", "enabled", "1") else "off"
+
+
+def get_meeting() -> str:
+    """The configured meeting-mode toggle ("off"/"on")."""
+    return MEETING
+
+
+def set_meeting(mode) -> str:
+    """Set and persist the meeting-mode toggle."""
+    global MEETING
+    MEETING = normalize_meeting(mode)
+    save_audio_config()
+    return MEETING
+
+
+def toggle_meeting() -> str:
+    """Cycle off -> on -> off and persist."""
+    global MEETING
+    index = MEETING_MODES.index(MEETING) if MEETING in MEETING_MODES else 0
+    MEETING = MEETING_MODES[(index + 1) % len(MEETING_MODES)]
+    save_audio_config()
+    return MEETING
+
+
+def meeting_setting_state(meeting_mode: str):
+    """``(description, badge, colour)`` for the settings modal's meeting row.
+
+    Extracted so the Rich and ratatui labels can be held together by a
+    source-level parity guard, the same way ``structure_setting_state`` is.
+    """
+    if normalize_meeting(meeting_mode) == "on":
+        return "Long, non-injecting capture", "[ON]", "green"
+    return "Off: dictation only", "[OFF]", "dim white"
+
+
+def normalize_meeting_spill_minutes(value) -> int:
+    """Map the spill knob onto a safe integer (delegates to the meeting module)."""
+    from voice_transcriber import meeting as _meeting
+    return _meeting.normalize_spill_minutes(value)
+
+
+def get_meeting_spill_minutes() -> int:
+    """The configured in-memory spill threshold, in minutes."""
+    return MEETING_SPILL_MINUTES
+
+
+def set_meeting_spill_minutes(value) -> int:
+    """Set and persist the spill threshold; unknown values keep the default."""
+    global MEETING_SPILL_MINUTES
+    MEETING_SPILL_MINUTES = normalize_meeting_spill_minutes(value)
+    save_audio_config()
+    return MEETING_SPILL_MINUTES
+
+
+def cycle_meeting_spill_minutes() -> int:
+    """Cycle through the shipped spill choices and persist."""
+    global MEETING_SPILL_MINUTES
+    choices = MEETING_SPILL_CHOICES
+    index = choices.index(MEETING_SPILL_MINUTES) if MEETING_SPILL_MINUTES in choices else 0
+    MEETING_SPILL_MINUTES = choices[(index + 1) % len(choices)]
+    save_audio_config()
+    return MEETING_SPILL_MINUTES
+
+
+def meeting_spill_setting_state(minutes: int):
+    """``(description, badge, colour)`` for the spill-threshold row."""
+    minutes = normalize_meeting_spill_minutes(minutes)
+    return f"Spills to disk past {minutes} min", "[SPILL]", "cyan"
+
+
+def meeting_elapsed_label(seconds) -> str:
+    """``MM:SS`` (or ``H:MM:SS`` past an hour) for the meeting timer."""
+    try:
+        total = max(0, int(seconds))
+    except (TypeError, ValueError):
+        total = 0
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+#: Hooks the engine registers so the settings modal can start/stop a capture.
+#: The capture needs the microphone and the TUI, so it is owned by the engine;
+#: the modal only needs a way to ask for a toggle and read a status snapshot.
+_MEETING_HOOKS = {"toggle": None, "status": None}
+
+
+def register_meeting_hooks(toggle=None, status=None) -> None:
+    """Let the engine expose its meeting capture to the settings modal."""
+    _MEETING_HOOKS["toggle"] = toggle
+    _MEETING_HOOKS["status"] = status
+
+
+def meeting_capture_status():
+    """The live meeting status from the engine, or ``None`` if unwired."""
+    hook = _MEETING_HOOKS.get("status")
+    return hook() if callable(hook) else None
+
+
+def toggle_meeting_capture():
+    """Ask the engine to start or stop a meeting capture (settings modal action)."""
+    hook = _MEETING_HOOKS.get("toggle")
+    if callable(hook):
+        hook()
+        return True
+    return False
 
 
 def set_number_digits(value):
@@ -2483,6 +2636,24 @@ def select_settings_picker():
             "keywords": "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
         },
         {
+            "id": "meeting",
+            "icon": "🎙️ ",
+            "title": "Meeting Mode",
+            "keywords": "meeting diarization speakers capture long recording minutes hours transcript notes",
+        },
+        {
+            "id": "meeting_capture",
+            "icon": "⏺ ",
+            "title": "Meeting Capture",
+            "keywords": "meeting capture start stop record long session elapsed timer microphone",
+        },
+        {
+            "id": "meeting_spill",
+            "icon": "💾 ",
+            "title": "Meeting Spill",
+            "keywords": "meeting spill memory temp file threshold minutes long recording buffer disk",
+        },
+        {
             "id": "structure",
             "icon": "☰ ",
             "title": "List Formatting",
@@ -2615,6 +2786,21 @@ def select_settings_picker():
             return structure_setting_state(
                 STRUCTURE_MODE, get_effective_structure_mode()
             )
+        elif item_id == "meeting":
+            return meeting_setting_state(MEETING)
+        elif item_id == "meeting_capture":
+            if MEETING == "off":
+                return "Switch Meeting Mode on first", "[OFF]", "dim white"
+            status = meeting_capture_status()
+            if status is None:
+                return "Start a meeting capture", "[START]", "yellow"
+            if status.state == "recording":
+                return f"Capturing · {meeting_elapsed_label(status.elapsed_s)}", "[STOP]", "red"
+            if status.state == "processing":
+                return f"Finishing · {status.progress_pct}%", "[BUSY]", "yellow"
+            return "Start a meeting capture", "[START]", "yellow"
+        elif item_id == "meeting_spill":
+            return meeting_spill_setting_state(MEETING_SPILL_MINUTES)
         elif item_id == "formatter":
             # The labels live in formatter_setting_state() so they can be held to
             # the ratatui ones by a source-level parity guard, the same way the
@@ -2798,6 +2984,12 @@ def select_settings_picker():
                     toggle_cleanup_mode()
                 elif item_id == "structure":
                     toggle_structure_mode()
+                elif item_id == "meeting":
+                    toggle_meeting()
+                elif item_id == "meeting_capture":
+                    toggle_meeting_capture()
+                elif item_id == "meeting_spill":
+                    cycle_meeting_spill_minutes()
                 elif item_id == "formatter":
                     toggle_formatter()
                 elif item_id == "formatter_model":

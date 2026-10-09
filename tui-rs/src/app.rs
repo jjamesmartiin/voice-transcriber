@@ -78,6 +78,7 @@ impl Theme {
 pub enum RunState {
     Ready,
     Recording,
+    Meeting,
     Processing,
     Rewriting,
     Config(String),
@@ -89,6 +90,7 @@ impl RunState {
         match s.to_uppercase().as_str() {
             "READY" => RunState::Ready,
             "RECORDING" => RunState::Recording,
+            "MEETING" => RunState::Meeting,
             "PROCESSING" => RunState::Processing,
             "REWRITING" => RunState::Rewriting,
             other => RunState::Config(other.to_string()),
@@ -205,6 +207,11 @@ pub struct App {
     /// Configured cleanup mode ("off"/"artifacts"/"full"): how much of the
     /// post-processing pass may change the words. See docs/cleanup_modes.md.
     pub cleanup_mode: String,
+    /// Configured meeting-mode toggle ("off"/"on"). Meeting capture is a
+    /// second, non-injecting lifecycle; see docs/meeting_mode.md.
+    pub meeting_mode: String,
+    /// Meeting capture in-memory spill threshold, in minutes.
+    pub meeting_spill_minutes: u32,
     #[allow(dead_code)]
     pub sound_theme: String,
     pub ui_theme: Theme,
@@ -272,6 +279,8 @@ impl App {
             formatter_style: "semi-formal".to_string(),
             formatter_context: "general".to_string(),
             cleanup_mode: "full".to_string(),
+            meeting_mode: "off".to_string(),
+            meeting_spill_minutes: 10,
             sound_theme: "proximity".to_string(),
             ui_theme,
             should_quit: false,
@@ -313,7 +322,7 @@ impl App {
     pub fn update_state(&mut self, state: RunState, sub_text: String) {
         let starts_timer = matches!(
             state,
-            RunState::Recording | RunState::Processing | RunState::Rewriting
+            RunState::Recording | RunState::Meeting | RunState::Processing | RunState::Rewriting
         );
         if starts_timer && self.state_started.is_none() {
             self.state_started = Some(Instant::now());
@@ -498,6 +507,33 @@ impl App {
         &self.cleanup_mode
     }
 
+    /// Advance the meeting-mode toggle between the two states the engine knows
+    /// (``t2.MEETING_MODES == ["off", "on"]``). The engine is authoritative and
+    /// replies with a `cfg` that overwrites this optimistic value.
+    pub fn cycle_meeting_mode(&mut self) -> &str {
+        const MEETING_MODES: [&str; 2] = ["off", "on"];
+        let idx = MEETING_MODES
+            .iter()
+            .position(|m| *m == self.meeting_mode)
+            .map(|i| (i + 1) % MEETING_MODES.len())
+            .unwrap_or(0);
+        self.meeting_mode = MEETING_MODES[idx].to_string();
+        &self.meeting_mode
+    }
+
+    /// Advance the meeting spill threshold through the shipped choices
+    /// (``t2.MEETING_SPILL_CHOICES == [5, 10, 20, 30, 60]``).
+    pub fn cycle_meeting_spill(&mut self) -> u32 {
+        const SPILL_MINUTES: [u32; 5] = [5, 10, 20, 30, 60];
+        let idx = SPILL_MINUTES
+            .iter()
+            .position(|&x| x == self.meeting_spill_minutes)
+            .map(|i| (i + 1) % SPILL_MINUTES.len())
+            .unwrap_or(0);
+        self.meeting_spill_minutes = SPILL_MINUTES[idx];
+        self.meeting_spill_minutes
+    }
+
     #[allow(dead_code)] // retained to mirror Python's `cycle_punctuation`; the
                         // preset modal owns punctuation selection on this frontend.
     pub fn cycle_punctuation(&mut self) {
@@ -557,6 +593,8 @@ impl App {
                 formatter_style,
                 formatter_context,
                 cleanup_mode,
+                meeting_mode,
+                meeting_spill_minutes,
                 trailing_space,
                 auto_punctuate,
                 number_digits,
@@ -582,6 +620,8 @@ impl App {
                 formatter_style,
                 formatter_context,
                 cleanup_mode,
+                meeting_mode,
+                meeting_spill_minutes,
                 trailing_space,
                 auto_punctuate,
                 number_digits,
@@ -636,6 +676,8 @@ impl App {
         formatter_style: Option<String>,
         formatter_context: Option<String>,
         cleanup_mode: Option<String>,
+        meeting_mode: Option<String>,
+        meeting_spill_minutes: Option<u32>,
         trailing_space: Option<bool>,
         auto_punctuate: Option<bool>,
         number_digits: Option<bool>,
@@ -697,6 +739,12 @@ impl App {
         }
         if let Some(c) = cleanup_mode {
             self.cleanup_mode = c;
+        }
+        if let Some(m) = meeting_mode {
+            self.meeting_mode = m;
+        }
+        if let Some(m) = meeting_spill_minutes {
+            self.meeting_spill_minutes = m;
         }
         if let Some(sp) = trailing_space {
             self.trailing_space = sp;
@@ -847,5 +895,24 @@ mod tests {
         );
         app.update_devices(Some(Vec::new()));
         assert!(app.audio_devices.is_empty(), "empty list clears the rows");
+    }
+
+    /// ``MEETING`` is a real run state, not a generic ``Config`` fallback: the
+    /// status row is how the user sees a long capture is running.
+    #[test]
+    fn meeting_state_is_mapped_and_keeps_its_sub_text() {
+        assert_eq!(RunState::from_wire("MEETING"), RunState::Meeting);
+        // Case-insensitive, like every other state.
+        assert_eq!(RunState::from_wire("meeting"), RunState::Meeting);
+
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        app.update_state(RunState::Meeting, "01:05 · 40%".to_string());
+        assert_eq!(app.state, RunState::Meeting);
+        assert_eq!(app.sub_state_text, "01:05 · 40%");
+        assert!(app.state_started.is_some(), "the meeting timer should run");
+
+        // Returning to Ready clears the timer, exactly as dictation does.
+        app.update_state(RunState::Ready, String::new());
+        assert!(app.state_started.is_none());
     }
 }

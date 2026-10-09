@@ -186,6 +186,27 @@ pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Lin
 
             vec![Line::from(l1), Line::from(l2)]
         }
+        RunState::Meeting => {
+            // Long, non-injecting capture. Python drives the elapsed timer and
+            // batch-phase percentage in the sub-text, so this row just shows it.
+            let msg = if sub_state.is_empty() {
+                "long capture — nothing is typed".to_string()
+            } else {
+                sub_state.to_string()
+            };
+            vec![Line::from(vec![
+                Span::styled("❯ ", bold(c)),
+                Span::styled(
+                    "MEETING ",
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+                Span::styled(msg, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            ])]
+        }
         RunState::Processing => {
             let spinner = SPINNER[app.spinner % SPINNER.len()];
             let msg = if sub_state.is_empty() {
@@ -263,6 +284,7 @@ pub fn max_status_height(app: &App, width: u16) -> u16 {
     let samples = [
         RunState::Ready,
         RunState::Recording,
+        RunState::Meeting,
         RunState::Processing,
         RunState::Rewriting,
         RunState::Config("Selecting audio device (1/4)".to_string()),

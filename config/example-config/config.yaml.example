@@ -111,6 +111,30 @@ structure_mode: "off"
 cleanup_mode: "full"
 
 # ------------------------------------------------------------------------------
+# Meeting Mode (long, non-injecting capture)
+# A second capture lifecycle for meetings: start/stop instead of push-to-talk,
+# minutes to hours instead of seconds, and the audio is *held* (not typed) so a
+# later pass can label speakers and write a transcript document. Selectable at
+# runtime via 'Meeting Mode' in the settings modal, or
+# `python src/main.py meeting <off|on>`. Capture itself is driven by
+# `meeting-start` / `meeting-stop` (and the modal's 'Meeting Capture' action).
+#   - "off" : the shipped default. The dictation path is byte-identical to a
+#             build without meeting mode, and `meeting-start` refuses to run.
+#   - "on"  : allow a meeting capture. This is a batch job and is deliberately
+#             exempt from the release-to-clipboard SLA.
+# See docs/meeting_mode.md and docs/plan-diarization.md.
+# Default: "off"
+meeting: "off"
+
+# How much of a long meeting capture may stay in memory before it spills to a
+# temp file (deleted when the capture finishes). 16 kHz mono float32 is
+# 64 000 bytes/s, so 10 minutes is ~38.4 MB and an hour is ~230 MB. Selectable
+# at runtime via 'Meeting Memory Spill' in the settings modal, or
+# `python src/main.py meeting-spill <minutes>` (1-240).
+# Env: VT_MEETING_SPILL_MINUTES. Default: 10
+meeting_spill_minutes: 10
+
+# ------------------------------------------------------------------------------
 # On-Device Formatter (optional local language model)
 # An optional second pass that rewrites the cleaned transcript the way a cloud
 # dictation product would: casing fixed, false starts resolved, spoken lists
