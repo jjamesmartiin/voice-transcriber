@@ -285,6 +285,9 @@ the settings modal would.
 | `punctuation` | mode | `full`, `no_terminal_period`, `no_punctuation`, `aesthetic_lowercase`, `gen_z` |
 | `structure` | mode | `off`, `inline`, `blocks` — turns spoken lists into bullets. `blocks` emits real line breaks, so **typing downgrades it to `inline`**: read `structure_setting` for what the user chose and `structure_mode` for what is in force |
 | `cleanup` | mode | `off`, `artifacts`, `full` — how much the cleanup pass may change the words: `off` keeps everything, `artifacts` removes noise only, `full` also resolves self-corrections. See `docs/cleanup_modes.md` |
+| `diarization` | state | `on`, `off` (omit to toggle) — label speakers in meeting transcripts. `off` (the shipped default) never loads the diarization model. Reports `diarization` (effective) and `diarization_setting` (configured) |
+| `diarization-speakers` | count | `auto`, or `2`–`8` — optional expected speaker count (omit to cycle `auto 2 … 8`) |
+| `diarization-model` | model | `diarization` — registry name of the model bundle; startup-loaded, so a change needs a restart |
 | `theme` | theme | `auto`, `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white` |
 | `trailing-space` | state | `on`, `off` (omit to toggle) |
 | `auto-punctuate` | state | `on`, `off` (omit to toggle) |

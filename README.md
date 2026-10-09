@@ -122,6 +122,8 @@ for the platform you are targeting.
 | **Disk (standalone Windows EXE)** | ~6 GB — the bundle carries its own Python, PyTorch, and the full 3.9 GB model. |
 | **Network** | ~2.8 GB download on **first launch only**, for the compressed model weights. Fully offline afterwards. Set `VT_AUTO_DOWNLOAD_MODEL=0` to skip the download and supply weights yourself. |
 | **Model weights** | Auto-installed on first run, or provided via `VT_MODEL_DIR` / a local `models/cohere/`. The download is split-xz and needs ~2.8 GB down / ~4 GB on disk. |
+| **Optional on-device formatter** | Off by default. Needs a `llama-server` binary (from `pkgs.llama-cpp` in the dev shell, or llama.cpp's prebuilt Windows build) and ~462 MiB for the S1-mini Q4 GGUF, downloaded on first use after you enable the formatter. |
+| **Optional meeting mode (diarization)** | Off by default. Needs ~40 MB for the two sherpa-onnx graphs (pyannote segmentation + 3D-Speaker), downloaded on first use. |
 | **Audio** | A working microphone exposed as the system default input device. |
 | **Python** | **3.10+** — only needed to run from source or to build. The Nix package and the Windows EXE bundle their own interpreter. |
 
@@ -581,6 +583,21 @@ download). Acquisition order:
 Once the weights are on disk the app runs **fully offline** with no network
 access.
 
+Two optional models are registry entries and download through the same verified
+split-xz path, but only the first time the feature is used:
+
+* **On-device formatter** - `"S1-mini" by "Superwhisper"`, a ~462 MiB Q4 GGUF
+  (`superwhisper/s1-mini-GGUF`) run by a local `llama-server`. Enabling the
+  formatter states that size and asks before anything downloads. Licensed
+  Apache-2.0 **plus an additional naming term**; see
+  [`config/licenses/S1-mini-Apache-2.0.txt`](config/licenses/S1-mini-Apache-2.0.txt).
+* **Meeting-mode diarization** - the ~40 MB pyannote segmentation + 3D-Speaker
+  graphs (`k2-fsa/sherpa-onnx`, MIT + Apache-2.0); see
+  [`config/licenses/`](config/licenses/).
+
+Every install writes a `SOURCE.json` next to the weights recording the upstream
+repo, revision and sha256.
+
 ### Language Support & Disclaimer
 
 - **Primary / Officially Supported**: **English (`en`)**
@@ -804,4 +821,7 @@ The LLM can directly emit the clean YAML entry:
 ## License
 
 MIT License. See [LICENSE](LICENSE). The bundled Cohere Transcribe model is
-distributed under Apache-2.0 (see `config/licenses/`).
+distributed under Apache-2.0. The optional on-device formatter model,
+"S1-mini" by "Superwhisper", is Apache-2.0 plus an additional naming term, and
+the diarization graphs are MIT (segmentation) and Apache-2.0 (embedding); full
+texts and provenance are in [`config/licenses/`](config/licenses/).

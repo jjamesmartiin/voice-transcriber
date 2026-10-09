@@ -140,6 +140,11 @@ class VoiceTranscriberTUI:
         self.cleanup_mode = "full"
         self.meeting_mode = "off"
         self.meeting_spill_minutes = 10
+        self.diarization = "off"
+        self.diarization_speakers = "auto"
+        self.diarization_model = "diarization"
+        self.meeting_output_dir = "meetings"
+        self.meeting_output_format = "text"
         self.formatter = "off"
         self.formatter_model = "s1-mini"
         self.formatter_style = "semi-formal"
@@ -169,6 +174,12 @@ class VoiceTranscriberTUI:
         self.on_toggle_meeting = None
         self.on_cycle_meeting = None
         self.on_cycle_meeting_spill = None
+        self.on_cycle_diarization = None
+        self.on_cycle_diarization_speakers = None
+        self.on_cycle_diarization_model = None
+        self.on_cycle_meeting_output_format = None
+        self.on_set_meeting_output_dir = None
+        self.on_open_speaker_editor = None
         self.on_cycle_formatter = None
         self.on_cycle_formatter_model = None
         self.on_cycle_formatter_style = None
@@ -246,7 +257,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, meeting_mode=None, meeting_spill_minutes=None, formatter=None, formatter_model=None, formatter_style=None, formatter_context=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, meeting_mode=None, meeting_spill_minutes=None, diarization=None, diarization_speakers=None, diarization_model=None, meeting_output_dir=None, meeting_output_format=None, formatter=None, formatter_model=None, formatter_style=None, formatter_context=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -272,6 +283,16 @@ class VoiceTranscriberTUI:
                 self.meeting_mode = meeting_mode
             if meeting_spill_minutes is not None:
                 self.meeting_spill_minutes = int(meeting_spill_minutes)
+            if diarization is not None:
+                self.diarization = diarization
+            if diarization_speakers is not None:
+                self.diarization_speakers = diarization_speakers
+            if diarization_model is not None:
+                self.diarization_model = diarization_model
+            if meeting_output_dir is not None:
+                self.meeting_output_dir = meeting_output_dir
+            if meeting_output_format is not None:
+                self.meeting_output_format = meeting_output_format
             if formatter is not None:
                 self.formatter = formatter
             if formatter_model is not None:
@@ -691,11 +712,25 @@ class VoiceTranscriberTUI:
     def _handle_keypress(self, ch):
         """Route terminal keypresses to callbacks.
 
-        The settings modal is the single configuration entry point: ``s``,
-        ``S`` and ``,`` open it, and the microphone, theme and preset pickers
-        are reached from inside it. ``Space`` / ``Enter`` toggles recording
-        (tap to start, tap again to stop — hands-free/hands-latched).
+        The *meeting screen* has its own key map: Space/Enter start or stop the
+        meeting capture, ``s`` opens the speaker-name editor, and Esc quits. That
+        is the one place terminal keys differ, because the speaker map is
+        transcript metadata edited live during a capture rather than app config.
+        Everywhere else the global contract is unchanged: ``s``/``S``/``,`` open
+        the settings modal, ``Space``/``Enter`` toggle dictation, ``r`` resets the
+        terminal and ``q``/Esc/Ctrl+C quit.
         """
+        if getattr(self, "state", None) == "MEETING":
+            if ch in [' ', '\r', '\n']:
+                if getattr(self, "on_toggle_meeting", None):
+                    self.on_toggle_meeting()
+            elif ch in ('s', 'S'):
+                if getattr(self, "on_open_speaker_editor", None):
+                    self.on_open_speaker_editor()
+            elif ch == '\x1b' or ch.lower() == 'q' or ch == '\x03':
+                if getattr(self, "on_quit", None):
+                    self.on_quit()
+            return
         if ch in [' ', '\r', '\n']:
             if self.on_toggle_record:
                 self.on_toggle_record()

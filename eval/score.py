@@ -41,6 +41,8 @@ import contextlib
 import json
 import os
 import re
+import shlex
+import subprocess
 import sys
 import time
 
@@ -50,6 +52,41 @@ EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SRC_DIR)
 
 TARGET_SR = 16000
+
+# Filled in by load_app_config(); written into the result JSON so a baseline can
+# always state where its settings came from.
+_CONFIG_SOURCE = {"path": "", "loaded": False, "error": ""}
+
+# Environment variables a scoring run actually depends on. Recorded verbatim (when
+# present) so `meta.invocation` can be reproduced by copy-paste, not just inferred
+# from the semantic keys.
+_RECORDED_ENV_VARS = ("PYTHONPATH", "VT_INT8_DYNAMIC", "VT_MODEL_DIR", "VT_PLATFORM")
+
+
+def _git_revision():
+    """Return (rev, dirty) for the source tree under test, or ("", False)."""
+    try:
+        rev = subprocess.run(
+            ["git", "-C", REPO_ROOT, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "-C", REPO_ROOT, "status", "--porcelain"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        return rev, bool(status)
+    except Exception:
+        return "", False
+
+
+def _reproduce_command() -> str:
+    """A single shell line that reruns this exact invocation, env included."""
+    env_prefix = " ".join(
+        f"{k}={shlex.quote(os.environ[k])}" for k in _RECORDED_ENV_VARS if k in os.environ
+    )
+    argv = ["python", os.path.relpath(__file__, REPO_ROOT)] + sys.argv[1:]
+    cmd = " ".join(shlex.quote(a) for a in argv)
+    return f"{env_prefix} {cmd}".strip()
 
 
 def eprint(*a, **k):
@@ -158,19 +195,24 @@ def char_edits(ref: str, hyp: str, normalize_numbers: bool = True) -> tuple[int,
 # ---------------------------------------------------------------------------
 def load_app_config() -> dict:
     path = os.path.join(REPO_ROOT, "config", "config.yaml")
+    _CONFIG_SOURCE.update(path=path, loaded=False, error="")
     try:
         import yaml
         with open(path) as f:
-            return yaml.safe_load(f) or {}
+            cfg = yaml.safe_load(f) or {}
+        _CONFIG_SOURCE["loaded"] = True
+        return cfg
     except Exception as e:
+        _CONFIG_SOURCE["error"] = str(e)
         eprint(f"[score] could not read {path}: {e}")
+        eprint("[score] falling back to built-in defaults; record the flags you passed")
         return {}
 
 
 # ---------------------------------------------------------------------------
 # Transcription via the real pipeline
 # ---------------------------------------------------------------------------
-def transcribe_clip(audio, blocks_ms: int) -> str:
+def transcribe_clip(audio, blocks_ms: int, skip_slm: bool = True) -> str:
     import numpy as np
     from micro_batcher import StreamingMicroBatcher
 
@@ -180,7 +222,7 @@ def transcribe_clip(audio, blocks_ms: int) -> str:
     block = max(1, int(blocks_ms / 1000.0 * TARGET_SR))
     for i in range(0, len(audio), block):
         batcher.feed_audio(audio[i:i + block])
-    return batcher.finish_and_get_text(skip_slm=True)
+    return batcher.finish_and_get_text(skip_slm=skip_slm)
 
 
 def load_audio(path: str):
@@ -222,6 +264,9 @@ def main():
     ap.add_argument("--no-number-digits", dest="num_digits", action="store_false")
     ap.add_argument("--raw-numbers", dest="norm_numbers", action="store_false", default=True,
                     help="disable spoken-number normalization in scoring")
+    ap.add_argument("--no-skip-slm", dest="skip_slm", action="store_false", default=True,
+                    help="run the optional SLM rewrite pass (default: skip it, as the "
+                         "154-clip baseline does)")
     ap.add_argument("--json", dest="json_out", default="", help="write full results JSON")
     ap.add_argument("--max-offenders", type=int, default=15)
     ap.add_argument("--verbose", action="store_true", help="do not silence model/pipeline stdout")
@@ -281,6 +326,11 @@ def main():
     eprint(f"backend      : {backend_name}  (VT_INT8_DYNAMIC={os.environ.get('VT_INT8_DYNAMIC', '0')})")
     eprint(f"number_digits: {bool(num_digits)} (config value: {cfg.get('number_digits', False)})")
     eprint(f"feed block   : {args.blocks_ms} ms")
+    eprint(f"skip_slm     : {bool(args.skip_slm)}")
+    _rev, _dirty = _git_revision()
+    eprint(f"git rev      : {_rev or '<unknown>'}{' (dirty)' if _dirty else ''}")
+    eprint(f"config source: {_CONFIG_SOURCE['path']} "
+           f"({'loaded' if _CONFIG_SOURCE['loaded'] else 'MISSING -> defaults'})")
 
     # ---- silence pipeline stdout while loading/running model ----
     devnull = open(os.devnull, "w")
@@ -298,7 +348,7 @@ def main():
             path = os.path.join(EVAL_DIR, e["path"])
             audio = load_audio(path)
             t1 = time.perf_counter()
-            hyp = transcribe_clip(audio, args.blocks_ms)
+            hyp = transcribe_clip(audio, args.blocks_ms, skip_slm=args.skip_slm)
             dt = time.perf_counter() - t1
             we, wr = word_edits(e["ref"], hyp, normalize_numbers=args.norm_numbers)
             ce, cr = char_edits(e["ref"], hyp, normalize_numbers=args.norm_numbers)
@@ -411,8 +461,18 @@ def main():
                 "backend": backend_name,
                 "int8_dynamic": os.environ.get("VT_INT8_DYNAMIC", "0"),
                 "number_digits": bool(num_digits),
+                "number_digits_config": cfg.get("number_digits", False),
                 "norm_numbers": args.norm_numbers,
                 "blocks_ms": args.blocks_ms,
+                "skip_slm": bool(args.skip_slm),
+                "device": args.device,
+                "git_rev": _rev,
+                "git_dirty": _dirty,
+                "config_source": dict(_CONFIG_SOURCE),
+                "manifest": os.path.relpath(args.manifest, REPO_ROOT),
+                "invocation": ["python", os.path.relpath(__file__, REPO_ROOT)] + sys.argv[1:],
+                "env": {k: os.environ[k] for k in _RECORDED_ENV_VARS if k in os.environ},
+                "reproduce": _reproduce_command(),
                 "overall_wer": overall_wer,
                 "overall_clean_wer": overall_clean_wer,
                 "overall_cer": overall_cer,

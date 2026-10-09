@@ -341,6 +341,8 @@ Mostly implemented; **the open work is integration, not features.**
 - [ ] **A4** Extend `eval/` with a `formatting` slice: input transcript → expected output,
       **including the four Wispr reference fixtures** from formatter §4.
       *Done = the parity gate is a regression test, not a one-off comparison.*
+      **Unblocked 2026-10-09:** the ASR baseline it would gate against has been regenerated and
+      is now self-describing (§4E finding 1), so a recorded manifest can be trusted again.
 
 ### 4B. Model registry — `refactor/model-registry`
 
@@ -828,11 +830,40 @@ slice. Measured on the real 154-clip set, all three configs, fresh.
 
 **Two findings from E that are not about Parakeet at all:**
 
-1. **`eval/results.json` is stale.** Re-running its exact config gives **3.57 %** WER, not
-   the recorded 5.10 %; the refs are identical but **85 of 154** hypotheses differ, so the app
-   changed underneath the baseline (post-processor/chunker drift since `b7f9ad4`). The app
-   improving is good news; a recorded baseline that no longer reproduces is not, because
-   A4/C7 want to gate regressions against it. **It needs regenerating.**
+1. ~~**`eval/results.json` is stale.**~~ **REGENERATED 2026-10-09 (`c409981`).** The old
+   baseline recorded **5.10 %** WER; the same config on the current tree reproduces
+   **3.57 %**, with **85 of 154** hypotheses changed and **0** references changed — so the app
+   moved underneath it, exactly as suspected (post-processor/chunker drift since `b7f9ad4`).
+   Attributed with evidence to the post-processor work landed since then (`f1376f3`
+   corrections, `424a1d8` cleanup modes, `58f4ab6` serial/NATO/spell + words-first numbers,
+   `eeecc31` 3-mode number formatting, `a5b6fd0` clause-boundary pause breaks): 32 of the 85
+   changes are punctuation/case-only and the rest are token-level (`three`→`3`,
+   `discovery recovery`→`discovery`).
+
+   | slice | n | old WER | new WER |
+   | --- | --- | --- | --- |
+   | clean | 44 | 2.81 % | 2.22 % |
+   | accented | 22 | 12.32 % | 9.42 % |
+   | noisy | 24 | 3.01 % | 2.73 % |
+   | **long** | 12 | 1.78 % | **2.19 % ⚠️ worse** |
+   | technical | 28 | 8.44 % | 4.26 % |
+   | technical_noisy | 12 | 8.12 % | 0.64 % |
+   | **overall (speech)** | **142** | **5.10 %** | **3.57 %** |
+   | silence hallucination | 12 | 0/12 | 0/12 |
+
+   CER 2.97 %→1.42 %, exact-match 54.23 %→69.72 %. `meta` is now **self-describing**
+   (backend, int8, number_digits + raw config value, blocks_ms, skip_slm, device, git rev +
+   dirty flag, config source and whether it was found, manifest, exact invocation), all keys
+   additive so older result files still load. Reproducibility was verified by a clean-tree
+   re-run at the commit: **0/154 hypothesis diffs**.
+
+   **Two open items this surfaced, neither fixed here:**
+   * the **`long` slice regressed** (1.78 %→2.19 %). Everything else improved, so this is a
+     real signal, not noise — worth a bisect before it is dismissed.
+   * an observed post-processor bug: the CIDR block `10.0.0.0/24` still comes out as
+     `10 000/24` (previously worse: `10.6. One.0.0.0 slash twenty four`). CIDR handling is
+     still wrong. Reported rather than fixed, because `src/` behaviour was deliberately out
+     of scope for the eval worker.
 2. **Silence did not hallucinate.** The plan warned sherpa-onnx needed its own silence guard
    because the decoder hallucinated on silence — that did not reproduce (0/12, and the raw
    decoder gives 0/12 too, so the guard is not what produces the zero). Worth knowing before
@@ -868,6 +899,36 @@ slice. Measured on the real 154-clip set, all three configs, fresh.
       control-API tests.*
       **Residual gaps:** `socket.getaddrinfo` is not guarded (DNS could still leak), and asyncio
       connects go through the loop's own `sock_connect`, bypassing the guard.
+- [ ] **X6** ⚠️ **A second `tests/shared` hermeticity hole — a "model-free" test loads the real
+      462 MiB formatter and leaks a `llama-server` on every run.** Found 2026-10-09 while
+      reviewing the eval merge, and **pre-existing**: it fails identically at `2140c50` in a
+      clean detached worktree, so it is not a regression from this session.
+
+      `tests/shared/test_formatter_settings.py::test_no_backend_means_the_text_passes_through`
+      was written against the **dropped C4 in-process backend**, whose module "is not
+      installed", and it deliberately does not stub the backend. Both of its premises died:
+      C3 shipped `llama-server` as the real backend and C2 added the
+      conventional-install-path fallback, so `FORMATTER_MODEL="s1-mini"` resolves the real
+      GGUF on any machine that has ever done a first-run install. Measured: `available("s1-mini")`
+      returns `True`, `_model_path` returns the installed `.gguf`, and the pipeline returns a
+      *formatted* transcript while the file's docstring still promises "Model-free throughout …
+      nothing here needs the 462 MiB GGUF".
+
+      Two consequences beyond the wrong assertion:
+      * **It leaks a process per run.** 42 orphaned `llama-server` processes (12 threads each)
+        were reparented to `systemd --user` before being killed. The user's *real* server is a
+        child of the live engine (pid given by `ps --ppid <engine>`), so orphans are
+        distinguishable by parent — never blanket-`pkill` these.
+      * **It is load-dependent, which is why it survived.** A preceding failed spawn arms
+        `_state["spawn_failed_at"]`, after which `available()` returns `False` for
+        `_SPAWN_RETRY_COOLDOWN_S` (60 s) — so a loaded machine makes the test pass. It reported
+        all-green in at least three separate runs before it was caught. **A green run of this
+        tier is not evidence.**
+
+      *Done = the test forces "no backend available" by construction (`available() -> False`,
+      not "the machine has no model"), any other test in the file that can reach the real
+      backend is fixed too, and a pin proves the shared tier cannot spawn a real server —
+      verified by running the tier twice and showing `pgrep -c llama-server` does not grow.*
 
 ---
 
