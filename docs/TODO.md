@@ -15,6 +15,10 @@ are looking at before you file an issue.
 `- [x]` items are kept for the record of *how* something was validated, not as a
 changelog; see [`CHANGELOG.md`](CHANGELOG.md) for what shipped in each release.
 
+> **Looking for the feature-parity work (formatter, diarization, ASR bake-off)?** That has its
+own resumable task list: [`TODO-parity.md`](TODO-parity.md). This file stays what it is — the
+limitations and verification log.
+
 ---
 
 - [ ] **Pause-separated lists are paragraphs, not bullets (post-processing).** Segment boundaries are now carried end-to-end (hard silence cut, soft energy-trough cut) and `blocks` mode turns them into paragraph/line breaks, verified by model-free tests in `tests/shared/test_structure_blocks.py`. What is *not* done: promoting a run of pause-separated short fragments to a bullet list, and using the measured gap in milliseconds (the batcher currently reports the *kind* of cut, not its duration). Both need a confidence rule that has been measured against real dictation, not invented. The e2e behaviour with real audio has also not been re-run since the sentinel was introduced: the worktree has no weights, so `tests/e2e/` could not be executed. Run `./scripts/test.sh e2e` on a machine with the model before trusting the pause path end-to-end.
