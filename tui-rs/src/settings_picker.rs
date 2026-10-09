@@ -32,6 +32,10 @@ pub enum SettingKind {
     OutputMode,
     PunctuationMode,
     StructureMode,
+    Formatter,
+    FormatterModel,
+    FormatterStyle,
+    FormatterContext,
     CleanupMode,
     Theme,
     Microphone,
@@ -48,7 +52,7 @@ pub struct SettingItem {
     pub keywords: &'static str,
 }
 
-pub const SETTINGS: [SettingItem; 17] = [
+pub const SETTINGS: [SettingItem; 21] = [
     // NOTE: icons must be exactly one glyph whose *own* codepoint already
     // occupies its final width in every terminal - never a `U+FE0F`
     // variation-selector sequence and never a ZWJ sequence. Terminals that
@@ -69,6 +73,30 @@ pub const SETTINGS: [SettingItem; 17] = [
         icon: "•",
         title: "List Formatting",
         keywords: "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
+    },
+    SettingItem {
+        kind: SettingKind::Formatter,
+        icon: "•",
+        title: "Formatter",
+        keywords: "formatter format rewrite rewrite transcript local slm llm cleanup deterministic off on",
+    },
+    SettingItem {
+        kind: SettingKind::FormatterModel,
+        icon: "•",
+        title: "Formatter Model",
+        keywords: "formatter model backend slm llm local s1-mini llama-server rewrite",
+    },
+    SettingItem {
+        kind: SettingKind::FormatterStyle,
+        icon: "•",
+        title: "Formatter Style",
+        keywords: "formatter style writing casual semi-casual semi-formal formal tone rewrite",
+    },
+    SettingItem {
+        kind: SettingKind::FormatterContext,
+        icon: "•",
+        title: "Formatter Context",
+        keywords: "formatter context general email message writing rewrite",
     },
     SettingItem {
         kind: SettingKind::CleanupMode,
@@ -187,9 +215,17 @@ impl SettingItem {
             }
             SettingKind::AutoPunctuate => {
                 if app.auto_punctuate {
-                    ("Full punctuation + period".to_string(), "[ON]", Color::Green)
+                    (
+                        "Full punctuation + period".to_string(),
+                        "[ON]",
+                        Color::Green,
+                    )
                 } else {
-                    ("Respect the mode preset".to_string(), "[OFF]", Color::DarkGray)
+                    (
+                        "Respect the mode preset".to_string(),
+                        "[OFF]",
+                        Color::DarkGray,
+                    )
                 }
             }
             SettingKind::NumberDigits => match app.number_mode.as_str() {
@@ -232,7 +268,11 @@ impl SettingItem {
                         Color::Green,
                     )
                 } else {
-                    ("Spell command ignored".to_string(), "[OFF]", Color::DarkGray)
+                    (
+                        "Spell command ignored".to_string(),
+                        "[OFF]",
+                        Color::DarkGray,
+                    )
                 }
             }
             SettingKind::TypingWpm => {
@@ -302,27 +342,19 @@ impl SettingItem {
                 // tests/shared/test_mode_presets.py keep this in step with
                 // post_processor.apply_punctuation_mode().
                 let (desc, badge, color) = match app.punctuation_mode.as_str() {
-                    "no_terminal_period" | "casual" => (
-                        "\"Hey, how are you? I'm good\"",
-                        "[CASUAL]",
-                        Color::Yellow,
-                    ),
+                    "no_terminal_period" | "casual" => {
+                        ("\"Hey, how are you? I'm good\"", "[CASUAL]", Color::Yellow)
+                    }
                     "no_punctuation" | "autocorrect" => {
                         ("\"Hey how are you I'm good\"", "[PHONE]", Color::Blue)
                     }
-                    "aesthetic_lowercase" | "aesthetic" => (
-                        "\"hey, how are you? i'm good\"",
-                        "[AESTH]",
-                        Color::Magenta,
-                    ),
+                    "aesthetic_lowercase" | "aesthetic" => {
+                        ("\"hey, how are you? i'm good\"", "[AESTH]", Color::Magenta)
+                    }
                     "lowercase_no_punctuation" | "gen_z" => {
                         ("\"hey how are you i'm good\"", "[GEN Z]", Color::Cyan)
                     }
-                    _ => (
-                        "\"Hey, how are you? I'm good.\"",
-                        "[DEFAULT]",
-                        Color::Green,
-                    ),
+                    _ => ("\"Hey, how are you? I'm good.\"", "[DEFAULT]", Color::Green),
                 };
                 (desc.to_string(), badge, color)
             }
@@ -359,6 +391,42 @@ impl SettingItem {
                 };
                 (desc.to_string(), badge, color)
             }
+            // Formatter labels (spec): "Off: deterministic cleanup only",
+            // "Rewrites the transcript on this machine", "Backend: {value}",
+            // "Writing style: {value}", "Context: {value}".
+            SettingKind::Formatter => {
+                // Spec: docs/plan-on-device-formatter.md. The formatter is the
+                // only component in the codebase that may invent text, so "off"
+                // is the shipped default: deterministic cleanup only.
+                if app.formatter == "on" {
+                    (
+                        "Rewrites the transcript on this machine".to_string(),
+                        "[ON]",
+                        Color::Green,
+                    )
+                } else {
+                    (
+                        "Off: deterministic cleanup only".to_string(),
+                        "[OFF]",
+                        Color::DarkGray,
+                    )
+                }
+            }
+            SettingKind::FormatterModel => (
+                format!("Backend: {}", app.formatter_model),
+                "[MODEL]",
+                Color::Cyan,
+            ),
+            SettingKind::FormatterStyle => (
+                format!("Writing style: {}", app.formatter_style),
+                "[STYLE]",
+                Color::Cyan,
+            ),
+            SettingKind::FormatterContext => (
+                format!("Context: {}", app.formatter_context),
+                "[CONTEXT]",
+                Color::Cyan,
+            ),
             SettingKind::Theme => {
                 let name = app.ui_theme.name();
                 (format!("{} palette", name), "[PICKER]", c)
@@ -401,11 +469,7 @@ impl SettingItem {
             }
             SettingKind::ResetDefaults => {
                 if state.defaults_done {
-                    (
-                        "All settings restored".to_string(),
-                        "[DONE]",
-                        Color::Green,
-                    )
+                    ("All settings restored".to_string(), "[DONE]", Color::Green)
                 } else if state.confirm_defaults {
                     (
                         "Press Enter again to confirm".to_string(),
@@ -490,7 +554,9 @@ fn setting_row(
     if is_selected {
         spans.push(Span::styled(
             "❯ ",
-            Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme_color)
+                .add_modifier(Modifier::BOLD),
         ));
     } else {
         spans.push(Span::raw("  "));
@@ -504,9 +570,13 @@ fn setting_row(
 
     // Title column.
     let title_style = if is_selected {
-        Style::default().fg(theme_color).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme_color)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
     };
     spans.push(Span::styled(
         textfit::fit(item.title, layout.title_w),
@@ -720,8 +790,8 @@ impl SettingsPickerState {
 
         // Arming the destructive factory reset survives only until the next
         // keystroke that is not the confirming Enter/Space.
-        let is_activate = key.code == KeyCode::Enter
-            || (key.code == KeyCode::Char(' ') && self.query.is_empty());
+        let is_activate =
+            key.code == KeyCode::Enter || (key.code == KeyCode::Char(' ') && self.query.is_empty());
         if !is_activate {
             self.confirm_defaults = false;
         }
@@ -846,10 +916,16 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme_color).add_modifier(Modifier::BOLD))
+        .border_style(
+            Style::default()
+                .fg(theme_color)
+                .add_modifier(Modifier::BOLD),
+        )
         .title(Span::styled(
             " ⚙️  Settings & Configuration ",
-            Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme_color)
+                .add_modifier(Modifier::BOLD),
         ));
 
     // Paragraph never clips to the frame buffer, so the inner rect has to be
@@ -874,7 +950,9 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
         Span::styled(" 🔍 ", Style::default().fg(theme_color)),
         Span::styled(
             "Filter: ",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         ),
     ];
     if state.query.is_empty() {
@@ -885,7 +963,9 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
     } else {
         search_spans.push(Span::styled(
             &state.query,
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ));
         search_spans.push(Span::styled("█", Style::default().fg(theme_color)));
     }
@@ -902,9 +982,15 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
     let list_area = chunks[2];
     if state.filtered_indices.is_empty() {
         let no_match = Paragraph::new(Line::from(vec![
-            Span::styled("  No settings match '", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "  No settings match '",
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::styled(&state.query, Style::default().fg(Color::Yellow)),
-            Span::styled("'. Press Backspace or Esc.", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "'. Press Backspace or Esc.",
+                Style::default().fg(Color::DarkGray),
+            ),
         ]));
         frame.render_widget(no_match, list_area);
     } else {
@@ -955,7 +1041,10 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
         Span::styled(" [↑/↓] ", Style::default().fg(Color::Cyan)),
         Span::styled("Navigate   ", Style::default().add_modifier(Modifier::DIM)),
         Span::styled("[Enter/Space] ", Style::default().fg(Color::Green)),
-        Span::styled("Toggle/Action   ", Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(
+            "Toggle/Action   ",
+            Style::default().add_modifier(Modifier::DIM),
+        ),
         Span::styled("[Type] ", Style::default().fg(Color::Cyan)),
         Span::styled("Filter   ", Style::default().add_modifier(Modifier::DIM)),
         Span::styled("[Esc] ", Style::default().fg(Color::Red)),
@@ -980,10 +1069,16 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
         let p_block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme_color).add_modifier(Modifier::BOLD))
+            .border_style(
+                Style::default()
+                    .fg(theme_color)
+                    .add_modifier(Modifier::BOLD),
+            )
             .title(Span::styled(
                 " ⚡ Typing Speed (WPM) ",
-                Style::default().fg(theme_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme_color)
+                    .add_modifier(Modifier::BOLD),
             ));
 
         let p_inner = p_block.inner(prompt_area);
@@ -1000,36 +1095,59 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
             ])
             .split(p_inner);
 
-        let prompt_label = Line::from(vec![
-            Span::styled(" Enter typing speed in words/minute:", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        ]);
+        let prompt_label = Line::from(vec![Span::styled(
+            " Enter typing speed in words/minute:",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )]);
         frame.render_widget(Paragraph::new(prompt_label), p_chunks[0]);
 
-        let sep1 = Line::from(vec![
-            Span::styled("─".repeat(p_inner.width as usize), Style::default().fg(Color::DarkGray)),
-        ]);
+        let sep1 = Line::from(vec![Span::styled(
+            "─".repeat(p_inner.width as usize),
+            Style::default().fg(Color::DarkGray),
+        )]);
         frame.render_widget(Paragraph::new(sep1), p_chunks[1]);
 
         let input_spans = if input.is_empty() {
             vec![
-                Span::styled(" ❯ ", Style::default().fg(theme_color).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("{}", app.typing_wpm), Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    " ❯ ",
+                    Style::default()
+                        .fg(theme_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{}", app.typing_wpm),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
                 Span::styled("█", Style::default().fg(theme_color)),
                 Span::styled(" words/min (current)", Style::default().fg(Color::DarkGray)),
             ]
         } else {
             vec![
-                Span::styled(" ❯ ", Style::default().fg(theme_color).add_modifier(Modifier::BOLD)),
-                Span::styled(input.clone(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    " ❯ ",
+                    Style::default()
+                        .fg(theme_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    input.clone(),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("█", Style::default().fg(theme_color)),
                 Span::styled(" words/min", Style::default().fg(Color::Cyan)),
             ]
         };
         frame.render_widget(Paragraph::new(Line::from(input_spans)), p_chunks[2]);
 
-        let sep2 = Line::from(vec![
-            Span::styled("─".repeat(p_inner.width as usize), Style::default().fg(Color::DarkGray)),
-        ]);
+        let sep2 = Line::from(vec![Span::styled(
+            "─".repeat(p_inner.width as usize),
+            Style::default().fg(Color::DarkGray),
+        )]);
         frame.render_widget(Paragraph::new(sep2), p_chunks[3]);
 
         let footer = Line::from(vec![
@@ -1211,6 +1329,38 @@ pub fn run_settings_picker(
                                         }
                                     }
                                 }
+                                SettingKind::Formatter => {
+                                    app.cycle_formatter();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_formatter").is_err() {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
+                                SettingKind::FormatterModel => {
+                                    app.cycle_formatter_model();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_formatter_model").is_err() {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
+                                SettingKind::FormatterStyle => {
+                                    app.cycle_formatter_style();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_formatter_style").is_err() {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
+                                SettingKind::FormatterContext => {
+                                    app.cycle_formatter_context();
+                                    if let Some(w) = writer {
+                                        if ipc::send_cmd(w, "cycle_formatter_context").is_err() {
+                                            app.should_quit = true;
+                                        }
+                                    }
+                                }
                                 SettingKind::OutputMode => {
                                     app.cycle_output_mode();
                                     if let Some(w) = writer {
@@ -1222,11 +1372,7 @@ pub fn run_settings_picker(
                                 SettingKind::PunctuationMode => {
                                     // Nested preset picker modal.
                                     let _ = hand_over_screen(&mut terminal, || {
-                                        crate::preset_picker::run_preset_picker(
-                                            writer,
-                                            rx,
-                                            app,
-                                        )
+                                        crate::preset_picker::run_preset_picker(writer, rx, app)
                                     });
                                 }
                                 SettingKind::Theme => {
@@ -1265,7 +1411,8 @@ pub fn run_settings_picker(
                                     }
                                     state.reset_done = true;
                                     let _ = crossterm::terminal::enable_raw_mode();
-                                    let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Hide);
+                                    let _ =
+                                        crossterm::execute!(io::stdout(), crossterm::cursor::Hide);
                                     let _ = terminal.clear();
                                 }
                                 SettingKind::ResetDefaults => {
@@ -1356,7 +1503,9 @@ mod tests {
         let state2 = SettingsPickerState::new();
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
-        terminal.draw(|f| render_settings_picker(f, &state2, &app)).unwrap();
+        terminal
+            .draw(|f| render_settings_picker(f, &state2, &app))
+            .unwrap();
     }
 
     /// A terminal shorter than the popup's minimum used to panic: the centered
@@ -1395,7 +1544,9 @@ mod tests {
         // Render with prompt active
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
-        terminal.draw(|f| render_settings_picker(f, &state, &app)).unwrap();
+        terminal
+            .draw(|f| render_settings_picker(f, &state, &app))
+            .unwrap();
 
         // Type '6', '5'
         state.handle_key(KeyEvent::new(KeyCode::Char('6'), KeyModifiers::NONE));
@@ -1500,7 +1651,12 @@ mod tests {
             // The microphone row shows user data (a device name), which can be
             // longer than any column by nature.
             if kind != SettingKind::Microphone && textfit::width(&desc) > layout.desc_w {
-                clipped.push(format!("{:?} ({} > {})", desc, textfit::width(&desc), layout.desc_w));
+                clipped.push(format!(
+                    "{:?} ({} > {})",
+                    desc,
+                    textfit::width(&desc),
+                    layout.desc_w
+                ));
             }
             assert!(
                 textfit::width(item.title) <= layout.title_w,
@@ -1636,6 +1792,90 @@ mod tests {
     }
 
     #[test]
+    fn test_formatter_previews_match_the_spec() {
+        // Spec: docs/plan-on-device-formatter.md, enforced on the Python side by
+        // tests/shared/test_formatter.py and tests/shared/test_config_sync.py.
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        let idle = SettingsPickerState::new();
+
+        let formatter = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::Formatter)
+            .unwrap();
+        app.formatter = "off".to_string();
+        let (desc, badge, _) = formatter.value_and_badge(&app, &idle);
+        assert_eq!(desc, "Off: deterministic cleanup only");
+        assert_eq!(badge, "[OFF]");
+        app.formatter = "on".to_string();
+        let (desc, badge, _) = formatter.value_and_badge(&app, &idle);
+        assert_eq!(desc, "Rewrites the transcript on this machine");
+        assert_eq!(badge, "[ON]");
+
+        let model = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::FormatterModel)
+            .unwrap();
+        for value in ["s1-mini", "llama-server"] {
+            app.formatter_model = value.to_string();
+            let (desc, badge, _) = model.value_and_badge(&app, &idle);
+            assert_eq!(desc, format!("Backend: {value}"));
+            assert_eq!(badge, "[MODEL]");
+        }
+
+        let style = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::FormatterStyle)
+            .unwrap();
+        for value in ["casual", "semi-casual", "semi-formal", "formal"] {
+            app.formatter_style = value.to_string();
+            let (desc, badge, _) = style.value_and_badge(&app, &idle);
+            assert_eq!(desc, format!("Writing style: {value}"));
+            assert_eq!(badge, "[STYLE]");
+        }
+
+        let context = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::FormatterContext)
+            .unwrap();
+        for value in ["general", "email"] {
+            app.formatter_context = value.to_string();
+            let (desc, badge, _) = context.value_and_badge(&app, &idle);
+            assert_eq!(desc, format!("Context: {value}"));
+            assert_eq!(badge, "[CONTEXT]");
+        }
+
+        // The optimistic local cycles must only ever produce values the engine
+        // knows, and must round-trip.
+        app.formatter = "off".to_string();
+        app.cycle_formatter();
+        assert_eq!(app.formatter, "on");
+        app.cycle_formatter();
+        assert_eq!(app.formatter, "off");
+
+        app.formatter_model = "s1-mini".to_string();
+        app.cycle_formatter_model();
+        assert_eq!(app.formatter_model, "llama-server");
+        app.cycle_formatter_model();
+        assert_eq!(app.formatter_model, "s1-mini");
+
+        app.formatter_style = "casual".to_string();
+        app.cycle_formatter_style();
+        assert_eq!(app.formatter_style, "semi-casual");
+        app.cycle_formatter_style();
+        assert_eq!(app.formatter_style, "semi-formal");
+        app.cycle_formatter_style();
+        assert_eq!(app.formatter_style, "formal");
+        app.cycle_formatter_style();
+        assert_eq!(app.formatter_style, "casual");
+
+        app.formatter_context = "general".to_string();
+        app.cycle_formatter_context();
+        assert_eq!(app.formatter_context, "email");
+        app.cycle_formatter_context();
+        assert_eq!(app.formatter_context, "general");
+    }
+
+    #[test]
     fn test_cleanup_previews_match_the_spec() {
         // Spec: docs/cleanup_modes.md, enforced on the Python side by
         // tests/shared/test_cleanup_modes.py.
@@ -1679,12 +1919,12 @@ mod tests {
             .find(|i| i.kind == SettingKind::PunctuationMode)
             .unwrap();
         let expected = [
+            ("full", "\"Hey, how are you? I'm good.\"", "[DEFAULT]"),
             (
-                "full",
-                "\"Hey, how are you? I'm good.\"",
-                "[DEFAULT]",
+                "no_terminal_period",
+                "\"Hey, how are you? I'm good\"",
+                "[CASUAL]",
             ),
-            ("no_terminal_period", "\"Hey, how are you? I'm good\"", "[CASUAL]"),
             ("no_punctuation", "\"Hey how are you I'm good\"", "[PHONE]"),
             (
                 "aesthetic_lowercase",
@@ -1724,11 +1964,7 @@ mod tests {
         done.reset_done = true;
         done.defaults_done = true;
 
-        for state in [
-            SettingsPickerState::new(),
-            armed,
-            done,
-        ] {
+        for state in [SettingsPickerState::new(), armed, done] {
             for total in [34usize, 44, 64, 70, 76, 96, 130] {
                 let layout = RowLayout::new(total);
                 assert_eq!(
@@ -1742,8 +1978,15 @@ mod tests {
                 for item in SETTINGS.iter() {
                     let (val, badge, color) = item.value_and_badge(&app, &state);
                     for is_selected in [true, false] {
-                        let line =
-                            setting_row(item, &val, badge, color, is_selected, Color::Cyan, &layout);
+                        let line = setting_row(
+                            item,
+                            &val,
+                            badge,
+                            color,
+                            is_selected,
+                            Color::Cyan,
+                            &layout,
+                        );
                         assert_eq!(
                             line.width(),
                             expected,
@@ -1771,7 +2014,10 @@ mod tests {
         // One activation is enough: unlike the factory reset there is nothing
         // destructive about re-enumerating devices, so it must not need arming.
         let action = state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(action, SettingsPickerAction::Toggle(SettingKind::RescanMics));
+        assert_eq!(
+            action,
+            SettingsPickerAction::Toggle(SettingKind::RescanMics)
+        );
         assert!(!state.confirm_defaults);
         assert!(!state.mic_rescan_done);
     }

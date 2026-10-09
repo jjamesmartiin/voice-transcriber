@@ -194,6 +194,14 @@ pub struct App {
     pub punctuation_mode: String,
     /// Configured list-formatting mode ("off"/"inline"/"blocks").
     pub structure_mode: String,
+    /// Configured formatter toggle ("off"/"on").
+    pub formatter: String,
+    /// Configured formatter backend identifier (e.g. "s1-mini").
+    pub formatter_model: String,
+    /// Configured formatter writing style ("casual"/"semi-casual"/"semi-formal"/"formal").
+    pub formatter_style: String,
+    /// Configured formatter context ("general"/"email").
+    pub formatter_context: String,
     /// Configured cleanup mode ("off"/"artifacts"/"full"): how much of the
     /// post-processing pass may change the words. See docs/cleanup_modes.md.
     pub cleanup_mode: String,
@@ -259,6 +267,10 @@ impl App {
             middle_click_enabled: false,
             punctuation_mode: "full".to_string(),
             structure_mode: "off".to_string(),
+            formatter: "off".to_string(),
+            formatter_model: "s1-mini".to_string(),
+            formatter_style: "semi-formal".to_string(),
+            formatter_context: "general".to_string(),
             cleanup_mode: "full".to_string(),
             sound_theme: "proximity".to_string(),
             ui_theme,
@@ -333,7 +345,9 @@ impl App {
     /// visual fall-off independent of message cadence.
     fn vu_decay(&mut self) -> f32 {
         let now = Instant::now();
-        let dt = now.saturating_duration_since(self.vu_last_update).as_secs_f32();
+        let dt = now
+            .saturating_duration_since(self.vu_last_update)
+            .as_secs_f32();
         self.vu_last_update = now;
         decay_factor(dt)
     }
@@ -413,6 +427,62 @@ impl App {
         &self.structure_mode
     }
 
+    /// Advance the formatter toggle between the two states the engine knows
+    /// (``formatter.BACKENDS`` gates the rewrite; ``off`` disables it). The
+    /// engine is authoritative and replies with a `cfg` that overwrites this
+    /// optimistic value.
+    pub fn cycle_formatter(&mut self) -> &str {
+        const FORMATTER_MODES: [&str; 2] = ["off", "on"];
+        let idx = FORMATTER_MODES
+            .iter()
+            .position(|m| *m == self.formatter)
+            .map(|i| (i + 1) % FORMATTER_MODES.len())
+            .unwrap_or(0);
+        self.formatter = FORMATTER_MODES[idx].to_string();
+        &self.formatter
+    }
+
+    /// Advance the formatter backend through the two shipped names. The engine
+    /// is authoritative and replies with a `cfg` that overwrites this value.
+    pub fn cycle_formatter_model(&mut self) -> &str {
+        const FORMATTER_MODELS: [&str; 2] = ["s1-mini", "llama-server"];
+        let idx = FORMATTER_MODELS
+            .iter()
+            .position(|m| *m == self.formatter_model)
+            .map(|i| (i + 1) % FORMATTER_MODELS.len())
+            .unwrap_or(0);
+        self.formatter_model = FORMATTER_MODELS[idx].to_string();
+        &self.formatter_model
+    }
+
+    /// Advance the formatter writing style through the four the engine knows.
+    /// The engine is authoritative and replies with a `cfg` that overwrites
+    /// this optimistic value.
+    pub fn cycle_formatter_style(&mut self) -> &str {
+        const FORMATTER_STYLES: [&str; 4] = ["casual", "semi-casual", "semi-formal", "formal"];
+        let idx = FORMATTER_STYLES
+            .iter()
+            .position(|m| *m == self.formatter_style)
+            .map(|i| (i + 1) % FORMATTER_STYLES.len())
+            .unwrap_or(0);
+        self.formatter_style = FORMATTER_STYLES[idx].to_string();
+        &self.formatter_style
+    }
+
+    /// Advance the formatter context between the two the engine knows. The
+    /// engine is authoritative and replies with a `cfg` that overwrites this
+    /// optimistic value.
+    pub fn cycle_formatter_context(&mut self) -> &str {
+        const FORMATTER_CONTEXTS: [&str; 2] = ["general", "email"];
+        let idx = FORMATTER_CONTEXTS
+            .iter()
+            .position(|m| *m == self.formatter_context)
+            .map(|i| (i + 1) % FORMATTER_CONTEXTS.len())
+            .unwrap_or(0);
+        self.formatter_context = FORMATTER_CONTEXTS[idx].to_string();
+        &self.formatter_context
+    }
+
     /// Advance the cleanup mode through the three the engine knows
     /// (``t2.CLEANUP_MODES == ["off", "artifacts", "full"]``). As with the other
     /// cycles, the engine is authoritative and replies with a `cfg` that
@@ -429,7 +499,7 @@ impl App {
     }
 
     #[allow(dead_code)] // retained to mirror Python's `cycle_punctuation`; the
-    // preset modal owns punctuation selection on this frontend.
+                        // preset modal owns punctuation selection on this frontend.
     pub fn cycle_punctuation(&mut self) {
         self.punctuation_mode = match self.punctuation_mode.as_str() {
             "full" | "default" => "no_terminal_period".to_string(),
@@ -469,9 +539,7 @@ impl App {
         match wire {
             Wire::Tx { .. } | Wire::Ev { .. } => self.pending_output.push(wire),
             Wire::Devices { devices } => self.update_devices(devices),
-            Wire::State { state, sub } => {
-                self.update_state(RunState::from_wire(&state), sub)
-            }
+            Wire::State { state, sub } => self.update_state(RunState::from_wire(&state), sub),
             Wire::Vu { level, levels } => self.apply_vu_wire(level, levels.as_deref()),
             Wire::Cfg {
                 mic,
@@ -484,6 +552,10 @@ impl App {
                 ui_theme,
                 punctuation_mode,
                 structure_mode,
+                formatter,
+                formatter_model,
+                formatter_style,
+                formatter_context,
                 cleanup_mode,
                 trailing_space,
                 auto_punctuate,
@@ -505,6 +577,10 @@ impl App {
                 ui_theme,
                 punctuation_mode,
                 structure_mode,
+                formatter,
+                formatter_model,
+                formatter_style,
+                formatter_context,
                 cleanup_mode,
                 trailing_space,
                 auto_punctuate,
@@ -555,6 +631,10 @@ impl App {
         ui_theme: Option<String>,
         punctuation_mode: Option<String>,
         structure_mode: Option<String>,
+        formatter: Option<String>,
+        formatter_model: Option<String>,
+        formatter_style: Option<String>,
+        formatter_context: Option<String>,
         cleanup_mode: Option<String>,
         trailing_space: Option<bool>,
         auto_punctuate: Option<bool>,
@@ -583,7 +663,11 @@ impl App {
             self.auto_type = self.output_mode == "type" || self.output_mode == "type_fast";
         } else if let Some(a) = auto_type {
             self.auto_type = a;
-            self.output_mode = if a { "type".to_string() } else { "clipboard".to_string() };
+            self.output_mode = if a {
+                "type".to_string()
+            } else {
+                "clipboard".to_string()
+            };
         }
         if let Some(s) = sound_theme {
             self.sound_theme = s;
@@ -598,6 +682,18 @@ impl App {
         }
         if let Some(s) = structure_mode {
             self.structure_mode = s;
+        }
+        if let Some(f) = formatter {
+            self.formatter = f;
+        }
+        if let Some(m) = formatter_model {
+            self.formatter_model = m;
+        }
+        if let Some(s) = formatter_style {
+            self.formatter_style = s;
+        }
+        if let Some(c) = formatter_context {
+            self.formatter_context = c;
         }
         if let Some(c) = cleanup_mode {
             self.cleanup_mode = c;
@@ -745,7 +841,10 @@ mod tests {
         let mut app = App::new("1.1.1", Theme::Cyan);
         assert!(!app.audio_devices.is_empty());
         app.update_devices(None);
-        assert!(!app.audio_devices.is_empty(), "absent list is not an update");
+        assert!(
+            !app.audio_devices.is_empty(),
+            "absent list is not an update"
+        );
         app.update_devices(Some(Vec::new()));
         assert!(app.audio_devices.is_empty(), "empty list clears the rows");
     }

@@ -217,6 +217,30 @@ Mostly implemented; **the open work is integration, not features.**
 
       `off` and `inline` are provably untouched — they flatten every pause to a space, pinned
       by a test. 1197 passed, 2 skipped; ruff clean; `cargo test` 51 passed.
+- [ ] **A6** *(new, found while doing C5)* **"Reset to Defaults" does not take effect until the
+      next launch, and its punctuation target differs from the first-run default.**
+      `t2.reset_to_defaults()` assigns `PUNCTUATION_MODE` but never pushes it to the
+      post-processor, which keeps its own copy - so the running app carries on with the old
+      preset while `save_audio_config()` has already written the new one to disk. Restart and
+      the preset changes, which is exactly the kind of delayed-action surprise that is hard to
+      attribute.
+
+      Compounding it: `DEFAULT_SETTINGS['PUNCTUATION_MODE']` is `"no_punctuation"` while the
+      module global, `config/config.yaml` and `docs/mode_presets.md` (canonical id `full`, badge
+      `[DEFAULT]`, aliases `default`/`standard`) all say the shipped default is `full`. That
+      difference is **deliberate** - `test_settings_menu.py::
+      test_shipped_defaults_are_the_intended_baseline` says "The reset target is a product
+      decision, not an incidental value" - so the reset target and the first-run default are
+      intentionally different values. Worth a second look on its own merits, but not to be
+      "fixed" by matching them up.
+
+      **Why this was not fixed here:** adding the missing push is arguably more correct, and it
+      was tried - but it is a behaviour change outside the formatter workstream, and it exposed
+      order-dependent leakage in several tests that mutate settings globals
+      (`test_settings_menu.py`, `test_time_saved.py`) without restoring the renderer's copies.
+      Chasing that destabilised the suite for no C5 benefit, so it was reverted and recorded
+      instead. *Done = the reset pushes every setting it changes, one place owns the two
+      defaults, and the leaking fixtures restore what they touch.*
 - [ ] **A4** Extend `eval/` with a `formatting` slice: input transcript → expected output,
       **including the four Wispr reference fixtures** from formatter §4.
       *Done = the parity gate is a regression test, not a one-off comparison.*
@@ -306,9 +330,34 @@ Detail: [`plan-on-device-formatter.md`](plan-on-device-formatter.md).
       *The latency half of the exit criteria needs the 462 MiB GGUF and is folded into C2.*
 - [ ] **C4** `formatters/s1_mini.py` — in-process fallback, baselined against C3.
       *Done = a measured throughput comparison; that measurement picks the documented default.*
-- [ ] **C5** Settings end-to-end (`formatter`, `formatter_model`, `formatter_style`,
-      `formatter_context`; `structure_mode` supplies the third control axis). *Done = `off`
-      byte-identical, both TUIs, `help --json`, configured-vs-effective in `status`.*
+- [x] **C5** Settings end-to-end (`formatter`, `formatter_model`, `formatter_style`,
+      `formatter_context`; `structure_mode` supplies the third control axis). **DONE.**
+      Surface count, all wired: `config/config.yaml` + the documented example, `t2.py`
+      (globals, `DEFAULT_SETTINGS`, load/save, `VT_FORMATTER*` env overrides, getters/setters,
+      cycles, `_push_formatter_settings()`), the integration point in
+      `post_processor.clean_speech_transcription()` (after deterministic cleanup, before the
+      structure stage), 4 control verbs + `status`, `main.py` (verb dispatch, cycle callbacks,
+      status fields), both Python TUIs, and the ratatui modal.
+
+      **The `off` guarantee is pinned by the test that matters:** with `formatter: off` the
+      backend is never consulted, *and* the same input demonstrably changes when it is on - so
+      the test cannot pass on a broken no-op. `cleanup_mode: off` is a second hard gate
+      (it promises nothing is deleted; the formatter's whole job is deleting), and
+      `get_effective_formatter()` reports that distinction so an inert `formatter: on` is
+      visible in `status` rather than looking like a broken feature.
+
+      Two findings along the way:
+      * **Guardrail 3b added.** `plan-on-device-formatter.md` §7.3 contradicted itself -
+        "list markup is stripped to prose" vs "not something to silently strip". The
+        clarification wins: with `structure: prose` requested, list markup in the answer is now
+        a **validation failure** (fall back to the unformatted text), not silent stripping -
+        stripping would hide a prompt that no longer matches the trained format.
+      * **The Rust settings box cost nothing to parallelise** because the two halves touch
+        disjoint files, so a subagent took the ratatui side against a frozen label contract.
+        It reformatted five unrelated files to satisfy a crate-wide `cargo fmt --check`; that
+        criterion was mine and was wrong (`cargo fmt` is *not* enforced here - it is only a dev
+        tool in the flake), so the churn was reverted. Rust is held to Python by a source-level
+        parity guard now, like the structure row.
 - [ ] **C6** Publish the model bundle + first-use download prompt stating the size.
       *Done = a clean machine can enable the formatter and then work offline.*
 - [ ] **C7** `eval/` parity gate + latency numbers per hardware tier (A4 overlaps).

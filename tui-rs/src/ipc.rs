@@ -11,7 +11,9 @@
 //!   {"t":"vu","level":0.42}
 //!   {"t":"vu","level":0.42,"levels":[{"i":4,"level":0.0},{"i":5,"level":0.44}]}
 //!   {"t":"cfg","mic":"...","secondary":"...","backend":"cohere",
-//!    "muted":true,"auto_type":false,"sound_theme":"proximity","ui_theme":"auto"}
+//!    "muted":true,"auto_type":false,"sound_theme":"proximity","ui_theme":"auto",
+//!    "formatter":"off","formatter_model":"s1-mini","formatter_style":"semi-formal",
+//!    "formatter_context":"general"}
 //!   {"t":"tx","text":"...","rec":3.2,"proc":1.35,"ready":0.62,"status":"typed"}
 //!   {"t":"ev","title":"...","message":"...","level":"info"}
 //!   {"t":"suspend"} / {"t":"resume"} / {"t":"quit"}
@@ -50,6 +52,11 @@ pub struct VuLevel {
     pub level: f32,
 }
 
+// `cfg` mirrors Python's optional config fields one-for-one, so it is
+// deliberately much larger than the other variants. One `Wire` is handled per
+// channel message and `IpcEvent` already boxes it, so boxing the config fields
+// individually would add indirection without meaningfully reducing stack use.
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize, Debug)]
 #[serde(tag = "t")]
 pub enum Wire {
@@ -99,6 +106,19 @@ pub enum Wire {
         /// "inline" while typing, because a newline is an Enter keypress.
         #[serde(default)]
         structure_mode: Option<String>,
+        /// Configured formatter toggle: "off" or "on". The engine only runs a
+        /// rewrite when the user opted in *and* deterministic cleanup is on.
+        #[serde(default)]
+        formatter: Option<String>,
+        /// Configured formatter backend identifier, e.g. "s1-mini".
+        #[serde(default)]
+        formatter_model: Option<String>,
+        /// Configured formatter writing style, e.g. "semi-formal".
+        #[serde(default)]
+        formatter_style: Option<String>,
+        /// Configured formatter context, e.g. "general".
+        #[serde(default)]
+        formatter_context: Option<String>,
         /// Configured cleanup mode: "off", "artifacts" or "full" — how much of
         /// the pass may change the words (see docs/cleanup_modes.md).
         #[serde(default)]
@@ -159,8 +179,8 @@ pub enum Wire {
 }
 
 #[allow(clippy::large_enum_variant)] // one `Wire` per channel message; the
-// channel holds at most a frame's worth, so boxing would only add an allocation
-// per message for negligible stack savings.
+                                     // channel holds at most a frame's worth, so boxing would only add an allocation
+                                     // per message for negligible stack savings.
 pub enum IpcEvent {
     Wire(Box<Wire>),
     Closed,
@@ -217,12 +237,7 @@ pub fn send_cmd(stream: &UnixStream, cmd: &str) -> std::io::Result<()> {
 }
 
 /// Send a command with a string property.
-pub fn send_cmd_value(
-    stream: &UnixStream,
-    cmd: &str,
-    key: &str,
-    val: &str,
-) -> std::io::Result<()> {
+pub fn send_cmd_value(stream: &UnixStream, cmd: &str, key: &str, val: &str) -> std::io::Result<()> {
     let mut extra = serde_json::Map::new();
     extra.insert(key.to_string(), serde_json::Value::String(val.to_string()));
     send_cmd_json(stream, cmd, serde_json::Value::Object(extra))
@@ -238,8 +253,14 @@ pub fn send_cmd_json(
     extra: serde_json::Value,
 ) -> std::io::Result<()> {
     let mut obj = serde_json::Map::new();
-    obj.insert("t".to_string(), serde_json::Value::String("cmd".to_string()));
-    obj.insert("cmd".to_string(), serde_json::Value::String(cmd.to_string()));
+    obj.insert(
+        "t".to_string(),
+        serde_json::Value::String("cmd".to_string()),
+    );
+    obj.insert(
+        "cmd".to_string(),
+        serde_json::Value::String(cmd.to_string()),
+    );
     if let serde_json::Value::Object(extra) = extra {
         obj.extend(extra);
     }
@@ -284,7 +305,12 @@ mod tests {
     fn tx_message_parses_without_lifetime_time_saved() {
         let json = r#"{"t":"tx","text":"hello","rec":1.5,"proc":0.5,"ready":0.2,"status":"copied","time_saved":12.0,"session_time_saved":105.0}"#;
         match serde_json::from_str::<Wire>(json).expect("old engine payload must parse") {
-            Wire::Tx { lifetime_time_saved, session_time_saved, text, .. } => {
+            Wire::Tx {
+                lifetime_time_saved,
+                session_time_saved,
+                text,
+                ..
+            } => {
                 assert_eq!(text, "hello");
                 assert_eq!(session_time_saved, Some(105.0));
                 assert_eq!(lifetime_time_saved, None);
@@ -297,7 +323,10 @@ mod tests {
     fn tx_message_parses_with_lifetime_time_saved() {
         let json = r#"{"t":"tx","text":"hi","rec":1.0,"proc":0.1,"ready":0.1,"status":"typed","time_saved":12.0,"session_time_saved":105.0,"lifetime_time_saved":3661.0}"#;
         match serde_json::from_str::<Wire>(json).expect("new engine payload must parse") {
-            Wire::Tx { lifetime_time_saved, .. } => {
+            Wire::Tx {
+                lifetime_time_saved,
+                ..
+            } => {
                 assert_eq!(lifetime_time_saved, Some(3661.0));
             }
             other => panic!("expected Tx, got {other:?}"),
@@ -368,7 +397,10 @@ mod tests {
     #[test]
     fn send_cmd_json_escapes_device_names() {
         // A name containing a quote must not terminate the JSON string early.
-        let line = command_line("set_device", serde_json::json!({ "device": "Mic \"Pro\" \\2" }));
+        let line = command_line(
+            "set_device",
+            serde_json::json!({ "device": "Mic \"Pro\" \\2" }),
+        );
         let parsed: serde_json::Value = serde_json::from_str(&line).expect("must stay valid JSON");
         assert_eq!(parsed["t"], "cmd");
         assert_eq!(parsed["cmd"], "set_device");
@@ -378,8 +410,14 @@ mod tests {
     /// Mirror of `send_cmd_json` that returns the line instead of writing it.
     fn command_line(cmd: &str, extra: serde_json::Value) -> String {
         let mut obj = serde_json::Map::new();
-        obj.insert("t".to_string(), serde_json::Value::String("cmd".to_string()));
-        obj.insert("cmd".to_string(), serde_json::Value::String(cmd.to_string()));
+        obj.insert(
+            "t".to_string(),
+            serde_json::Value::String("cmd".to_string()),
+        );
+        obj.insert(
+            "cmd".to_string(),
+            serde_json::Value::String(cmd.to_string()),
+        );
         if let serde_json::Value::Object(extra) = extra {
             obj.extend(extra);
         }
@@ -391,7 +429,12 @@ mod tests {
         // Every numeric field is `#[serde(default)]`, so a minimal producer works.
         let json = r#"{"t":"tx","text":"minimal"}"#;
         match serde_json::from_str::<Wire>(json).expect("minimal payload must parse") {
-            Wire::Tx { lifetime_time_saved, time_saved, session_time_saved, .. } => {
+            Wire::Tx {
+                lifetime_time_saved,
+                time_saved,
+                session_time_saved,
+                ..
+            } => {
                 assert_eq!(lifetime_time_saved, None);
                 assert_eq!(time_saved, None);
                 assert_eq!(session_time_saved, None);

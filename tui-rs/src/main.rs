@@ -190,6 +190,10 @@ impl Runtime {
                 ui_theme,
                 punctuation_mode,
                 structure_mode,
+                formatter,
+                formatter_model,
+                formatter_style,
+                formatter_context,
                 cleanup_mode,
                 trailing_space,
                 auto_punctuate,
@@ -211,6 +215,10 @@ impl Runtime {
                 ui_theme,
                 punctuation_mode,
                 structure_mode,
+                formatter,
+                formatter_model,
+                formatter_style,
+                formatter_context,
                 cleanup_mode,
                 trailing_space,
                 auto_punctuate,
@@ -404,7 +412,11 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                                     }
                                 }
                                 Intent::OpenSettingsPicker => {
-                                    settings_picker::run_settings_picker(Some(&writer), Some(&rx), &mut app)?;
+                                    settings_picker::run_settings_picker(
+                                        Some(&writer),
+                                        Some(&rx),
+                                        &mut app,
+                                    )?;
                                     rt.flush_pending(&mut app)?;
                                 }
                                 Intent::ResetTerminal => {
@@ -537,7 +549,9 @@ fn apply_local_action(app: &mut App, rt: &mut Runtime, action: Action) -> io::Re
         } => {
             app.transcription_count += 1;
             let width = rt.width();
-            let block = ui::transcription_block(app, width, &text, rec, proc, ready, status, None, None, None);
+            let block = ui::transcription_block(
+                app, width, &text, rec, proc, ready, status, None, None, None,
+            );
             rt.emit_block(&block)?;
             app.update_state(RunState::Ready, String::new());
         }
