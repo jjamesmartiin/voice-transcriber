@@ -17,7 +17,6 @@ that needs the 462 MiB GGUF and is milestone C2/C7.
 """
 import json
 import os
-import socket
 import subprocess
 import sys
 import time

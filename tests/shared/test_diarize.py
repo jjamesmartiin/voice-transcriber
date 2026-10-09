@@ -15,6 +15,8 @@ instead of against a mock's assumptions.
 Hermeticity: tests/shared/conftest.py blocks real non-loopback connects, so a
 backend that tried to fetch weights here would fail loudly.
 """
+import dataclasses
+import itertools
 import subprocess
 import sys
 from pathlib import Path
@@ -131,7 +133,7 @@ def test_importing_the_fake_backend_does_not_import_sherpa_onnx():
 # ---------------------------------------------------------------------------
 def test_turn_is_frozen():
     turn = diarize.Turn(start=0.0, end=1.0, speaker=0)
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         turn.start = 5.0
 
 
@@ -463,7 +465,7 @@ def test_turn_boundaries_partition_the_audio():
     """Turns must be contiguous and ordered, because they become ASR inputs."""
     turns = diarize.diarize(_fake_audio(10), 16000, backend="fake")
     assert turns
-    for earlier, later in zip(turns, turns[1:]):
+    for earlier, later in itertools.pairwise(turns):
         assert earlier.end <= later.start
 
 
