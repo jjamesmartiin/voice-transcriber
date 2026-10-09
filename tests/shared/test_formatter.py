@@ -83,16 +83,32 @@ def test_resolve_backend_name_rejects_an_unknown_name():
         formatter.resolve_backend_name("gpt-4")
 
 
-def test_a_backend_whose_module_is_absent_loads_as_none():
+def test_the_default_backend_is_absent_until_its_milestone():
     """Fail safe, not fail loud.
 
-    ``s1-mini`` is the default and its module lands in milestone C3. Until then
+    ``s1-mini`` is the default and its module lands in milestone C4. Until then
     resolving it must mean "no formatting available", never a crash on the
-    dictation path.
+    dictation path. ``llama-server`` used to be in this list too; it now exists
+    (C3), so only the genuinely absent one is asserted here.
     """
     assert formatter.load_backend("s1-mini") is None
-    assert formatter.load_backend("llama-server") is None
     assert formatter.load_backend("not-a-backend") is None
+
+
+def test_the_shipped_backend_exists_and_satisfies_the_contract():
+    module = formatter.load_backend("llama-server")
+    assert module is not None, "C3 ships formatters/llama_server.py"
+    for fn in formatter.REQUIRED_FUNCTIONS:
+        assert hasattr(module, fn)
+
+
+def test_an_unavailable_shipped_backend_still_yields_the_original(monkeypatch):
+    """Present-but-unusable is the common case on a machine with no weights."""
+    monkeypatch.setenv("PATH", "/nonexistent")
+    monkeypatch.delenv("VT_FORMATTER_SERVER_URL", raising=False)
+    formatter.reset_backend_cache()
+    original = "buy milk"
+    assert formatter.format_text(original, backend="llama-server") == original
 
 
 def test_backend_missing_part_of_the_contract_loads_as_none(monkeypatch):
