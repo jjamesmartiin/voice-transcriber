@@ -16,15 +16,16 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ### Added
 
-- **The on-device formatter downloads its model, and states the size first.**
-  Enabling the formatter (`formatter: on`) and dictating once fetches the
-  ~462 MiB S1-mini Q4 GGUF through the same verified split-xz path the ASR
-  uses, on a background thread, so dictation is never blocked. The prompt names
-  the model exactly as its licence requires - **"S1-mini" by "Superwhisper"**
-  (Apache-2.0 plus an additional naming term; the full text and provenance are
-  in `config/licenses/`). Meeting-mode diarization's ~40 MB pyannote/3D-Speaker
-  graphs are declared in the same model registry and packaged by the same
-  scripts.
+- **The on-device formatter's first-use prompt states the model size before it
+  downloads.** Enabling the formatter (`formatter: on`) and dictating once is
+  wired to fetch the ~462 MiB S1-mini Q4 GGUF through the same verified split-xz
+  path the ASR uses, on a background thread, so dictation is never blocked. The
+  prompt names the model exactly as its licence requires - **"S1-mini" by
+  "Superwhisper"** (Apache-2.0 plus an additional naming term; the full text and
+  provenance are in `config/licenses/`). Meeting-mode diarization's ~40 MB
+  pyannote/3D-Speaker graphs are declared in the same model registry and packaged
+  by the same scripts. **No bundle has been published yet**, so until one is, the
+  weights must be placed under the model directory.
 - **List formatting (`structure_mode`).** Spoken enumerations become real
   lists: "I can list them like: Thing one. Thing two. Thing three." now comes out
   as a bulleted list, and spoken "new line" / "new paragraph" / "bullet point"
