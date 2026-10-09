@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
 """
-Prepare the Cohere Transcribe weights for distribution as GitHub Release assets.
+Prepare a registered model's weights for distribution as GitHub Release assets.
 
-Why: CohereLabs/cohere-transcribe-03-2026 is Apache-2.0 licensed, so the weights
-may be mirrored and redistributed (with license + attribution). The app's
-first-run installer downloads these assets instead of requiring a Hugging Face
-account. GitHub caps individual release files at 2 GiB, so the unpacked model
-(4.13 GB bf16) is packed into ONE tar, split into raw byte-range parts (tar is
-plainly concatenable across any byte boundary), and each part is xz-compressed
+Why: the models mirrored here are permissively licensed (Cohere Apache-2.0;
+S1-mini Apache-2.0 plus a naming term; the diarization graphs MIT + Apache-2.0),
+so the weights may be redistributed with their licence and attribution. The
+app's first-run installer downloads these assets instead of requiring a Hugging
+Face account. GitHub caps individual release files at 2 GiB, so the unpacked
+model is packed into ONE tar, split into raw byte-range parts (tar is plainly
+concatenable across any byte boundary), and each part is xz-compressed
 independently. The installer downloads the parts, decompresses, concatenates,
-and extracts them back into a flat `models/cohere` directory.
+and extracts them back into the model's install directory.
+
+Everything model-specific is read from the registry in
+``src/voice_transcriber/model_download.py``; ``--model`` selects the entry.
 
 Output (in --outdir):
-  cohere-transcribe-<revision>.part<N>.xz   split, compressed weight parts
-  cohere-transcribe-<revision>.SHA256SUMS   "<sha256>  <filename>" per part
+  <asset_prefix>.part<N>.xz    split, compressed model parts
+  <asset_prefix>.SHA256SUMS    "<sha256>  <filename>" per part
 
 Usage:
-  python3 scripts/prepare_model_release.py                # auto-find HF cache
-  python3 scripts/prepare_model_release.py --model-dir <dir> --out dist/model
+  python3 scripts/prepare_model_release.py                    # default: cohere
+  python3 scripts/prepare_model_release.py --model formatter --model-dir DIR
+  python3 scripts/prepare_model_release.py --model diarization --model-dir DIR
 
 Requires the `xz` binary (present on Ubuntu runners and NixOS); falls back to
 Python's lzma module (single-threaded) if xz is unavailable.
@@ -76,6 +81,34 @@ def find_hf_cache_model_dir(spec):
     return None
 
 
+def find_installed_model_dir(spec):
+    """Locate the registry's install directory, when it already has the files.
+
+    Lets the packager run without ``--model-dir`` on a machine that installed the
+    weights through the app itself. Checked after the HF cache (where the Cohere
+    snapshot lands) and before giving up, and model-agnostic: the files are
+    whatever the spec declares.
+    """
+    try:
+        from model_download import get_data_dir, models_dir
+    except Exception:  # pragma: no cover - model_download is stdlib-only
+        return None
+    candidates = []
+    try:
+        candidates.append(models_dir(spec.name))
+    except Exception:
+        pass
+    try:
+        candidates.append(os.path.join(get_data_dir(), "models", spec.target_subdir))
+    except Exception:
+        pass
+    for cand in candidates:
+        if cand and all(os.path.exists(os.path.join(cand, f))
+                        for f in spec.package_files):
+            return cand
+    return None
+
+
 def sha256_file(path, chunk=1 << 20):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -109,7 +142,14 @@ def xz_compress(src, dst, level=6):
 
 
 def build_tar(spec, model_dir, staging, out_tar):
-    """Copy the flat model files + license into staging, then tar them."""
+    """Copy the model files + license/notice into staging, then tar them.
+
+    ``package_files`` may name a nested path - the diarization segmentation graph
+    lives under ``sherpa-onnx-pyannote-segmentation-3-0/`` - so relative paths are
+    preserved. A spec may also ship a verbatim ``notice_file`` instead of the
+    generated NOTICE: S1-mini's upstream NOTICE carries an operative naming
+    clause, so paraphrasing it would be a licence breach.
+    """
     os.makedirs(staging, exist_ok=True)
     missing = [f for f in spec.package_files if not os.path.exists(os.path.join(model_dir, f))]
     if missing:
@@ -117,7 +157,9 @@ def build_tar(spec, model_dir, staging, out_tar):
         sys.exit(2)
 
     for f in spec.package_files:
-        shutil.copy2(os.path.join(model_dir, f), os.path.join(staging, f))
+        target = os.path.join(staging, f)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copy2(os.path.join(model_dir, f), target)
 
     # Redistribution compliance: ship the license + attribution declared by the
     # spec, so a second model needs no edit here.
@@ -129,8 +171,20 @@ def build_tar(spec, model_dir, staging, out_tar):
     else:
         print(f"WARNING: {spec.license_file} not found; "
               "model LICENSE file will be missing from the release asset.")
-    with open(os.path.join(staging, "NOTICE"), "w") as f:
-        f.write(build_notice(spec))
+
+    notice = getattr(spec, "notice_file", "") or ""
+    if notice and not os.path.isabs(notice):
+        notice = os.path.join(REPO_ROOT, notice)
+    if notice:
+        if os.path.exists(notice):
+            shutil.copy2(notice, os.path.join(staging, "NOTICE"))
+        else:
+            print(f"WARNING: {spec.notice_file} not found; "
+                  "falling back to a generated NOTICE.")
+            notice = ""
+    if not notice:
+        with open(os.path.join(staging, "NOTICE"), "w") as f:
+            f.write(build_notice(spec))
 
     with tarfile.open(out_tar, "w", format=tarfile.GNU_FORMAT) as tf:
         for name in sorted(os.listdir(staging)):
@@ -210,11 +264,13 @@ def main():
     ap = argparse.ArgumentParser(description="Package a registered model's weights "
                                              "as split-xz GitHub Release assets.")
     ap.add_argument("--model", default="cohere",
-                    help="Registry model to package (default: cohere); the "
-                         "registry lives in src/voice_transcriber/model_download.py")
+                    help="Registry model to package (default: cohere). See the "
+                         "registry in src/voice_transcriber/model_download.py; "
+                         "also: formatter, diarization.")
     ap.add_argument("--model-dir", default=None,
                     help="Flat directory with the model files (default: locate "
-                         "the HF cache snapshot automatically)")
+                         "the HF cache snapshot, then the registry's install "
+                         "directory)")
     ap.add_argument("--out", default=os.path.join("dist", "model"),
                     help="Output directory for the release assets")
     ap.add_argument("--parts", type=int, default=2,
@@ -231,7 +287,8 @@ def main():
     args = ap.parse_args()
 
     spec = get_spec(args.model)
-    model_dir = args.model_dir or find_hf_cache_model_dir(spec)
+    model_dir = (args.model_dir or find_hf_cache_model_dir(spec)
+                 or find_installed_model_dir(spec))
     if not model_dir or not os.path.isdir(model_dir):
         print("ERROR: could not find the model. Pass --model-dir explicitly.")
         sys.exit(2)

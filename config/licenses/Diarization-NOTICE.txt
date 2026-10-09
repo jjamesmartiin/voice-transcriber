@@ -1,0 +1,14 @@
+sherpa-onnx diarization models
+
+pyannote segmentation 3.0 (MIT)
+  Copyright 2022 CNRS
+  Converted to ONNX by the k2-fsa/sherpa-onnx project.
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2
+
+3D-Speaker eres2net speaker embedding (Apache License, Version 2.0)
+  Alibaba Group
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
+
+The weights are mirrored byte-for-byte from the published release assets and
+verified by sha256 through the model registry. Full licence texts and
+provenance: Diarization-LICENSES.txt in this directory.

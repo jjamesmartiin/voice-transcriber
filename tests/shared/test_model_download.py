@@ -20,6 +20,8 @@ import os
 import subprocess
 import sys
 import tarfile
+import threading
+import types
 import urllib.error
 import zipfile
 from pathlib import Path
@@ -105,6 +107,142 @@ def test_models_dir_uses_the_target_subdir(monkeypatch, tmp_path):
 def test_get_spec_rejects_an_unknown_model():
     with pytest.raises(KeyError, match="unknown model 'nope'"):
         model_download.get_spec("nope")
+
+
+def test_formatter_and_diarization_specs_are_registered():
+    """The two redistributable non-ASR models resolve and carry their own data.
+
+    A fresh machine needs a download path for both; before C6 the registry held
+    only Cohere, so enabling the formatter or meeting mode did nothing unless the
+    files had been placed by hand.
+    """
+    formatter = model_download.get_spec("formatter")
+    assert formatter.repo_id == "superwhisper/s1-mini-GGUF"
+    assert formatter.target_subdir == "formatter"
+    assert formatter.required_local == ("s1-mini-q4_k_m.gguf",)
+    assert formatter.digests["s1-mini-q4_k_m.gguf"] == (
+        "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634")
+    assert formatter.model_ids == ("s1-mini",)
+    # The licence's naming term must survive as the display name.
+    assert formatter.display_name == '"S1-mini" by "Superwhisper"'
+
+    diarization = model_download.get_spec("diarization")
+    assert diarization.target_subdir == "diarization"
+    assert diarization.model_ids == ("diarization",)
+    assert set(diarization.required_local) == set(diarization.digests)
+    # Nested install layout the backend reads (diarizers/sherpa_onnx.py).
+    assert any(f.endswith("pyannote-segmentation-3-0/model.onnx")
+               for f in diarization.required_local)
+    assert any(f.endswith(".onnx") and "3dspeaker" in f
+               for f in diarization.required_local)
+
+
+def test_registry_name_for_model_maps_config_ids_to_registry_keys():
+    assert model_download.registry_name_for_model("s1-mini") == "formatter"
+    assert model_download.registry_name_for_model("S1-MINI") == "formatter"
+    assert model_download.registry_name_for_model("diarization") == "diarization"
+    assert model_download.registry_name_for_model("gpt-9-turbo") is None
+    assert model_download.registry_name_for_model("") is None
+    assert model_download.registry_name_for_model(None) is None
+
+
+def test_every_shipped_formatter_model_id_has_a_registry_entry():
+    """`formatter.MODELS` and the registry must not drift apart.
+
+    `formatter_model` names a *model id*; the registry is the single home for
+    what that id actually downloads. Without this pin, a new model in the
+    settings cycle could resolve to nothing at download time.
+    """
+    import formatter as formatter_module
+
+    for model_id in formatter_module.MODELS:
+        name = model_download.registry_name_for_model(model_id)
+        assert name is not None, f"no registry entry claims model id {model_id!r}"
+        spec = model_download.get_spec(name)
+        assert any(str(f).endswith(".gguf") for f in spec.required_local), (
+            f"{name} declares no GGUF for {model_id!r}")
+
+
+def test_models_dir_prefers_an_existing_per_user_install(monkeypatch, tmp_path):
+    """Registering an entry must not hide weights installed outside a checkout.
+
+    Regression the diarization graphs exposed: a writable checkout with no
+    `models/<subdir>` used to win over a complete per-user install, so adding the
+    `diarization` spec made already-present graphs unfindable.
+    """
+    monkeypatch.delenv("VT_MODEL_DIR", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(model_download, "find_repo_root", lambda: str(tmp_path / "repo"))
+    (tmp_path / "repo").mkdir()
+    spec = _synthetic_spec(name="synthetic", target_subdir="synthetic")
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+
+    installed = tmp_path / "vt" / "models" / "synthetic"
+    installed.mkdir(parents=True)
+    for req in spec.required_local:
+        (installed / req).write_text("stub", encoding="utf-8")
+
+    assert model_download.models_dir("synthetic") == str(installed)
+    # ... and a completely absent install still targets the writable checkout.
+    for req in spec.required_local:
+        (installed / req).unlink()
+    assert model_download.models_dir("synthetic") == os.path.join(
+        str(tmp_path), "repo", "models", "synthetic")
+
+
+def test_ensure_model_async_is_inert_without_a_status_handler(monkeypatch, tmp_path):
+    """No UI attached -> no background download (keeps shared tests hermetic)."""
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_status_handler", None)
+    called = []
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda *a, **k: called.append(a) or str(tmp_path))
+
+    assert model_download.ensure_model_async(spec.name, dest=str(tmp_path / "d")) is False
+    assert called == []
+
+
+def test_ensure_model_async_runs_the_install_on_a_daemon_thread(monkeypatch, tmp_path):
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_status_handler", lambda *a: None)
+    done = threading.Event()
+    calls = []
+
+    def fake_ensure(name, dest=None, base_url=None, revision=None):
+        calls.append((name, dest))
+        done.set()
+        return dest
+
+    monkeypatch.setattr(model_download, "ensure_model", fake_ensure)
+    dest = str(tmp_path / "d")
+    assert model_download.ensure_model_async(spec.name, dest=dest) is True
+    assert done.wait(5), "the background install never ran"
+    assert calls == [(spec.name, dest)]
+    # A completed install must not start a second one.
+    monkeypatch.setattr(model_download, "is_model_complete", lambda *a, **k: True)
+    assert model_download.ensure_model_async(spec.name, dest=dest) is False
+
+
+def test_the_download_prompt_states_the_size_before_fetching(capsys, monkeypatch, tmp_path):
+    """A clean machine must be told the size before anything downloads.
+
+    The prompt is answered "no" and the local-bundle probe is stubbed out, so
+    this proves the wording without touching the network or writing a file.
+    """
+    monkeypatch.setenv("VT_MODEL_DIR", str(tmp_path / "formatter"))
+    monkeypatch.delenv("VT_MODEL_SOURCE_DIR", raising=False)
+    monkeypatch.delenv("VT_MODEL_BUNDLE", raising=False)
+    monkeypatch.delenv("VT_AUTO_DOWNLOAD_MODEL", raising=False)
+    monkeypatch.setattr(model_download, "_local_model_source", lambda: (None, False))
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+
+    assert model_download.ensure_model("formatter") is None
+    out = capsys.readouterr().out
+    assert "Download size: ~462 MiB." in out, out
+    assert '"S1-mini" by "Superwhisper"' in out, out
 
 
 def test_is_model_complete_is_per_spec(monkeypatch, tmp_path):
@@ -391,6 +529,67 @@ def test_packager_selects_a_registry_model():
     assert "--model" in text
     assert "spec.asset_prefix" in text
     assert model_download.REVISION not in text
+    # It can locate an install the app itself made, so a machine that never
+    # touched the HF cache can still package.
+    assert "find_installed_model_dir" in text
+
+
+def test_packager_tars_nested_files_and_ships_a_verbatim_notice(tmp_path):
+    """A spec may nest package files and ship its own NOTICE verbatim.
+
+    Diarization's segmentation graph lives in a subdirectory, and S1-mini's
+    upstream NOTICE carries an operative naming clause that a generated NOTICE
+    would paraphrase, so both capabilities are load-bearing.
+    """
+    notice_text = 'S1-mini-GGUF\nCopyright 2026 Superwhisper\n'
+    notice_path = tmp_path / "NOTICE.upstream"
+    notice_path.write_text(notice_text, encoding="utf-8")
+    files = {"seg/model.onnx": b"ONNX-weights", "embed.onnx": b"EMB"}
+    spec = _synthetic_spec(files=files, notice_file=str(notice_path))
+    model_dir = tmp_path / "model"
+    for name, data in files.items():
+        path = model_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    packager = _load_packager()
+    tar_path = tmp_path / "model.tar"
+    packager.build_tar(spec, str(model_dir), str(tmp_path / "staging"), str(tar_path))
+
+    with tarfile.open(tar_path, "r") as tf:
+        names = tf.getnames()
+        assert "seg/model.onnx" in names, names
+        assert "embed.onnx" in names, names
+        assert tf.extractfile("NOTICE").read().decode() == notice_text
+
+
+def test_packager_falls_back_to_the_registry_install_dir(monkeypatch, tmp_path):
+    """A machine that installed through the app can package without --model-dir."""
+    spec = _synthetic_spec()
+    for req in spec.package_files:
+        (tmp_path / req).write_bytes(b"x")
+    monkeypatch.setattr(model_download, "models_dir", lambda name: str(tmp_path))
+    packager = _load_packager()
+    assert packager.find_installed_model_dir(spec) == str(tmp_path)
+    # A directory missing a declared file is not an install.
+    (tmp_path / spec.package_files[0]).unlink()
+    assert packager.find_installed_model_dir(spec) is None
+
+
+def test_install_from_a_bundle_with_a_nested_package_file(monkeypatch, tmp_path):
+    """The format-agnostic installer handles a nested layout (diarization)."""
+    files = {"seg/model.onnx": b"ONNX-weights", "embed.onnx": b"EMB"}
+    spec = _synthetic_spec(files=files)
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    bundle = _make_bundle(tmp_path, spec.asset_prefix, files)
+    dest = tmp_path / "dest"
+
+    result = model_download.install_model_from_local_bundle(
+        spec.name, str(bundle), dest=str(dest))
+
+    assert result == str(dest)
+    assert (dest / "seg" / "model.onnx").read_bytes() == files["seg/model.onnx"]
+    assert model_download.is_model_complete(spec.name, str(dest))
 
 
 def _load_packager():
@@ -441,6 +640,64 @@ def test_notice_formal_names_are_not_the_console_labels():
     assert spec.license_name == "Apache-2.0"
     assert spec.notice_title != spec.display_name
     assert spec.license_title != spec.license_name
+
+
+def test_s1_mini_notice_is_pinned_to_the_published_wording():
+    """The S1-mini NOTICE is a legal artifact and must never drift.
+
+    Its ADDITIONAL TERM requires the exact name '"S1-mini" by "Superwhisper"',
+    so the *upstream* NOTICE ships byte-for-byte through ``spec.notice_file``
+    instead of a generated one, which would paraphrase the operative clause.
+    Pinned here the same way the Cohere NOTICE is.
+    """
+    spec = model_download.get_spec("formatter")
+    assert spec.notice_file == "config/licenses/S1-mini-NOTICE.txt"
+    notice = (REPO_ROOT / spec.notice_file).read_text(encoding="utf-8")
+    assert notice == (
+        "S1-mini-GGUF\n"
+        "Copyright 2026 Superwhisper\n"
+        "\n"
+        "GGUF conversions of S1-mini, which is itself a derivative of Qwen3-0.6B,\n"
+        "Copyright 2024 Alibaba Cloud, licensed under the Apache License, Version 2.0.\n"
+        "\n"
+        "Any use, distribution, or integration of this model, whether unmodified or\n"
+        "as part of a derivative work or product, must continue to identify it by its\n"
+        'original name, "S1-mini" by "Superwhisper", using that exact capitalization.\n'
+        "This restates the ADDITIONAL TERM of the LICENSE file, which is the\n"
+        "operative text.\n"
+    )
+
+
+def test_s1_mini_licence_carries_provenance_and_the_full_upstream_text():
+    """The committed licence is the upstream text plus verifiable provenance."""
+    spec = model_download.get_spec("formatter")
+    lic = (REPO_ROOT / spec.license_file).read_text(encoding="utf-8")
+    assert spec.repo_id in lic, "provenance must name the source repo"
+    assert spec.revision in lic, "provenance must pin the revision"
+    assert spec.digests["s1-mini-q4_k_m.gguf"] in lic, "provenance must pin the digest"
+    # The full upstream text is retained: Apache-2.0 *and* the additional term.
+    assert "Apache License" in lic
+    assert "Version 2.0" in lic
+    assert "ADDITIONAL TERM" in lic
+    assert '"S1-mini" by "Superwhisper"' in lic
+
+
+def test_diarization_licences_and_provenance_are_committed():
+    """Both graphs' licences ship, with the digests that verify them."""
+    spec = model_download.get_spec("diarization")
+    lic = (REPO_ROOT / spec.license_file).read_text(encoding="utf-8")
+    assert "MIT License" in lic                 # pyannote segmentation
+    assert "Copyright (c) 2022 CNRS" in lic
+    assert "Apache License" in lic              # 3D-Speaker embedding
+    assert "recongition" in lic, "the upstream (misspelled) asset URL is provenance"
+    assert spec.repo_id in lic
+    for digest in spec.digests.values():
+        assert digest in lic, f"provenance must pin {digest}"
+
+    notice = (REPO_ROOT / spec.notice_file).read_text(encoding="utf-8")
+    assert "pyannote" in notice
+    assert "3D-Speaker" in notice
+    assert "MIT" in notice and "Apache" in notice
 
 
 def test_manifest_listing_missing_parts_is_skipped(monkeypatch, tmp_path):
