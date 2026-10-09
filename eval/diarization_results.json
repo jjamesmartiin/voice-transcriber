@@ -1,0 +1,128 @@
+{
+  "meta": {
+    "kind": "diarization",
+    "fixture": "eval/diarization/fixture.wav",
+    "rttm": "eval/diarization/fixture.rttm",
+    "backend": "sherpa-onnx",
+    "sherpa_onnx_version": "1.13.3",
+    "sherpa_onnx_version_source": "nix-store-path",
+    "num_speakers": 2,
+    "speakers_setting": "2",
+    "threshold": 0.5,
+    "collar": 0.25,
+    "der": 0.014494159149884406,
+    "missed": 0.014494159149884406,
+    "false_alarm": 0.0,
+    "speaker_confusion": 0.0,
+    "ref_speech_s": 14.053,
+    "scored_speaker_s": 14.053,
+    "missed_s": 0.20368641853332559,
+    "false_alarm_s": 0.0,
+    "speaker_confusion_s": 0.0,
+    "scored_intervals": 10,
+    "mapping": {
+      "A": "0",
+      "B": "1"
+    },
+    "turn_count": 4,
+    "expected_turns": 4,
+    "ordering": [
+      "A",
+      "B",
+      "A",
+      "B"
+    ],
+    "expected_order": [
+      "A",
+      "B",
+      "A",
+      "B"
+    ],
+    "ordering_ok": true,
+    "der_gate": 0.025,
+    "component_gate": 0.025,
+    "passed": true,
+    "progress_calls": 24,
+    "git_rev": "ce58b4faaa4a13b1bbee9fa0d6e77db378259c75",
+    "git_dirty": false,
+    "invocation": [
+      "python",
+      "eval/score_diarization.py"
+    ],
+    "env": {
+      "PYTHONPATH": "/home/jamesm/gitprojects/voice-transcriber-der/src"
+    },
+    "reproduce": "PYTHONPATH=/home/jamesm/gitprojects/voice-transcriber-der/src python eval/score_diarization.py"
+  },
+  "results": [
+    {
+      "id": "fixture",
+      "ref_turns": [
+        {
+          "speaker": "A",
+          "start": 0.0,
+          "end": 3.893
+        },
+        {
+          "speaker": "B",
+          "start": 5.293,
+          "end": 9.125
+        },
+        {
+          "speaker": "A",
+          "start": 10.525,
+          "end": 15.047
+        },
+        {
+          "speaker": "B",
+          "start": 16.447,
+          "end": 20.253
+        }
+      ],
+      "sys_turns": [
+        {
+          "speaker": "0",
+          "mapped_speaker": "A",
+          "start": 0.031,
+          "end": 3.558
+        },
+        {
+          "speaker": "1",
+          "mapped_speaker": "B",
+          "start": 5.262,
+          "end": 8.924
+        },
+        {
+          "speaker": "0",
+          "mapped_speaker": "A",
+          "start": 10.527,
+          "end": 14.678
+        },
+        {
+          "speaker": "1",
+          "mapped_speaker": "B",
+          "start": 16.383,
+          "end": 20.062
+        }
+      ],
+      "turn_count": 4,
+      "ref_order": [
+        "A",
+        "B",
+        "A",
+        "B"
+      ],
+      "sys_order": [
+        "A",
+        "B",
+        "A",
+        "B"
+      ],
+      "ordering_ok": true,
+      "der": 0.014494159149884406,
+      "missed": 0.014494159149884406,
+      "false_alarm": 0.0,
+      "speaker_confusion": 0.0
+    }
+  ]
+}

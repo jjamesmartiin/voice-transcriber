@@ -6,6 +6,9 @@ replacing the meaningless 11-clean-clip smoke test.
 - **`build_eval.py`** — builds `data/` (mono 16 kHz float32 WAVs) + `manifest.jsonl`.
 - **`score.py`** — runs the **real** pipeline over the manifest and reports WER/CER,
   exact-match rate, silence hallucination rate, and worst offenders.
+- **`score_diarization.py`** — scores **speaker diarization** (DER) on a committed
+  synthetic fixture; see [Diarization (DER)](#diarization-der--evalscore_diarizationpy).
+- **`diarization/`** — the tracked diarization fixture (WAV + RTTM + generator).
 - **`pinned_ids.json`** — the pinned source-sample ids that make network selection
   reproducible.
 - **`data/`** — generated audio. **Never committed** (see `data/.gitignore`, which
@@ -89,6 +92,56 @@ The app's **real config is honoured**: `number_digits` is read from
 `config/config.yaml` (currently `false`) and applied via
 `post_processor.set_number_digits_enabled(...)` before any transcription.
 `VT_INT8_DYNAMIC` is read by the backend as usual.
+
+## Diarization (DER) — `eval/score_diarization.py`
+
+A second, independent eval entry that scores **speaker diarization** (meeting
+mode) rather than ASR. It drives the shipped path
+(`voice_transcriber.diarize.diarize`, including `diarizers/sherpa_onnx.py`) on
+the committed synthetic two-voice fixture in `eval/diarization/` and computes
+DER with a collar and an optimal 1-to-1 speaker mapping, mirroring NIST
+`md-eval.pl` / `wq2012/mdeval`. The metric is self-contained here because
+sherpa-onnx ships **no** DER computation at all.
+
+**This is a regression smoke gate, never an accuracy claim.** A 4-turn A-B-A-B
+clip of maximally separated voices exercises almost none of the failure modes
+that matter (crosstalk, overlap, similar voices, far-field, short backchannels).
+The meaningful number is **AMI SDM** — see `docs/TODO.md`.
+
+```bash
+nix develop --command env PYTHONPATH=$PWD/src python eval/score_diarization.py
+nix develop --command env PYTHONPATH=$PWD/src python eval/score_diarization.py --speakers auto
+```
+
+| flag | meaning |
+|---|---|
+| `--fixture PATH` | WAV to score (default `eval/diarization/fixture.wav`) |
+| `--rttm PATH` | reference RTTM (default `eval/diarization/fixture.rttm`) |
+| `--json OUT` | results JSON (default `eval/diarization_results.json`) |
+| `--collar S` | no-score collar around reference boundaries (default `0.25`) |
+| `--speakers N\|auto` | known speaker count or auto-clustering (default `2`) |
+| `--threshold F` | clustering threshold, auto only |
+| `--verbose` | keep backend stdout |
+
+The scorer **skips with a clear message and exits 0** when the diarization
+graphs (or `sherpa_onnx`) are absent — the same fail-safe the backend uses — so
+a fresh machine can run it before downloading the models. The graphs resolve
+through the model registry (`diarization` `ModelSpec`), not a hand-placed
+directory.
+
+`eval/diarization/` is tracked and holds `fixture.wav` (20.653 s, 16 kHz mono
+PCM16, 645 KiB), `fixture.rttm` (ground truth) and `gen_fixture.py` (the espeak
+recipe). Re-running the recipe needs `nix run nixpkgs#espeak-ng`, but **scoring
+never does** — the WAV is committed. (`eval/data/` is untracked and irrelevant
+here.)
+
+Recorded on the reference machine 2026-10-09 (sherpa-onnx 1.13.3,
+`num_speakers=2`): **DER 0.0145**, missed 0.0145, false_alarm 0.0000,
+speaker_confusion 0.0000, turn count 4, ordering A,B,A,B, `ref_speech_s` 14.053.
+`--speakers auto` measured identically. The gate in the script is the recorded
+value plus ~0.01 margin (`DER <= 0.025`, `missed` and `false_alarm` each
+`< 0.025`), tightened from the spec's initial `0.10` / `0.05`. The metric is
+pinned model-free by `tests/shared/test_diarization_der.py`.
 
 ## Metrics
 
