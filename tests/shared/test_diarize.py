@@ -80,14 +80,26 @@ def test_resolve_backend_name_rejects_an_unknown_name():
         diarize.resolve_backend_name("pyannote")
 
 
-def test_the_real_backend_is_absent_until_its_milestone():
-    """D3 ships ``diarizers/sherpa_onnx.py``; until then this must be a no-op.
+def test_an_absent_backend_still_degrades_to_none(monkeypatch):
+    """Fail safe, not fail loud.
 
-    ``sherpa_onnx`` is not installed in this environment either, so both failure
-    modes - module missing, dependency missing - must collapse to ``None``.
+    ``sherpa-onnx`` used to be in this list; it now exists (D3), so this pins
+    only the genuinely absent cases: an unknown name, and a registered backend
+    whose module was never shipped. Either must mean "no diarization", never a
+    crash on the meeting path.
     """
-    assert diarize.load_backend("sherpa-onnx") is None
     assert diarize.load_backend("not-a-backend") is None
+    monkeypatch.setitem(
+        diarize.BACKENDS, "unbuilt", "voice_transcriber.diarizers.unbuilt")
+    diarize.reset_backend_cache()
+    assert diarize.load_backend("unbuilt") is None
+
+
+def test_the_shipped_backend_exists_and_satisfies_the_contract():
+    module = diarize.load_backend("sherpa-onnx")
+    assert module is not None, "D3 ships diarizers/sherpa_onnx.py"
+    for fn in diarize.REQUIRED_FUNCTIONS:
+        assert hasattr(module, fn)
 
 
 def test_backend_missing_part_of_the_contract_loads_as_none(monkeypatch):
