@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Publish the model weights bundle for the revision pinned in src/model_download.py.
+# Publish a model weights bundle for a revision pinned in src/model_download.py.
 #
-# RUN THIS ONLY WHEN `REVISION` CHANGES. Weights are addressed by model revision
-# (tag `model-cohere-<rev12>`), not by app release, so dropping a new app version
-# requires running nothing at all — v1.2.1, v1.3.0, ... all resolve to the same
-# bundle. Not having to re-upload 2.9 GB per release is the whole point.
+# RUN THIS ONLY WHEN A MODEL'S `revision` CHANGES. Weights are addressed by model
+# revision (tag `model-<name>-<rev12>`), not by app release, so dropping a new app
+# version requires running nothing at all — v1.2.1, v1.3.0, ... all resolve to the
+# same bundle. Not having to re-upload gigabytes per release is the whole point.
+#
+# The registry names every model this script can publish: `cohere` (~2.8 GB),
+# `formatter` (~462 MiB S1-mini GGUF) and `diarization` (~40 MB sherpa-onnx
+# graphs). Nothing below is model-specific; --model selects the entry and every
+# constant (repo, tag, prefix, display name) is read back out of the spec.
 #
 # Ordering is the part that actually matters. The parts go up first, and
 # SHA256SUMS is published LAST, only once every part has been verified present on
@@ -13,10 +18,11 @@
 # part before trusting a manifest, but do not lean on that — get the order right.)
 #
 # Usage:
-#   ./scripts/publish_model_bundle.sh              publish the existing dist/model assets
+#   ./scripts/publish_model_bundle.sh              publish the existing dist/model assets for cohere
 #   ./scripts/publish_model_bundle.sh --build      package them first, then publish
 #   ./scripts/publish_model_bundle.sh --model NAME publish a specific registry model
-#                                                  (default: cohere; see MODEL_DOWNLOAD registry)
+#                                                  (cohere, formatter, diarization;
+#                                                  default: cohere)
 #   ./scripts/publish_model_bundle.sh --dry-run    show the plan, change nothing
 #
 # Extra flags are forwarded to scripts/prepare_model_release.py with --build

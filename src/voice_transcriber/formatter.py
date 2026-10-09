@@ -474,6 +474,25 @@ def validate(original: str, candidate: str, *, structure: str | None = None) -> 
 # The only entry point
 # ---------------------------------------------------------------------------
 
+def _request_backend_model(module: Any, model: str | None) -> bool:
+    """Ask a backend to acquire its weights in the background, if it can.
+
+    Optional duck-typed hook (``request_model``): a backend with nothing to fetch
+    (``noop``) or one that already has its weights simply does not define it.
+    Called only on the unavailable path, immediately before falling back to the
+    unformatted text. Never raises: a missing or failed download must not change
+    the transcript the user receives, and it must never block this thread - the
+    backend starts a daemon thread and returns immediately.
+    """
+    request = getattr(module, "request_model", None)
+    if not callable(request):
+        return False
+    try:
+        return bool(request(model=model))
+    except Exception:
+        return False
+
+
 def format_text(
     text: str,
     *,
@@ -500,6 +519,10 @@ def format_text(
         if module is None:
             return original
         if not module.available(model=model):
+            # The model may simply not be downloaded yet. Ask the backend to fetch
+            # it in the background (it states the size before anything downloads),
+            # then return the untouched text for *this* utterance.
+            _request_backend_model(module, model)
             return original
 
         started = time.monotonic()

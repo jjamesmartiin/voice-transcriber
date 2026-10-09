@@ -611,3 +611,55 @@ def test_an_unavailable_backend_falls_back_to_the_original(monkeypatch):
     formatter.reset_backend_cache()
     original = "buy milk"
     assert formatter.format_text(original, backend="llama-server") == original
+
+
+# ---------------------------------------------------------------------------
+# request_model: the first-use download start
+# ---------------------------------------------------------------------------
+def test_request_model_is_inert_when_the_model_is_present(stub_env):
+    """An installed model is not re-fetched."""
+    assert llama_server.request_model("s1-mini") is False
+
+
+def test_request_model_is_inert_without_a_binary(monkeypatch):
+    """No runtime -> no point fetching weights, and no network in tests."""
+    import model_download
+
+    monkeypatch.setenv("PATH", "/nonexistent")
+    monkeypatch.setattr(llama_server, "_model_path", lambda model=None: None)
+    started = []
+    monkeypatch.setattr(model_download, "ensure_model_async",
+                        lambda name, **k: started.append(name) or True)
+    assert llama_server.request_model("s1-mini") is False
+    assert started == []
+
+
+def test_request_model_is_inert_in_attach_mode(monkeypatch):
+    """An attached server is not ours and does not need our weights."""
+    monkeypatch.setenv(llama_server.ENV_SERVER_URL, "http://127.0.0.1:9")
+    assert llama_server.request_model("s1-mini") is False
+
+
+def test_request_model_starts_the_registry_install(monkeypatch):
+    """A spawn-mode install with a binary but no weights asks the registry."""
+    import model_download
+
+    monkeypatch.setattr(llama_server, "_binary", lambda: "/bin/llama-server")
+    monkeypatch.setattr(llama_server, "_model_path", lambda model=None: None)
+    started = []
+    monkeypatch.setattr(model_download, "ensure_model_async",
+                        lambda name, **k: started.append(name) or True)
+    assert llama_server.request_model("s1-mini") is True
+    assert started == ["formatter"]
+
+
+def test_request_model_ignores_an_unregistered_model_id(monkeypatch):
+    import model_download
+
+    monkeypatch.setattr(llama_server, "_binary", lambda: "/bin/llama-server")
+    monkeypatch.setattr(llama_server, "_model_path", lambda model=None: None)
+    started = []
+    monkeypatch.setattr(model_download, "ensure_model_async",
+                        lambda name, **k: started.append(name) or True)
+    assert llama_server.request_model("gpt-9-turbo") is False
+    assert started == []

@@ -490,6 +490,54 @@ def test_warm_reports_readiness_without_raising(monkeypatch):
     assert formatter.warm(name) is False
 
 
+def test_an_unavailable_backend_is_asked_to_fetch_its_model(monkeypatch):
+    """First use of an enabled formatter with no weights starts a download.
+
+    The backend owns *how* (a daemon thread); the entry point's job is only to
+    ask, and to still return the untouched text for this utterance.
+    """
+    requested = []
+    module = types.SimpleNamespace(
+        available=lambda model=None: False,
+        warm=lambda: None,
+        format_text=lambda text, **kw: "SHOULD NOT RUN",
+        request_model=lambda model=None: requested.append(model) or True,
+    )
+    monkeypatch.setitem(formatter.BACKENDS, "fetchy", "voice_transcriber.formatters.fetchy")
+    monkeypatch.setitem(formatter._loaded, "fetchy", module)
+
+    assert formatter.format_text("buy milk", backend="fetchy", model="s1-mini") == "buy milk"
+    assert requested == ["s1-mini"]
+
+
+def test_a_backend_without_a_request_hook_is_left_alone(monkeypatch):
+    """The hook is optional: a backend with nothing to fetch must still work."""
+    module = types.SimpleNamespace(
+        available=lambda model=None: False,
+        warm=lambda: None,
+        format_text=lambda text, **kw: text,
+    )
+    monkeypatch.setitem(formatter.BACKENDS, "plain", "voice_transcriber.formatters.plain")
+    monkeypatch.setitem(formatter._loaded, "plain", module)
+    assert formatter.format_text("buy milk", backend="plain") == "buy milk"
+
+
+def test_a_failing_request_hook_never_reaches_the_user(monkeypatch):
+    """A broken download path must not disturb the transcript."""
+    def boom(model=None):
+        raise RuntimeError("download machinery exploded")
+
+    module = types.SimpleNamespace(
+        available=lambda model=None: False,
+        warm=lambda: None,
+        format_text=lambda text, **kw: text,
+        request_model=boom,
+    )
+    monkeypatch.setitem(formatter.BACKENDS, "boomdl", "voice_transcriber.formatters.boomdl")
+    monkeypatch.setitem(formatter._loaded, "boomdl", module)
+    assert formatter.format_text("buy milk", backend="boomdl") == "buy milk"
+
+
 # ---------------------------------------------------------------------------
 # Hard gate: never run when nothing may be deleted
 # ---------------------------------------------------------------------------

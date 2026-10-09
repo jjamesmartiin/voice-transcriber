@@ -9,6 +9,81 @@ Written 2026-10-08, at a point where context was getting long.
 
 ---
 
+## 0. Session 2 state — 2026-10-09 (read this before §1)
+
+**Interrupted mid-flight by a network pause.** Nothing is lost: every worktree is
+on disk, and every commit is on **github** under `wip/feature-parity-2026-10`.
+`git.jdm.cx` (gitea) stopped resolving — re-push when it is back.
+
+**`main` is deliberately untouched** so no release can fire (`release.yml`
+triggers only on `v*` tags, verified). This session's owner decisions are recorded
+in [`TODO-parity.md`](TODO-parity.md) **§1b as `S1`–`S12`**.
+
+### Committed
+
+| Branch | State |
+| --- | --- |
+| `wip/feature-parity-2026-10` | **Integration branch.** Docs: §1b decisions, D7/DER design, E3 verification, the regenerated eval baseline, X6. `work/parity-eval` merged. |
+| `work/parity-eval` | **Merged.** Baseline regenerated 5.10 %→3.57 % on a clean tree with self-describing `meta`; `eval/review_report.py` → `eval/report.html` (per-clip audio + ref + hyp + diff). |
+| `work/parity-formatter` | **MERGED into the integration branch.** 6 commits: C6a registry (adds `FORMATTER` **and `DIARIZATION`** specs, `_model_path` through the registry), C6b first-use prompt with the size, C6c publish path, C9 licence/NOTICE + provenance, C8 docs/CHANGELOG, and the X6 fix + guard pins. |
+| `work/parity-meeting` | **Not merged.** 2 commits: `6c01795` A6 (reset takes effect immediately), `da619d6` D6 (diarization settings on every Python surface). |
+
+### Uncommitted WIP — **do not delete these worktrees**
+
+Nothing is committed here; the files persist on disk, so recovery is just
+*look at the tree*, not *reconstruct it*. (The formatter worktree is now clean —
+its WIP was finished, squashed and merged.)
+
+| Worktree | WIP |
+| --- | --- |
+| `../voice-transcriber-meeting` | **D5a (large):** ~1017 insertions — `t2.py` (+327), `meeting_pipeline.py` (+185), `main.py` (+126), `control.py`, `tui.py`, `tui_ratatui.py`, `config/example-config/`, `.gitignore`, `docs/meeting_mode.md`, plus tests (`test_config_sync.py` +156, `test_meeting_pipeline.py` +96) and a **new `tests/shared/test_meeting_screen.py`**. This is the live speaker map + repo-local output dir. |
+| `../voice-transcriber-e3flake` | `flake.nix` + `flake.lock` — the narrow `sherpa-onnx` override. **Most valuable uncommitted artefact of the session; see §0.1.** |
+
+The integration branch is **green**: `tests/shared` 1451 passed, 3 skipped, `ruff check src/ tests/`
+clean. It was red only because of X6, which is now fixed and pinned.
+
+### 0.1 Expensive findings — do not re-derive
+
+* **sherpa-onnx / glibc (new, and the reason `e3flake` pinned a second input).** The locked
+  nixpkgs ships **1.12.25** (no Cohere support). Bumping to **1.13.8 does not work**: it is
+  linked against **glibc 2.44**, and the locked nixpkgs carries **glibc 2.42**, so it cannot
+  be loaded. The working pin is a second input at nixpkgs rev
+  `a9630bf480bf699d6792772fd0a5ee1b9084825b`, which provides **1.13.3** (built against glibc
+  2.42) and already exposes both `OfflineCohereTranscribeModelConfig` and
+  `from_cohere_transcribe`. Also load-bearing: `python.withPackages` **silently drops** any
+  package whose `pythonModule` is not the environment's own python, so the python wrapper
+  must be rebuilt against the newer set's cached **cpython-313** bindings rather than
+  spliced in.
+* **X6 — a second `tests/shared` hermeticity hole.** `test_formatter_settings.py::
+  test_no_backend_means_the_text_passes_through` is documented "model-free" but loads the
+  real 462 MiB formatter and **leaks a `llama-server` per run**; it is **load-dependent** (a
+  failed spawn arms a 60 s cooldown, after which it passes) — so *a green run of this tier is
+  not evidence*. 42 orphans were killed. The live engine's own server is a child of the engine
+  and must be preserved: orphans are distinguishable by parent, never blanket-`pkill`.
+* **E3** verified byte-for-byte (sha256 matches the declared digest; all 8 LFS files match the
+  HF mirror; decodes `en.wav` at RTF 0.145). `test_wavs/ja.wav` is a **corrupt 145-byte JSON
+  error body** in both the tarball and the mirror.
+* **eval** 5.10 %→**3.57 %** WER, CER 2.97 %→1.42 %, exact 54 %→70 %. The **`long` slice
+  regressed** 1.78 %→2.19 % (worth a bisect), and CIDR `10.0.0.0/24` still renders as
+  `10 000/24`.
+
+### Queue on resume
+
+1. `tests/shared` is **green on the integration branch** (1451 passed). X6 — the pre-existing
+   leak that made it red — is fixed and its guards are now themselves pinned; see §0.1.
+2. Merge `work/parity-meeting` next — its D6 commit is complete but its **D5a is an unverified
+   checkpoint**, so run the suite before trusting it — then `work/parity-e3flake`, which has
+   never been verified at all (its flake change was interrupted mid-flight).
+3. Spawn the **Rust/TUI worker** for the live speaker editor — it needs the frozen contract
+   the meeting worker was about to produce (control verbs, `status` fields, bridge messages,
+   label strings).
+4. **D7** implementation (design recorded in `TODO-parity.md` §4D).
+5. **X1–X4** plus the adversarial red-team pass (S5).
+6. Cleanup: obsolete worktrees/branches, the stray 3 GB `models/vt-model-dl-*`, and the E3
+   scratch tarball (delete the 1.58 GiB `.tar.bz2`, keep the extracted tree).
+
+---
+
 ## 1. Read these first, in this order
 
 | Doc | What it is |

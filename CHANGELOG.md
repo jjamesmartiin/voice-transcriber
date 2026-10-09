@@ -7,15 +7,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Entries are grouped as Added / Changed / Fixed / Security.
 
 The model weights are versioned **separately** from the app, on a
-revision-derived tag (`model-cohere-<rev>`). They are republished only when the
-underlying model revision changes — never per app release — so a new app version
-normally reuses the existing bundle. See
-[`docs/releasing.md`](docs/releasing.md).
+model-revision-derived tag (`model-<name>-<rev>` for `cohere`, `formatter` and
+`diarization`). They are republished only when the underlying model revision
+changes — never per app release — so a new app version normally reuses the
+existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
 ### Added
 
+- **The on-device formatter downloads its model, and states the size first.**
+  Enabling the formatter (`formatter: on`) and dictating once fetches the
+  ~462 MiB S1-mini Q4 GGUF through the same verified split-xz path the ASR
+  uses, on a background thread, so dictation is never blocked. The prompt names
+  the model exactly as its licence requires - **"S1-mini" by "Superwhisper"**
+  (Apache-2.0 plus an additional naming term; the full text and provenance are
+  in `config/licenses/`). Meeting-mode diarization's ~40 MB pyannote/3D-Speaker
+  graphs are declared in the same model registry and packaged by the same
+  scripts.
 - **List formatting (`structure_mode`).** Spoken enumerations become real
   lists: "I can list them like: Thing one. Thing two. Thing three." now comes out
   as a bulleted list, and spoken "new line" / "new paragraph" / "bullet point"
