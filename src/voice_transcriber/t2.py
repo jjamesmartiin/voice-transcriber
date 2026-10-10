@@ -1954,11 +1954,19 @@ def formatter_model_setting_state(model: str = FORMATTER_MODEL):
 
 
 def formatter_style_setting_state(style: str = FORMATTER_STYLE):
-    return f"Writing style: {style}", "[STYLE]", "cyan"
+    notes = {
+        "casual": "informal",
+        "semi-casual": "work chat",
+        "semi-formal": "pro grammar",
+        "formal": "expands",
+    }
+    note = notes.get(style, "style")
+    return f"Writing style: {style} ({note})", "[STYLE]", "cyan"
 
 
 def formatter_context_setting_state(context: str = FORMATTER_CONTEXT):
-    return f"Context: {context}", "[CONTEXT]", "cyan"
+    note = "greeting/signoff" if context == "email" else "standard prose"
+    return f"Context: {context} ({note})", "[CONTEXT]", "cyan"
 
 
 def normalize_cleanup_mode(value) -> str:
@@ -3102,22 +3110,150 @@ def select_settings_picker():
     query = ""
     selected_idx = 0
 
-    settings_defs = [
+    current_menu = "main"
+
+    MAIN_SETTINGS_DEFS = [
         {
-            "id": "preset",
-            "icon": "✨ ",
-            "title": "Mode Preset",
-            "keywords": "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
+            "id": "microphone",
+            "icon": "🎙️ ",
+            "title": "Audio: Device (Mic)",
+            "keywords": "mic microphone audio device input hardware primary secondary",
+        },
+        {
+            "id": "sound_mute",
+            "icon": "🔔 ",
+            "title": "Audio: Sound Cues",
+            "keywords": "sound effects mute volume chimes audio audio cues notify silent audio sounds",
         },
         {
             "id": "cleanup",
             "icon": "🧹 ",
-            "title": "Cleanup Mode",
+            "title": "Format: Cleanup",
             "keywords": "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
         },
         {
+            "id": "structure",
+            "icon": "☰ ",
+            "title": "Format: List Blocks",
+            "keywords": "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
+        },
+        {
+            "id": "number_digits",
+            "icon": "🔢 ",
+            "title": "Format: Numbers",
+            "keywords": "numbers digits words spelled format numeric conversion digits auto",
+        },
+        {
+            "id": "preset",
+            "icon": "✨ ",
+            "title": "Format: Preset",
+            "keywords": "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
+        },
+        {
+            "id": "serial_collapse",
+            "icon": "🔤 ",
+            "title": "Format: Serials",
+            "keywords": "serial code alphanumeric nato phonetic spelled collapse spacing identifier model vin license plate",
+        },
+        {
+            "id": "spell_command",
+            "icon": "✍️ ",
+            "title": "Format: Spell Cmd",
+            "keywords": "spell spelled verbal command letters c a t acronym dictation spelling",
+        },
+        {
+            "id": "middle_click",
+            "icon": "🖱️ ",
+            "title": "Hotkey: Mouse (PTT)",
+            "keywords": "middle click mouse hotkey push to talk button hold ptt",
+        },
+        {
+            "id": "formatter_menu",
+            "icon": "✦ ",
+            "title": "Menu: Formatter",
+            "keywords": "formatter format rewrite slm llm model style context s1-mini rewrite offline language polish menu",
+        },
+        {
+            "id": "meeting_menu",
+            "icon": "⏺ ",
+            "title": "Menu: Meeting",
+            "keywords": "meeting diarization speaker speakers capture spill transcript folder output notes long record hours menu",
+        },
+        {
+            "id": "output_mode",
+            "icon": "📤 ",
+            "title": "Output: Delivery",
+            "keywords": "output mode delivery clipboard type typing paste speed fast slow safe",
+        },
+        {
+            "id": "trailing_space",
+            "icon": "␣ ",
+            "title": "Output: Space",
+            "keywords": "space trailing space auto type whitespace append space",
+        },
+        {
+            "id": "typing_wpm",
+            "icon": "⚡ ",
+            "title": "Output: Typing WPM",
+            "keywords": "typing speed wpm words per minute time saved benchmark calculation stats speed",
+        },
+        {
+            "id": "reset_defaults",
+            "icon": "↩️ ",
+            "title": "Reset: Defaults",
+            "keywords": "reset defaults factory restore revert shipped initial config settings default everything",
+        },
+        {
+            "id": "rescan_mics",
+            "icon": "♻ ",
+            "title": "Reset: Microphones",
+            "keywords": "reset rescan refresh microphones mics devices audio input list enumerate plugged busy stale missing",
+        },
+        {
+            "id": "reset_terminal",
+            "icon": "💻 ",
+            "title": "Reset: Terminal",
+            "keywords": "reset terminal clipboard bridge clear state fix",
+        },
+        {
+            "id": "theme",
+            "icon": "🎨 ",
+            "title": "UI: Color Theme",
+            "keywords": "theme color ui palette cyan magenta green blue yellow red white",
+        },
+    ]
+
+    FORMATTER_SETTINGS_DEFS = [
+        {
+            "id": "formatter",
+            "icon": "🧠 ",
+            "title": "Formatter",
+            "keywords": "formatter local rewrite slm llm language model cleanup polish rewrite offline on off",
+        },
+        {
+            "id": "formatter_model",
+            "icon": "🤖 ",
+            "title": "Formatter Backend",
+            "keywords": "formatter model backend s1-mini llama-server which model swap",
+        },
+        {
+            "id": "formatter_style",
+            "icon": "✍️ ",
+            "title": "Formatter Style",
+            "keywords": "formatter style tone casual semi-casual semi-formal formal writing voice",
+        },
+        {
+            "id": "formatter_context",
+            "icon": "✉️ ",
+            "title": "Formatter Context",
+            "keywords": "formatter context general email message greeting sign-off destination",
+        },
+    ]
+
+    MEETING_SETTINGS_DEFS = [
+        {
             "id": "meeting",
-            "icon": "🎙️ ",
+            "icon": "🗣️ ",
             "title": "Meeting Mode",
             "keywords": "meeting diarization speakers capture long recording minutes hours transcript notes",
         },
@@ -3135,13 +3271,13 @@ def select_settings_picker():
         },
         {
             "id": "diarization",
-            "icon": "🗣️ ",
+            "icon": "👥️ ",
             "title": MEETING_SETTINGS_TITLES["diarization"],
             "keywords": "diarization diarize speaker speakers labels who said meeting transcript separation",
         },
         {
             "id": "diarization_speakers",
-            "icon": "🔢 ",
+            "icon": "👥 ",
             "title": MEETING_SETTINGS_TITLES["diarization_speakers"],
             "keywords": "diarization speakers count number hint auto known how many people",
         },
@@ -3163,114 +3299,6 @@ def select_settings_picker():
             "title": MEETING_SETTINGS_TITLES["meeting_output_format"],
             "keywords": "meeting transcript output format form text json markdown md artifact",
         },
-        {
-            "id": "structure",
-            "icon": "☰ ",
-            "title": "List Formatting",
-            "keywords": "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
-        },
-        {
-            "id": "formatter",
-            "icon": "🪄 ",
-            "title": "Formatter",
-            "keywords": "formatter local rewrite slm llm language model cleanup polish rewrite offline on off",
-        },
-        {
-            "id": "formatter_model",
-            "icon": "🧠 ",
-            "title": "Formatter Backend",
-            "keywords": "formatter model backend s1-mini llama-server which model swap",
-        },
-        {
-            "id": "formatter_style",
-            "icon": "✍️ ",
-            "title": "Formatter Style",
-            "keywords": "formatter style tone casual semi-casual semi-formal formal writing voice",
-        },
-        {
-            "id": "formatter_context",
-            "icon": "✉️ ",
-            "title": "Formatter Context",
-            "keywords": "formatter context general email message greeting sign-off destination",
-        },
-        {
-            "id": "output_mode",
-            "icon": "🚀 ",
-            "title": "Output Delivery",
-            "keywords": "output mode delivery clipboard type typing paste speed fast slow safe",
-        },
-        {
-            "id": "trailing_space",
-            "icon": "␣ ",
-            "title": "Trailing Space",
-            "keywords": "trailing space auto type whitespace append space",
-        },
-        {
-            "id": "number_digits",
-            "icon": "🔢 ",
-            "title": "Number Conversion",
-            "keywords": "numbers digits words spelled format numeric conversion",
-        },
-        {
-            "id": "serial_collapse",
-            "icon": "🔤 ",
-            "title": "Serial/Codes",
-            "keywords": "serial code alphanumeric nato phonetic spelled collapse spacing identifier model vin license plate",
-        },
-        {
-            "id": "spell_command",
-            "icon": "✍️ ",
-            "title": "Spell Command",
-            "keywords": "spell spelled verbal command letters c a t acronym dictation",
-        },
-        {
-            "id": "typing_wpm",
-            "icon": "⚡ ",
-            "title": "Typing Speed",
-            "keywords": "typing speed wpm words per minute time saved benchmark calculation stats",
-        },
-        {
-            "id": "middle_click",
-            "icon": "🖱️ ",
-            "title": "Mouse Hotkey",
-            "keywords": "middle click mouse hotkey push to talk button hold",
-        },
-        {
-            "id": "sound_mute",
-            "icon": "🔔 ",
-            "title": "Sound Effects",
-            "keywords": "sound effects mute volume chimes audio audio cues notify",
-        },
-        {
-            "id": "theme",
-            "icon": "🎨 ",
-            "title": "UI Color Theme",
-            "keywords": "theme color ui palette cyan magenta green blue yellow red white",
-        },
-        {
-            "id": "microphone",
-            "icon": "🎙️ ",
-            "title": "Audio Device (Mic)",
-            "keywords": "mic microphone audio device input hardware primary secondary",
-        },
-        {
-            "id": "rescan_mics",
-            "icon": "♻ ",
-            "title": "Reset Microphones",
-            "keywords": "reset rescan refresh microphones mics devices audio input list enumerate plugged busy stale missing",
-        },
-        {
-            "id": "reset_terminal",
-            "icon": "🔄 ",
-            "title": "Reset Terminal",
-            "keywords": "reset terminal clipboard bridge clear state fix",
-        },
-        {
-            "id": "reset_defaults",
-            "icon": "↩️ ",
-            "title": "Reset to Defaults",
-            "keywords": "reset defaults factory restore revert shipped initial config settings default everything",
-        },
     ]
 
     def get_setting_state(item_id):
@@ -3282,11 +3310,21 @@ def select_settings_picker():
             return preview, badge, color
         elif item_id == "cleanup":
             if CLEANUP_MODE == "off":
-                return "Keeps every word (no cleaning)", "[OFF]", "dim white"
+                return "Verbatim: keeps every spoken word", "[OFF]", "dim white"
             elif CLEANUP_MODE == "artifacts":
-                return "Removes noise only (no corrections)", "[NOISE]", "cyan"
+                return "Drops 'um' & noise, keeps words", "[NOISE]", "cyan"
             else:
-                return "Removes noise and resolves corrections", "[FULL]", "green"
+                return "'Tuesday no Wed' -> Wednesday", "[FULL]", "green"
+        elif item_id == "formatter_menu":
+            if FORMATTER == "on":
+                return "Active · rewrites transcript", "[ON]", "green"
+            else:
+                return "Off · deterministic cleanup only", "[OFF]", "dim white"
+        elif item_id == "meeting_menu":
+            if MEETING == "on":
+                return "Active · audio held for turns", "[ON]", "green"
+            else:
+                return "Off · dictation path only", "[OFF]", "dim white"
         elif item_id == "structure":
             # The configured mode and the effective one can differ: typing
             # downgrades "blocks" to "inline" because a newline is an Enter
@@ -3334,9 +3372,9 @@ def select_settings_picker():
             return formatter_context_setting_state(FORMATTER_CONTEXT)
         elif item_id == "trailing_space":
             if AUTO_TYPE_TRAILING_SPACE:
-                return "Enabled (appends ' ')", "[ON]", "green"
+                return "Chains: 'first ' + 'next '", "[ON]", "green"
             else:
-                return "Disabled (exact text)", "[OFF]", "dim white"
+                return "Exact: 'first' (no extra space)", "[OFF]", "dim white"
         elif item_id == "number_digits":
             if NUMBER_MODE == "digits":
                 return "All Digits (1, 2, 3)", "[DIGITS]", "green"
@@ -3403,11 +3441,16 @@ def select_settings_picker():
         return "", "", "white"
 
     def filter_settings(q):
+        active_defs = (
+            MAIN_SETTINGS_DEFS if current_menu == "main"
+            else (FORMATTER_SETTINGS_DEFS if current_menu == "formatter"
+                  else MEETING_SETTINGS_DEFS)
+        )
         if not q.strip():
-            return list(enumerate(settings_defs))
+            return list(enumerate(active_defs))
         q = q.strip().lower()
         scored = []
-        for i, item in enumerate(settings_defs):
+        for i, item in enumerate(active_defs):
             score = _score_setting(q, item["title"], item["keywords"])
             if score is not None:
                 scored.append((score, i, item))
@@ -3459,12 +3502,19 @@ def select_settings_picker():
             padding=(0, 1),
         )
 
+        menu_titles = {
+            "main": "⚙️  Settings & Configuration",
+            "formatter": "✦  Settings · Formatter",
+            "meeting": "⏺  Settings · Meeting & Diarization",
+        }
+        title_text = menu_titles.get(current_menu, "⚙️  Settings & Configuration")
+        footer_esc = "Close" if current_menu == "main" else "Back"
         footer = Text.from_markup(
-            "  [cyan][↑/↓][/cyan] Navigate   [cyan][Type][/cyan] Search   [green][Enter/Space][/green] Toggle   [red][Esc][/red] Close"
+            f"  [cyan][↑/↓][/cyan] Navigate   [cyan][Type][/cyan] Search   [green][Enter/Space][/green] Toggle/Select   [red][Esc][/red] {footer_esc}"
         )
         main_panel = Panel(
             table,
-            title="⚙️  Settings & Configuration",
+            title=title_text,
             subtitle=footer,
             border_style=eff_theme,
             box=box.ROUNDED,
@@ -3484,17 +3534,44 @@ def select_settings_picker():
         if key != 'ENTER':
             confirm_defaults = False
         if key in ('ESC', 'CTRL_C'):
+            if current_menu != "main":
+                prev = current_menu
+                current_menu = "main"
+                query = ""
+                selected_idx = 2 if prev == "formatter" else 4
+                continue
             save_audio_config()
             console.clear()
             return True
         elif key in ('q', 'Q') and not query:
+            if current_menu != "main":
+                prev = current_menu
+                current_menu = "main"
+                query = ""
+                selected_idx = 2 if prev == "formatter" else 4
+                continue
             save_audio_config()
             console.clear()
             return True
+        elif key == 'BACKSPACE' and not query and current_menu != "main":
+            prev = current_menu
+            current_menu = "main"
+            selected_idx = 2 if prev == "formatter" else 4
+            continue
         elif key == 'ENTER' or (key == ' ' and not query):
             if matches:
                 item_id = matches[selected_idx][1]["id"]
-                if item_id in ("preset", "punctuation_mode"):
+                if item_id == "formatter_menu":
+                    current_menu = "formatter"
+                    query = ""
+                    selected_idx = 0
+                    continue
+                elif item_id == "meeting_menu":
+                    current_menu = "meeting"
+                    query = ""
+                    selected_idx = 0
+                    continue
+                elif item_id in ("preset", "punctuation_mode"):
                     if key == 'ENTER':
                         select_preset_picker()
                     else:

@@ -1361,3 +1361,32 @@ def test_ratatui_speaker_and_output_commands_reach_callbacks():
         "editor",
         ("names", ["Priya", "Sam"]),
     ]
+
+
+def test_ratatui_meeting_capture_row_matches_python():
+    """Both front ends can start a capture, with the same wording.
+
+    Regression: the ratatui settings picker had no capture row at all — only the
+    Rich modal did — so a meeting could not be started from the Rust front end and
+    the meeting screen was unreachable there. Start-restart is the only way in.
+    """
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
+
+    assert "SettingKind::MeetingCapture" in implementation, (
+        "tui-rs/src/settings_picker.rs has no Meeting Capture row, so a meeting "
+        "cannot be started from the ratatui front end"
+    )
+    # The static half of the Rich row's wording, from t2.py's meeting_capture
+    # branch, plus the badge that says what activating it will do.
+    for text in (
+        "Switch Meeting Mode on first",
+        "Start a meeting capture",
+        "[START]",
+        "[OFF]",
+    ):
+        assert text in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows {text!r}, which the "
+            f"Rich settings modal does show for the same row"
+        )
+    # Same engine command from both front ends: the row is not a second path.
+    assert '"toggle_meeting"' in implementation

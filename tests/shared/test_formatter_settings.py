@@ -444,9 +444,9 @@ def test_formatter_labels():
     assert t2.formatter_model_setting_state("s1-mini") == (
         'Model: "S1-mini" by "Superwhisper"', "[MODEL]", "cyan")
     assert t2.formatter_style_setting_state("formal") == (
-        "Writing style: formal", "[STYLE]", "cyan")
+        "Writing style: formal (expands)", "[STYLE]", "cyan")
     assert t2.formatter_context_setting_state("email") == (
-        "Context: email", "[CONTEXT]", "cyan")
+        "Context: email (greeting/signoff)", "[CONTEXT]", "cyan")
 
 
 def test_ratatui_formatter_labels_match_python():

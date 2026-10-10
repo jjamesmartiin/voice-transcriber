@@ -12,16 +12,23 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{App, RunState};
 use crate::ipc::{self, IpcEvent};
 use crate::textfit;
 use crate::theme_picker;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsMenu {
+    Main,
+    Formatter,
+    Meeting,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingKind {
+    FormatterMenu,
+    MeetingMenu,
     TrailingSpace,
-    #[allow(dead_code)]
-    AutoPunctuate,
     NumberDigits,
     SerialCollapse,
     SpellCommand,
@@ -38,6 +45,7 @@ pub enum SettingKind {
     FormatterContext,
     CleanupMode,
     MeetingMode,
+    MeetingCapture,
     MeetingSpill,
     Diarization,
     DiarizationSpeakers,
@@ -57,9 +65,10 @@ pub struct SettingItem {
     pub icon: &'static str,
     pub title: &'static str,
     pub keywords: &'static str,
+    pub menu: SettingsMenu,
 }
 
-pub const SETTINGS: [SettingItem; 28] = [
+pub const SETTINGS: [SettingItem; 31] = [
     // NOTE: icons must be exactly one glyph whose *own* codepoint already
     // occupies its final width in every terminal - never a `U+FE0F`
     // variation-selector sequence and never a ZWJ sequence. Terminals that
@@ -69,173 +78,228 @@ pub const SETTINGS: [SettingItem; 28] = [
     // column left. `test_setting_icons_have_terminal_independent_width` pins
     // this. A narrow glyph such as `␣` is fine: `RowLayout` pads the icon
     // column to a fixed two cells.
+
+    // --- Main Settings (alphabetical by category prefix) ---
     SettingItem {
-        kind: SettingKind::PunctuationMode,
-        icon: "✨",
-        title: "Mode Preset",
-        keywords: "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
+        kind: SettingKind::Microphone,
+        icon: "•",
+        title: "Audio: Device (Mic)",
+        keywords: "mic microphone audio device input hardware primary secondary",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::SoundMute,
+        icon: "•",
+        title: "Audio: Sound Cues",
+        keywords: "sound effects mute volume chimes audio audio cues notify silent audio sounds",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::CleanupMode,
+        icon: "•",
+        title: "Format: Cleanup",
+        keywords: "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
+        menu: SettingsMenu::Main,
     },
     SettingItem {
         kind: SettingKind::StructureMode,
         icon: "•",
-        title: "List Formatting",
+        title: "Format: List Blocks",
         keywords: "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
+        menu: SettingsMenu::Main,
     },
+    SettingItem {
+        kind: SettingKind::NumberDigits,
+        icon: "•",
+        title: "Format: Numbers",
+        keywords: "numbers digits words spelled format numeric conversion digits auto",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::PunctuationMode,
+        icon: "✨",
+        title: "Format: Preset",
+        keywords: "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::SerialCollapse,
+        icon: "•",
+        title: "Format: Serials",
+        keywords: "serial code alphanumeric nato phonetic spelled collapse spacing identifier model vin license plate",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::SpellCommand,
+        icon: "•",
+        title: "Format: Spell Cmd",
+        keywords: "spell spelled verbal command letters c a t acronym dictation spelling",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::Hotkeys,
+        icon: "•",
+        title: "Hotkey: Keys (PTT)",
+        keywords: "push to talk hotkey key bind chord shortcut alt shift ptt keyboard f13 right ctrl add remove",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::MiddleClick,
+        icon: "•",
+        title: "Hotkey: Mouse (PTT)",
+        keywords: "middle click mouse hotkey push to talk button hold ptt",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::FormatterMenu,
+        icon: "✦",
+        title: "Menu: Formatter",
+        keywords: "formatter format rewrite slm llm model style context s1-mini rewrite offline language polish menu",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::MeetingMenu,
+        icon: "⏺",
+        title: "Menu: Meeting",
+        keywords: "meeting diarization speaker speakers capture spill transcript folder output notes long record hours menu",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::OutputMode,
+        icon: "•",
+        title: "Output: Delivery",
+        keywords: "output mode delivery clipboard type typing paste speed fast slow safe",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::TrailingSpace,
+        icon: "␣",
+        title: "Output: Space",
+        keywords: "space trailing space auto type whitespace append space",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::TypingWpm,
+        icon: "⚡",
+        title: "Output: Typing WPM",
+        keywords: "typing speed wpm words per minute time saved benchmark calculation stats speed",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::ResetDefaults,
+        icon: "•",
+        title: "Reset: Defaults",
+        keywords: "reset defaults factory restore revert shipped initial config settings default everything",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::RescanMics,
+        icon: "♻",
+        title: "Reset: Microphones",
+        keywords: "reset rescan refresh microphones mics devices audio input list enumerate plugged busy stale missing",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::ResetTerminal,
+        icon: "•",
+        title: "Reset: Terminal",
+        keywords: "reset terminal clipboard bridge clear state fix",
+        menu: SettingsMenu::Main,
+    },
+    SettingItem {
+        kind: SettingKind::Theme,
+        icon: "•",
+        title: "UI: Color Theme",
+        keywords: "theme color ui palette cyan magenta green blue yellow red white",
+        menu: SettingsMenu::Main,
+    },
+
+    // --- Formatter Submenu ---
     SettingItem {
         kind: SettingKind::Formatter,
         icon: "•",
         title: "Formatter",
         keywords: "formatter format rewrite rewrite transcript local slm llm cleanup deterministic off on",
+        menu: SettingsMenu::Formatter,
     },
     SettingItem {
         kind: SettingKind::FormatterModel,
         icon: "•",
         title: "Formatter Model",
         keywords: "formatter model backend slm llm local s1-mini llama-server rewrite",
+        menu: SettingsMenu::Formatter,
     },
     SettingItem {
         kind: SettingKind::FormatterStyle,
         icon: "•",
         title: "Formatter Style",
         keywords: "formatter style writing casual semi-casual semi-formal formal tone rewrite",
+        menu: SettingsMenu::Formatter,
     },
     SettingItem {
         kind: SettingKind::FormatterContext,
         icon: "•",
         title: "Formatter Context",
         keywords: "formatter context general email message writing rewrite",
+        menu: SettingsMenu::Formatter,
     },
-    SettingItem {
-        kind: SettingKind::CleanupMode,
-        icon: "•",
-        title: "Cleanup Mode",
-        keywords: "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
-    },
+
+    // --- Meeting Submenu ---
     SettingItem {
         kind: SettingKind::MeetingMode,
         icon: "•",
         title: "Meeting Mode",
         keywords: "meeting diarization speakers capture long recording minutes hours transcript notes",
+        menu: SettingsMenu::Meeting,
+    },
+    SettingItem {
+        kind: SettingKind::MeetingCapture,
+        icon: "⏺",
+        title: "Meeting Capture",
+        keywords: "meeting capture start stop record long session elapsed timer microphone",
+        menu: SettingsMenu::Meeting,
     },
     SettingItem {
         kind: SettingKind::MeetingSpill,
         icon: "•",
         title: "Meeting Spill",
         keywords: "meeting spill memory temp file threshold minutes long recording buffer disk",
+        menu: SettingsMenu::Meeting,
     },
     SettingItem {
         kind: SettingKind::Diarization,
         icon: "•",
         title: "Speaker Labels",
         keywords: "diarization diarize speaker speakers labels who said meeting transcript separation",
+        menu: SettingsMenu::Meeting,
     },
     SettingItem {
         kind: SettingKind::DiarizationSpeakers,
         icon: "•",
         title: "Speaker Count",
         keywords: "diarization speakers count number hint auto known how many people",
+        menu: SettingsMenu::Meeting,
     },
     SettingItem {
         kind: SettingKind::DiarizationModel,
         icon: "•",
         title: "Speaker Model",
         keywords: "diarization model backend sherpa onnx speaker embed which model swap",
+        menu: SettingsMenu::Meeting,
     },
     SettingItem {
         kind: SettingKind::MeetingOutputDir,
         icon: "•",
         title: "Transcript Folder",
         keywords: "meeting transcript output directory folder path save location where written meetings",
+        menu: SettingsMenu::Meeting,
     },
     SettingItem {
         kind: SettingKind::MeetingOutputFormat,
         icon: "•",
         title: "Transcript Form",
         keywords: "meeting transcript output format form text json markdown md artifact",
-    },
-    SettingItem {
-        kind: SettingKind::OutputMode,
-        icon: "🚀",
-        title: "Output Delivery",
-        keywords: "output mode delivery clipboard type typing paste speed fast slow safe",
-    },
-    SettingItem {
-        kind: SettingKind::TrailingSpace,
-        icon: "␣",
-        title: "Trailing Space",
-        keywords: "trailing space auto type whitespace append space",
-    },
-    SettingItem {
-        kind: SettingKind::NumberDigits,
-        icon: "🔢",
-        title: "Number Conversion",
-        keywords: "numbers digits words spelled format numeric conversion",
-    },
-    SettingItem {
-        kind: SettingKind::SerialCollapse,
-        icon: "🔤",
-        title: "Serial/Codes",
-        keywords: "serial code alphanumeric nato phonetic spelled collapse spacing identifier model vin license plate",
-    },
-    SettingItem {
-        kind: SettingKind::SpellCommand,
-        icon: "🔠",
-        title: "Spell Command",
-        keywords: "spell spelled verbal command letters c a t acronym dictation",
-    },
-    SettingItem {
-        kind: SettingKind::TypingWpm,
-        icon: "⚡",
-        title: "Typing Speed",
-        keywords: "typing speed wpm words per minute time saved benchmark calculation stats",
-    },
-    SettingItem {
-        kind: SettingKind::MiddleClick,
-        icon: "👆",
-        title: "Mouse Hotkey",
-        keywords: "middle click mouse hotkey push to talk button hold",
-    },
-    SettingItem {
-        kind: SettingKind::Hotkeys,
-        icon: "🔑",
-        title: "Push-to-Talk Keys",
-        keywords: "push to talk hotkey key bind chord shortcut alt shift ptt keyboard f13 right ctrl add remove",
-    },
-    SettingItem {
-        kind: SettingKind::SoundMute,
-        icon: "🔔",
-        title: "Sound Effects",
-        keywords: "sound effects mute volume chimes audio audio cues notify",
-    },
-    SettingItem {
-        kind: SettingKind::Theme,
-        icon: "🎨",
-        title: "UI Color Theme",
-        keywords: "theme color ui palette cyan magenta green blue yellow red white",
-    },
-    SettingItem {
-        kind: SettingKind::Microphone,
-        icon: "🎤",
-        title: "Audio Device (Mic)",
-        keywords: "mic microphone audio device input hardware primary secondary",
-    },
-    SettingItem {
-        kind: SettingKind::RescanMics,
-        icon: "♻",
-        title: "Reset Microphones",
-        keywords: "reset rescan refresh microphones mics devices audio input list enumerate plugged busy stale missing",
-    },
-    SettingItem {
-        kind: SettingKind::ResetTerminal,
-        icon: "🔄",
-        title: "Reset Terminal",
-        keywords: "reset terminal clipboard bridge clear state fix",
-    },
-    SettingItem {
-        kind: SettingKind::ResetDefaults,
-        icon: "🔙",
-        title: "Reset to Defaults",
-        keywords: "reset defaults factory restore revert shipped initial config settings default everything",
+        menu: SettingsMenu::Meeting,
     },
 ];
 
@@ -289,28 +353,13 @@ impl SettingItem {
             SettingKind::TrailingSpace => {
                 if app.trailing_space {
                     (
-                        "Appends a space after typing".to_string(),
+                        "Chains: 'first ' + 'next '".to_string(),
                         "[ON]",
                         Color::Green,
                     )
                 } else {
                     (
-                        "No space added after typing".to_string(),
-                        "[OFF]",
-                        Color::DarkGray,
-                    )
-                }
-            }
-            SettingKind::AutoPunctuate => {
-                if app.auto_punctuate {
-                    (
-                        "Full punctuation + period".to_string(),
-                        "[ON]",
-                        Color::Green,
-                    )
-                } else {
-                    (
-                        "Respect the mode preset".to_string(),
+                        "Exact: 'first' (no extra space)".to_string(),
                         "[OFF]",
                         Color::DarkGray,
                     )
@@ -451,9 +500,9 @@ impl SettingItem {
                 // deleted), "artifacts" deletes noise only, "full" also resolves
                 // what the speaker retracted.
                 let (desc, badge, color) = match app.cleanup_mode.as_str() {
-                    "off" => ("Keeps every word", "[OFF]", Color::DarkGray),
-                    "artifacts" => ("Removes noise only", "[NOISE]", Color::Cyan),
-                    _ => ("Resolves corrections", "[FULL]", Color::Green),
+                    "off" => ("Verbatim: keeps every spoken word", "[OFF]", Color::DarkGray),
+                    "artifacts" => ("Drops 'um' & noise, keeps words", "[NOISE]", Color::Cyan),
+                    _ => ("'Tuesday no Wed' -> Wednesday", "[FULL]", Color::Green),
                 };
                 (desc.to_string(), badge, color)
             }
@@ -469,6 +518,37 @@ impl SettingItem {
                     )
                 } else {
                     ("Off: dictation only".to_string(), "[OFF]", Color::DarkGray)
+                }
+            }
+            SettingKind::MeetingCapture => {
+                // Mirrors `meeting_capture_status()` / the label arm in t2.py.
+                // The engine owns the capture, so this row only has the app's
+                // state and the sub-text it streams (elapsed timer while
+                // recording, phase + percent while finalizing).
+                if app.meeting_mode != "on" {
+                    (
+                        "Switch Meeting Mode on first".to_string(),
+                        "[OFF]",
+                        Color::DarkGray,
+                    )
+                } else if app.state == RunState::Meeting {
+                    (
+                        format!("Capturing · {}", app.sub_state_text),
+                        "[STOP]",
+                        Color::Red,
+                    )
+                } else if app.state == RunState::Processing {
+                    (
+                        format!("Finishing · {}", app.sub_state_text),
+                        "[BUSY]",
+                        Color::Yellow,
+                    )
+                } else {
+                    (
+                        "Start a meeting capture".to_string(),
+                        "[START]",
+                        Color::Yellow,
+                    )
                 }
             }
             SettingKind::MeetingSpill => (
@@ -527,6 +607,36 @@ impl SettingItem {
                 "[FORM]",
                 Color::Cyan,
             ),
+            SettingKind::FormatterMenu => {
+                if app.formatter == "on" {
+                    (
+                        "Active · rewrites transcript".to_string(),
+                        "[ON]",
+                        Color::Green,
+                    )
+                } else {
+                    (
+                        "Off · deterministic cleanup only".to_string(),
+                        "[OFF]",
+                        Color::DarkGray,
+                    )
+                }
+            }
+            SettingKind::MeetingMenu => {
+                if app.meeting_mode == "on" {
+                    (
+                        "Active · audio held for turns".to_string(),
+                        "[ON]",
+                        Color::Green,
+                    )
+                } else {
+                    (
+                        "Off · dictation path only".to_string(),
+                        "[OFF]",
+                        Color::DarkGray,
+                    )
+                }
+            }
             SettingKind::StructureMode => {
                 // Spec: docs/formatting.md. "blocks" emits real line breaks, and
                 // a newline is an Enter keypress, so the engine downgrades it to
@@ -578,16 +688,31 @@ impl SettingItem {
                 "[MODEL]",
                 Color::Cyan,
             ),
-            SettingKind::FormatterStyle => (
-                format!("Writing style: {}", app.formatter_style),
-                "[STYLE]",
-                Color::Cyan,
-            ),
-            SettingKind::FormatterContext => (
-                format!("Context: {}", app.formatter_context),
-                "[CONTEXT]",
-                Color::Cyan,
-            ),
+            SettingKind::FormatterStyle => {
+                let note = match app.formatter_style.as_str() {
+                    "casual" => "informal",
+                    "semi-casual" => "work chat",
+                    "semi-formal" => "pro grammar",
+                    "formal" => "expands",
+                    _ => "style",
+                };
+                (
+                    format!("Writing style: {} ({note})", app.formatter_style),
+                    "[STYLE]",
+                    Color::Cyan,
+                )
+            }
+            SettingKind::FormatterContext => {
+                let note = match app.formatter_context.as_str() {
+                    "email" => "greeting/signoff",
+                    _ => "standard prose",
+                };
+                (
+                    format!("Context: {} ({note})", app.formatter_context),
+                    "[CONTEXT]",
+                    Color::Cyan,
+                )
+            }
             SettingKind::Theme => {
                 let name = app.ui_theme.name();
                 (format!("{} palette", name), "[PICKER]", c)
@@ -815,6 +940,7 @@ pub enum SettingsPickerAction {
 }
 
 pub struct SettingsPickerState {
+    pub current_menu: SettingsMenu,
     pub query: String,
     pub selected_index: usize,
     pub filtered_indices: Vec<usize>,
@@ -833,22 +959,28 @@ pub struct SettingsPickerState {
 
 impl SettingsPickerState {
     pub fn new() -> Self {
-        Self {
+        let mut s = Self {
+            current_menu: SettingsMenu::Main,
             query: String::new(),
             selected_index: 0,
-            filtered_indices: (0..SETTINGS.len()).collect(),
+            filtered_indices: Vec::new(),
             reset_done: false,
             mic_rescan_done: false,
             defaults_done: false,
             confirm_defaults: false,
             wpm_input: None,
             dir_input: None,
-        }
+        };
+        s.update_filter();
+        s
     }
 
     pub fn update_filter(&mut self) {
         let mut scored: Vec<(usize, i32)> = Vec::new();
         for (i, item) in SETTINGS.iter().enumerate() {
+            if item.menu != self.current_menu {
+                continue;
+            }
             if let Some(score) = score_setting(&self.query, item) {
                 scored.push((i, score));
             }
@@ -857,6 +989,32 @@ impl SettingsPickerState {
         self.filtered_indices = scored.into_iter().map(|(idx, _)| idx).collect();
         if self.selected_index >= self.filtered_indices.len() {
             self.selected_index = self.filtered_indices.len().saturating_sub(1);
+        }
+    }
+
+    pub fn enter_menu(&mut self, menu: SettingsMenu) {
+        self.current_menu = menu;
+        self.query.clear();
+        self.selected_index = 0;
+        self.confirm_defaults = false;
+        self.update_filter();
+    }
+
+    pub fn leave_menu(&mut self) {
+        let prev = self.current_menu;
+        self.current_menu = SettingsMenu::Main;
+        self.query.clear();
+        self.confirm_defaults = false;
+        self.update_filter();
+        let target = match prev {
+            SettingsMenu::Formatter => Some(SettingKind::FormatterMenu),
+            SettingsMenu::Meeting => Some(SettingKind::MeetingMenu),
+            SettingsMenu::Main => None,
+        };
+        if let Some(target_kind) = target {
+            if let Some(pos) = self.filtered_indices.iter().position(|&idx| SETTINGS[idx].kind == target_kind) {
+                self.selected_index = pos;
+            }
         }
     }
 
@@ -999,11 +1157,24 @@ impl SettingsPickerState {
         }
 
         match key.code {
-            KeyCode::Esc => SettingsPickerAction::Close,
+            KeyCode::Esc => {
+                if self.current_menu != SettingsMenu::Main {
+                    self.leave_menu();
+                    SettingsPickerAction::Continue
+                } else {
+                    SettingsPickerAction::Close
+                }
+            }
             KeyCode::Enter => {
                 if let Some(&idx) = self.filtered_indices.get(self.selected_index) {
                     let kind = SETTINGS[idx].kind;
-                    if kind == SettingKind::TypingWpm {
+                    if kind == SettingKind::FormatterMenu {
+                        self.enter_menu(SettingsMenu::Formatter);
+                        SettingsPickerAction::Continue
+                    } else if kind == SettingKind::MeetingMenu {
+                        self.enter_menu(SettingsMenu::Meeting);
+                        SettingsPickerAction::Continue
+                    } else if kind == SettingKind::TypingWpm {
                         self.wpm_input = Some(String::new());
                         SettingsPickerAction::Continue
                     } else if kind == SettingKind::MeetingOutputDir {
@@ -1013,7 +1184,10 @@ impl SettingsPickerState {
                         SettingsPickerAction::Toggle(kind)
                     }
                 } else {
-                    SettingsPickerAction::Close
+                    // Nothing matches the search: the hint says to use Backspace
+                    // or Esc, so Enter must not close the whole modal on a
+                    // keystroke the user pressed expecting a row.
+                    SettingsPickerAction::Continue
                 }
             }
             KeyCode::Char(' ') => {
@@ -1022,7 +1196,13 @@ impl SettingsPickerState {
                 if self.query.is_empty() {
                     if let Some(&idx) = self.filtered_indices.get(self.selected_index) {
                         let kind = SETTINGS[idx].kind;
-                        if kind == SettingKind::TypingWpm {
+                        if kind == SettingKind::FormatterMenu {
+                            self.enter_menu(SettingsMenu::Formatter);
+                            return SettingsPickerAction::Continue;
+                        } else if kind == SettingKind::MeetingMenu {
+                            self.enter_menu(SettingsMenu::Meeting);
+                            return SettingsPickerAction::Continue;
+                        } else if kind == SettingKind::TypingWpm {
                             self.wpm_input = Some(String::new());
                             return SettingsPickerAction::Continue;
                         } else if kind == SettingKind::MeetingOutputDir {
@@ -1060,8 +1240,12 @@ impl SettingsPickerState {
                 SettingsPickerAction::Continue
             }
             KeyCode::Backspace => {
-                self.query.pop();
-                self.update_filter();
+                if self.query.is_empty() && self.current_menu != SettingsMenu::Main {
+                    self.leave_menu();
+                } else {
+                    self.query.pop();
+                    self.update_filter();
+                }
                 SettingsPickerAction::Continue
             }
             KeyCode::Char(c) => {
@@ -1103,7 +1287,11 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
                 .add_modifier(Modifier::BOLD),
         )
         .title(Span::styled(
-            " ⚙️  Settings & Configuration ",
+            match state.current_menu {
+                SettingsMenu::Main => " ⚙️  Settings & Configuration ",
+                SettingsMenu::Formatter => " ✦  Settings · Formatter ",
+                SettingsMenu::Meeting => " ⏺  Settings · Meeting & Diarization ",
+            },
             Style::default()
                 .fg(theme_color)
                 .add_modifier(Modifier::BOLD),
@@ -1229,7 +1417,10 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
         Span::styled("[Type] ", Style::default().fg(Color::Cyan)),
         Span::styled("Filter   ", Style::default().add_modifier(Modifier::DIM)),
         Span::styled("[Esc] ", Style::default().fg(Color::Red)),
-        Span::styled("Done", Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(
+            if state.current_menu == SettingsMenu::Main { "Done" } else { "Back" },
+            Style::default().add_modifier(Modifier::DIM),
+        ),
     ]);
     frame.render_widget(Paragraph::new(footer), chunks[4]);
 
@@ -1512,13 +1703,10 @@ pub fn run_settings_picker(
                         }
                         SettingsPickerAction::Toggle(kind) => {
                             match kind {
+                                SettingKind::FormatterMenu | SettingKind::MeetingMenu => {}
                                 SettingKind::TrailingSpace => {
                                     app.trailing_space = !app.trailing_space;
                                     ipc::fire(writer, "toggle_trailing_space", app);
-                                }
-                                SettingKind::AutoPunctuate => {
-                                    app.auto_punctuate = !app.auto_punctuate;
-                                    ipc::fire(writer, "toggle_auto_punctuate", app);
                                 }
                                 SettingKind::NumberDigits => {
                                     app.number_mode = match app.number_mode.as_str() {
@@ -1562,6 +1750,24 @@ pub fn run_settings_picker(
                                 SettingKind::MeetingMode => {
                                     app.cycle_meeting_mode();
                                     ipc::fire(writer, "cycle_meeting", app);
+                                }
+                                SettingKind::MeetingCapture => {
+                                    // Deliberate difference from RescanMics (and
+                                    // every other row here): close the modal so
+                                    // the user lands on the meeting screen. The
+                                    // engine answers with state MEETING, which
+                                    // switches RunState. If the engine refuses
+                                    // (a dictation is active, or the previous
+                                    // finalize is still running) it reports that
+                                    // as an event, which is then visible on the
+                                    // main screen. With Meeting Mode off the
+                                    // label already says to switch it on first,
+                                    // and that switch lives on this very modal,
+                                    // so do nothing and stay open.
+                                    if app.meeting_mode == "on" {
+                                        ipc::fire(writer, "toggle_meeting", app);
+                                        break;
+                                    }
                                 }
                                 SettingKind::MeetingSpill => {
                                     app.cycle_meeting_spill();
@@ -1679,6 +1885,74 @@ mod tests {
     use crate::app::{App, Theme};
 
     #[test]
+    fn test_enter_on_an_empty_search_does_not_close_the_modal() {
+        // Regression: with no match, the Enter arm fell through to Close and shut
+        // the whole settings modal, on a keystroke the user pressed expecting a
+        // row — while the on-screen hint says to use Backspace or Esc to leave.
+        let mut state = SettingsPickerState::new();
+        state.query = "zzzzzz".to_string();
+        state.update_filter();
+        assert!(state.filtered_indices.is_empty());
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            SettingsPickerAction::Continue
+        );
+        // Esc still closes.
+        assert_eq!(
+            state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            SettingsPickerAction::Close
+        );
+    }
+
+    #[test]
+    fn test_settings_submenu_navigation() {
+        let mut state = SettingsPickerState::new();
+        assert_eq!(state.current_menu, SettingsMenu::Main);
+
+        // Find and select Formatter Settings
+        let fmt_pos = state
+            .filtered_indices
+            .iter()
+            .position(|&idx| SETTINGS[idx].kind == SettingKind::FormatterMenu)
+            .unwrap();
+        state.selected_index = fmt_pos;
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(state.current_menu, SettingsMenu::Formatter);
+        assert_eq!(state.filtered_indices.len(), 4);
+        assert_eq!(SETTINGS[state.filtered_indices[0]].kind, SettingKind::Formatter);
+
+        // Esc returns to Main and parks on Formatter Settings
+        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(state.current_menu, SettingsMenu::Main);
+        assert_eq!(
+            SETTINGS[state.filtered_indices[state.selected_index]].kind,
+            SettingKind::FormatterMenu
+        );
+
+        // Find and select Meeting Settings
+        let meet_pos = state
+            .filtered_indices
+            .iter()
+            .position(|&idx| SETTINGS[idx].kind == SettingKind::MeetingMenu)
+            .unwrap();
+        state.selected_index = meet_pos;
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(state.current_menu, SettingsMenu::Meeting);
+        assert_eq!(state.filtered_indices.len(), 8);
+        assert_eq!(SETTINGS[state.filtered_indices[0]].kind, SettingKind::MeetingMode);
+
+        // Esc returns to Main and parks on Meeting Settings
+        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(state.current_menu, SettingsMenu::Main);
+        assert_eq!(
+            SETTINGS[state.filtered_indices[state.selected_index]].kind,
+            SettingKind::MeetingMenu
+        );
+    }
+
+    #[test]
     fn test_settings_fuzzy_matching() {
         let item_space = SETTINGS
             .iter()
@@ -1708,7 +1982,10 @@ mod tests {
     fn test_settings_state_navigation_and_toggle() {
         let app = App::new("1.1.1", Theme::Cyan);
         let mut state = SettingsPickerState::new();
-        assert_eq!(state.filtered_indices.len(), SETTINGS.len());
+        assert_eq!(
+            state.filtered_indices.len(),
+            SETTINGS.iter().filter(|s| s.menu == SettingsMenu::Main).count()
+        );
 
         // Type 'space'
         state.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
@@ -1753,6 +2030,29 @@ mod tests {
             terminal
                 .draw(|f| render_settings_picker(f, &state, &app))
                 .unwrap_or_else(|e| panic!("{w}x{h} failed to draw: {e}"));
+        }
+    }
+
+    /// Regression: the two prompt dialogs ask for 34 columns and force a minimum
+    /// height. The popup was clamped to the terminal; the prompts were not, so
+    /// `Clear` indexed past the frame buffer and panicked.
+    #[test]
+    fn test_render_prompts_on_a_terminal_smaller_than_they_ask_for() {
+        let app = App::new("1.1.1", Theme::Cyan);
+        for (w, h) in [(80, 24), (30, 20), (20, 4), (1, 1)] {
+            for prompt in ["wpm", "dir"] {
+                let mut state = SettingsPickerState::new();
+                if prompt == "wpm" {
+                    state.wpm_input = Some(String::new());
+                } else {
+                    state.dir_input = Some(String::new());
+                }
+                let backend = ratatui::backend::TestBackend::new(w, h);
+                let mut terminal = ratatui::Terminal::new(backend).unwrap();
+                terminal
+                    .draw(|f| render_settings_picker(f, &state, &app))
+                    .unwrap_or_else(|e| panic!("{w}x{h} {prompt} prompt failed: {e}"));
+            }
         }
     }
 
@@ -1971,6 +2271,8 @@ mod tests {
         }
         for state in [&idle, &reset_done] {
             check(&app, state, SettingKind::ResetTerminal);
+        check(&app, state, SettingKind::FormatterMenu);
+        check(&app, state, SettingKind::MeetingMenu);
         }
         for state in [&idle, &mic_rescan_done] {
             check(&app, state, SettingKind::RescanMics);
@@ -1979,7 +2281,68 @@ mod tests {
             check(&app, state, SettingKind::ResetDefaults);
         }
 
+        // The meeting-capture row renders a live state string; cover the mode
+        // gate, an idle start, a running capture and the finalize.
+        app.meeting_mode = "off".to_string();
+        check(&app, &idle, SettingKind::MeetingCapture);
+        app.meeting_mode = "on".to_string();
+        app.update_state(RunState::Ready, String::new());
+        check(&app, &idle, SettingKind::MeetingCapture);
+        app.update_state(RunState::Meeting, "01:05 · 40%".to_string());
+        check(&app, &idle, SettingKind::MeetingCapture);
+        app.update_state(RunState::Processing, "40%".to_string());
+        check(&app, &idle, SettingKind::MeetingCapture);
+
         assert!(clipped.is_empty(), "labels would be clipped: {clipped:?}");
+    }
+
+    #[test]
+    fn test_meeting_capture_previews_match_the_python_row() {
+        // Mirrors `meeting_capture_status()` and the label arm in t2.py; the
+        // parity guard in tests/shared/test_config_sync.py pins the same strings.
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        let idle = SettingsPickerState::new();
+        let item = SETTINGS
+            .iter()
+            .find(|i| i.kind == SettingKind::MeetingCapture)
+            .unwrap();
+
+        // Mode off: point at the row that turns it on.
+        app.meeting_mode = "off".to_string();
+        assert_eq!(
+            item.value_and_badge(&app, &idle),
+            (
+                "Switch Meeting Mode on first".to_string(),
+                "[OFF]",
+                Color::DarkGray
+            )
+        );
+
+        // Mode on, idle: an invitation to start.
+        app.meeting_mode = "on".to_string();
+        app.update_state(RunState::Ready, String::new());
+        assert_eq!(
+            item.value_and_badge(&app, &idle),
+            (
+                "Start a meeting capture".to_string(),
+                "[START]",
+                Color::Yellow
+            )
+        );
+
+        // Capturing: the sub-text is the elapsed timer the engine streams.
+        app.update_state(RunState::Meeting, "01:05 · 40%".to_string());
+        assert_eq!(
+            item.value_and_badge(&app, &idle),
+            ("Capturing · 01:05 · 40%".to_string(), "[STOP]", Color::Red)
+        );
+
+        // Finalizing: the sub-text is the phase + percent.
+        app.update_state(RunState::Processing, "40%".to_string());
+        assert_eq!(
+            item.value_and_badge(&app, &idle),
+            ("Finishing · 40%".to_string(), "[BUSY]", Color::Yellow)
+        );
     }
 
     #[test]
@@ -2230,10 +2593,16 @@ mod tests {
             .iter()
             .find(|i| i.kind == SettingKind::FormatterStyle)
             .unwrap();
-        for value in ["casual", "semi-casual", "semi-formal", "formal"] {
+        let style_expected = [
+            ("casual", "Writing style: casual (informal)"),
+            ("semi-casual", "Writing style: semi-casual (work chat)"),
+            ("semi-formal", "Writing style: semi-formal (pro grammar)"),
+            ("formal", "Writing style: formal (expands)"),
+        ];
+        for (value, want) in style_expected {
             app.formatter_style = value.to_string();
             let (desc, badge, _) = style.value_and_badge(&app, &idle);
-            assert_eq!(desc, format!("Writing style: {value}"));
+            assert_eq!(desc, want);
             assert_eq!(badge, "[STYLE]");
         }
 
@@ -2241,10 +2610,14 @@ mod tests {
             .iter()
             .find(|i| i.kind == SettingKind::FormatterContext)
             .unwrap();
-        for value in ["general", "email"] {
+        let context_expected = [
+            ("general", "Context: general (standard prose)"),
+            ("email", "Context: email (greeting/signoff)"),
+        ];
+        for (value, want) in context_expected {
             app.formatter_context = value.to_string();
             let (desc, badge, _) = context.value_and_badge(&app, &idle);
-            assert_eq!(desc, format!("Context: {value}"));
+            assert_eq!(desc, want);
             assert_eq!(badge, "[CONTEXT]");
         }
 
@@ -2295,9 +2668,9 @@ mod tests {
             .unwrap();
 
         let expected = [
-            ("off", "Keeps every word", "[OFF]"),
-            ("artifacts", "Removes noise only", "[NOISE]"),
-            ("full", "Resolves corrections", "[FULL]"),
+            ("off", "Verbatim: keeps every spoken word", "[OFF]"),
+            ("artifacts", "Drops 'um' & noise, keeps words", "[NOISE]"),
+            ("full", "'Tuesday no Wed' -> Wednesday", "[FULL]"),
         ];
         for (mode, desc, badge) in expected {
             app.cleanup_mode = mode.to_string();
