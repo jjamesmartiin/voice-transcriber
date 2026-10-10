@@ -682,6 +682,25 @@ def test_output_dir_setting_is_used_when_no_explicit_dir(tmp_path, monkeypatch):
     assert str(env_target) in str(result2.path)
 
 
+def test_relative_output_dir_without_a_checkout_uses_the_data_dir(tmp_path, monkeypatch):
+    """An installed build must not write meetings into the launch directory."""
+    from voice_transcriber import model_download
+
+    monkeypatch.delenv(mp.OUTPUT_DIR_ENV, raising=False)
+    monkeypatch.setattr(mp, "_repo_root", lambda: None)
+    monkeypatch.setattr(model_download, "get_data_dir", lambda: str(tmp_path / "data"))
+
+    assert mp.meeting_output_dir(setting="meetings") == str(tmp_path / "data" / "meetings")
+
+
+def test_relative_output_dir_with_a_checkout_stays_in_the_repo(tmp_path, monkeypatch):
+    """Decision S8: a checkout keeps the repo-relative ``meetings`` default."""
+    monkeypatch.delenv(mp.OUTPUT_DIR_ENV, raising=False)
+    monkeypatch.setattr(mp, "_repo_root", lambda: str(tmp_path / "checkout"))
+
+    assert mp.meeting_output_dir(setting="meetings") == str(tmp_path / "checkout" / "meetings")
+
+
 # ---------------------------------------------------------------------------
 # End-to-end: session capture -> pipeline -> status, plus spill cleanup
 # ---------------------------------------------------------------------------
