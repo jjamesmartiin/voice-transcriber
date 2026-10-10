@@ -408,13 +408,7 @@ pub fn run_bind_picker(
     rx: Option<&mpsc::Receiver<IpcEvent>>,
     app: &mut App,
 ) -> io::Result<()> {
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
-
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.hide_cursor()?;
-    terminal.clear()?;
+    let mut terminal = crate::modal::enter_modal_screen()?;
 
     let mut state = BindPickerState::new();
 
@@ -459,7 +453,7 @@ pub fn run_bind_picker(
         }
     }
 
-    let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    crate::modal::leave_modal_screen();
     Ok(())
 }
 

@@ -463,13 +463,7 @@ pub fn run_speaker_picker(
     rx: Option<&mpsc::Receiver<IpcEvent>>,
     app: &mut App,
 ) -> io::Result<()> {
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
-
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.hide_cursor()?;
-    terminal.clear()?;
+    let mut terminal = crate::modal::enter_modal_screen()?;
 
     let mut state = SpeakerPickerState::new(app.speaker_names.clone());
 
@@ -519,7 +513,7 @@ pub fn run_speaker_picker(
     // is no engine, so keep the local copy so the screen stays consistent.
     app.speaker_names = state.names.clone();
 
-    let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    crate::modal::leave_modal_screen();
     Ok(())
 }
 

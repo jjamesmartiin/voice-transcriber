@@ -496,12 +496,7 @@ pub fn run_preset_picker(
     rx: Option<&mpsc::Receiver<IpcEvent>>,
     app: &mut App,
 ) -> io::Result<Option<&'static str>> {
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
-
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.hide_cursor()?;
+    let mut terminal = crate::modal::enter_modal_screen()?;
 
     let mut state = PresetPickerState::new(&app.punctuation_mode);
     let mut result: Option<&'static str> = None;
@@ -545,7 +540,7 @@ pub fn run_preset_picker(
         }
     }
 
-    let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    crate::modal::leave_modal_screen();
 
     if let Some(canon) = result {
         app.punctuation_mode = canon.to_string();

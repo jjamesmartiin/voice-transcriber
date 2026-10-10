@@ -491,12 +491,7 @@ pub fn run_theme_picker(
     rx: Option<&mpsc::Receiver<IpcEvent>>,
     app: &mut App,
 ) -> io::Result<Option<Theme>> {
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
-
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.hide_cursor()?;
+    let mut terminal = crate::modal::enter_modal_screen()?;
 
     let mut state = PickerState::new(current_theme);
     let mut result: Option<Theme> = None;
@@ -540,7 +535,7 @@ pub fn run_theme_picker(
         }
     }
 
-    let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    crate::modal::leave_modal_screen();
 
     if let Some(theme) = result {
         app.ui_theme = theme;

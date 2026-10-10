@@ -13,6 +13,7 @@ mod bind_picker;
 mod demo;
 mod ipc;
 mod mic_picker;
+mod modal;
 mod preset_picker;
 mod settings_picker;
 mod speaker_picker;
