@@ -87,6 +87,7 @@
             ncurses
             readline
             mpg123
+            llama-cpp
           ] ++ (pkgs.lib.optionals isLinux linuxRuntimeDeps);
 
           # Python environment
@@ -242,6 +243,7 @@
             ncurses
             readline
             mpg123
+            llama-cpp
           ] ++ (pkgs.lib.optionals isLinux linuxRuntimeDeps);
 
           vt_pkg = self.packages.${system}.default;
@@ -340,6 +342,7 @@
             ncurses
             readline
             mpg123
+            llama-cpp
           ] ++ (pkgs.lib.optionals isLinux linuxRuntimeDeps);
 
           pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [

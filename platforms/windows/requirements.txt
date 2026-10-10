@@ -65,6 +65,7 @@ safetensors==0.7.0
 scikit-learn==1.8.0
 scipy==1.17.1
 sentencepiece==0.2.1
+sherpa-onnx>=1.13.3
 six==1.17.0
 sounddevice==0.5.5
 soundfile==0.13.1

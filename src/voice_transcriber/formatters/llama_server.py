@@ -44,6 +44,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 from voice_transcriber import formatter
@@ -156,10 +157,23 @@ def server_process() -> subprocess.Popen | None:
 
 
 def _binary() -> str | None:
-    """Locate ``llama-server``: explicit override, then ``PATH``."""
+    """Locate ``llama-server``: explicit override, bundled executable, then ``PATH``."""
     override = (os.environ.get(ENV_BINARY) or "").strip()
     if override:
         return override if os.path.exists(override) else None
+
+    # Check next to executable (frozen PyInstaller bundle or virtualenv bin)
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        candidates.extend([exe_dir / "llama-server", exe_dir / "llama-server.exe"])
+    if hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS)
+        candidates.extend([base / "llama-server", base / "llama-server.exe"])
+    for cand in candidates:
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+
     from shutil import which
     return which("llama-server")
 
@@ -352,7 +366,7 @@ def _build_command(binary: str, model: str, host: str, port: int) -> list[str]:
     part: without it the model can emit its reasoning as the answer. The
     sampling flags are pinned to greedy for determinism.
     """
-    return [
+    cmd = [
         binary,
         "-m", model,
         "--host", host,
@@ -368,6 +382,12 @@ def _build_command(binary: str, model: str, host: str, port: int) -> list[str]:
         "--repeat-penalty", "1.0",
         "--no-webui",
     ]
+    ngl = (os.environ.get("VT_FORMATTER_GPU_LAYERS") or "").strip()
+    if ngl:
+        cmd.extend(["-ngl", ngl])
+    elif sys.platform == "darwin":
+        cmd.extend(["-ngl", "99"])
+    return cmd
 
 
 def _health_ok(url: str, timeout: float = 1.0) -> bool:

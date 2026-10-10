@@ -99,6 +99,18 @@ def prepare_bundled_models():
         print(f"\nWARNING: No local Cohere model found at {LOCAL_COHERE}")
         print("  Run the app once (online) to install it, then rebuild.")
 
+    local_diarize = PROJECT_ROOT / "models" / "diarization"
+    if local_diarize.exists():
+        print(f"\nFound local Diarization model: {local_diarize}")
+        dest_diarize = MODELS_DIR / "diarization"
+        copy_with_progress(local_diarize, dest_diarize, "Copying Diarization model")
+
+    local_formatter = PROJECT_ROOT / "models" / "formatter"
+    if local_formatter.exists():
+        print(f"\nFound local Formatter model: {local_formatter}")
+        dest_formatter = MODELS_DIR / "formatter"
+        copy_with_progress(local_formatter, dest_formatter, "Copying Formatter model")
+
     print(f"\nBundle prepared at: {MODELS_DIR}")
 
     # Print summary of what's being bundled
@@ -162,6 +174,15 @@ def build_exe():
         "--hidden-import=voice_transcriber.t2",
         "--hidden-import=voice_transcriber.transcribe2",
         "--hidden-import=voice_transcriber.transcribe_cohere",
+        "--hidden-import=voice_transcriber.transcribe_parakeet",
+        "--hidden-import=voice_transcriber.backend_registry",
+        "--hidden-import=voice_transcriber.diarization",
+        "--hidden-import=voice_transcriber.diarizers.sherpa_onnx",
+        "--hidden-import=voice_transcriber.formatter",
+        "--hidden-import=voice_transcriber.formatters.llama_server",
+        "--hidden-import=voice_transcriber.formatters.noop",
+        "--hidden-import=voice_transcriber.meeting",
+        "--hidden-import=voice_transcriber.meeting_pipeline",
         "--hidden-import=voice_transcriber.tui",
         "--hidden-import=voice_transcriber.tui_ratatui",
         "--hidden-import=voice_transcriber.platform.windows",
@@ -186,6 +207,7 @@ def build_exe():
         "--hidden-import=tqdm",
         "--hidden-import=tokenizers",
         "--hidden-import=onnxruntime",
+        "--hidden-import=sherpa_onnx",
         "--hidden-import=rich",
 
         # Collect all for these packages
@@ -214,7 +236,15 @@ def build_exe():
         print("=" * 60)
         print("BUILD SUCCESSFUL!")
         print("=" * 60)
-        exe_path = DIST_DIR / "VoiceTranscriber" / "VoiceTranscriber.exe"
+        dist_dir = DIST_DIR / "VoiceTranscriber"
+        llama_exe = shutil.which("llama-server.exe") or (PROJECT_ROOT / "llama-server.exe")
+        if isinstance(llama_exe, Path) and not llama_exe.exists():
+            llama_exe = None
+        if llama_exe and dist_dir.exists():
+            dest_llama = dist_dir / "llama-server.exe"
+            print(f"Bundling llama-server.exe: {llama_exe} -> {dest_llama}")
+            shutil.copy2(str(llama_exe), str(dest_llama))
+        exe_path = dist_dir / "VoiceTranscriber.exe"
         if exe_path.exists():
             size_mb = exe_path.stat().st_size / (1024 * 1024)
             print(f"EXE created: {exe_path}")
