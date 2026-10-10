@@ -113,13 +113,13 @@ quantisation:
 
 | slice | n | WER | CER | exact match |
 | :--- | ---: | ---: | ---: | ---: |
-| clean read speech | 44 | **2.81%** | 1.43% | 70.5% |
-| noisy (SNR 5–20 dB) | 24 | **3.01%** | 1.24% | 70.8% |
-| long-form (15–40 s) | 12 | **1.78%** | 0.87% | 50.0% |
-| technical vocabulary | 28 | **8.44%** | 5.46% | 50.0% |
-| technical + noise | 12 | 8.12% | 4.52% | 50.0% |
-| accented meeting speech | 22 | 12.32% | 7.66% | 13.6% |
-| **overall (speech)** | **142** | **5.10%** | **2.97%** | **54.2%** |
+| clean read speech | 44 | **2.07%** | 0.72% | 81.8% |
+| noisy (SNR 5–20 dB) | 24 | **2.73%** | 1.58% | 75.0% |
+| long-form (15–40 s) | 12 | **2.19%** | 0.75% | 33.3% |
+| technical vocabulary | 28 | **4.52%** | 2.07% | 82.1% |
+| technical + noise | 12 | 0.64% | 0.25% | 91.7% |
+| accented meeting speech | 22 | 9.42% | 3.65% | 36.4% |
+| **overall (speech)** | **142** | **3.57%** | **1.43%** | **70.4%** |
 | **silence hallucination** | **12** | — | — | **0/12** |
 
 Two things worth saying about that table, because the honest version is more

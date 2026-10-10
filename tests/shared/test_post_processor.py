@@ -50,6 +50,21 @@ def test_spoken_ip_and_cidr():
         "net is 10.0.0.0/24 today"
 
 
+def test_spoken_ip_survives_the_number_pass(number_mode):
+    """The whole pipeline, not just the path pass.
+
+    Regression: the cardinal pass spells small numbers out, and it runs *before*
+    the path pass, which needs literal digits -- so in the default "auto" number
+    mode "10 dot 0 dot 0 dot 0 slash 24" came out as "ten dot zero dot zero dot
+    zero slash 24". The direct call above passed the whole time because it never
+    went through the number pass.
+    """
+    pp.set_number_digits_mode("auto")
+    assert pp.clean_speech_transcription(
+        "connect to 10 dot 0 dot 0 dot 0 slash 24 now", skip_slm=True
+    ) == "connect to 10.0.0.0/24 now."
+
+
 def test_backslash_is_not_treated_as_a_path():
     assert pp.clean_spoken_paths("a backslash in text") == "a backslash in text"
 
@@ -394,6 +409,11 @@ def test_phone_number_groups_collapse(number_mode, text, expected):
 @pytest.mark.parametrize("text", [
     "in 2020 1200 people lived there",
     "page 100 200 is fine",
+    # Regression: without a call phrase, two adjacent quantities matched the
+    # 3+4 phone pattern and were welded into one wrong number.
+    "we need 500 2000 more",
+    "I have 250 1500 dollars",
+    "meeting at 500 2024",
 ])
 def test_phone_group_does_not_over_collapse(number_mode, text):
     pp.set_number_digits_mode("auto")
@@ -918,10 +938,28 @@ def test_digit_string_guards_unit(number_mode):
     ("Let's meet at 5 PM... actually 6 PM", "Let's meet at 6 PM."),
     ("We should deploy on Tuesday... no wait Wednesday", "We should deploy on Wednesday."),
     ("Send the report to John... I mean Alice", "Send the report to Alice."),
+    ("Let's meet at 5 PM I mean 6 PM", "Let's meet at 6 PM."),
     ("Add the class definition... scratch that", "Add the class definition."),
 ])
 def test_verbal_self_corrections_are_resolved(spoken, expected):
     assert pp.clean_speech_transcription(spoken, skip_slm=True, punctuation_mode="full") == expected
+
+
+@pytest.mark.parametrize("spoken", [
+    "you know what I mean right",
+    "the thing I mean right",
+    "I mean what I say",
+])
+def test_the_i_mean_idiom_is_not_a_retraction(spoken):
+    """Regression: the greedy matcher read "know what" as the retracted value.
+
+    ``require_category=False`` was the whole guard on the "I mean" path, so
+    *anything* after the marker replaced the matched span: "you know what I mean
+    right" came out as "you right", deleting words the speaker said.
+    """
+    assert pp.clean_speech_transcription(
+        spoken, skip_slm=True, punctuation_mode="full"
+    ) == spoken + "."
 
 
 def test_the_advertised_demo_is_pinned():

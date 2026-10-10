@@ -611,3 +611,90 @@ def test_an_unavailable_backend_falls_back_to_the_original(monkeypatch):
     formatter.reset_backend_cache()
     original = "buy milk"
     assert formatter.format_text(original, backend="llama-server") == original
+
+
+# ---------------------------------------------------------------------------
+# request_model: the first-use download start
+# ---------------------------------------------------------------------------
+def test_request_model_is_inert_when_the_model_is_present(stub_env):
+    """An installed model is not re-fetched."""
+    assert llama_server.request_model("s1-mini") is False
+
+
+def test_request_model_is_inert_without_a_binary(monkeypatch):
+    """No runtime -> no point fetching weights, and no network in tests."""
+    import model_download
+
+    monkeypatch.setenv("PATH", "/nonexistent")
+    monkeypatch.setattr(llama_server, "_model_path", lambda model=None: None)
+    started = []
+    monkeypatch.setattr(model_download, "ensure_model_async",
+                        lambda name, **k: started.append(name) or True)
+    assert llama_server.request_model("s1-mini") is False
+    assert started == []
+
+
+def test_request_model_is_inert_in_attach_mode(monkeypatch):
+    """An attached server is not ours and does not need our weights."""
+    monkeypatch.setenv(llama_server.ENV_SERVER_URL, "http://127.0.0.1:9")
+    assert llama_server.request_model("s1-mini") is False
+
+
+def test_request_model_starts_the_registry_install(monkeypatch):
+    """A spawn-mode install with a binary but no weights asks the registry."""
+    import model_download
+
+    monkeypatch.setattr(llama_server, "_binary", lambda: "/bin/llama-server")
+    monkeypatch.setattr(llama_server, "_model_path", lambda model=None: None)
+    calls = []
+    monkeypatch.setattr(model_download, "ensure_model_async",
+                        lambda name, **k: calls.append((name, k)) or True)
+    # The first-use path must NOT claim consent; under a TUI that is what makes it
+    # report the size and wait instead of prompting on a background thread.
+    assert llama_server.request_model("s1-mini") is True
+    assert calls == [("formatter", {"consented": False})]
+    # The explicit verb forwards its consent through to the installer.
+    calls.clear()
+    assert llama_server.request_model("s1-mini", consented=True) is True
+    assert calls == [("formatter", {"consented": True})]
+
+
+def test_request_model_ignores_an_unregistered_model_id(monkeypatch):
+    import model_download
+
+    monkeypatch.setattr(llama_server, "_binary", lambda: "/bin/llama-server")
+    monkeypatch.setattr(llama_server, "_model_path", lambda model=None: None)
+    started = []
+    monkeypatch.setattr(model_download, "ensure_model_async",
+                        lambda name, **k: started.append(name) or True)
+    assert llama_server.request_model("gpt-9-turbo") is False
+    assert started == []
+
+
+def test_binary_resolves_frozen_or_bundled_executable(tmp_path, monkeypatch):
+    bin_file = tmp_path / "llama-server"
+    bin_file.write_text("#!/bin/sh\nexit 0\n")
+    bin_file.chmod(0o755)
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "app"))
+    monkeypatch.setenv(llama_server.ENV_BINARY, "")
+    assert llama_server._binary() == str(bin_file)
+
+
+def test_build_command_gpu_layers_darwin_and_env(monkeypatch):
+    cmd = llama_server._build_command("/bin/llama-server", "/m.gguf", "127.0.0.1", 1234)
+    # Default on Linux: no -ngl
+    assert "-ngl" not in cmd
+
+    monkeypatch.setenv("VT_FORMATTER_GPU_LAYERS", "33")
+    cmd_env = llama_server._build_command("/bin/llama-server", "/m.gguf", "127.0.0.1", 1234)
+    assert "-ngl" in cmd_env
+    assert cmd_env[cmd_env.index("-ngl") + 1] == "33"
+
+    monkeypatch.delenv("VT_FORMATTER_GPU_LAYERS")
+    monkeypatch.setattr(sys, "platform", "darwin")
+    cmd_mac = llama_server._build_command("/bin/llama-server", "/m.gguf", "127.0.0.1", 1234)
+    assert "-ngl" in cmd_mac
+    assert cmd_mac[cmd_mac.index("-ngl") + 1] == "99"
+

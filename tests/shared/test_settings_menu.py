@@ -14,6 +14,114 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import t2  # noqa: E402
+import keybinds  # noqa: E402
+
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # Python 3.10, which the app still supports
+    tomllib = None
+
+
+# --- example-config parity ---------------------------------------------------
+#
+# The examples are documentation, so the only way to keep them honest is to
+# derive the key set from the code (DEFAULT_SETTINGS, the model-choice lists)
+# and check **both** directions: every shipped setting is documented, and every
+# documented key is a real setting. A hand-written map cannot fail for a key it
+# never lists - which is exactly how eight new settings went uncovered.
+#
+# The YAML example is the fully annotated reference and is asserted to carry the
+# shipped default for every key. The TOML example is a real, supported format
+# (`get_config_file` searches `config.toml` first) but a minimal template with
+# sample values, so it is asserted to document every key rather than to carry the
+# defaults.
+
+EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "config/example-config"
+
+#: Both examples are checked. The TOML one needs ``tomllib`` (3.11+), the same
+#: gate the app's own TOML loader has, so it is skipped on 3.10.
+EXAMPLE_NAMES = ["config.yaml.example"] + (
+    ["config.toml.example"] if tomllib is not None else []
+)
+
+#: Settings whose config-file key is not just the lowercased name.
+_EXAMPLE_RENAMES = {
+    "PUNCTUATION_MODE": "preset",
+    "NUMBER_MODE": "number_digits",
+    "MODEL_BACKEND": "model_backend",
+    "HOTKEY_BINDS": "hotkeys",
+}
+
+#: A setting may be documented under any of these spellings.
+_EXAMPLE_ALIASES = {
+    "PUNCTUATION_MODE": ("preset", "punctuation_mode"),
+}
+
+#: Keys an example may carry that are not DEFAULT_SETTINGS entries: optional
+#: device hints, and the dictionary, which has its own loader.
+_EXAMPLE_EXTRAS = {
+    "primary_device_name",
+    "secondary_device_name",
+    "dictionary",
+    "dictionary_file",
+}
+
+#: Derived runtime mirrors, deliberately not file keys.
+_DERIVED_SETTINGS = {"NUMBER_DIGITS"}
+
+
+def _load_example(path: Path) -> dict:
+    text = path.read_text(encoding="utf-8")
+    if ".toml" in path.suffixes:
+        assert tomllib is not None
+        return tomllib.loads(text)
+    import yaml
+
+    return yaml.safe_load(text) or {}
+
+
+def _expected_example_keys() -> dict:
+    """Every setting -> the config-file key(s) that may document it."""
+    expected = {}
+    for setting in t2.DEFAULT_SETTINGS:
+        if setting in _DERIVED_SETTINGS:
+            continue
+        expected[setting] = _EXAMPLE_ALIASES.get(
+            setting, (_EXAMPLE_RENAMES.get(setting, setting.lower()),)
+        )
+    return expected
+
+
+def _normalize_example_value(setting: str, value):
+    if setting == "PUNCTUATION_MODE":
+        return t2.get_canonical_preset_name(value)
+    if setting == "NUMBER_MODE" and isinstance(value, bool):
+        return "digits" if value else "words"
+    if setting == "HOTKEY_BINDS":
+        return keybinds.parse_binds(value)
+    return value
+
+
+def _assert_example_covers_every_setting(documented: dict, name: str) -> None:
+    expected = _expected_example_keys()
+    accepted_all = {key for keys in expected.values() for key in keys}
+
+    for setting, accepted in expected.items():
+        present = [key for key in accepted if key in documented]
+        assert present, f"{name} no longer documents {accepted[0]!r} ({setting})"
+        if name.endswith(".yaml.example"):
+            key = present[0]
+            got = _normalize_example_value(setting, documented[key])
+            wanted = t2.DEFAULT_SETTINGS[setting]
+            assert got == wanted, (
+                f"{name} documents {key}={documented[key]!r} but the shipped "
+                f"default for {setting} is {wanted!r}"
+            )
+
+    unknown = sorted(set(documented) - accepted_all - _EXAMPLE_EXTRAS)
+    assert unknown == [], (
+        f"{name} documents keys that are not shipped settings: {unknown}"
+    )
 
 
 @pytest.fixture
@@ -228,6 +336,32 @@ class TestResetToDefaults:
         assert t2.UI_THEME == t2.DEFAULT_SETTINGS["UI_THEME"]
         assert t2.PUNCTUATION_MODE == t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"]
 
+    def test_reset_takes_effect_immediately(self, cfg, monkeypatch):
+        """A reset must reach the runtime, not only the config file (A6).
+
+        ``t2`` delegates to ``post_processor``, which keeps its own copies of
+        the punctuation/cleanup/number/serial/spell/formatter state. Assigning
+        the ``t2`` globals alone left the running app on the old preset until
+        the next launch even though the file already said otherwise.
+        """
+        import post_processor as pp
+
+        # Move every runtime copy away from the defaults...
+        t2.set_punctuation_mode("gen_z")
+        t2.set_cleanup_mode("off")
+        t2.set_number_digits("words")
+        t2.set_serial_collapse(False)
+        t2.set_spell_command(False)
+
+        t2.reset_to_defaults()
+
+        # ...and confirm the reset pushed the shipped values straight through.
+        assert pp.get_punctuation_mode() == t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"]
+        assert pp.get_cleanup_mode() == t2.DEFAULT_SETTINGS["CLEANUP_MODE"]
+        assert pp.get_number_digits_mode() == t2.DEFAULT_SETTINGS["NUMBER_MODE"]
+        assert pp.get_serial_collapse() is t2.DEFAULT_SETTINGS["SERIAL_COLLAPSE"]
+        assert pp.get_spell_command() is t2.DEFAULT_SETTINGS["SPELL_COMMAND"]
+
     def test_reset_keeps_microphone_and_unknown_keys(self, cfg, monkeypatch):
         import json
 
@@ -263,66 +397,88 @@ class TestResetToDefaults:
             "PUNCTUATION_MODE",
             "MEETING",
             "MEETING_SPILL_MINUTES",
+            "DIARIZATION",
+            "DIARIZATION_SPEAKERS",
+            "DIARIZATION_MODEL",
         ):
             assert name in t2.DEFAULT_SETTINGS
 
     def test_shipped_defaults_are_the_intended_baseline(self):
-        """The reset target is a product decision, not an incidental value."""
+        """The reset target is a product decision, not an incidental value.
+
+        A6 (2026-10-09) resolved the old deliberate divergence between
+        ``DEFAULT_SETTINGS['PUNCTUATION_MODE']`` and the module global: the reset
+        target is now the most compatible configuration that still gives the
+        most useful *cheap* corrections. Formatter and meeting/diarization stay
+        off (models are opt-in), the deterministic corrections stay on, and the
+        punctuation preset is ``full`` - standard complete sentences produced by
+        pure-Python post-processing, which costs nothing on a weak machine.
+        """
         assert t2.DEFAULT_SETTINGS["OUTPUT_MODE"] == "type_fast"
         assert t2.DEFAULT_SETTINGS["IS_MUTED"] is True  # start muted
         assert t2.DEFAULT_SETTINGS["MIDDLE_CLICK_ENABLED"] is False  # opt-in
-        assert t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"] == "no_punctuation"
+        assert t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"] == "full"
         assert t2.DEFAULT_SETTINGS["NUMBER_MODE"] == "auto"
-        assert t2.DEFAULT_SETTINGS["UI_THEME"] == "red"
+        # The theme follows the desktop accent rather than a fixed colour: what
+        # is pinned is that intent, not a colour, because the resolved colour is
+        # a property of the machine (see tests/shared/test_accent.py).
+        assert t2.DEFAULT_SETTINGS["UI_THEME"] == "auto"
         assert t2.DEFAULT_SETTINGS["AUTO_TYPE_AUTO_PUNCTUATE"] is False
+
+        # Heavyweight, model-backed features stay off by default: a reset must
+        # produce a configuration that runs on a weak computer.
+        assert t2.DEFAULT_SETTINGS["FORMATTER"] == "off"
+        assert t2.DEFAULT_SETTINGS["MEETING"] == "off"
+        # Cheap deterministic corrections stay on.
+        assert t2.DEFAULT_SETTINGS["CLEANUP_MODE"] == "full"
+        assert t2.DEFAULT_SETTINGS["SERIAL_COLLAPSE"] is True
+        assert t2.DEFAULT_SETTINGS["SPELL_COMMAND"] is True
 
         # Derived mirrors must agree with their source of truth.
         mode = t2.DEFAULT_SETTINGS["OUTPUT_MODE"]
         assert t2.DEFAULT_SETTINGS["AUTO_TYPE"] == (mode in ("type", "type_fast"))
-        assert t2.DEFAULT_SETTINGS["COPY_TO_CLIPBOARD"] == (mode not in ("type", "type_fast"))
         assert t2.DEFAULT_SETTINGS["NUMBER_DIGITS"] == (t2.DEFAULT_SETTINGS["NUMBER_MODE"] != "words")
 
-    def test_example_config_documents_the_shipped_defaults(self):
-        """A copied config.yaml.example must behave exactly like the defaults."""
-        import yaml
+    def test_punctuation_default_has_one_owner(self):
+        """The reset target and the first-run default are the same value.
 
-        example = Path(__file__).resolve().parents[2] / "config/example-config/config.yaml.example"
-        documented = yaml.safe_load(example.read_text())
+        Before A6 they were two hardcoded literals (``no_punctuation`` vs
+        ``full``) plus a third in ``load_audio_config``'s fallback. All three
+        now read ``DEFAULT_PUNCTUATION_MODE``.
+        """
+        assert t2.PUNCTUATION_MODE == t2.DEFAULT_PUNCTUATION_MODE
+        assert t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"] == t2.DEFAULT_PUNCTUATION_MODE
 
-        key_map = {
-            "is_muted": "IS_MUTED",
-            "auto_type": "AUTO_TYPE",
-            "output_mode": "OUTPUT_MODE",
-            "auto_type_trailing_space": "AUTO_TYPE_TRAILING_SPACE",
-            "auto_type_auto_punctuate": "AUTO_TYPE_AUTO_PUNCTUATE",
-            "copy_to_clipboard": "COPY_TO_CLIPBOARD",
-            "preset": "PUNCTUATION_MODE",
-            "language": "LANGUAGE",
-            "enable_slm": "ENABLE_SLM",
-            "wait_for_model_on_startup": "WAIT_FOR_MODEL_ON_STARTUP",
-            "number_digits": "NUMBER_MODE",
-            "serial_collapse": "SERIAL_COLLAPSE",
-            "spell_command": "SPELL_COMMAND",
-            "keep_bluetooth_handsfree": "KEEP_BLUETOOTH_HANDSFREE",
-            "middle_click_enabled": "MIDDLE_CLICK_ENABLED",
-            "sound_theme": "SOUND_THEME",
-            "ui_theme": "UI_THEME",
-            "typing_wpm": "TYPING_WPM",
-            "meeting": "MEETING",
-            "meeting_spill_minutes": "MEETING_SPILL_MINUTES",
-        }
-
-        for example_key, default_key in key_map.items():
-            assert example_key in documented, f"config.yaml.example lost '{example_key}'"
-            value = documented[example_key]
-            if default_key == "PUNCTUATION_MODE":
-                value = t2.get_canonical_preset_name(value)
-            elif default_key == "NUMBER_MODE" and isinstance(value, bool):
-                value = "digits" if value else "words"
-            assert value == t2.DEFAULT_SETTINGS[default_key], (
-                f"config.yaml.example documents {example_key}={value!r} but the "
-                f"shipped default is {t2.DEFAULT_SETTINGS[default_key]!r}"
+    def test_initial_globals_match_default_settings(self):
+        """A fresh clone with no config file must start on the shipped defaults."""
+        for name, expected in t2.DEFAULT_SETTINGS.items():
+            assert getattr(t2, name) == expected, (
+                f"module global {name} drifted from DEFAULT_SETTINGS"
             )
+
+    def test_example_config_documents_the_shipped_defaults(self):
+        """Both example configs must document every shipped setting.
+
+        The key set is derived from ``DEFAULT_SETTINGS`` (plus the model-choice
+        lists), not a hand-written map, so adding a setting without documenting
+        it fails here. It also checks that every documented key is a real
+        setting. The YAML example must additionally carry the shipped default
+        for every key; the TOML template only has to cover the keys.
+        """
+        for name in EXAMPLE_NAMES:
+            _assert_example_covers_every_setting(
+                _load_example(EXAMPLES_DIR / name), name
+            )
+
+    def test_the_example_choices_are_real(self):
+        """Documented model/hotkey choices must be ones the code registers."""
+        for name in EXAMPLE_NAMES:
+            documented = _load_example(EXAMPLES_DIR / name)
+            assert documented["formatter_model"] in t2.FORMATTER_MODELS
+            assert documented["diarization_model"] in t2.DIARIZATION_MODELS
+            assert documented["model_backend"] in t2.transcribe2.BACKENDS
+            assert keybinds.parse_binds(documented["hotkeys"]) == \
+                t2.DEFAULT_SETTINGS["HOTKEY_BINDS"]
 
 
 def _make_app(monkeypatch, recording=False):

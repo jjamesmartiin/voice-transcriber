@@ -31,6 +31,7 @@ KEY_LEFTSHIFT = 42
 KEY_LEFTALT = 56
 KEY_SPACE = 57
 KEY_RIGHTCTRL = 97
+KEY_LEFTMETA = 125
 KEY_F13 = 183
 
 
@@ -82,6 +83,31 @@ def make_manager(binds=None, cb_start=None, cb_stop=None):
 # ---------------------------------------------------------------------------
 # Defaults and the configured-bind trigger
 # ---------------------------------------------------------------------------
+
+
+def test_a_held_meta_key_keeps_modifiers_pressed_after_shift_is_released():
+    """The engine waits for ``are_modifiers_pressed()`` to go false before typing.
+
+    Regression: Super/Meta was missing from the predicate, so with a ``meta+shift``
+    bind, releasing Shift first reported "no modifiers held" while Super was still
+    down -- and the injected letters were read as desktop shortcuts.
+    """
+    manager = make_manager(binds=["meta+shift"])
+    kb = FakeKeyboard()
+    manager.devices = [kb]
+    try:
+        kb.deliver(manager, KEY_LEFTMETA, 1)
+        kb.deliver(manager, KEY_LEFTSHIFT, 1)
+        assert manager.hotkey_active is True
+
+        kb.deliver(manager, KEY_LEFTSHIFT, 0)  # release Shift first
+        assert manager.hotkey_active is False  # the trigger ended...
+        assert manager.are_modifiers_pressed() is True  # ...but Super is still held
+
+        kb.deliver(manager, KEY_LEFTMETA, 0)
+        assert manager.are_modifiers_pressed() is False
+    finally:
+        manager.cleanup()
 
 
 def test_default_bind_is_still_alt_shift():

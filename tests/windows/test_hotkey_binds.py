@@ -70,6 +70,29 @@ def test_default_binds_are_alt_shift():
         manager.cleanup()
 
 
+def test_a_held_meta_key_keeps_modifiers_pressed():
+    """The engine waits for ``are_modifiers_pressed()`` to go false before typing.
+
+    Regression: Super/Meta was missing from the predicate, so with a ``meta``-based
+    bind the engine typed while Super was still held and the desktop read the
+    injected letters as OS shortcuts.
+    """
+    manager, _, _ = _manager(["meta+shift"])
+    try:
+        # The fake key namespace is swapped in after construction, so rebuild the
+        # modifier set the way the bind matcher rebuilds its own resolved groups.
+        manager.META_KEYS = manager._alternatives_for("meta")
+        assert "Key.cmd_l" in manager.META_KEYS
+
+        manager._on_press("Key.cmd_l")
+        assert manager.are_modifiers_pressed() is True
+
+        manager._on_release("Key.cmd_l")
+        assert manager.are_modifiers_pressed() is False
+    finally:
+        manager.cleanup()
+
+
 def test_bare_modifier_matches_either_side():
     """A bare ``alt``/``shift`` accepts both physical sides."""
     manager, cb_start, _ = _manager([{"keys": ["alt", "shift"]}])

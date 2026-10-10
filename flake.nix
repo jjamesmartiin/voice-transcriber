@@ -3,18 +3,47 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
-  outputs = { self, nixpkgs } @ inputs:
+  # Narrow override for sherpa-onnx >= 1.13 (Cohere Transcribe). The nixpkgs
+  # pinned in flake.lock ships sherpa-onnx 1.12.25, which has no
+  # OfflineCohereTranscribeModelConfig. This second package set (only) supplies
+  # the newer sherpa-onnx, so a full nixpkgs bump (which would move python,
+  # torch and onnxruntime) is not required. It is pinned to 1.13.3 rather than
+  # 1.13.8 on purpose: 1.13.3 is the newest sherpa-onnx built against the same
+  # glibc (2.42) as the locked nixpkgs, and it already exposes both
+  # OfflineCohereTranscribeModelConfig and
+  # OfflineRecognizer.from_cohere_transcribe. 1.13.8 is linked against glibc
+  # 2.44, which the locked nixpkgs' glibc 2.42 cannot load.
+  inputs.nixpkgs-sherpa.url = "github:NixOS/nixpkgs/a9630bf480bf699d6792772fd0a5ee1b9084825b";
+
+  outputs = { self, nixpkgs, ... } @ inputs:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forEachSupportedSystem = f: inputs.nixpkgs.lib.genAttrs supportedSystems (system: f {
         inherit system;
         pkgs = import inputs.nixpkgs { inherit system; };
+        # Newer set used only to source sherpa-onnx >= 1.13. See mkSherpaOnnx.
+        sherpaPkgs = import inputs.nixpkgs-sherpa { inherit system; };
       });
+
+      # sherpa-onnx with Cohere Transcribe support for the *locked* python
+      # environment. nixpkgs' python sherpa-onnx is a thin wrapper that copies
+      # the native package's prebuilt bindings, and `withPackages` silently
+      # drops any package whose `pythonModule` is not the environment's python.
+      # So instead of splicing in the newer set's package (built for python
+      # 3.14), rebuild the local wrapper against the newer set's cached native
+      # cpython-313 bindings: same python-3.13 ABI as the locked interpreter,
+      # but the wrapper belongs to this environment again.
+      mkSherpaOnnx = sherpaPkgs: python:
+        python.pkgs.sherpa-onnx.override {
+          sherpa-onnx = sherpaPkgs.sherpa-onnx.override {
+            python3Packages = sherpaPkgs.python313Packages;
+          };
+        };
 
       version = "1.3.1";
     in
     {
-      packages = forEachSupportedSystem ({ system, pkgs }:
+      packages = forEachSupportedSystem ({ system, pkgs, sherpaPkgs }:
         let
           isLinux = pkgs.stdenv.isLinux;
 
@@ -22,6 +51,9 @@
           python = pkgs.python3.override {
             self = python;
           };
+
+          # sherpa-onnx >= 1.13 from the override package set (Cohere support).
+          sherpaOnnx = mkSherpaOnnx sherpaPkgs python;
 
           # Linux-only runtime dependencies
           linuxRuntimeDeps = with pkgs; [
@@ -55,6 +87,7 @@
             ncurses
             readline
             mpg123
+            llama-cpp
           ] ++ (pkgs.lib.optionals isLinux linuxRuntimeDeps);
 
           # Python environment
@@ -75,10 +108,10 @@
             protobuf
             accelerate
             librosa
-            datasets
-            sherpa-onnx
+            sherpaOnnx
             psutil
             pyyaml
+            rich
           ] ++ (pkgs.lib.optionals isLinux [ evdev python-uinput ]));
 
           # ratatui frontend (Rust), built from the tui-rs/ crate.
@@ -146,7 +179,7 @@
           };
         });
 
-      apps = forEachSupportedSystem ({ system, pkgs }:
+      apps = forEachSupportedSystem ({ system, pkgs, sherpaPkgs }:
         let
           isLinux = pkgs.stdenv.isLinux;
 
@@ -154,6 +187,9 @@
           python = pkgs.python3.override {
             self = python;
           };
+
+          # sherpa-onnx >= 1.13 from the override package set (Cohere support).
+          sherpaOnnx = mkSherpaOnnx sherpaPkgs python;
           
           pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
             sounddevice
@@ -172,11 +208,11 @@
             protobuf
             accelerate
             librosa
-            datasets
-            sherpa-onnx
+            sherpaOnnx
             pytest
             psutil
             pyyaml
+            rich
           ] ++ (pkgs.lib.optionals isLinux [ evdev python-uinput ]));
 
           linuxRuntimeDeps = with pkgs; [
@@ -207,6 +243,7 @@
             ncurses
             readline
             mpg123
+            llama-cpp
           ] ++ (pkgs.lib.optionals isLinux linuxRuntimeDeps);
 
           vt_pkg = self.packages.${system}.default;
@@ -265,13 +302,16 @@
           };
         });
 
-      devShells = forEachSupportedSystem ({ system, pkgs }:
+      devShells = forEachSupportedSystem ({ system, pkgs, sherpaPkgs }:
         let
           isLinux = pkgs.stdenv.isLinux;
 
           python = pkgs.python3.override {
             self = python;
           };
+
+          # sherpa-onnx >= 1.13 from the override package set (Cohere support).
+          sherpaOnnx = mkSherpaOnnx sherpaPkgs python;
 
           linuxRuntimeDeps = with pkgs; [
             xclip
@@ -302,6 +342,7 @@
             ncurses
             readline
             mpg123
+            llama-cpp
           ] ++ (pkgs.lib.optionals isLinux linuxRuntimeDeps);
 
           pythonEnv = python.withPackages (python-pkgs: with python-pkgs; [
@@ -322,11 +363,12 @@
             accelerate
             librosa
             datasets
-            sherpa-onnx
+            sherpaOnnx
             pip
             pytest
             psutil
             pyyaml
+            rich
           ] ++ (pkgs.lib.optionals isLinux [ evdev python-uinput ]));
         in
         {

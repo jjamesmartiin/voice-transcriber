@@ -6,6 +6,9 @@ replacing the meaningless 11-clean-clip smoke test.
 - **`build_eval.py`** — builds `data/` (mono 16 kHz float32 WAVs) + `manifest.jsonl`.
 - **`score.py`** — runs the **real** pipeline over the manifest and reports WER/CER,
   exact-match rate, silence hallucination rate, and worst offenders.
+- **`score_diarization.py`** — scores **speaker diarization** (DER) on a committed
+  synthetic fixture; see [Diarization (DER)](#diarization-der--evalscore_diarizationpy).
+- **`diarization/`** — the tracked diarization fixture (WAV + RTTM + generator).
 - **`pinned_ids.json`** — the pinned source-sample ids that make network selection
   reproducible.
 - **`data/`** — generated audio. **Never committed** (see `data/.gitignore`, which
@@ -75,11 +78,70 @@ Key flags:
 | `--number-digits` / `--no-number-digits` | override `number_digits` from `config/config.yaml` |
 | `--json OUT` | write full per-clip results + aggregates |
 | `--verbose` | don't silence model/pipeline stdout |
+| `--no-skip-slm` | run the optional SLM rewrite pass (default: skip it) |
+
+The JSON `meta` block records the full configuration and the exact invocation so
+a baseline can state how it was produced: `backend`, `int8_dynamic`,
+`number_digits` (+ `number_digits_config`), `blocks_ms`, `skip_slm`, `device`,
+`git_rev`/`git_dirty`, `config_source` (path + whether it loaded), `manifest`,
+`invocation` (argv), `env` (the relevant environment variables, verbatim), and
+`reproduce` (a single copy-pasteable shell line). Extra keys are additive; older
+result JSON files that predate them still load.
 
 The app's **real config is honoured**: `number_digits` is read from
 `config/config.yaml` (currently `false`) and applied via
 `post_processor.set_number_digits_enabled(...)` before any transcription.
 `VT_INT8_DYNAMIC` is read by the backend as usual.
+
+## Diarization (DER) — `eval/score_diarization.py`
+
+A second, independent eval entry that scores **speaker diarization** (meeting
+mode) rather than ASR. It drives the shipped path
+(`voice_transcriber.diarize.diarize`, including `diarizers/sherpa_onnx.py`) on
+the committed synthetic two-voice fixture in `eval/diarization/` and computes
+DER with a collar and an optimal 1-to-1 speaker mapping, mirroring NIST
+`md-eval.pl` / `wq2012/mdeval`. The metric is self-contained here because
+sherpa-onnx ships **no** DER computation at all.
+
+**This is a regression smoke gate, never an accuracy claim.** A 4-turn A-B-A-B
+clip of maximally separated voices exercises almost none of the failure modes
+that matter (crosstalk, overlap, similar voices, far-field, short backchannels).
+The meaningful number is **AMI SDM** — see `docs/TODO.md`.
+
+```bash
+nix develop --command env PYTHONPATH=$PWD/src python eval/score_diarization.py
+nix develop --command env PYTHONPATH=$PWD/src python eval/score_diarization.py --speakers auto
+```
+
+| flag | meaning |
+|---|---|
+| `--fixture PATH` | WAV to score (default `eval/diarization/fixture.wav`) |
+| `--rttm PATH` | reference RTTM (default `eval/diarization/fixture.rttm`) |
+| `--json OUT` | results JSON (default `eval/diarization_results.json`) |
+| `--collar S` | no-score collar around reference boundaries (default `0.25`) |
+| `--speakers N\|auto` | known speaker count or auto-clustering (default `2`) |
+| `--threshold F` | clustering threshold, auto only |
+| `--verbose` | keep backend stdout |
+
+The scorer **skips with a clear message and exits 0** when the diarization
+graphs (or `sherpa_onnx`) are absent — the same fail-safe the backend uses — so
+a fresh machine can run it before downloading the models. The graphs resolve
+through the model registry (`diarization` `ModelSpec`), not a hand-placed
+directory.
+
+`eval/diarization/` is tracked and holds `fixture.wav` (20.653 s, 16 kHz mono
+PCM16, 645 KiB), `fixture.rttm` (ground truth) and `gen_fixture.py` (the espeak
+recipe). Re-running the recipe needs `nix run nixpkgs#espeak-ng`, but **scoring
+never does** — the WAV is committed. (`eval/data/` is untracked and irrelevant
+here.)
+
+Recorded on the reference machine 2026-10-09 (sherpa-onnx 1.13.3,
+`num_speakers=2`): **DER 0.0145**, missed 0.0145, false_alarm 0.0000,
+speaker_confusion 0.0000, turn count 4, ordering A,B,A,B, `ref_speech_s` 14.053.
+`--speakers auto` measured identically. The gate in the script is the recorded
+value plus ~0.01 margin (`DER <= 0.025`, `missed` and `false_alarm` each
+`< 0.025`), tightened from the spec's initial `0.10` / `0.05`. The metric is
+pinned model-free by `tests/shared/test_diarization_der.py`.
 
 ## Metrics
 
@@ -100,21 +162,69 @@ reference is empty); it is reported only via the hallucination rate.
 
 ## Baseline (reference machine, CPU, `VT_INT8_DYNAMIC=1`)
 
-Produced with `number_digits=false`, 100 ms blocks, `eval/results.json`:
+Regenerated 2026-10-09 with `number_digits=false`, `skip_slm=True`, 100 ms blocks,
+all 154 clips, `eval/results.json`. The exact command and all settings are recorded
+in `results.json` → `meta` (`backend`, `int8_dynamic`, `number_digits`, `blocks_ms`,
+`skip_slm`, `git_rev`, `config_source`, `invocation`, `env`, `reproduce`), so the
+baseline is self-describing rather than depending on this paragraph:
+
+```bash
+nix develop --command env PYTHONPATH=$PWD/src VT_INT8_DYNAMIC=1 \
+  python eval/score.py --backend cohere --int8 --no-number-digits \
+  --blocks-ms 100 --json eval/results.json
+```
 
 | slice | n | WER | CER | exact | latency |
 |---|---|---|---|---|---|
-| clean | 44 | 2.81% | 1.43% | 70.45% | 0.84 s |
-| accented | 22 | 12.32% | 7.66% | 13.64% | 1.02 s |
-| noisy | 24 | 3.01% | 1.24% | 70.83% | 0.85 s |
-| long | 12 | 1.78% | 0.87% | 50.00% | 3.27 s |
-| technical | 28 | 8.44% | 5.46% | 50.00% | 1.04 s |
-| technical_noisy | 12 | 8.12% | 4.52% | 50.00% | 0.86 s |
-| **overall (speech)** | **142** | **5.10%** | **2.97%** | **54.23%** | |
+| clean | 44 | 2.07% | 0.72% | 81.82% | 0.42 s |
+| accented | 22 | 9.42% | 3.65% | 36.36% | 0.41 s |
+| noisy | 24 | 2.73% | 1.58% | 75.00% | 0.38 s |
+| long | 12 | 2.19% | 0.75% | 33.33% | 1.54 s |
+| technical | 28 | 4.52% | 2.07% | 82.14% | 0.45 s |
+| technical_noisy | 12 | 0.64% | 0.25% | 91.67% | 0.48 s |
+| **overall (speech)** | **142** | **3.57%** | **1.43%** | **70.42%** | |
 | silence | 12 | — | — | — | hallucination **0/12** |
+
+> The previous baseline recorded **5.10%** WER with `git_rev` unrecorded. It no longer
+> reproduced: 85 of 154 hypotheses changed with the refs identical, because the app
+> (post-processor / chunker) improved underneath it. The table above is the
+> current, reproducing number. See `docs/TODO-parity.md` §4E.
+>
+> `normalize()` used to call `post_processor.set_number_digits_enabled(True)` and
+> never restore it, so in a `number_digits=false` run only clip 1 was actually
+> transcribed with number words; the rest ran in digits mode. Fixed 2026-10-09
+> (`convert_number_words_to_digits(..., mode="digits")` is now applied locally and
+> the scorer writes no product state). 17 of 154 hypotheses changed -- `3`→`three`,
+> `2`→`two`, `1st`→`first`, `16th`→`sixteenth` -- with overall WER unchanged at
+> 3.57% (the scorer normalises both sides), CER 1.42%→1.43% and exact
+> 69.72%→70.42%. The `long` slice did not move. Pinned by
+> `tests/shared/test_eval_score.py`.
 
 Latency is per-clip wall time (after model load) and is shown only as context;
 this harness is about accuracy, not a latency benchmark.
+
+## Review report (human-verifiable, no model run)
+
+`review_report.py` turns a recorded results JSON + the manifest into a single
+self-contained page for checking **what the audio was** against **what was
+transcribed**: every clip gets an inline `<audio>` player (referenced by relative
+path — the WAVs are not embedded), the reference, the hypothesis, a word-level
+diff, and per-clip WER, plus a per-slice roll-up.
+
+Regenerate it from the recorded results **without re-running the model**:
+
+```bash
+nix develop --command python eval/review_report.py
+```
+
+Inputs default to `eval/results.json` + `eval/manifest.jsonl`; outputs are
+`eval/report.html` (committed — the human artifact) and `eval/review.json`
+(machine readable, **gitignored**: it is pure derived data whose only inputs are
+`results.json` + `manifest.jsonl`, so tracking it would add ~500 KiB of diff
+noise to every future results change). Both paths are overridable with
+`--out`/`--json`. The diff compares whitespace tokens on a lowercased `[a-z0-9]`
+key, so case/punctuation-only differences (which scoring normalisation ignores)
+are not flagged.
 
 ## What this set covers
 

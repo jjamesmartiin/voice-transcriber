@@ -125,3 +125,84 @@ class TestFullDictationSimulation:
         app.recording = False
         app.stop_recording()  # must not raise / spawn processing
         assert not hasattr(app, "process_thread")
+
+
+class TestMeetingLiveTranscriptWiring:
+    """The engine owns a display-only batcher for the duration of a capture.
+
+    Meeting mode shows text while it records. That view is fed by a second
+    micro-batcher, and it is *not* the transcript: the diarized batch pipeline
+    still owns the written artifact, so this one must be cheap to throw away and
+    must never be able to fail a capture.
+    """
+
+    def _app(self, monkeypatch):
+        app = _make_app(monkeypatch)
+        app.meeting_live_text = ""
+        app._meeting_batcher = None
+        app.meeting = MagicMock()
+        app.meeting.sample_rate = 16000
+        return app
+
+    def test_the_batcher_is_started_and_released_around_a_capture(self, monkeypatch):
+        app = self._app(monkeypatch)
+
+        app._start_meeting_live_batcher()
+        assert app._meeting_batcher is not None
+        assert app._meeting_batcher.running is True
+        try:
+            # A captured chunk is routed to it; no audio is fed here, so the ASR
+            # stub is never reached.
+            app._on_meeting_chunk(np.zeros(64, dtype=np.float32))
+            app._on_meeting_live_text("hello there")
+            assert app.meeting_live_text == "hello there"
+            app.tui.set_meeting_live_text.assert_called_once_with("hello there")
+        finally:
+            app._stop_meeting_live_batcher()
+
+        assert app._meeting_batcher is None
+        app._stop_meeting_live_batcher()  # idempotent
+        app._on_meeting_chunk(np.zeros(64, dtype=np.float32))  # no batcher: no-op
+
+    def test_a_front_end_without_a_live_view_still_gets_the_text_on_status(self, monkeypatch):
+        """The Rich TUI has no live-text block, so publishing must not raise."""
+        app = self._app(monkeypatch)
+        app.tui = object()  # no set_meeting_live_text attribute at all
+
+        app._on_meeting_live_text("hello")
+
+        assert app.meeting_live_text == "hello"
+
+    def test_a_batcher_that_cannot_start_leaves_the_capture_alone(self, monkeypatch):
+        app = self._app(monkeypatch)
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("no live view today")
+
+        monkeypatch.setattr("micro_batcher.StreamingMicroBatcher", _boom)
+
+        app._start_meeting_live_batcher()  # must not raise
+
+        assert app._meeting_batcher is None
+
+    def test_the_live_view_yields_to_a_dictation(self, monkeypatch):
+        """A dictation mid-meeting keeps the ASR lock; the live view can wait.
+
+        Same reason the batch pipeline yields between turns: a live preview must
+        never be the thing that makes the user's dictation slow.
+        """
+        app = self._app(monkeypatch)
+        app._start_meeting_live_batcher()
+        try:
+            app._meeting_batcher = MagicMock()
+            app.recording = False
+            app._on_meeting_chunk(np.zeros(8, dtype=np.float32))
+            assert app._meeting_batcher.feed_audio.call_count == 1
+
+            app.recording = True
+            app._on_meeting_chunk(np.zeros(8, dtype=np.float32))
+            assert app._meeting_batcher.feed_audio.call_count == 1, (
+                "a dictation must not compete with the live preview"
+            )
+        finally:
+            app._stop_meeting_live_batcher()

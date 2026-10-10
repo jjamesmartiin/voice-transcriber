@@ -84,7 +84,10 @@ unmerged). Windows therefore uses **loopback TCP**:
   `0600`, which the client reads to find the engine and which is removed on clean
   shutdown;
 - the client falls back to TCP automatically when there is no `AF_UNIX` socket on
-disk but a published endpoint exists, so a WSL client can drive a Windows engine.
+  disk but a published endpoint exists, so a WSL client can drive a Windows
+  engine: point `VT_CONTROL_ENDPOINT_FILE` at the Windows-side file (its path is
+  given in the error the client prints), because the default location is
+  computed per-host and the WSL and Windows paths differ.
 
 Loopback is not a security boundary on a shared machine — any process can
 connect to `127.0.0.1` — which is exactly why the token exists: it stands in for
@@ -154,7 +157,7 @@ Every reply is a JSON object with at least `ok`:
   "structure_mode": "inline",
   "structure_setting": "blocks",
   "cleanup_mode": "full",
-  "ui_theme": "red",
+  "ui_theme": "auto",
   "middle_click": false,
   "last_transcription": "I deployed on NixOS using kubectl.",
   "session_words": 30,
@@ -208,10 +211,10 @@ rm "${XDG_DATA_HOME:-$HOME/.local/share}/vt/stats.json" # wipe the all-time tota
 ```
 
 > **Native Windows:** the file and the `⚡ saved` badge work exactly as on
-> Linux/macOS, but the command above does not — the control API needs
-> `AF_UNIX`, which stock CPython does not expose on Windows (see the note at the
-> top of this document). Read the totals from the badge, or from
-> `%LOCALAPPDATA%\vt\stats.json`.
+> Linux/macOS. The `rm` above is a POSIX shell command rather than a control-API
+> verb, so use your own path: `%LOCALAPPDATA%\vt\stats.json`. Reading the totals
+> works there too — the control API has a Windows transport (loopback TCP, see
+> the note at the top of this document).
 
 Human-readable CLI output is encoding-safe: on a stream that cannot encode the
 `·` separator or the `✓`/`✗` markers they become `|`, `+` and `x` rather than
@@ -226,7 +229,7 @@ regardless of the console's encoding.
 `settings`,
 `mic`, `theme`, `output`, `numbers`, `punctuation`, `structure`, `cleanup`, `trailing-space`,
 `auto-punctuate`, `serial`, `spell`, `middle-click`, `hotkey`, `mute`, `reset-defaults`,
-`reset-terminal`, `ping`, `doctor`, `help`, `quit`.
+`reset-terminal`, `ping`, `doctor`, `help`, `formatter-download`, `quit`.
 
 Get this catalogue programmatically — it is the machine-readable source of truth
 (see [For LLM agents](#for-llm-agents)). `help --json` is served locally, so it
@@ -249,7 +252,7 @@ is a plain socket client and fails when no instance is running.
 | `start` | — | Recording starts immediately. If the model is still loading, recording proceeds and transcription waits — same as pressing the hotkey |
 | `stop` | — | Schedules transcription. Pass `copy: false` to respect the configured output mode |
 | `toggle` | — | `start` if idle, `stop` if recording |
-| `wait` | `seconds` (default 30) | Blocks until `state != PROCESSING`, then returns status plus `timed_out` |
+| `wait` | `seconds` (default 30, capped at 3600) | Blocks until `state != PROCESSING`, then returns status plus `timed_out`. The cap keeps one request from pinning a control thread indefinitely |
 
 `start`, `stop` and `toggle` wait (up to 1 s) for the UI state to settle before
 replying, so `stop` reports `PROCESSING`/`READY` rather than a stale `RECORDING`.
@@ -285,6 +288,9 @@ the settings modal would.
 | `punctuation` | mode | `full`, `no_terminal_period`, `no_punctuation`, `aesthetic_lowercase`, `gen_z` |
 | `structure` | mode | `off`, `inline`, `blocks` — turns spoken lists into bullets. `blocks` emits real line breaks, so **typing downgrades it to `inline`**: read `structure_setting` for what the user chose and `structure_mode` for what is in force |
 | `cleanup` | mode | `off`, `artifacts`, `full` — how much the cleanup pass may change the words: `off` keeps everything, `artifacts` removes noise only, `full` also resolves self-corrections. See `docs/cleanup_modes.md` |
+| `diarization` | state | `on`, `off` (omit to toggle) — label speakers in meeting transcripts. `off` (the shipped default) never loads the diarization model. Reports `diarization` (effective) and `diarization_setting` (configured) |
+| `diarization-speakers` | count | `auto`, or `2`–`8` — optional expected speaker count (omit to cycle `auto 2 … 8`) |
+| `diarization-model` | model | `diarization` — registry name of the model bundle; startup-loaded, so a change needs a restart |
 | `theme` | theme | `auto`, `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white` |
 | `trailing-space` | state | `on`, `off` (omit to toggle) |
 | `auto-punctuate` | state | `on`, `off` (omit to toggle) |
@@ -296,6 +302,24 @@ the settings modal would.
 | `wpm` | words-per-minute | Integer WPM, e.g. `40`, `60`, `80` (omit to cycle presets) |
 
 `on`/`off` also accept `true`/`false`, `1`/`0`, `yes`/`no`, `enable`/`disable`.
+
+### Optional model downloads
+
+Required weights (the ASR) install themselves on first run. The optional
+on-device formatter model does **not** download on its own under a terminal UI: a
+full-screen TUI owns the terminal in raw mode, so a consent prompt on stdin from
+a background download thread would be drawn underneath the TUI and would block
+on keystrokes the TUI is consuming. Instead, the first use of an enabled
+formatter reports the model and its size through the status line and waits.
+
+| Verb | Notes |
+| :--- | :--- |
+| `formatter-download` | Explicitly fetch the formatter model (e.g. `"S1-mini" by "Superwhisper"`, ~462 MiB). Runs on a daemon thread; progress arrives through the same status handler as the ASR download. Returns `formatter_download: true` when an install was started, `false` when the weights are already present or `llama-server` is unavailable |
+
+`VT_AUTO_DOWNLOAD_MODEL=1` is standing consent and skips the gate; `0` disables
+model downloads entirely. Standalone use (`python -m
+voice_transcriber.model_download --model formatter`) still prompts on a real
+terminal, where `input()` actually works.
 
 ### Push-to-talk binds
 

@@ -69,6 +69,28 @@ pub fn center(s: &str, max: usize) -> String {
     out
 }
 
+/// Score `pattern` as a subsequence of `target`, returning the sum of the
+/// matched character indices (lower is a better, more clustered match), or
+/// `None` when `pattern` is not a subsequence of `target`. The pickers use it
+/// as a cheap fuzzy filter.
+pub fn fuzzy_subsequence(pattern: &str, target: &str) -> Option<usize> {
+    let mut p_chars = pattern.chars().peekable();
+    let mut dist = 0;
+    for (i, c) in target.chars().enumerate() {
+        if let Some(&p) = p_chars.peek() {
+            if c == p {
+                p_chars.next();
+                dist += i;
+            }
+        }
+    }
+    if p_chars.peek().is_none() {
+        Some(dist)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -85,6 +85,21 @@ DEFAULT_TIMEOUT = 5.0
 #: Upper bound on a single request, so a hostile client cannot exhaust memory.
 MAX_REQUEST_BYTES = 1 << 20  # 1 MiB
 
+#: Cap on control connections served at once. A local process can open sockets
+#: in a loop, and each one costs a thread plus up to MAX_REQUEST_BYTES buffered
+#: before it has even proved it holds the token, so past this we close the
+#: connection rather than spawn another thread.
+MAX_CONCURRENT_CONNECTIONS = 32
+
+#: A ``wait`` longer than this pins a control thread for no good reason, and an
+#: unbounded value must not cost one for days. An hour is far above any real
+#: transcription (a 90-minute meeting finishes well inside it) while still
+#: bounding a hostile or fat-fingered request.
+MAX_WAIT_SECONDS = 3600.0
+
+#: Counting-down slots, one per live connection thread (see ``_serve``).
+_CONNECTION_SLOTS = threading.Semaphore(MAX_CONCURRENT_CONNECTIONS)
+
 #: Canonical verb -> machine-readable spec. Single source of truth for the
 #: ``help`` verb, CLI validation and the docs, so a user or an LLM agent can
 #: discover the entire surface with ``python src/main.py help --json``.
@@ -113,6 +128,10 @@ VERBS: dict[str, dict] = {
             "meeting", "meeting_setting", "meeting_state", "meeting_elapsed_s",
             "meeting_progress", "meeting_spill_minutes", "meeting_stage",
             "meeting_transcript", "meeting_transcript_path", "meeting_speakers",
+            "meeting_live_transcript",
+            "diarization", "diarization_setting", "diarization_speakers",
+            "diarization_model",
+            "meeting_output_dir", "meeting_output_format", "speakers",
             "ui_theme", "middle_click",
             "last_transcription",
         ],
@@ -194,6 +213,44 @@ VERBS: dict[str, dict] = {
         "value": "minutes",
         "returns": ["meeting_spill_minutes"],
     },
+    "diarization": {
+        "summary": "Label speakers in meeting transcripts (diarization); off never loads the model",
+        "value": "state",
+        "choices": ["off", "on"],
+        "toggles": True,
+        "returns": ["diarization", "diarization_setting"],
+    },
+    "diarization-speakers": {
+        "summary": "Set the expected speaker count hint (auto, or 2-8); omit to cycle",
+        "value": "count",
+        "choices": ["auto", "2", "3", "4", "5", "6", "7", "8"],
+        "returns": ["diarization_speakers"],
+    },
+    "diarization-model": {
+        "summary": "Choose the diarization model (startup-loaded; needs a restart)",
+        "value": "model",
+        "choices": ["diarization"],
+        "required": True,
+        "returns": ["diarization_model"],
+    },
+    "meeting-output": {
+        "summary": "Set (or report) the folder meeting transcripts are written to",
+        "value": "folder",
+        "aliases": ["meeting-output-dir", "meeting-output-folder"],
+        "returns": ["meeting_output_dir"],
+    },
+    "meeting-format": {
+        "summary": "Set the transcript form (text, json, or markdown); omit to cycle",
+        "value": "format",
+        "choices": ["text", "json", "markdown"],
+        "returns": ["meeting_output_format"],
+    },
+    "speakers": {
+        "summary": "List or set the meeting speaker names (ordered, comma-separated metadata)",
+        "value": "names",
+        "aliases": ["speaker-names", "speaker-map"],
+        "returns": ["speakers"],
+    },
     "meeting-start": {
         "summary": "Start a meeting capture (requires meeting mode on; does not inject text)",
         "returns": ["meeting_state", "meeting_elapsed_s", "meeting_progress"],
@@ -229,6 +286,11 @@ VERBS: dict[str, dict] = {
         "choices": ["general", "email"],
         "required": True,
         "returns": ["formatter_context"],
+    },
+    "formatter-download": {
+        "summary": ("Download the formatter model now (explicit consent; the "
+                    "first-use path will not prompt under a TUI)"),
+        "returns": ["formatter_download"],
     },
     "trailing-space": {
         "summary": "Append a space to auto-typed text",
@@ -347,9 +409,11 @@ def default_transport() -> str:
     explicit = (os.environ.get(CONTROL_TRANSPORT_ENV) or "").strip().lower()
     if explicit in (UNIX, TCP):
         return explicit
-    if os.environ.get(CONTROL_SOCKET_ENV):
+    if os.environ.get(CONTROL_SOCKET_ENV) and unix_sockets_supported():
         # An explicit socket *path* can only mean AF_UNIX, so honour it rather
-        # than silently ignoring it in favour of the TCP transport.
+        # than silently ignoring it in favour of the TCP transport. On a host
+        # without AF_UNIX (stock Windows CPython) the path is meaningless, so
+        # fall through to TCP instead of failing to start the API.
         return UNIX
     return UNIX if unix_sockets_supported() else TCP
 
@@ -433,7 +497,12 @@ def read_endpoint_file(path: str | None = None) -> dict | None:
             data = json.load(handle)
     except (OSError, json.JSONDecodeError, ValueError):
         return None
-    if not isinstance(data, dict) or not data.get("port"):
+    # Validate the port here so ``send_command``'s later use cannot raise
+    # ``ValueError`` out of a function whose contract is to return an error reply.
+    if not isinstance(data, dict):
+        return None
+    port = data.get("port")
+    if not isinstance(port, int) or not 0 < port < 65536:
         return None
     return data
 
@@ -444,6 +513,30 @@ def _remove_endpoint_file(path: str) -> None:
             os.unlink(path)
     except OSError:  # pragma: no cover - defensive
         pass
+
+
+def _bound_wait(request: dict) -> dict:
+    """Clamp a ``wait`` timeout to :data:`MAX_WAIT_SECONDS`.
+
+    A caller can ask to block for days; nothing legitimately takes that long, and
+    a control thread must not be pinned that long. A non-numeric value is left
+    alone so the engine reports it as the bad input it is.
+    """
+    raw = request.get("value")
+    if raw is None:
+        raw = request.get("timeout_seconds")
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        return request
+    if seconds <= MAX_WAIT_SECONDS:
+        return request
+    request = dict(request)
+    if request.get("value") is not None:
+        request["value"] = str(MAX_WAIT_SECONDS)
+    else:
+        request["timeout_seconds"] = str(MAX_WAIT_SECONDS)
+    return request
 
 
 class ControlServer:
@@ -617,6 +710,14 @@ class ControlServer:
                 continue
             except OSError:
                 break
+            if not _CONNECTION_SLOTS.acquire(blocking=False):
+                # At the cap: refuse immediately rather than spawn a thread that
+                # would read up to MAX_REQUEST_BYTES before authenticating.
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+                continue
             threading.Thread(
                 target=self._handle,
                 args=(conn,),
@@ -646,6 +747,9 @@ class ControlServer:
                 conn.close()
             except OSError:
                 pass
+            # Release the slot only after the connection is done, so the cap
+            # tracks live work rather than threads merely spawned.
+            _CONNECTION_SLOTS.release()
 
     def _authorized(self, request: dict) -> bool:
         """Gate the TCP transport on a shared token.
@@ -660,7 +764,11 @@ class ControlServer:
             return True
         expected = self.token or ""
         supplied = str(request.get("token") or "")
-        return bool(expected) and secrets.compare_digest(expected, supplied)
+        # Compared as UTF-8 bytes: ``compare_digest`` raises ``TypeError`` on a
+        # non-ASCII ``str``, which would leak an exception into a pre-auth reply
+        # instead of answering with the documented "unauthorized".
+        return bool(expected) and secrets.compare_digest(
+            expected.encode("utf-8"), supplied.encode("utf-8"))
 
     def dispatch(self, line: str) -> dict:
         """Parse one request line and route it to the engine."""
@@ -684,6 +792,9 @@ class ControlServer:
         cmd = str(request.get("cmd") or request.get("command") or "").strip()
         if not cmd:
             return {"ok": False, "error": "missing 'cmd'"}
+
+        if normalize_verb(cmd) == "wait":
+            request = _bound_wait(request)
 
         handler = getattr(self.target, "handle_control", None)
         if not callable(handler):
@@ -735,7 +846,7 @@ def send_command(
                 ),
             }
         host = str(endpoint.get("host") or TCP_HOST)
-        port = int(endpoint["port"])
+        port = endpoint["port"]  # validated as an int by read_endpoint_file
         request["token"] = endpoint.get("token") or ""
         address = f"{host}:{port}"
         family: int = socket.AF_INET

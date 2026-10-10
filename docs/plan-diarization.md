@@ -427,6 +427,17 @@ be hot (it only decides whether to run the pass), so a user can turn it off with
 restarting. Report both in `status` — this is the "configured vs effective" split
 `docs/formatting.md` §1 established.
 
+> **Implemented (D6).** All of the above landed; see `docs/meeting_mode.md` for the
+> user-facing table. Two deviations from this plan worth recording:
+> * `diarization_model` defaults to the registry spec name **`diarization`**, not to the
+>   backend name `sherpa-onnx`: the setting names *which model bundle* to load, and the
+>   backend stays `diarize.DEFAULT_BACKEND`. The plan's `sherpa-onnx` default conflated
+>   the two axes (the same conflation the formatter's C4 refactor undid).
+> * the shipped toggle is `off`/`on` (not the sketch's `off`/`auto`/`on`). `auto`'s
+>   "label only when more than one speaker is found" behaviour is already what the
+>   pipeline does with the corrected turn list, so a third value carried no distinct
+>   behaviour to pin.
+
 ### 6.1 Model registry (shared with the formatter workstream)
 
 `model_download.py` is hardwired to exactly one model: `REPO_ID`, `REVISION`,

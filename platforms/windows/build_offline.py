@@ -27,10 +27,10 @@ def copy_with_progress(src, dst, desc="Copying"):
                 total_size += item.stat().st_size
     else:
         total_size = src.stat().st_size
-    
+
     size_mb = total_size / (1024 * 1024)
     print(f"{desc}: {src.name} ({size_mb:.1f} MB)...")
-    
+
     copied = [0]
     def progress_copy():
         if src.is_dir():
@@ -40,7 +40,7 @@ def copy_with_progress(src, dst, desc="Copying"):
             shutil.copy2(src, dst)
             copied[0] = total_size
         print(f"{desc} complete: {size_mb:.1f} MB")
-    
+
     if size_mb > 100:
         thread = threading.Thread(target=progress_copy)
         thread.start()
@@ -76,19 +76,19 @@ def ensure_cached_models():
         print("  Run the app once (online) to install it from the GitHub release assets.")
 
     print()
-    
+
 def prepare_bundled_models():
     """Copy models to build directory for bundling"""
     print("=" * 60)
     print("Preparing bundled models...")
     print("=" * 60)
-    
+
     # Clean up old models
     if MODELS_DIR.exists():
         print("Cleaning up old build models...")
         shutil.rmtree(MODELS_DIR)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     # The runtime loads from models/cohere (installed from the GitHub release
     # assets on first run). Bundle that directory so the EXE runs fully offline.
     if (LOCAL_COHERE / "model.safetensors").exists():
@@ -98,9 +98,21 @@ def prepare_bundled_models():
     else:
         print(f"\nWARNING: No local Cohere model found at {LOCAL_COHERE}")
         print("  Run the app once (online) to install it, then rebuild.")
-    
+
+    local_diarize = PROJECT_ROOT / "models" / "diarization"
+    if local_diarize.exists():
+        print(f"\nFound local Diarization model: {local_diarize}")
+        dest_diarize = MODELS_DIR / "diarization"
+        copy_with_progress(local_diarize, dest_diarize, "Copying Diarization model")
+
+    local_formatter = PROJECT_ROOT / "models" / "formatter"
+    if local_formatter.exists():
+        print(f"\nFound local Formatter model: {local_formatter}")
+        dest_formatter = MODELS_DIR / "formatter"
+        copy_with_progress(local_formatter, dest_formatter, "Copying Formatter model")
+
     print(f"\nBundle prepared at: {MODELS_DIR}")
-    
+
     # Print summary of what's being bundled
     total_size = sum(f.stat().st_size for f in MODELS_DIR.rglob("*") if f.is_file())
     print(f"Total bundle size: {total_size / (1024*1024):.1f} MB")
@@ -111,7 +123,7 @@ def build_exe():
     print("=" * 60)
     print("Building EXE with PyInstaller...")
     print("=" * 60)
-    
+
     # PyInstaller options - copy src files to root of bundle (not in src/ subfolder)
     pyinstaller_args = [
         sys.executable, "-m", "PyInstaller",
@@ -122,7 +134,7 @@ def build_exe():
         "--clean",
         "-y",
         "--log-level=INFO",
-        
+
         # Add models directory
         f"--add-data={MODELS_DIR}{os.pathsep}models",
 
@@ -132,19 +144,20 @@ def build_exe():
         # src/platform/__init__.py loads this copy so numpy/torch/pkg_resources
         # keep a working platform.system()/uname().
         f"--add-data={_stdlib_platform.__file__}{os.pathsep}stdlib_shim",
-        
+
         # Add all src files to root (not in src/ subfolder)
         f"--add-data={SRC_DIR}{os.pathsep}.",
-        
+
         # Add config files (common dictionary, presets, examples)
         f"--add-data={PROJECT_ROOT / 'config'}{os.pathsep}config",
-        
+
         # Hidden imports
         "--hidden-import=hal",
         "--hidden-import=voice_transcriber",
         "--hidden-import=voice_transcriber.main",
         "--hidden-import=voice_transcriber.hal",
         "--hidden-import=voice_transcriber.audio_state",
+        "--hidden-import=voice_transcriber.accent",
         "--hidden-import=voice_transcriber.check_devices",
         "--hidden-import=voice_transcriber.console_text",
         "--hidden-import=voice_transcriber.control",
@@ -161,6 +174,15 @@ def build_exe():
         "--hidden-import=voice_transcriber.t2",
         "--hidden-import=voice_transcriber.transcribe2",
         "--hidden-import=voice_transcriber.transcribe_cohere",
+        "--hidden-import=voice_transcriber.transcribe_parakeet",
+        "--hidden-import=voice_transcriber.backend_registry",
+        "--hidden-import=voice_transcriber.diarization",
+        "--hidden-import=voice_transcriber.diarizers.sherpa_onnx",
+        "--hidden-import=voice_transcriber.formatter",
+        "--hidden-import=voice_transcriber.formatters.llama_server",
+        "--hidden-import=voice_transcriber.formatters.noop",
+        "--hidden-import=voice_transcriber.meeting",
+        "--hidden-import=voice_transcriber.meeting_pipeline",
         "--hidden-import=voice_transcriber.tui",
         "--hidden-import=voice_transcriber.tui_ratatui",
         "--hidden-import=voice_transcriber.platform.windows",
@@ -185,35 +207,44 @@ def build_exe():
         "--hidden-import=tqdm",
         "--hidden-import=tokenizers",
         "--hidden-import=onnxruntime",
+        "--hidden-import=sherpa_onnx",
         "--hidden-import=rich",
-        
+
         # Collect all for these packages
         "--collect-all=transformers",
         "--collect-all=torch",
         "--collect-all=tokenizers",
-        
+
         # Disable upx to avoid issues with large bundles
         "--upx-dir=NONE",
     ]
-    
+
     icon_path = PROJECT_ROOT / "packaging" / "icon.ico"
     if icon_path.exists():
         pyinstaller_args.append(f"--icon={icon_path}")
-    
+
     # Filter out NONE value
     pyinstaller_args = [arg for arg in pyinstaller_args if arg != "NONE"]
-    
+
     print("Running:", " ".join(pyinstaller_args[:10]) + "...")
     print()
-    
+
     result = subprocess.run(pyinstaller_args, cwd=PROJECT_ROOT)
-    
+
     if result.returncode == 0:
         print()
         print("=" * 60)
         print("BUILD SUCCESSFUL!")
         print("=" * 60)
-        exe_path = DIST_DIR / "VoiceTranscriber" / "VoiceTranscriber.exe"
+        dist_dir = DIST_DIR / "VoiceTranscriber"
+        llama_exe = shutil.which("llama-server.exe") or (PROJECT_ROOT / "llama-server.exe")
+        if isinstance(llama_exe, Path) and not llama_exe.exists():
+            llama_exe = None
+        if llama_exe and dist_dir.exists():
+            dest_llama = dist_dir / "llama-server.exe"
+            print(f"Bundling llama-server.exe: {llama_exe} -> {dest_llama}")
+            shutil.copy2(str(llama_exe), str(dest_llama))
+        exe_path = dist_dir / "VoiceTranscriber.exe"
         if exe_path.exists():
             size_mb = exe_path.stat().st_size / (1024 * 1024)
             print(f"EXE created: {exe_path}")
@@ -243,7 +274,7 @@ def main():
     print("Voice Transcriber - Offline Build Script")
     print("=" * 60)
     print()
-    
+
     # Check prerequisites
     try:
         import PyInstaller
@@ -267,7 +298,7 @@ def main():
 
         # Prepare bundled models
         prepare_bundled_models()
-    
+
     # Build the EXE
     build_exe()
 

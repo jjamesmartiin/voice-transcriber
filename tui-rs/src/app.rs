@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use ratatui::style::Color;
 
-use crate::ipc::Wire;
+use crate::ipc::{SpeakerCount, Wire};
 
 /// UI colour palettes. Mirrors `COLOR_PALETTES` in `src/tui.py`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -53,11 +53,6 @@ impl Theme {
             .iter()
             .copied()
             .find(|t| t.name() == s.trim().to_lowercase())
-    }
-
-    pub fn next(self) -> Theme {
-        let i = Theme::ALL.iter().position(|t| *t == self).unwrap_or(0);
-        Theme::ALL[(i + 1) % Theme::ALL.len()]
     }
 
     pub fn color(self) -> Color {
@@ -125,15 +120,6 @@ impl Level {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn default_color(self) -> Color {
-        match self {
-            Level::Info => Color::Green,
-            Level::Success => Color::Green,
-            Level::Warning => Color::Yellow,
-            Level::Error => Color::Red,
-        }
-    }
 }
 
 /// Actions produced by the demo script (or by the keyboard in interactive mode).
@@ -163,7 +149,6 @@ pub struct App {
     pub state_started: Option<Instant>,
     pub rec_started: Option<Instant>,
     pub vu_level: f32,
-    pub vu_peak: f32,
     /// Timestamp of the last scalar VU update, used to decay the meter in real
     /// time rather than once per message.
     vu_last_update: Instant,
@@ -212,6 +197,25 @@ pub struct App {
     pub meeting_mode: String,
     /// Meeting capture in-memory spill threshold, in minutes.
     pub meeting_spill_minutes: u32,
+    /// Configured diarization toggle ("off"/"on"): label who said what in
+    /// meeting transcripts. See docs/meeting_mode.md.
+    pub diarization: String,
+    /// Speaker-count hint ("auto" or "2".."8") in its canonical string form.
+    pub diarization_speakers: String,
+    /// Configured diarization model registry id (e.g. "diarization").
+    pub diarization_model: String,
+    /// Where the finished transcript is written (repo-relative by default).
+    pub meeting_output_dir: String,
+    /// The artifact form: "text", "json" or "markdown".
+    pub meeting_output_format: String,
+    /// The live transcript streamed by the engine while a meeting records. It is
+    /// the whole accumulated text so far; the meeting screen shows its tail.
+    /// Cleared when a capture starts or ends so a new capture never inherits
+    /// the previous one (see `update_state`).
+    pub meeting_live_text: String,
+    /// The live speakers map: ordered names, index *i* names speaker *i*. It is
+    /// transcript metadata rather than config, edited from the meeting screen.
+    pub speaker_names: Vec<String>,
     #[allow(dead_code)]
     pub sound_theme: String,
     pub ui_theme: Theme,
@@ -233,7 +237,6 @@ impl App {
             state_started: None,
             rec_started: None,
             vu_level: 0.0,
-            vu_peak: 0.0,
             vu_last_update: Instant::now(),
             vu_levels: HashMap::new(),
             vu_levels_last_update: Instant::now(),
@@ -261,10 +264,10 @@ impl App {
             secondary_device: Some("Built-in Analog Stereo".to_string()),
             model_backend: "cohere".to_string(),
             is_muted: true,
-            auto_type: false,
-            output_mode: "clipboard".to_string(),
+            auto_type: true,
+            output_mode: "type_fast".to_string(),
             trailing_space: true,
-            auto_punctuate: true,
+            auto_punctuate: false,
             number_digits: true,
             number_mode: "auto".to_string(),
             serial_collapse: true,
@@ -275,17 +278,24 @@ impl App {
             punctuation_mode: "full".to_string(),
             structure_mode: "off".to_string(),
             formatter: "off".to_string(),
-            // The subprocess backend, matching Python's default. Not "s1-mini",
-            // which names the in-process backend that does not exist: a default
-            // that resolves to nothing makes the feature look broken rather than
-            // disabled. The engine overwrites this from cfg, but a wrong initial
-            // value still shows for a moment and is a trap for the next reader.
+            // `s1-mini` is the shipped *model* name, matching Python's default.
+            // It is not a backend: the backend axis is separate (the
+            // `llama-server` runtime) and was split from the model when the
+            // in-process C4 backend was dropped (docs/TODO-parity.md §4C). The
+            // engine overwrites this from cfg either way.
             formatter_model: "s1-mini".to_string(),
             formatter_style: "semi-formal".to_string(),
             formatter_context: "general".to_string(),
             cleanup_mode: "full".to_string(),
             meeting_mode: "off".to_string(),
             meeting_spill_minutes: 10,
+            diarization: "off".to_string(),
+            diarization_speakers: "auto".to_string(),
+            diarization_model: "diarization".to_string(),
+            meeting_output_dir: "meetings".to_string(),
+            meeting_output_format: "text".to_string(),
+            meeting_live_text: String::new(),
+            speaker_names: Vec::new(),
             sound_theme: "proximity".to_string(),
             ui_theme,
             should_quit: false,
@@ -325,6 +335,14 @@ impl App {
 
     /// `update_state()` from the Python TUI.
     pub fn update_state(&mut self, state: RunState, sub_text: String) {
+        // A new capture must never show the previous transcript. Clear the live
+        // text whenever the meeting-ness changes - entering a meeting (which
+        // also covers re-entering one after a finalize) or leaving it - but not
+        // on the per-tick `MEETING` state updates the engine sends during a
+        // capture, which would otherwise wipe the transcript every second.
+        if (self.state == RunState::Meeting) != (state == RunState::Meeting) {
+            self.meeting_live_text.clear();
+        }
         let starts_timer = matches!(
             state,
             RunState::Recording | RunState::Meeting | RunState::Processing | RunState::Rewriting
@@ -335,7 +353,6 @@ impl App {
         if state == RunState::Ready {
             self.state_started = None;
             self.vu_level = 0.0;
-            self.vu_peak = 0.0;
             self.vu_levels.clear();
             self.rec_started = None;
         }
@@ -350,7 +367,6 @@ impl App {
     pub fn update_vu(&mut self, level: f32) {
         let decay = self.vu_decay();
         self.vu_level = level.max(self.vu_level * decay);
-        self.vu_peak = self.vu_peak.max(self.vu_level);
     }
 
     /// Exponential decay over the time since the previous scalar update. The
@@ -418,12 +434,6 @@ impl App {
                 // handled by caller
             }
         }
-    }
-
-    #[allow(dead_code)] // theme selection now lives in the settings modal
-    pub fn cycle_theme(&mut self) -> Theme {
-        self.ui_theme = self.ui_theme.next();
-        self.ui_theme
     }
 
     /// Advance the list-formatting mode through the three the engine knows
@@ -539,16 +549,57 @@ impl App {
         self.meeting_spill_minutes
     }
 
-    #[allow(dead_code)] // retained to mirror Python's `cycle_punctuation`; the
-                        // preset modal owns punctuation selection on this frontend.
-    pub fn cycle_punctuation(&mut self) {
-        self.punctuation_mode = match self.punctuation_mode.as_str() {
-            "full" | "default" => "no_terminal_period".to_string(),
-            "no_terminal_period" | "casual" => "no_punctuation".to_string(),
-            "no_punctuation" | "autocorrect" => "aesthetic_lowercase".to_string(),
-            "aesthetic_lowercase" | "aesthetic" => "lowercase_no_punctuation".to_string(),
-            _ => "full".to_string(),
-        };
+    /// Advance the diarization toggle through the two states the engine knows
+    /// (``t2.DIARIZATION_MODES == ["off", "on"]``). The engine is authoritative
+    /// and replies with a `cfg` that overwrites this optimistic value.
+    pub fn cycle_diarization(&mut self) -> &str {
+        const DIARIZATION_MODES: [&str; 2] = ["off", "on"];
+        let idx = DIARIZATION_MODES
+            .iter()
+            .position(|m| *m == self.diarization)
+            .map(|i| (i + 1) % DIARIZATION_MODES.len())
+            .unwrap_or(0);
+        self.diarization = DIARIZATION_MODES[idx].to_string();
+        &self.diarization
+    }
+
+    /// Advance the speaker-count hint through the shipped choices
+    /// (``t2.DIARIZATION_SPEAKER_CHOICES == ["auto", 2..8]``).
+    pub fn cycle_diarization_speakers(&mut self) -> &str {
+        const CHOICES: [&str; 8] = ["auto", "2", "3", "4", "5", "6", "7", "8"];
+        let idx = CHOICES
+            .iter()
+            .position(|m| *m == self.diarization_speakers)
+            .map(|i| (i + 1) % CHOICES.len())
+            .unwrap_or(0);
+        self.diarization_speakers = CHOICES[idx].to_string();
+        &self.diarization_speakers
+    }
+
+    /// Advance the diarization model through the shipped names
+    /// (``t2.DIARIZATION_MODELS``). One name today; cycling is a round-trip.
+    pub fn cycle_diarization_model(&mut self) -> &str {
+        const MODELS: [&str; 1] = ["diarization"];
+        let idx = MODELS
+            .iter()
+            .position(|m| *m == self.diarization_model)
+            .map(|i| (i + 1) % MODELS.len())
+            .unwrap_or(0);
+        self.diarization_model = MODELS[idx].to_string();
+        &self.diarization_model
+    }
+
+    /// Advance the transcript form through the three the engine knows
+    /// (``t2.MEETING_OUTPUT_FORMATS == ["text", "json", "markdown"]``).
+    pub fn cycle_meeting_output_format(&mut self) -> &str {
+        const FORMATS: [&str; 3] = ["text", "json", "markdown"];
+        let idx = FORMATS
+            .iter()
+            .position(|m| *m == self.meeting_output_format)
+            .map(|i| (i + 1) % FORMATS.len())
+            .unwrap_or(0);
+        self.meeting_output_format = FORMATS[idx].to_string();
+        &self.meeting_output_format
     }
 
     /// Advance the output mode through the three modes the engine actually
@@ -579,6 +630,7 @@ impl App {
     pub fn handle_modal_wire(&mut self, wire: Wire) {
         match wire {
             Wire::Tx { .. } | Wire::Ev { .. } => self.pending_output.push(wire),
+            Wire::MeetingText { text } => self.meeting_live_text = text,
             Wire::Devices { devices } => self.update_devices(devices),
             Wire::State { state, sub } => self.update_state(RunState::from_wire(&state), sub),
             Wire::Vu { level, levels } => self.apply_vu_wire(level, levels.as_deref()),
@@ -609,14 +661,18 @@ impl App {
                 middle_click_enabled,
                 typing_wpm,
                 hotkeys,
+                diarization,
+                diarization_speakers,
+                diarization_model,
+                meeting_output_dir,
+                meeting_output_format,
+                speakers,
             } => self.apply_config(
                 mic,
-                secondary,
                 backend,
                 muted,
                 auto_type,
                 output_mode,
-                sound_theme,
                 ui_theme,
                 punctuation_mode,
                 structure_mode,
@@ -636,6 +692,14 @@ impl App {
                 middle_click_enabled,
                 typing_wpm,
                 hotkeys,
+                diarization,
+                diarization_speakers,
+                diarization_model,
+                meeting_output_dir,
+                meeting_output_format,
+                speakers,
+                secondary,
+                sound_theme,
             ),
             Wire::Quit => self.should_quit = true,
             Wire::Header | Wire::Suspend | Wire::Resume => {}
@@ -667,12 +731,10 @@ impl App {
     pub fn apply_config(
         &mut self,
         mic: Option<String>,
-        secondary: Option<String>,
         backend: Option<String>,
         muted: Option<bool>,
         auto_type: Option<bool>,
         output_mode: Option<String>,
-        sound_theme: Option<String>,
         ui_theme: Option<String>,
         punctuation_mode: Option<String>,
         structure_mode: Option<String>,
@@ -692,12 +754,23 @@ impl App {
         middle_click_enabled: Option<bool>,
         typing_wpm: Option<u32>,
         hotkeys: Option<Vec<String>>,
+        diarization: Option<String>,
+        diarization_speakers: Option<SpeakerCount>,
+        diarization_model: Option<String>,
+        meeting_output_dir: Option<String>,
+        meeting_output_format: Option<String>,
+        speakers: Option<Vec<String>>,
+        secondary: Option<String>,
+        sound_theme: Option<String>,
     ) {
         if let Some(m) = mic {
             self.active_device = m;
         }
         if let Some(s) = secondary {
             self.secondary_device = Some(s);
+        }
+        if let Some(s) = sound_theme {
+            self.sound_theme = s;
         }
         if let Some(b) = backend {
             self.model_backend = b;
@@ -715,9 +788,6 @@ impl App {
             } else {
                 "clipboard".to_string()
             };
-        }
-        if let Some(s) = sound_theme {
-            self.sound_theme = s;
         }
         if let Some(t) = ui_theme {
             if let Some(theme) = Theme::from_name(&t) {
@@ -779,6 +849,26 @@ impl App {
         if let Some(h) = hotkeys {
             self.hotkeys = h;
         }
+        if let Some(d) = diarization {
+            self.diarization = d;
+        }
+        if let Some(s) = diarization_speakers {
+            self.diarization_speakers = s.as_string();
+        }
+        if let Some(m) = diarization_model {
+            self.diarization_model = m;
+        }
+        if let Some(p) = meeting_output_dir {
+            self.meeting_output_dir = p;
+        }
+        if let Some(f) = meeting_output_format {
+            self.meeting_output_format = f;
+        }
+        if let Some(n) = speakers {
+            // Transcript metadata: the engine is authoritative, so replace
+            // rather than merge. A blank list is a legitimate "no names".
+            self.speaker_names = n;
+        }
     }
 }
 
@@ -793,7 +883,12 @@ fn decay_factor(dt_secs: f32) -> f32 {
     PER_STEP.powf(dt_secs / NOMINAL_DT_SECS)
 }
 
-fn detect_system_theme() -> Theme {
+pub(crate) fn detect_system_theme() -> Theme {
+    // `auto` is resolved here. The Python engine runs the desktop accent probe it
+    // cannot run itself (it is the one process that must not shell out twice) and
+    // hands the answer down as ACCENT_COLOR, which is why that step follows
+    // VT_UI_THEME rather than replacing it. Standalone runs (--demo, by hand)
+    // have neither and fall through to the terminal heuristic.
     if let Ok(t) = std::env::var("VT_UI_THEME") {
         if let Some(theme) = Theme::from_name(&t) {
             if theme != Theme::Auto {

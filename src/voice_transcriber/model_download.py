@@ -30,6 +30,7 @@ Env knobs:
 """
 import dataclasses
 import hashlib
+import http.client
 import lzma
 import os
 import re
@@ -38,6 +39,7 @@ import socket
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -70,7 +72,15 @@ class ModelSpec:
     package_files: tuple = ()        # files the packager stages into the tar
     required_local: tuple = ()       # minimal set meaning "loadable locally"
     digests: dict = dataclasses.field(default_factory=dict)  # file -> sha256
+    #: Config-layer model ids that select this entry. ``formatter_model: s1-mini``
+    #: and ``diarization_model: diarization`` are user-facing values; this maps
+    #: them back to the registry key so the mapping lives in exactly one place.
+    model_ids: tuple = ()
     license_file: str = ""           # repo-relative license to ship
+    #: Repo-relative NOTICE to ship *verbatim*. Empty means "generate one from
+    #: the spec" (the Cohere behaviour). A model whose upstream NOTICE carries
+    #: an operative clause - S1-mini's naming term - must ship that exact text.
+    notice_file: str = ""
     license_name: str = ""           # short license label (NOTICE, provenance)
     target_subdir: str = ""          # <models root>/<target_subdir>
     download_hint: str = ""          # size hint shown in the download prompt
@@ -138,9 +148,107 @@ COHERE = ModelSpec(
     download_hint="~2.8 GB (~3.9 GB uncompressed on disk)",
 )
 
-#: The registry. A future GGUF formatter and the ONNX diarization graphs each
-#: add one entry here and inherit the whole installer/publisher pipeline.
-MODELS: dict = {COHERE.name: COHERE}
+#: The registry. Every redistributable artifact is one entry here; the packager
+#: and publisher read the entry, and the installers resolve through it. Adding a
+#: model is adding an entry, never a branch in the installer.
+
+# --- Formatter: S1-mini (GGUF, llama.cpp) ----------------------------------
+# The quant lives in a *separate* repo from the base model: superwhisper/s1-mini
+# ships no GGUF at all. Pin by commit sha, because the repo has no tags (a
+# ``v1`` ref 404s). The digest is the extracted file, not the download wrapper.
+_FORMATTER_REVISION = "34add00a48a2e5d24e5a4ee5405a99620a3a240c"
+_FORMATTER_SHA256 = "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634"
+_FORMATTER_TAG = f"model-formatter-{_FORMATTER_REVISION[:12]}"
+
+FORMATTER = ModelSpec(
+    name="formatter",
+    # The licence's additional term requires exactly this attribution wherever
+    # the model is named, so it is the display name as well as the NOTICE title.
+    display_name='"S1-mini" by "Superwhisper"',
+    description="On-device transcript formatter by Superwhisper.",
+    repo_id="superwhisper/s1-mini-GGUF",
+    revision=_FORMATTER_REVISION,
+    asset_prefix=f"s1-mini-{_FORMATTER_REVISION}",
+    bundle_tag=_FORMATTER_TAG,
+    release_base=f"{_REPO_URL}/releases/download/{_FORMATTER_TAG}",
+    package_files=("s1-mini-q4_k_m.gguf",),
+    required_local=("s1-mini-q4_k_m.gguf",),
+    digests={"s1-mini-q4_k_m.gguf": _FORMATTER_SHA256},
+    model_ids=("s1-mini",),
+    license_file="config/licenses/S1-mini-Apache-2.0.txt",
+    notice_file="config/licenses/S1-mini-NOTICE.txt",
+    license_name="Apache-2.0 (with an additional naming term)",
+    notice_title="S1-mini",
+    license_title=("the Apache License, Version 2.0, plus the additional "
+                   "naming term"),
+    target_subdir="formatter",
+    download_hint="~462 MiB",
+)
+
+# --- Diarization: pyannote segmentation + 3D-Speaker embedding --------------
+# Both graphs come from k2-fsa/sherpa-onnx GitHub releases; the embedding asset
+# bucket really is misspelled ``recongition`` upstream, so the URLs are copied
+# literally. The revision is the segmentation tarball's sha256: it is the
+# primary artifact and pins the bundle tag to the content, the same way the
+# Cohere and formatter tags pin to a commit sha.
+_DIARIZATION_TARBALL_SHA256 = (
+    "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488"
+)
+#: Extracted pyannote segmentation graph (what we redistribute).
+_DIARIZATION_SEGMENTATION_SHA256 = (
+    "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079"
+)
+#: 3D-Speaker eres2net embedding graph.
+_DIARIZATION_EMBEDDING_SHA256 = (
+    "1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b"
+)
+_DIARIZATION_REVISION = _DIARIZATION_TARBALL_SHA256
+_DIARIZATION_TAG = f"model-diarization-{_DIARIZATION_REVISION[:12]}"
+#: Installed layout the backend reads (see diarizers/sherpa_onnx.py).
+_DIARIZATION_SEGMENTATION_PATH = (
+    "sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
+)
+_DIARIZATION_EMBEDDING_PATH = (
+    "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+)
+
+DIARIZATION = ModelSpec(
+    name="diarization",
+    display_name="Diarization (sherpa-onnx)",
+    description="Speaker diarization graphs: pyannote segmentation 3.0 "
+                "(MIT) and a 3D-Speaker eres2net embedding (Apache-2.0).",
+    repo_id="k2-fsa/sherpa-onnx",
+    revision=_DIARIZATION_REVISION,
+    asset_prefix=f"diarization-{_DIARIZATION_REVISION}",
+    bundle_tag=_DIARIZATION_TAG,
+    release_base=f"{_REPO_URL}/releases/download/{_DIARIZATION_TAG}",
+    package_files=(
+        _DIARIZATION_EMBEDDING_PATH,
+        _DIARIZATION_SEGMENTATION_PATH,
+    ),
+    required_local=(
+        _DIARIZATION_EMBEDDING_PATH,
+        _DIARIZATION_SEGMENTATION_PATH,
+    ),
+    digests={
+        _DIARIZATION_EMBEDDING_PATH: _DIARIZATION_EMBEDDING_SHA256,
+        _DIARIZATION_SEGMENTATION_PATH: _DIARIZATION_SEGMENTATION_SHA256,
+    },
+    model_ids=("diarization",),
+    license_file="config/licenses/Diarization-LICENSES.txt",
+    notice_file="config/licenses/Diarization-NOTICE.txt",
+    license_name="MIT (segmentation) and Apache-2.0 (embedding)",
+    notice_title="sherpa-onnx diarization models",
+    license_title="MIT (segmentation) and Apache-2.0 (embedding)",
+    target_subdir="diarization",
+    download_hint="~40 MB",
+)
+
+MODELS: dict = {
+    COHERE.name: COHERE,
+    FORMATTER.name: FORMATTER,
+    DIARIZATION.name: DIARIZATION,
+}
 
 # --- Backward-compatible constant aliases (deprecated) ---------------------
 # Kept so existing callers, docs and the publisher's constant import keep
@@ -166,6 +274,22 @@ def get_spec(name):
         raise KeyError(f"unknown model {name!r} (known: {known})") from None
 
 
+def registry_name_for_model(model_id):
+    """Registry key whose ``model_ids`` contains ``model_id``, or ``None``.
+
+    A config value (``formatter_model: s1-mini``, ``diarization_model:
+    diarization``) is a *model id*, not a registry key. This is the one place
+    that mapping lives, so the settings layer and the loaders cannot drift.
+    """
+    key = str(model_id or "").strip().lower()
+    if not key:
+        return None
+    for name, spec in MODELS.items():
+        if key in tuple(getattr(spec, "model_ids", ()) or ()):
+            return name
+    return None
+
+
 def _resolved_spec(name, revision=None):
     """Return the spec for ``name``, allowing a legacy revision override.
 
@@ -188,6 +312,40 @@ def _resolved_spec(name, revision=None):
 
 _status_handler = None  # set by the app: fn(stage: str, pct: int, text: str)
 
+#: Whether ``input()`` may be used for a consent prompt. ``None`` means "decide
+#: from ``sys.stdin.isatty()``" (standalone use). The app sets it to ``False``
+#: because a full-screen TUI (Rich or ratatui) owns the terminal in raw mode and
+#: consumes keystrokes: a prompt written there is invisible and blocks forever.
+_prompt_allowed = None
+
+
+def set_prompt_allowed(allowed):
+    """Tell the installer whether stdin is safe to prompt on.
+
+    ``None`` restores the tty heuristic; ``False`` is what the app passes once a
+    TUI owns the terminal. Prompting is a *courtesy* for standalone use
+    (``python -m voice_transcriber.model_download``); under a TUI consent has to
+    come through the status handler and an explicit command instead.
+    """
+    global _prompt_allowed
+    _prompt_allowed = None if allowed is None else bool(allowed)
+
+
+def _can_prompt() -> bool:
+    """Whether a yes/no prompt on stdin can be shown right now."""
+    if _prompt_allowed is not None:
+        return _prompt_allowed
+    try:
+        return bool(sys.stdin and sys.stdin.isatty())
+    except Exception:
+        return False
+
+
+def _auto_download_enabled() -> bool:
+    """True when ``VT_AUTO_DOWNLOAD_MODEL`` already carries the user's consent."""
+    return os.environ.get("VT_AUTO_DOWNLOAD_MODEL", "").strip().lower() in (
+        "1", "true", "yes", "always")
+
 
 def set_status_handler(fn):
     """Register a UI callback for download progress (optional)."""
@@ -204,16 +362,25 @@ def _notify(stage, pct, text):
     print(text, flush=True)
 
 
+def _data_dir():
+    """The per-user data root, without creating anything (see get_data_dir)."""
+    if os.environ.get("XDG_DATA_HOME"):
+        return os.path.join(os.environ["XDG_DATA_HOME"], "vt")
+    if os.name == "posix":
+        return os.path.join(os.path.expanduser("~"), ".local", "share", "vt")
+    return os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "vt")
+
+
 def get_data_dir():
     """Per-user data dir (mirrors t2.get_data_dir without importing the app)."""
-    if os.environ.get("XDG_DATA_HOME"):
-        d = os.path.join(os.environ["XDG_DATA_HOME"], "vt")
-    elif os.name == "posix":
-        d = os.path.join(os.path.expanduser("~"), ".local", "share", "vt")
-    else:
-        d = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "vt")
+    d = _data_dir()
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def _per_user_model_dir(subdir):
+    """Per-user install path for a model subdir, without creating anything."""
+    return os.path.join(_data_dir(), "models", subdir)
 
 
 def _has_repo_marker(directory):
@@ -288,15 +455,28 @@ def _models_dir_for(spec):
         if os.path.isdir(exe_models) or os.access(exe_dir, os.W_OK):
             return exe_models
     root = find_repo_root()
-    if root:
-        repo_dir = os.path.join(root, "models", subdir)
-        # writable now? (no side effects: don't create anything on lookup)
-        if os.path.isdir(repo_dir):
-            if os.access(repo_dir, os.W_OK):
-                return repo_dir
-        elif os.access(root, os.W_OK):
-            return repo_dir
-    return os.path.join(get_data_dir(), "models", subdir)
+    repo_dir = os.path.join(root, "models", subdir) if root else None
+    per_user = _per_user_model_dir(subdir)
+
+    # An existing, complete install always wins, wherever it lives. This keeps a
+    # model that was installed into the per-user directory (when the checkout
+    # was read-only, or before its registry entry existed) findable once the
+    # checkout path becomes writable - registering a model must never make an
+    # already-installed one unfindable.
+    if repo_dir and is_model_complete(spec.name, repo_dir):
+        return repo_dir
+    if is_model_complete(spec.name, per_user):
+        return per_user
+
+    # Nothing installed yet: a writable checkout is the conventional target, so
+    # the weights live visibly in the project they came from; read-only installs
+    # (Nix store, AppImage) fall back to the per-user data dir.
+    if repo_dir and (
+        (os.path.isdir(repo_dir) and os.access(repo_dir, os.W_OK))
+        or (not os.path.isdir(repo_dir) and os.access(root, os.W_OK))
+    ):
+        return repo_dir
+    return per_user
 
 
 def cohere_models_dir():
@@ -391,12 +571,41 @@ def _asset_exists(url):
     return False
 
 
+def _recorded_revision(directory):
+    """The revision recorded in ``directory``'s ``SOURCE.json``, else ``None``.
+
+    ``None`` means "unknown" (no file, unreadable, or no revision field) and is
+    treated as "do not block" -- a hand-installed weights directory never has a
+    SOURCE.json, and forcing a multi-gigabyte re-download over a JSON typo is
+    worse than trusting the file list.
+    """
+    try:
+        import json as _json
+        with open(os.path.join(directory, "SOURCE.json"), "r", encoding="utf-8") as f:
+            recorded = _json.load(f)
+    except (OSError, ValueError):
+        return None
+    if isinstance(recorded, dict):
+        revision = recorded.get("revision")
+        if isinstance(revision, str) and revision.strip():
+            return revision.strip()
+    return None
+
+
 def is_model_complete(name, directory=None):
-    """True when a loadable local copy of ``name`` already exists (offline-ready)."""
+    """True when a loadable local copy of ``name`` already exists (offline-ready).
+
+    A revision recorded in ``SOURCE.json`` that differs from the spec's counts as
+    incomplete: the weights are keyed by revision, so without this check a
+    revision bump would leave every existing user silently running the previous
+    model forever.
+    """
     spec = get_spec(name)
     directory = directory or models_dir(name)
-    return all(os.path.exists(os.path.join(directory, f))
-               for f in spec.required_local)
+    if not all(os.path.exists(os.path.join(directory, f))
+               for f in spec.required_local):
+        return False
+    return _recorded_revision(directory) in (None, spec.revision)
 
 
 def is_local_model_complete(directory=None):
@@ -429,8 +638,17 @@ def _http_get(url, dest, descr):
                                 last_pct = pct
                                 _notify("Downloading model", pct,
                                         f"Downloading {descr}: {done/1e9:.2f}/{total/1e9:.2f} GB")
+            if total and done != total:
+                # A short read is a dropped connection, not a fatal one. Raise
+                # (an OSError, so the loop below retries) rather than install a
+                # truncated part that will fail its SHA-256 anyway.
+                raise ConnectionError(
+                    f"short read: {done} of {total} bytes for {descr}")
             return done
-        except (urllib.error.URLError, OSError, socket.timeout) as e:
+        except (urllib.error.URLError, OSError, socket.timeout,
+                http.client.HTTPException) as e:
+            # IncompleteRead is an HTTPException, not an OSError: without it in
+            # this tuple one blip mid-part aborted the whole install.
             last_err = e
             print(f"Download attempt {attempt}/3 for {url} failed: {e}", flush=True)
             time.sleep(2 * attempt)
@@ -641,6 +859,25 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
     part_names = sorted(manifest)
     dest_parent = os.path.dirname(os.path.abspath(dest))
     os.makedirs(dest_parent, exist_ok=True)
+    lock_dir = dest + ".lock"
+    owns_lock = False
+    try:
+        os.mkdir(lock_dir)
+        owns_lock = True
+    except FileExistsError:
+        # Another process is installing the same model. Wait briefly rather
+        # than racing its rmtree: if it finishes, its install is the one to
+        # use, and deleting a good install to rewrite an identical one is the
+        # one outcome worth never risking.
+        for _ in range(60):
+            time.sleep(0.5)
+            if is_model_complete(spec.name, dest):
+                return dest
+        # Then carry on anyway. The re-check before the rmtree below is what
+        # actually protects a finished install, whereas giving up here would
+        # leave a lock dropped by a killed installer blocking every later
+        # attempt until someone deleted it by hand.
+        print(f"Another install of {spec.display_name} looks stuck; continuing.", flush=True)
     tmp_root = tempfile.mkdtemp(prefix="vt-model-install-", dir=dest_parent)
     try:
         tar_path = os.path.join(tmp_root, "model.tar")
@@ -681,6 +918,10 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
         if not is_model_complete(spec.name, staging):
             raise RuntimeError("Extracted model directory is missing required files.")
 
+        if is_model_complete(spec.name, dest):
+            # A concurrent install landed while we assembled. Keep it; ours is
+            # an identical copy and the existing one is already loadable.
+            return dest
         if os.path.isdir(dest):
             shutil.rmtree(dest)
         shutil.move(staging, dest)
@@ -690,6 +931,13 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
         return dest
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
+        if owns_lock:
+            # Only ever remove our own lock: the not-owned path above proceeds
+            # alongside another installer, whose lock must survive us.
+            try:
+                os.rmdir(lock_dir)
+            except OSError:
+                pass
 
 
 def _print_manual_install_instructions(spec, dest):
@@ -746,13 +994,16 @@ def ensure_model(name, dest=None, base_url=None, revision=None):
         return None
 
     if auto_env not in ("1", "true", "yes", "always"):
-        if sys.stdin and hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
+        # State the size *before* anything is fetched. With a terminal we also
+        # ask; without one the header is still printed, so a user reading the
+        # log is told what is about to be downloaded and how large it is.
+        print("\n" + "-" * 68)
+        print(f"  {spec.display_name} model weights are not installed.")
+        print(f"  Target location: {dest}")
+        print(f"  Download size: {spec.download_hint}.")
+        print("-" * 68)
+        if _can_prompt():
             try:
-                print("\n" + "-" * 68)
-                print(f"  {spec.display_name} model weights are not installed.")
-                print(f"  Target location: {dest}")
-                print(f"  Download size: {spec.download_hint}.")
-                print("-" * 68)
                 ans = input("  Would you like to download them automatically from GitHub now? [Y/n]: ").strip().lower()
                 if ans and ans not in ("y", "yes"):
                     print("  Automatic download cancelled.")
@@ -821,6 +1072,87 @@ def ensure_model(name, dest=None, base_url=None, revision=None):
         return None
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+#: Model names with a background install in flight, so a second utterance while
+#: the first download is still running does not start a duplicate.
+_async_inflight: set = set()
+#: Model names whose "not installed" notice has already been reported to the UI,
+#: so an utterance that keeps finding the model absent does not spam the status
+#: line on every dictation.
+_async_consent_notified: set = set()
+_async_lock = threading.Lock()
+
+
+def ensure_model_async(name, dest=None, base_url=None, revision=None, *,
+                       consented=False):
+    """Start installing ``name`` on a daemon thread; never blocks the caller.
+
+    This is the first-use path for an optional, large model: the caller (a
+    dictation, a settings change) must not wait for a ~462 MiB download, and the
+    hotkey/UI threads must never block on one.
+
+    Consent is explicit, because there is nowhere to ask from a background
+    thread: a full-screen TUI owns the terminal, so an ``input()`` prompt would
+    be invisible and would block on keystrokes the TUI is consuming.
+
+    * ``consented=True`` - the user asked for this (the ``formatter-download``
+      control verb), so start it.
+    * prompting is possible (standalone use) - :func:`ensure_model` asks.
+    * ``VT_AUTO_DOWNLOAD_MODEL`` is truthy - the user pre-consented.
+    * otherwise - report the size and the explicit command through the status
+      handler and start nothing. The first-use path therefore *stops* under the
+      app's TUI rather than downloading; the verb is the way to proceed.
+
+    Returns ``True`` when an install was started (or was already in flight),
+    ``False`` when there is nothing to do - the model is already complete, no
+    user-facing app is attached, or the download is waiting for consent.
+    """
+    spec = _resolved_spec(name, revision)
+    dest = dest or _models_dir_for(spec)
+    if is_model_complete(spec.name, dest):
+        return False
+    if _status_handler is None:
+        return False
+
+    with _async_lock:
+        # An install already running is always success, whatever started it - the
+        # check must come before the consent gate, or an utterance arriving while a
+        # consented download is in flight would re-report "not installed".
+        if spec.name in _async_inflight:
+            return True
+        needs_consent = (not consented and not _can_prompt()
+                         and not _auto_download_enabled())
+        if needs_consent:
+            first_notice = spec.name not in _async_consent_notified
+            _async_consent_notified.add(spec.name)
+        else:
+            _async_inflight.add(spec.name)
+
+    if needs_consent:
+        # No safe way to ask. Tell the user the size and how to proceed, once.
+        if first_notice:
+            _notify(
+                "Model download", 0,
+                f"{spec.display_name} model not installed "
+                f"({spec.download_hint}); run \"{spec.name}-download\" to install it.",
+            )
+        return False
+
+    def _install():
+        try:
+            ensure_model(spec.name, dest=dest, base_url=base_url)
+        except Exception as exc:  # never raise into a daemon thread
+            print(f"Background install of the {spec.display_name} model failed: {exc}",
+                  flush=True)
+        finally:
+            with _async_lock:
+                _async_inflight.discard(spec.name)
+                _async_consent_notified.discard(spec.name)
+
+    threading.Thread(target=_install, name=f"vt-model-install-{spec.name}",
+                     daemon=True).start()
+    return True
 
 
 def ensure_local_cohere(dest=None, base_url=None, revision=REVISION):

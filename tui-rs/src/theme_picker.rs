@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
@@ -29,7 +29,7 @@ pub const THEME_OPTIONS: [ThemeOption; 8] = [
         theme: Theme::Auto,
         name: "auto",
         label: "Auto",
-        desc: "Detect from system terminal accent color",
+        desc: "Follow the desktop accent color",
     },
     ThemeOption {
         theme: Theme::Green,
@@ -110,32 +110,14 @@ pub fn score_theme(query: &str, opt: &ThemeOption) -> Option<i32> {
         return Some(300 - pos as i32 * 5);
     }
     // Fuzzy subsequence in name
-    if let Some(dist) = fuzzy_subsequence(&q, &name) {
+    if let Some(dist) = textfit::fuzzy_subsequence(&q, &name) {
         return Some(200 - dist as i32);
     }
     // Fuzzy subsequence in description
-    if let Some(dist) = fuzzy_subsequence(&q, &desc) {
+    if let Some(dist) = textfit::fuzzy_subsequence(&q, &desc) {
         return Some(100 - dist as i32);
     }
     None
-}
-
-fn fuzzy_subsequence(pattern: &str, target: &str) -> Option<usize> {
-    let mut p_chars = pattern.chars().peekable();
-    let mut dist = 0;
-    for (i, c) in target.chars().enumerate() {
-        if let Some(&p) = p_chars.peek() {
-            if c == p {
-                p_chars.next();
-                dist += i;
-            }
-        }
-    }
-    if p_chars.peek().is_none() {
-        Some(dist)
-    } else {
-        None
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -150,6 +132,10 @@ pub struct PickerState {
     pub selected_index: usize,
     pub filtered_indices: Vec<usize>,
     pub current_theme: Theme,
+    /// What `auto` is drawn as, captured once when the picker opens. Held here
+    /// rather than re-read per frame, and so a render test can say what the
+    /// accent is instead of depending on the machine's desktop.
+    pub auto_accent: Theme,
 }
 
 impl PickerState {
@@ -159,6 +145,7 @@ impl PickerState {
             selected_index: 0,
             filtered_indices: (0..THEME_OPTIONS.len()).collect(),
             current_theme: current,
+            auto_accent: crate::app::detect_system_theme(),
         };
         if let Some(pos) = THEME_OPTIONS.iter().position(|o| o.theme == current) {
             s.selected_index = pos;
@@ -182,21 +169,11 @@ impl PickerState {
     }
 
     pub fn move_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-        } else if !self.filtered_indices.is_empty() {
-            self.selected_index = self.filtered_indices.len() - 1;
-        }
+        crate::modal::move_cursor_up(&mut self.selected_index, self.filtered_indices.len());
     }
 
     pub fn move_down(&mut self) {
-        if !self.filtered_indices.is_empty() {
-            if self.selected_index + 1 < self.filtered_indices.len() {
-                self.selected_index += 1;
-            } else {
-                self.selected_index = 0;
-            }
-        }
+        crate::modal::move_cursor_down(&mut self.selected_index, self.filtered_indices.len());
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> PickerAction {
@@ -306,6 +283,17 @@ impl ThemeRowLayout {
     }
 }
 
+/// The colour a theme entry is drawn in.
+///
+/// `auto` is drawn as the colour this front end actually resolves it to -- the
+/// accent the engine handed down -- and never as a fixed green: the popup
+/// previews the highlighted entry, so a wrong answer here is visible before the
+/// user commits to it.
+fn swatch(theme: Theme, auto_accent: Theme) -> Color {
+    let resolved = if theme == Theme::Auto { auto_accent } else { theme };
+    resolved.color()
+}
+
 /// Render one theme row. Columns are padded by display width so the action
 /// pill lands on the same columns on every line.
 fn theme_row(
@@ -313,8 +301,9 @@ fn theme_row(
     is_selected: bool,
     is_current: bool,
     layout: &ThemeRowLayout,
+    auto_accent: Theme,
 ) -> Line<'static> {
-    let opt_color = opt.theme.color();
+    let opt_color = swatch(opt.theme, auto_accent);
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     // Pointer column.
@@ -375,19 +364,12 @@ pub fn render_picker(frame: &mut Frame, state: &PickerState) {
     // Centered popup modal
     let popup_w = 66u16.min(area.width.saturating_sub(4)).max(30);
     let popup_h = 16u16.min(area.height.saturating_sub(2)).max(10);
-    let x = (area.width.saturating_sub(popup_w)) / 2;
-    let y = (area.height.saturating_sub(popup_h)) / 2;
-    let popup_area = Rect {
-        x,
-        y,
-        width: popup_w,
-        height: popup_h,
-    };
+    let popup_area = crate::modal::centered_rect(area, popup_w, popup_h);
 
     frame.render_widget(Clear, popup_area);
 
     let preview_theme = state.active_theme_preview();
-    let preview_color = preview_theme.color();
+    let preview_color = swatch(preview_theme, state.auto_accent);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -476,7 +458,7 @@ pub fn render_picker(frame: &mut Frame, state: &PickerState) {
             let opt = &THEME_OPTIONS[opt_idx];
             let is_current = opt.theme == state.current_theme;
 
-            list_lines.push(theme_row(opt, is_selected, is_current, &layout));
+            list_lines.push(theme_row(opt, is_selected, is_current, &layout, state.auto_accent));
         }
         frame.render_widget(Paragraph::new(list_lines), list_area);
     }
@@ -509,12 +491,7 @@ pub fn run_theme_picker(
     rx: Option<&mpsc::Receiver<IpcEvent>>,
     app: &mut App,
 ) -> io::Result<Option<Theme>> {
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
-
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.hide_cursor()?;
+    let mut terminal = crate::modal::enter_modal_screen()?;
 
     let mut state = PickerState::new(current_theme);
     let mut result: Option<Theme> = None;
@@ -558,15 +535,11 @@ pub fn run_theme_picker(
         }
     }
 
-    let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    crate::modal::leave_modal_screen();
 
     if let Some(theme) = result {
         app.ui_theme = theme;
-        if let Some(w) = writer {
-            if ipc::send_cmd_value(w, "set_theme", "theme", theme.name()).is_err() {
-                app.should_quit = true;
-            }
-        }
+        ipc::fire_value(writer, "set_theme", "theme", theme.name(), app);
     }
 
     Ok(result)
@@ -575,6 +548,54 @@ pub fn run_theme_picker(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: `centered_rect` returned the requested size even when it
+    /// exceeded the terminal, and `Clear` indexes the frame buffer directly.
+    /// The popup's `.max(30)` floor means a 20-column terminal asked for 30.
+    #[test]
+    fn test_render_on_a_terminal_narrower_than_the_popup_minimum() {
+        for (w, h) in [(80, 24), (20, 24), (174, 3), (1, 1)] {
+            let state = PickerState::new(Theme::Cyan);
+            let backend = ratatui::backend::TestBackend::new(w, h);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| render_picker(f, &state))
+                .unwrap_or_else(|e| panic!("{w}x{h} failed to draw: {e}"));
+        }
+    }
+
+    /// `auto` has no colour of its own: it is drawn as whatever the front end
+    /// resolved for it. It used to be drawn as `Theme::color()`'s Auto arm -- a
+    /// hard-coded green -- so the popup previewed a colour the app then never
+    /// showed once the theme was actually applied.
+    #[test]
+    fn test_the_auto_swatch_is_the_resolved_accent() {
+        assert_eq!(swatch(Theme::Auto, Theme::Red), Color::Red);
+        assert_eq!(swatch(Theme::Auto, Theme::Cyan), Color::Cyan);
+        // A concrete theme is itself, whatever the accent is.
+        assert_eq!(swatch(Theme::Magenta, Theme::Red), Color::Magenta);
+    }
+
+    #[test]
+    fn test_the_auto_row_is_drawn_in_the_resolved_accent() {
+        let layout = ThemeRowLayout::new(80);
+        let auto = THEME_OPTIONS
+            .iter()
+            .find(|o| o.theme == Theme::Auto)
+            .expect("the theme list still offers auto");
+
+        let line = theme_row(auto, true, false, &layout, Theme::Red);
+
+        let green = line
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(Color::Green));
+        assert!(!green, "the auto row is still painted green");
+        assert!(
+            line.spans.iter().any(|s| s.style.fg == Some(Color::Red)),
+            "the auto row never shows the accent"
+        );
+    }
 
     #[test]
     fn test_picker_fuzzy_matching() {
@@ -639,7 +660,7 @@ mod tests {
             for opt in THEME_OPTIONS.iter() {
                 for is_selected in [true, false] {
                     for is_current in [true, false] {
-                        let line = theme_row(opt, is_selected, is_current, &layout);
+                        let line = theme_row(opt, is_selected, is_current, &layout, Theme::Red);
                         assert_eq!(
                             line.width(),
                             expected,

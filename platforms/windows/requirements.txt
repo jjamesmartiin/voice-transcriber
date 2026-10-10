@@ -19,7 +19,6 @@ certifi==2026.2.25
 cffi==2.0.0
 charset-normalizer==3.4.7
 colorama==0.4.6
-datasets==4.8.4
 decorator==5.2.1
 dill==0.4.1
 filelock==3.28.0
@@ -66,6 +65,7 @@ safetensors==0.7.0
 scikit-learn==1.8.0
 scipy==1.17.1
 sentencepiece==0.2.1
+sherpa-onnx>=1.13.3
 six==1.17.0
 sounddevice==0.5.5
 soundfile==0.13.1

@@ -36,7 +36,7 @@ jobs:
 
       - name: Lint (ruff, shellcheck)
         run: |
-          nix develop --command ruff check src tests tools eval
+          nix develop --command ruff check src tests tools eval scripts platforms
           nix develop --command shellcheck --severity=warning $(git ls-files '*.sh')
 
       - name: Build Rust Ratatui frontend (vt-tui)

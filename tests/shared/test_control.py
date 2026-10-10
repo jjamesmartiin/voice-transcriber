@@ -15,6 +15,7 @@ import shutil
 import socket
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,12 @@ _VALUE_VERBS = {
     "punctuation": "full",
     "structure": "inline",
     "cleanup": "artifacts",
+    "diarization": "on",
+    "diarization-speakers": "auto",
+    "diarization-model": "diarization",
+    "meeting-output": "/tmp/vt-transcripts",
+    "meeting-format": "text",
+    "speakers": "Priya, Sam",
 }
 
 
@@ -132,6 +139,13 @@ class TestDispatch:
         assert response["ok"] is False
         assert "control handler" in response["error"]
 
+    def test_a_wait_timeout_is_bounded(self):
+        """A days-long wait must not pin a control thread for days."""
+        engine = _FakeEngine()
+        _router(engine).dispatch(json.dumps({"cmd": "wait", "value": "1000000"}))
+        _, request = engine.calls[0]
+        assert float(request["value"]) <= control.MAX_WAIT_SECONDS
+
 
 # ---------------------------------------------------------------------------
 # Transport
@@ -230,6 +244,42 @@ class TestSocketTransport:
         server = _server(sock_path)
         assert server.transport == control.UNIX
 
+    def test_connections_past_the_cap_are_closed(self, sock_path, monkeypatch):
+        """A local process must not be able to pin unbounded engine threads."""
+        gate = threading.Event()
+        entered = threading.Event()
+
+        class BlockingEngine(_FakeEngine):
+            def handle_control(self, cmd, request):
+                entered.set()
+                gate.wait(5.0)
+                return {"ok": True, "cmd": cmd}
+
+        # One slot: the first connection takes it and blocks in the handler, so
+        # the second must be refused instead of spawning another thread.
+        monkeypatch.setattr(control, "_CONNECTION_SLOTS", threading.Semaphore(1))
+        server = _server(sock_path, BlockingEngine())
+        assert server.start() is True
+        first = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        first.settimeout(5.0)
+        first.connect(server.socket_path)
+        first.sendall(b"status\n")
+        try:
+            assert entered.wait(5.0), "the first client never reached the handler"
+            second = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            second.settimeout(5.0)
+            second.connect(server.socket_path)
+            assert second.recv(4096) == b""  # refused and closed
+            second.close()
+        finally:
+            gate.set()
+            try:
+                first.recv(4096)  # let the handler finish before we restore
+            except OSError:
+                pass
+            first.close()
+            server.stop()
+
 
 class TestSocketPathLength:
     """``sun_path`` is 104 bytes on macOS and 108 on Linux, NUL included.
@@ -277,6 +327,12 @@ class TestTransportSelection:
 
     def test_tcp_is_used_when_af_unix_is_absent(self, monkeypatch):
         monkeypatch.setattr(control, "unix_sockets_supported", lambda: False)
+        assert control.default_transport() == control.TCP
+
+    def test_a_socket_path_does_not_disable_the_api_without_af_unix(self, monkeypatch):
+        """VT_CONTROL_SOCKET must not force AF_UNIX where the OS lacks it."""
+        monkeypatch.setattr(control, "unix_sockets_supported", lambda: False)
+        monkeypatch.setenv(control.CONTROL_SOCKET_ENV, "/tmp/whatever.sock")
         assert control.default_transport() == control.TCP
 
     def test_the_transport_can_be_forced(self, monkeypatch):
@@ -370,6 +426,12 @@ class TestTcpTransport:
         assert reply["ok"] is False
         assert reply["error"] == "unauthorized"
 
+    def test_a_non_ascii_token_is_rejected_not_raised(self, server):
+        """``compare_digest`` raises on non-ASCII str; it must answer instead."""
+        reply = server.dispatch(json.dumps({"cmd": "status", "token": "t\u00f6k\u00e9n"}))
+        assert reply["ok"] is False
+        assert reply["error"] == "unauthorized"
+
     def test_a_request_with_the_token_is_served(self, server):
         reply = server.dispatch(json.dumps({"cmd": "status", "token": server.token}))
         assert reply["ok"] is True
@@ -387,6 +449,13 @@ class TestTcpTransport:
 
     def test_a_corrupt_endpoint_file_is_a_clean_error(self, endpoint_file):
         endpoint_file.write_text("{not json")
+        response = control.send_command("status")
+        assert response["ok"] is False
+        assert "no running Voice Transcriber" in response["error"]
+
+        # A structurally-valid file with a non-integer port must not raise
+        # ``ValueError`` out of ``send_command``.
+        endpoint_file.write_text('{"port": "abc", "token": "x"}')
         response = control.send_command("status")
         assert response["ok"] is False
         assert "no running Voice Transcriber" in response["error"]
@@ -529,6 +598,30 @@ class TestEngineVerbs:
         assert response["ok"] is True
         assert key in response
 
+    @pytest.mark.parametrize(
+        "verb,value",
+        [
+            ("diarization", "on"),
+            ("diarization-speakers", "3"),
+            ("diarization-model", "diarization"),
+            ("meeting-format", "json"),
+            ("meeting-output", "meetings-out"),
+        ],
+    )
+    def test_new_setting_verbs_save_the_config_exactly_once(
+        self, engine, verb, value, monkeypatch
+    ):
+        """The setters own the save; the control layer must not save again."""
+        import t2
+
+        saves = []
+        monkeypatch.setattr(t2, "save_audio_config", lambda: saves.append(1))
+
+        response = engine.handle_control(verb, {"value": value})
+
+        assert response["ok"] is True
+        assert len(saves) == 1, f"{verb} saved the config {len(saves)} times"
+
     def test_mute_toggles_without_a_value(self, engine):
         import t2
 
@@ -583,6 +676,26 @@ class TestEngineVerbs:
         with pytest.raises(ValueError, match="no input device matching"):
             engine.handle_control("set-mic", {"value": "zzz-not-a-real-device-zzz"})
 
+    def test_formatter_download_is_explicit_consent(self, engine, monkeypatch):
+        """The first-use path will not fetch under a TUI; this verb will.
+
+        It must reach the backend with ``consented=True`` - otherwise it would hit
+        the same refusal it exists to bypass.
+        """
+        from voice_transcriber.formatters import llama_server
+        t2 = pytest.importorskip("t2")
+
+        calls = []
+        monkeypatch.setattr(
+            llama_server, "request_model",
+            lambda model=None, **kw: calls.append((model, kw)) or True)
+
+        reply = engine.handle_control("formatter-download", {})
+
+        assert reply["ok"] is True
+        assert reply["formatter_download"] is True
+        assert calls == [(t2.get_formatter_model(), {"consented": True})]
+
     def test_every_documented_verb_is_recognised(self, engine):
         """Guard against docs drift: no documented verb may be unknown.
 
@@ -592,7 +705,7 @@ class TestEngineVerbs:
         blocking = {
             "start", "stop", "toggle", "settings", "mic", "theme",
             "reset-defaults", "reset-terminal", "quit", "set-mic", "mics",
-            "rescan-mics", "meeting-start", "meeting-stop",
+            "rescan-mics", "meeting-start", "meeting-stop", "formatter-download",
         }
         for verb in control.VERBS:
             if verb in blocking:
@@ -684,6 +797,28 @@ class TestVerbCatalogue:
             "meeting", "meeting_setting", "meeting_state", "meeting_elapsed_s",
             "meeting_progress", "meeting_spill_minutes",
         ):
+            assert key in control.VERBS["status"]["returns"]
+
+    def test_diarization_verbs_are_in_the_catalogue(self):
+        """Speaker labels are scriptable, and the status advertises the keys."""
+        assert control.VERBS["diarization"]["choices"] == ["off", "on"]
+        assert control.VERBS["diarization"]["toggles"] is True
+        assert control.VERBS["diarization-speakers"]["choices"] == [
+            "auto", "2", "3", "4", "5", "6", "7", "8",
+        ]
+        assert control.VERBS["diarization-model"]["required"] is True
+        for key in (
+            "diarization", "diarization_setting", "diarization_speakers",
+            "diarization_model",
+        ):
+            assert key in control.VERBS["status"]["returns"]
+
+    def test_meeting_artifact_and_speaker_verbs_are_in_the_catalogue(self):
+        """D5: the output location/form and the speakers map are scriptable."""
+        assert control.VERBS["meeting-output"]["value"] == "folder"
+        assert control.VERBS["meeting-format"]["choices"] == ["text", "json", "markdown"]
+        assert control.VERBS["speakers"]["value"] == "names"
+        for key in ("meeting_output_dir", "meeting_output_format", "speakers"):
             assert key in control.VERBS["status"]["returns"]
 
     def test_structure_verb_reports_both_modes(self):

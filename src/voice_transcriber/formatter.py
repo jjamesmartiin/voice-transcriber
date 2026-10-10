@@ -23,9 +23,14 @@ problems there the first time, and the same fix applies here.
 from __future__ import annotations
 
 import importlib
+import logging
 import re
 import time
 from typing import Any
+
+from voice_transcriber import backend_registry
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Backend registry
@@ -86,24 +91,19 @@ REQUIRED_FUNCTIONS = ("format_text", "available", "warm")
 _loaded: dict[str, Any] = {}
 
 
-class UnknownBackendError(ValueError):
-    """A config named a formatter backend that is not in :data:`BACKENDS`."""
+#: Shared with the ASR and diarization registries; the message names formatter.
+UnknownBackendError = backend_registry.UnknownBackendError
 
 
 def available_backends() -> list[str]:
     """Every backend name a config may use, sorted."""
-    return sorted(BACKENDS)
+    return backend_registry.available_backends(BACKENDS)
 
 
 def resolve_backend_name(name: str | None = None) -> str:
     """Validate ``name`` against the registry without importing anything."""
-    resolved = str(name or DEFAULT_BACKEND).strip().lower()
-    if resolved not in BACKENDS:
-        raise UnknownBackendError(
-            f"Unknown formatter backend {resolved!r}. "
-            f"Available: {', '.join(available_backends())}"
-        )
-    return resolved
+    return backend_registry.resolve_backend_name(
+        name, BACKENDS, DEFAULT_BACKEND, "formatter")
 
 
 def load_backend(name: str | None = None) -> Any | None:
@@ -114,27 +114,14 @@ def load_backend(name: str | None = None) -> Any | None:
     contract all mean the same thing to a caller: there is nothing to format
     with, so the transcript passes through untouched.
     """
-    try:
-        resolved = resolve_backend_name(name)
-    except UnknownBackendError:
-        return None
-    if resolved in _loaded:
-        return _loaded[resolved]
-    try:
-        module = importlib.import_module(BACKENDS[resolved])
-    except Exception:
-        module = None
-    if module is not None:
-        missing = [fn for fn in REQUIRED_FUNCTIONS if not hasattr(module, fn)]
-        if missing:
-            module = None
-    _loaded[resolved] = module
-    return module
+    return backend_registry.load_backend(
+        name, BACKENDS, DEFAULT_BACKEND, REQUIRED_FUNCTIONS, _loaded,
+        "formatter", strict=False, import_module=importlib.import_module)
 
 
 def reset_backend_cache() -> None:
     """Forget loaded backends. For tests, and for a config change at runtime."""
-    _loaded.clear()
+    backend_registry.reset_backend_cache(_loaded)
 
 
 def warm(backend: str | None = None, model: str | None = None) -> bool:
@@ -176,10 +163,6 @@ SYSTEM_PROMPT = (
     "with a control line specifying the styling, structure, and context settings; "
     "clean the transcript to match those settings and output only the cleaned text."
 )
-
-#: The rendered assistant prefix S1-mini was trained against. Only needed if a
-#: prompt is ever assembled by hand instead of through the chat template.
-ASSISTANT_PREFIX = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
 STYLES = ("casual", "semi-casual", "semi-formal", "formal")
 STRUCTURES = ("prose", "lists")
@@ -474,6 +457,25 @@ def validate(original: str, candidate: str, *, structure: str | None = None) -> 
 # The only entry point
 # ---------------------------------------------------------------------------
 
+def _request_backend_model(module: Any, model: str | None) -> bool:
+    """Ask a backend to acquire its weights in the background, if it can.
+
+    Optional duck-typed hook (``request_model``): a backend with nothing to fetch
+    (``noop``) or one that already has its weights simply does not define it.
+    Called only on the unavailable path, immediately before falling back to the
+    unformatted text. Never raises: a missing or failed download must not change
+    the transcript the user receives, and it must never block this thread - the
+    backend starts a daemon thread and returns immediately.
+    """
+    request = getattr(module, "request_model", None)
+    if not callable(request):
+        return False
+    try:
+        return bool(request(model=model))
+    except Exception:
+        return False
+
+
 def format_text(
     text: str,
     *,
@@ -500,6 +502,10 @@ def format_text(
         if module is None:
             return original
         if not module.available(model=model):
+            # The model may simply not be downloaded yet. Ask the backend to fetch
+            # it in the background (it states the size before anything downloads),
+            # then return the untouched text for *this* utterance.
+            _request_backend_model(module, model)
             return original
 
         started = time.monotonic()
@@ -519,7 +525,16 @@ def format_text(
         if elapsed > timeout_s:
             return original
 
-        if validate(original, candidate, structure=structure) is not None:
+        reason = validate(original, candidate, structure=structure)
+        if reason is not None:
+            # A rejected rewrite returns exactly what `formatter: off` returns, so
+            # without this line a discarded answer is invisible - and that
+            # ambiguity already hid two guardrail false-positives that threw away
+            # correct model output and looked like "the model did nothing". Local
+            # log only (file handler, 0600; see logging_setup).
+            logger.warning(
+                "formatter rewrite rejected (%s): %s",
+                model or DEFAULT_MODEL, reason)
             return original
         # Applied before validation, not after, so the text that was checked is the
         # text that is returned. Casing does not affect canonical tokens, so this

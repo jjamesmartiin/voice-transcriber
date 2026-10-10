@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
@@ -58,7 +58,7 @@ impl MicPickerState {
                     scored.push((i, 800 - q.len() as i32));
                 } else if let Some(pos) = name.find(&q).or_else(|| disp.find(&q)) {
                     scored.push((i, 600 - pos as i32 * 10));
-                } else if let Some(dist) = fuzzy_subsequence(&q, &name).or_else(|| fuzzy_subsequence(&q, &disp)) {
+                } else if let Some(dist) = textfit::fuzzy_subsequence(&q, &name).or_else(|| textfit::fuzzy_subsequence(&q, &disp)) {
                     scored.push((i, 200 - dist as i32));
                 }
             }
@@ -71,21 +71,11 @@ impl MicPickerState {
     }
 
     pub fn move_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-        } else if !self.filtered_indices.is_empty() {
-            self.selected_index = self.filtered_indices.len() - 1;
-        }
+        crate::modal::move_cursor_up(&mut self.selected_index, self.filtered_indices.len());
     }
 
     pub fn move_down(&mut self) {
-        if !self.filtered_indices.is_empty() {
-            if self.selected_index + 1 < self.filtered_indices.len() {
-                self.selected_index += 1;
-            } else {
-                self.selected_index = 0;
-            }
-        }
+        crate::modal::move_cursor_down(&mut self.selected_index, self.filtered_indices.len());
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, devices: &[AudioDeviceInfo]) -> MicPickerAction {
@@ -163,24 +153,6 @@ impl MicPickerState {
             }
             _ => MicPickerAction::Continue,
         }
-    }
-}
-
-fn fuzzy_subsequence(pattern: &str, target: &str) -> Option<usize> {
-    let mut p_chars = pattern.chars().peekable();
-    let mut dist = 0;
-    for (i, c) in target.chars().enumerate() {
-        if let Some(&p) = p_chars.peek() {
-            if c == p {
-                p_chars.next();
-                dist += i;
-            }
-        }
-    }
-    if p_chars.peek().is_none() {
-        Some(dist)
-    } else {
-        None
     }
 }
 
@@ -379,14 +351,7 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
 
     // Centered popup modal
     let (popup_w, popup_h) = popup_size(area.width, area.height);
-    let x = (area.width.saturating_sub(popup_w)) / 2;
-    let y = (area.height.saturating_sub(popup_h)) / 2;
-    let popup_area = Rect {
-        x,
-        y,
-        width: popup_w,
-        height: popup_h,
-    };
+    let popup_area = crate::modal::centered_rect(area, popup_w, popup_h);
 
     frame.render_widget(Clear, area);
 
@@ -531,21 +496,11 @@ pub fn run_mic_picker(
     rx: Option<&mpsc::Receiver<IpcEvent>>,
     app: &mut App,
 ) -> io::Result<()> {
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
-
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.hide_cursor()?;
-    terminal.clear()?;
+    let mut terminal = crate::modal::enter_modal_screen()?;
 
     // Request fresh device list from Python backend. The monitored set is
     // derived from what is actually on screen, so the loop below commands it.
-    if let Some(w) = writer {
-        if ipc::send_cmd(w, "get_devices").is_err() {
-            app.should_quit = true;
-        }
-    }
+    ipc::fire(writer, "get_devices", app);
 
     let mut state = MicPickerState::new(app.audio_devices.len());
     // Position cursor on currently active device if possible
@@ -610,13 +565,12 @@ pub fn run_mic_picker(
         // when scrolling or filtering actually changes the visible set.
         if visible != state.monitored {
             state.monitored = visible.clone();
-            if let Some(w) = writer {
-                if ipc::send_cmd_json(w, "start_mic_monitor", serde_json::json!({ "indices": visible }))
-                    .is_err()
-                {
-                    app.should_quit = true;
-                }
-            }
+            ipc::fire_json(
+                writer,
+                "start_mic_monitor",
+                serde_json::json!({ "indices": visible }),
+                app,
+            );
         }
 
         terminal.draw(|f| render_mic_picker(f, &state, app))?;
@@ -632,20 +586,15 @@ pub fn run_mic_picker(
                                 let dev_name = dev.name.clone();
                                 let dev_index = dev.index;
                                 app.active_device = dev_name.clone();
-                                if let Some(w) = writer {
-                                    if ipc::send_cmd_json(
-                                        w,
-                                        "set_device",
-                                        serde_json::json!({
-                                            "device": dev_name,
-                                            "index": dev_index,
-                                        }),
-                                    )
-                                    .is_err()
-                                    {
-                                        app.should_quit = true;
-                                    }
-                                }
+                                ipc::fire_json(
+                                    writer,
+                                    "set_device",
+                                    serde_json::json!({
+                                        "device": dev_name,
+                                        "index": dev_index,
+                                    }),
+                                    app,
+                                );
                             }
                             break;
                         }
@@ -656,13 +605,9 @@ pub fn run_mic_picker(
     }
 
     // Stop live mic monitoring stream on exit
-    if let Some(w) = writer {
-        if ipc::send_cmd(w, "stop_mic_monitor").is_err() {
-            app.should_quit = true;
-        }
-    }
+    ipc::fire(writer, "stop_mic_monitor", app);
 
-    let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    crate::modal::leave_modal_screen();
     Ok(())
 }
 

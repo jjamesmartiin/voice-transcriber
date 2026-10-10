@@ -28,31 +28,18 @@ from rich.live import Live
 from rich.text import Text
 
 import console_text
+import accent
 
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-COLOR_PALETTES = ["auto", "green", "cyan", "blue", "magenta", "yellow", "red", "white"]
+COLOR_PALETTES = accent.COLOR_PALETTES
 
 def detect_system_theme_color():
-    """Detect system terminal accent color"""
-    env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
-    if env_theme in COLOR_PALETTES and env_theme != "auto":
-        return env_theme
+    """Resolve the ``auto`` theme: the desktop accent, else the terminal.
 
-    accent = os.environ.get("ACCENT_COLOR", "").strip().lower()
-    if accent in COLOR_PALETTES:
-        return accent
-
-    term_prog = os.environ.get("TERM_PROGRAM", "").lower()
-    if "vscode" in term_prog:
-        return "cyan"
-    elif "kitty" in term_prog:
-        return "magenta"
-    elif "apple_terminal" in term_prog:
-        return "blue"
-    elif "alacritty" in term_prog:
-        return "yellow"
-
-    return "green"
+    The chain lives in :mod:`accent` so that this front end, the ratatui binary
+    and the settings modals cannot disagree about what ``auto`` means.
+    """
+    return accent.resolve("auto")
 
 
 def _format_duration_helper(seconds):
@@ -140,11 +127,15 @@ class VoiceTranscriberTUI:
         self.cleanup_mode = "full"
         self.meeting_mode = "off"
         self.meeting_spill_minutes = 10
+        self.diarization = "off"
+        self.diarization_speakers = "auto"
+        self.diarization_model = "diarization"
+        self.meeting_output_dir = "meetings"
+        self.meeting_output_format = "text"
         self.formatter = "off"
         self.formatter_model = "s1-mini"
         self.formatter_style = "semi-formal"
         self.formatter_context = "general"
-        self.copy_to_clipboard = True
         self.sound_theme = "proximity"
         self.last_transcription = ""
 
@@ -169,6 +160,12 @@ class VoiceTranscriberTUI:
         self.on_toggle_meeting = None
         self.on_cycle_meeting = None
         self.on_cycle_meeting_spill = None
+        self.on_cycle_diarization = None
+        self.on_cycle_diarization_speakers = None
+        self.on_cycle_diarization_model = None
+        self.on_cycle_meeting_output_format = None
+        self.on_set_meeting_output_dir = None
+        self.on_open_speaker_editor = None
         self.on_cycle_formatter = None
         self.on_cycle_formatter_model = None
         self.on_cycle_formatter_style = None
@@ -246,7 +243,7 @@ class VoiceTranscriberTUI:
         if self.live and self.running:
             self.live.update(self._render_status_bar())
 
-    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, meeting_mode=None, meeting_spill_minutes=None, formatter=None, formatter_model=None, formatter_style=None, formatter_context=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
+    def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None, sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None, meeting_mode=None, meeting_spill_minutes=None, diarization=None, diarization_speakers=None, diarization_model=None, meeting_output_dir=None, meeting_output_format=None, speakers=None, formatter=None, formatter_model=None, formatter_style=None, formatter_context=None, trailing_space=None, auto_punctuate=None, number_digits=None, number_mode=None, serial_collapse=None, spell_command=None, middle_click_enabled=None, typing_wpm=None, hotkeys=None):
         with self.lock:
             if backend is not None:
                 self.model_backend = backend
@@ -272,6 +269,22 @@ class VoiceTranscriberTUI:
                 self.meeting_mode = meeting_mode
             if meeting_spill_minutes is not None:
                 self.meeting_spill_minutes = int(meeting_spill_minutes)
+            if diarization is not None:
+                self.diarization = diarization
+            if diarization_speakers is not None:
+                self.diarization_speakers = diarization_speakers
+            if diarization_model is not None:
+                self.diarization_model = diarization_model
+            if meeting_output_dir is not None:
+                self.meeting_output_dir = meeting_output_dir
+            if meeting_output_format is not None:
+                self.meeting_output_format = meeting_output_format
+            if speakers is not None:
+                # The live speakers map is transcript metadata, pushed so the
+                # meeting screen can seed its editor. This TUI renders no list
+                # yet, but main.py calls whichever frontend it got with the same
+                # keywords, so it must accept them.
+                self.speaker_names = [str(name) for name in speakers]
             if formatter is not None:
                 self.formatter = formatter
             if formatter_model is not None:
@@ -684,6 +697,14 @@ class VoiceTranscriberTUI:
                     ch = sys.stdin.read(1)
                     if not ch:
                         break
+                    if ch == '\x1b':
+                        # An arrow or function key arrives as Esc followed by more
+                        # bytes; a bare Esc is the documented quit key. Only
+                        # forward it when nothing follows, or every arrow press
+                        # would quit the app.
+                        more, _, _ = select.select([fd], [], [], 0.02)
+                        if more:
+                            continue
                     self._handle_keypress(ch)
             except Exception:
                 break
@@ -691,11 +712,25 @@ class VoiceTranscriberTUI:
     def _handle_keypress(self, ch):
         """Route terminal keypresses to callbacks.
 
-        The settings modal is the single configuration entry point: ``s``,
-        ``S`` and ``,`` open it, and the microphone, theme and preset pickers
-        are reached from inside it. ``Space`` / ``Enter`` toggles recording
-        (tap to start, tap again to stop — hands-free/hands-latched).
+        The *meeting screen* has its own key map: Space/Enter start or stop the
+        meeting capture, ``s`` opens the speaker-name editor, and Esc quits. That
+        is the one place terminal keys differ, because the speaker map is
+        transcript metadata edited live during a capture rather than app config.
+        Everywhere else the global contract is unchanged: ``s``/``S``/``,`` open
+        the settings modal, ``Space``/``Enter`` toggle dictation, ``r`` resets the
+        terminal and ``q``/Esc/Ctrl+C quit.
         """
+        if getattr(self, "state", None) == "MEETING":
+            if ch in [' ', '\r', '\n']:
+                if getattr(self, "on_toggle_meeting", None):
+                    self.on_toggle_meeting()
+            elif ch in ('s', 'S'):
+                if getattr(self, "on_open_speaker_editor", None):
+                    self.on_open_speaker_editor()
+            elif ch == '\x1b' or ch.lower() == 'q' or ch == '\x03':
+                if getattr(self, "on_quit", None):
+                    self.on_quit()
+            return
         if ch in [' ', '\r', '\n']:
             if self.on_toggle_record:
                 self.on_toggle_record()
@@ -705,6 +740,6 @@ class VoiceTranscriberTUI:
         elif ch.lower() == 'r':
             if self.on_reset_terminal:
                 self.on_reset_terminal()
-        elif ch.lower() == 'q' or ch == '\x03':  # 'q' or Ctrl+C
+        elif ch.lower() == 'q' or ch in ('\x03', '\x1b'):  # 'q', Ctrl+C or Esc
             if self.on_quit:
                 self.on_quit()

@@ -32,21 +32,26 @@
 
 ## 📊 Benchmark & Accuracy
 
-Voice Transcriber is evaluated with a reproducible test suite in `eval/` across 154 speech and silence clips, scoring the real streaming pipeline with dynamic INT8 quantization on CPU:
+Voice Transcriber is evaluated with a reproducible test suite in `eval/` across 154 speech and silence clips, scoring the real streaming pipeline with dynamic INT8 quantization on CPU. The recorded configuration is written into `eval/results.json` itself — backend, int8, number digits, block size, git revision, and a single copy-pasteable `reproduce` command — so these numbers can be re-derived rather than taken on trust:
 
 | Dataset Slice | Sample Count (N) | Word Error Rate (WER) | Character Error Rate (CER) | Exact Match Rate | Silence Hallucination |
 | :--- | ---: | ---: | ---: | ---: | ---: |
-| **Clean read speech** | 44 | **2.81%** | 1.43% | 70.5% | — |
-| **Noisy speech (5–20 dB SNR)** | 24 | **3.01%** | 1.24% | 70.8% | — |
-| **Long-form speech (15–40s)** | 12 | **1.78%** | 0.87% | 50.0% | — |
-| **Technical vocabulary** | 28 | **8.44%** | 5.46% | 50.0% | — |
-| **Technical + background noise** | 12 | 8.12% | 4.52% | 50.0% | — |
-| **Accented meeting speech** | 22 | 12.32% | 7.66% | 13.6% | — |
-| **Overall Speech Pipeline** | **142** | **5.10%** | **2.97%** | **54.2%** | — |
+| **Clean read speech** | 44 | **2.07%** | 0.72% | 81.8% | — |
+| **Noisy speech (5–20 dB SNR)** | 24 | **2.73%** | 1.58% | 75.0% | — |
+| **Long-form speech (15–40s)** | 12 | **2.19%** | 0.75% | 33.3% | — |
+| **Technical vocabulary** | 28 | **4.52%** | 2.07% | 82.1% | — |
+| **Technical + background noise** | 12 | 0.64% | 0.25% | 91.7% | — |
+| **Accented meeting speech** | 22 | 9.42% | 3.65% | 36.4% | — |
+| **Overall Speech Pipeline** | **142** | **3.57%** | **1.43%** | **70.4%** | — |
 | **Silence / Quiet Room Gate** | **12** | — | — | — | **0 / 12 (0.0%)** |
 
 > **Latency Breakdown**: Streaming VAD: `0 ms` · Post-Processor: `~16 µs` · Cohere CPU Inference: `~0.15x RTF` (~0.7s on 5s audio) · End-to-End Delivery: `< 1.0 s`.  
 > *Read the engineering deep dive in the [Technical Blog Post](docs/blog_post.md).*
+
+The same 154-clip harness was used to evaluate **Parakeet TDT 0.6B v3** as an
+alternative ASR backend. It is faster and much lighter, but loses every accuracy
+slice, so **Cohere remains the default**; set `model_backend: parakeet` to opt
+in. The measurement and verdict are in [`docs/asr-bakeoff.md`](docs/asr-bakeoff.md).
 
 ---
 
@@ -122,6 +127,8 @@ for the platform you are targeting.
 | **Disk (standalone Windows EXE)** | ~6 GB — the bundle carries its own Python, PyTorch, and the full 3.9 GB model. |
 | **Network** | ~2.8 GB download on **first launch only**, for the compressed model weights. Fully offline afterwards. Set `VT_AUTO_DOWNLOAD_MODEL=0` to skip the download and supply weights yourself. |
 | **Model weights** | Auto-installed on first run, or provided via `VT_MODEL_DIR` / a local `models/cohere/`. The download is split-xz and needs ~2.8 GB down / ~4 GB on disk. |
+| **Optional on-device formatter** | Off by default. Needs a `llama-server` binary (from `pkgs.llama-cpp` in the dev shell, or llama.cpp's prebuilt Windows build) and ~462 MiB for the S1-mini Q4 GGUF. The first-use download prompt is implemented, but the bundle is not published yet — until it is, supply the weights locally. |
+| **Optional meeting mode (diarization)** | Off by default. Needs ~40 MB for the two sherpa-onnx graphs (pyannote segmentation + 3D-Speaker). Registered and packaged, but there is no in-app download path yet — place them under the model directory. |
 | **Audio** | A working microphone exposed as the system default input device. |
 | **Python** | **3.10+** — only needed to run from source or to build. The Nix package and the Windows EXE bundle their own interpreter. |
 
@@ -408,6 +415,8 @@ Under Nix the same verbs pass through the wrapper: `nix run . -- status`.
 | **Recording** | `start`, `stop`, `toggle`, `wait`, `status` |
 | **Devices** | `mics`, `set-mic`, `rescan-mics` |
 | **Settings** | `output`, `numbers`, `punctuation`, `theme`, `trailing-space`, `auto-punctuate`, `serial`, `spell`, `middle-click`, `mute` |
+| **Formatting** | `structure`, `cleanup`, `formatter`, `formatter-style`, `formatter-context`, `formatter-model` |
+| **Meeting** | `meeting`, `meeting-start`, `meeting-stop`, `meeting-spill`, `meeting-format`, `meeting-output`, `speakers`, `diarization`, `diarization-speakers`, `diarization-model` |
 | **Modals** | `settings`, `mic` (interactive — take over the terminal) |
 | **Lifecycle** | `reset-defaults`, `reset-terminal`, `ping`, `doctor`, `help`, `quit` |
 
@@ -581,6 +590,25 @@ download). Acquisition order:
 Once the weights are on disk the app runs **fully offline** with no network
 access.
 
+Two optional models are registered bundles:
+
+* **On-device formatter** - `"S1-mini" by "Superwhisper"`, a ~462 MiB Q4 GGUF
+  (`superwhisper/s1-mini-GGUF`) run by a local `llama-server`. Enabling the
+  formatter states that size and asks before anything downloads. Licensed
+  Apache-2.0 **plus an additional naming term**; see
+  [`config/licenses/S1-mini-Apache-2.0.txt`](config/licenses/S1-mini-Apache-2.0.txt).
+* **Meeting-mode diarization** - the ~40 MB pyannote segmentation + 3D-Speaker
+  graphs (`k2-fsa/sherpa-onnx`, MIT + Apache-2.0); see
+  [`config/licenses/`](config/licenses/).
+
+The bundles are produced by the release tooling, but **none has been published
+yet**: the formatter's first-use download prompt cannot fetch an unpublished
+asset, and diarization has no in-app download path at all. Until they are
+published, place the weights under the model directory (`VT_MODEL_DIR`, or the
+per-user install dir). The app degrades to unformatted text / a single speaker
+rather than failing when they are absent. Every install writes a `SOURCE.json`
+next to the weights recording the upstream repo, revision and sha256.
+
 ### Language Support & Disclaimer
 
 - **Primary / Officially Supported**: **English (`en`)**
@@ -591,6 +619,50 @@ access.
 > no weights. First launch auto-installs them from the GitHub release asset
 > (~2.8 GB down, ~4 GB on disk), which is the one slow step (a few minutes on a
 > fast connection, longer on a slow one) before dictation starts.
+
+---
+
+## Meeting Mode (diarization)
+
+Meeting mode is a long, **non-injecting** capture: it records a meeting,
+transcribes it in the background when you stop, and writes a transcript document
+instead of typing into the focused window. It is **off by default**; with
+`meeting: off` the dictation path is byte-identical to a build without the
+feature.
+
+| Setting | Values | Default |
+| :--- | :--- | :--- |
+| `meeting` | `off`, `on` | `off` |
+| `meeting_spill_minutes` | 1–240 | `10` |
+| `meeting_output_dir` | path | `meetings` (repo-local, gitignored) |
+| `meeting_output_format` | `text`, `json`, `markdown` | `text` |
+| `diarization` | `off`, `on` | `off` |
+| `diarization_speakers` | `auto`, `2`–`8` | `auto` |
+| `diarization_model` | registry name | `diarization` |
+
+Start and stop a capture with `python src/main.py meeting-start` / `meeting-stop`;
+`meeting-format`, `meeting-output` and `meeting-spill` set the rest. With
+`diarization: on`, the pass labels each turn with its speaker (`Speaker 1`,
+`Speaker 2`, …); `off` never loads the model and produces a single-speaker
+transcript. `diarization_speakers` is only a hint. All three diarization keys are
+on the settings modal in both Python frontends and in the config file.
+
+**Speaker names** are transcript metadata, not configuration: they are an ordered
+list you edit live on the meeting screen, or set without a TUI with
+`python src/main.py speakers "Alex, Priya, Sam"` (blank slots and speakers past
+the end of the list fall back to the readable `Speaker N` label). The map is read
+when the document is written, so a rename applies to the finished transcript;
+`status` reports it as `speakers`.
+
+Meeting transcripts land in a repo-local, gitignored `<repo>/meetings/` by
+default; an absolute `meeting_output_dir` is used as-is, and
+`VT_MEETING_OUTPUT_DIR` always wins. See
+[`docs/meeting_mode.md`](docs/meeting_mode.md).
+
+> **Diarization needs the two sherpa-onnx graphs**, which are a registered
+> bundle but have no in-app download path yet — place them under the model
+> directory (see [Model Weights](#model-weights--offline-operation)). Without
+> them, `diarization: on` degrades to one speaker rather than failing.
 
 ---
 
@@ -651,7 +723,6 @@ Supported options:
 - `is_muted`: `true` or `false`.
 - `output_mode`: `clipboard`, `type` (slow/safe), or `type_fast` (optimized).
 - `auto_type`: `true` (direct keystroke injection) or `false` (clipboard only).
-- `copy_to_clipboard`: `true` or `false`.
 - `auto_type_trailing_space`: append a space after auto-typed text.
 - `auto_type_auto_punctuate`: enforce terminal punctuation on auto-typed text.
 - `number_digits`: `auto` (default: only consecutive spoken digit chains such as phone/serial numbers become digits, while ordinals and small isolated counts read as words — `"the 5th item"` → `"the fifth item"`, `"I have 2 dogs"` → `"I have two dogs"`), `digits` (always convert), or `words` (never convert). Legacy `true`/`false` are accepted as aliases for `digits`/`words`. Spoken dates are the one exception in `auto`/`digits`: the day is always written as an ordinal numeral (`"October twentieth"` → `"October 20th"`, `"the twentieth of October"` → `"the 20th of October"`, `"October twentieth twenty twenty five"` → `"October 20th, 2025"`); `words` mode leaves them spelled out.
@@ -663,7 +734,7 @@ Supported options:
 - `cleanup_mode`: how much the post-processing pass may change the words — `off` (keeps every word, deletes nothing), `artifacts` (removes noise: silence hallucinations, filler, stutters, trailing mutterings — but leaves your corrections verbatim), or `full` (default: also resolves self-corrections such as `"Tuesday no sorry Wednesday"` → `"Wednesday"`). Number/date formatting, the dictionary, casing and the punctuation preset are separate settings and are not gated by it. See [`docs/cleanup_modes.md`](docs/cleanup_modes.md).
 - `enable_slm`: `true` to enable the optional local vLLM grammar-polish pass (default `false`).
 - `sound_theme`: audio cue pack — `proximity` (default), `pop`, `chime`, or `silent`.
-- `ui_theme`: `auto` (follow the terminal) or one of `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white`.
+- `ui_theme`: `auto` (default: follow your desktop's accent color — GNOME's `accent-color` today — falling back to the terminal heuristic and then green) or one of `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white`. `VT_UI_THEME` overrides it per session.
 - `typing_wpm`: words-per-minute typing baseline used for the `⚡ saved` estimate (default `40`; preset cycling lives in the `wpm` control verb).
 - `dictionary`: key-value map of custom phrase replacements (see `config/dictionary.yaml`).
 - `dictionary_file`: path to an external YAML/JSON dictionary; takes precedence over the inline `dictionary` map.
@@ -672,6 +743,14 @@ Supported options:
 key, including the ones not listed above (`primary_device_name`,
 `middle_click_enabled`, …). Any option can be overridden per-session with its
 `VT_*` environment variable, e.g. `VT_OUTPUT_MODE=clipboard`, `VT_UI_THEME=cyan`.
+
+> **Your settings are saved atomically.** Every settings change is written to a
+> temp file and moved into place, so a crash, a `Ctrl+C` or a full disk mid-save
+> cannot truncate `config.yaml`. If a config file *does* become unreadable (a
+> YAML typo from a hand-edit, a disk error), the app starts from the shipped
+> defaults for that run, preserves the file as `config.yaml.corrupt-<timestamp>`
+> beside it, logs an error naming the file, and only then writes a new one — an
+> unreadable config is never silently replaced with defaults.
 
 > **Not everything is config.** The all-time time-saved totals live in
 > `stats.json` in the platform data directory (`$XDG_DATA_HOME/vt/`,
@@ -804,4 +883,7 @@ The LLM can directly emit the clean YAML entry:
 ## License
 
 MIT License. See [LICENSE](LICENSE). The bundled Cohere Transcribe model is
-distributed under Apache-2.0 (see `config/licenses/`).
+distributed under Apache-2.0. The optional on-device formatter model,
+"S1-mini" by "Superwhisper", is Apache-2.0 plus an additional naming term, and
+the diarization graphs are MIT (segmentation) and Apache-2.0 (embedding); full
+texts and provenance are in [`config/licenses/`](config/licenses/).

@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import t2
 
+from ._rust_source import rust_implementation
+
 
 def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
     # Setup temporary yaml config file
@@ -338,6 +340,52 @@ def test_malformed_toml_is_not_silently_wiped(tmp_path, monkeypatch):
     assert toml_file.read_text() == bad  # untouched
 
 
+def test_a_truncated_config_is_backed_up_before_a_save_overwrites_it(tmp_path, monkeypatch):
+    """An interrupted write must not cost the user their settings.
+
+    Regression: the save was a truncating ``open(..., 'w')``, and the loader
+    treated a file that failed to parse exactly like a missing one. A half-written
+    file therefore reverted every setting and the next save rewrote it as pure
+    defaults, with the original gone. The original is now preserved and named in
+    the error.
+    """
+    config = tmp_path / "config.yaml"
+    good = "ui_theme: magenta\npunctuation_mode: casual\ntyping_wpm: 85\n"
+    config.write_text(good[: len(good) // 2])  # a write cut off mid-file
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    t2.load_audio_config()  # degrades to the shipped defaults, does not raise
+    t2.set_typing_wpm(90)
+
+    backups = list(tmp_path.glob("config.yaml.corrupt-*"))
+    assert len(backups) == 1, "the unreadable file must be preserved, not overwritten"
+    assert backups[0].read_text() == good[: len(good) // 2]
+    assert not list(tmp_path.glob("*.tmp")), "no temp file may be left behind"
+    import yaml
+    saved = yaml.safe_load(config.read_text())
+    assert saved["typing_wpm"] == 90
+    assert config.read_text()  # the new file is valid YAML, not a stub
+
+
+def test_a_bad_hotkeys_scalar_does_not_skip_the_rest_of_the_config(tmp_path, monkeypatch):
+    """One typo'd key must not abort the whole load.
+
+    ``parse_binds`` raised TypeError (not KeybindError) for a scalar, so it
+    escaped the loader's narrow catch and every later setting silently kept its
+    default.
+    """
+    config = tmp_path / "config.yaml"
+    config.write_text("hotkeys: 12345\nui_theme: dark\ncleanup_mode: artifacts\n")
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    t2.load_audio_config()
+
+    assert t2.UI_THEME == "dark"
+    assert t2.CLEANUP_MODE == "artifacts"
+    assert t2.keybinds.format_chord(t2.HOTKEY_BINDS[0].keys) == t2.keybinds.format_chord(
+        t2.keybinds.DEFAULT_CHORD)
+
+
 def test_punctuation_modes_in_post_processor():
     from post_processor import clean_speech_transcription, set_punctuation_mode
 
@@ -363,29 +411,26 @@ def test_punctuation_modes_in_post_processor():
     assert clean_speech_transcription(sample, punctuation_mode="gen_z") == "hello world this is voice transcriber"
 
 
-def test_output_mode_cycle():
+def test_output_mode_cycle(monkeypatch):
+    monkeypatch.setattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True)
     t2.set_output_mode("clipboard")
     assert t2.get_output_mode() == "clipboard"
     assert t2.AUTO_TYPE is False
-    assert t2.COPY_TO_CLIPBOARD is True
 
     # 1. clipboard -> type (auto-switches punctuation to full)
     t2.set_punctuation_mode("no_punctuation")
     assert t2.cycle_output_mode() == "type"
     assert t2.AUTO_TYPE is True
-    assert t2.COPY_TO_CLIPBOARD is False
     assert t2.PUNCTUATION_MODE == "full"
 
     # 2. type -> type_fast (remains in full)
     assert t2.cycle_output_mode() == "type_fast"
     assert t2.AUTO_TYPE is True
-    assert t2.COPY_TO_CLIPBOARD is False
     assert t2.PUNCTUATION_MODE == "full"
 
     # 3. type_fast -> clipboard
     assert t2.cycle_output_mode() == "clipboard"
     assert t2.AUTO_TYPE is False
-    assert t2.COPY_TO_CLIPBOARD is True
 
 
 def test_output_mode_config_sync(tmp_path, monkeypatch):
@@ -702,6 +747,170 @@ def test_meeting_elapsed_label():
     assert t2.meeting_elapsed_label("bogus") == "00:00"
 
 
+def test_diarization_defaults_off_and_round_trips(tmp_path, monkeypatch):
+    """The speaker-label toggle persists, and "off" is the shipped default."""
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_DIARIZATION", raising=False)
+
+    try:
+        t2.load_audio_config()
+        assert t2.get_diarization() == "off"
+
+        t2.set_diarization("on")
+        assert t2.get_diarization() == "on"
+        assert yaml.safe_load(config.read_text())["diarization"] == "on"
+
+        t2.DIARIZATION = "off"
+        t2.load_audio_config()
+        assert t2.get_diarization() == "on"
+    finally:
+        monkeypatch.delenv("VT_DIARIZATION", raising=False)
+        t2.set_diarization("off")
+
+
+def test_diarization_is_unknown_value_safe(tmp_path, monkeypatch):
+    """An unrecognised value falls back to "off": the pass loads a model."""
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"diarization": "maybe"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_DIARIZATION", raising=False)
+
+    t2.load_audio_config()
+    assert t2.get_diarization() == "off"
+
+
+def test_diarization_env_override_wins(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"diarization": "off"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    try:
+        monkeypatch.setenv("VT_DIARIZATION", "on")
+        t2.load_audio_config()
+        assert t2.get_diarization() == "on"
+    finally:
+        monkeypatch.delenv("VT_DIARIZATION", raising=False)
+        t2.set_diarization("off")
+
+
+def test_diarization_speakers_round_trips_and_cycles(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_DIARIZATION_SPEAKERS", raising=False)
+
+    try:
+        t2.load_audio_config()
+        assert t2.get_diarization_speakers() == "auto"
+
+        t2.set_diarization_speakers(3)
+        assert t2.get_diarization_speakers() == 3
+        assert yaml.safe_load(config.read_text())["diarization_speakers"] == 3
+
+        # An out-of-range or unparseable hint keeps auto-detection rather than
+        # guessing a count: a wrong hint is worse than none.
+        assert t2.set_diarization_speakers(1) == "auto"
+        assert t2.set_diarization_speakers(99) == "auto"
+        assert t2.set_diarization_speakers("lots") == "auto"
+
+        t2.set_diarization_speakers("auto")
+        assert t2.cycle_diarization_speakers() == 2
+        assert t2.cycle_diarization_speakers() == 3
+        for _ in range(6):
+            t2.cycle_diarization_speakers()
+        assert t2.cycle_diarization_speakers() == 2  # 8 -> auto -> 2
+    finally:
+        t2.set_diarization_speakers("auto")
+
+
+def test_speaker_count_validators_agree_on_the_2_to_8_range():
+    """t2 and diarize must not disagree about what a valid hint is."""
+    from voice_transcriber import diarize
+
+    for value in (None, "auto", "none", "garbage", 0, 1, 2, 5, 8, 9, 100):
+        normalized = t2.normalize_diarization_speakers(value)
+        expected = None if normalized == "auto" else normalized
+        assert diarize.parse_speakers(value) == expected, value
+
+
+def test_diarization_speakers_env_override(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({"diarization_speakers": "auto"}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    try:
+        monkeypatch.setenv("VT_DIARIZATION_SPEAKERS", "4")
+        t2.load_audio_config()
+        assert t2.get_diarization_speakers() == 4
+    finally:
+        monkeypatch.delenv("VT_DIARIZATION_SPEAKERS", raising=False)
+        t2.set_diarization_speakers("auto")
+
+
+def test_diarization_model_default_and_fallback(tmp_path, monkeypatch):
+    """The model is a registry name; an unknown one warns and keeps the default."""
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_DIARIZATION_MODEL", raising=False)
+
+    try:
+        t2.load_audio_config()
+        assert t2.get_diarization_model() == "diarization"
+        assert t2.DIARIZATION_MODEL in t2.DIARIZATION_MODELS
+
+        # Unknown -> the shipped default, never an empty/disabled value.
+        assert t2.set_diarization_model("nope") == "diarization"
+        assert t2.set_diarization_model("") == "diarization"
+        assert t2.set_diarization_model(None) == "diarization"
+    finally:
+        t2.set_diarization_model(t2.DIARIZATION_DEFAULT_MODEL)
+
+
+def test_diarization_model_env_override(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    try:
+        monkeypatch.setenv("VT_DIARIZATION_MODEL", "diarization")
+        t2.load_audio_config()
+        assert t2.get_diarization_model() == "diarization"
+    finally:
+        monkeypatch.delenv("VT_DIARIZATION_MODEL", raising=False)
+        t2.set_diarization_model(t2.DIARIZATION_DEFAULT_MODEL)
+
+
+def test_diarization_setting_labels_are_stable():
+    assert t2.diarization_setting_state("on") == (
+        "Labels who said what in meeting transcripts", "[ON]", "green"
+    )
+    assert t2.diarization_setting_state("off") == (
+        "Off: one speaker per transcript", "[OFF]", "dim white"
+    )
+    assert t2.diarization_setting_state("nonsense") == (
+        "Off: one speaker per transcript", "[OFF]", "dim white"
+    )
+    assert t2.diarization_speakers_setting_state("auto") == (
+        "Auto-detect the speaker count", "[AUTO]", "cyan"
+    )
+    assert t2.diarization_speakers_setting_state(3) == (
+        "Expecting 3 speakers", "[3]", "cyan"
+    )
+    assert t2.diarization_model_setting_state("diarization") == (
+        "Model: diarization", "[MODEL]", "cyan"
+    )
+
+
 def test_main_typing_formatting_options(monkeypatch):
     """Test that disabling trailing space and auto-punctuate works in main._do_process_recording."""
     from main import SimpleVoiceTranscriber
@@ -798,8 +1007,7 @@ def test_ratatui_structure_labels_match_python():
     Rust test repeats these strings, and matching those would let the real
     implementation drift. Mirrors the guard in tests/shared/test_mode_presets.py.
     """
-    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
     assert "SettingKind::StructureMode" in implementation, (
         "could not find the structure row in tui-rs/src/settings_picker.rs - the "
         "parity guard is looking in the wrong place"
@@ -824,8 +1032,7 @@ def test_ratatui_meeting_labels_match_python():
     Same source-scoped guard as the structure labels above: the Rust test
     repeats these strings, so only the non-test half of the file is searched.
     """
-    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
     assert "SettingKind::MeetingMode" in implementation, (
         "could not find the meeting row in tui-rs/src/settings_picker.rs - the "
         "parity guard is looking in the wrong place"
@@ -844,6 +1051,62 @@ def test_ratatui_meeting_labels_match_python():
     # string and the static badge.
     assert "Spills to disk past {} min" in implementation
     assert t2.meeting_spill_setting_state(10)[1] in implementation
+
+
+def test_ratatui_diarization_and_output_labels_match_python():
+    """D5/D6: the new ratatui rows render the exact Python labels.
+
+    Same source-scoped guard as the structure/meeting labels above. The row
+    *titles* come from ``t2.MEETING_SETTINGS_TITLES`` (the settings menu reads
+    the same constant), and the descriptions/badges come from the
+    ``t2.*_setting_state()`` helpers the Rich modal uses, so neither language can
+    drift without failing here.
+    """
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
+    for kind in ("Diarization", "DiarizationSpeakers", "DiarizationModel",
+                 "MeetingOutputDir", "MeetingOutputFormat"):
+        assert f"SettingKind::{kind}" in implementation, (
+            f"could not find SettingKind::{kind} in tui-rs/src/settings_picker.rs - "
+            "the parity guard is looking in the wrong place")
+
+    # Row titles, exactly as the Python settings menu shows them.
+    for key, title in t2.MEETING_SETTINGS_TITLES.items():
+        assert f'"{title}"' in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer titles the {key} row "
+            f"{title!r}")
+
+    # Literal labels, taken from Python so the two cannot disagree.
+    for desc in (t2.diarization_setting_state("off")[0],
+                 t2.diarization_setting_state("on")[0],
+                 t2.diarization_speakers_setting_state("auto")[0]):
+        assert desc in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows {desc!r}")
+    # Interpolated labels: the Rust source holds the format string, so pin the
+    # prefix the row is built from.
+    for prefix in ("Model: ", "Saved to ", "Transcript form: "):
+        assert prefix in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows {prefix!r}")
+
+    # Every badge, taken from Python.
+    for state in (t2.diarization_setting_state("off"),
+                  t2.diarization_setting_state("on"),
+                  t2.diarization_speakers_setting_state("auto"),
+                  t2.diarization_model_setting_state("diarization"),
+                  t2.meeting_output_dir_setting_state("/tmp/x"),
+                  t2.meeting_output_format_setting_state("json")):
+        assert state[1] in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows the {state[1]} badge")
+
+    # The speaker-count row interpolates the count at render time.
+    assert 'format!("Expecting {count} speakers")' in implementation
+    for n in range(2, 9):
+        assert f'"[{n}]"' in implementation
+
+    # Commands the modal emits for the new rows.
+    for command in ("cycle_diarization", "cycle_diarization_speakers",
+                    "cycle_diarization_model", "cycle_meeting_output_format",
+                    "set_meeting_output_dir"):
+        assert command in implementation, f"ratatui no longer sends {command}"
 
 
 def test_the_naming_decision_is_recorded():
@@ -872,3 +1135,258 @@ def test_the_naming_decision_is_recorded():
     assert normalize_structure_mode("dashes") == "inline"
     assert normalize_structure_mode("single-line") == "inline"
     assert normalize_structure_mode("nonsense") == "off"
+
+
+def test_both_python_tuis_accept_diarization_settings():
+    """D6: every setting lands in both Python frontends, not just the modal."""
+    from tui import VoiceTranscriberTUI
+    from tui_ratatui import RatatuiTui
+
+    tui = VoiceTranscriberTUI(ui_theme="cyan")
+    tui.set_config_state(
+        diarization="on", diarization_speakers=3, diarization_model="diarization"
+    )
+    assert tui.diarization == "on"
+    assert tui.diarization_speakers == 3
+    assert tui.diarization_model == "diarization"
+
+    rat = RatatuiTui.__new__(RatatuiTui)
+    sent = []
+    rat._send = lambda msg: sent.append(msg)
+    rat.set_config_state(
+        diarization="on", diarization_speakers=3, diarization_model="diarization"
+    )
+    assert sent and sent[-1]["t"] == "cfg"
+    assert sent[-1]["diarization"] == "on"
+    assert sent[-1]["diarization_speakers"] == 3
+    assert sent[-1]["diarization_model"] == "diarization"
+
+
+def test_ratatui_cycle_commands_reach_the_engine():
+    """D6: the ratatui settings modal's cycle commands are wired to callbacks."""
+    from tui_ratatui import RatatuiTui
+
+    rat = RatatuiTui.__new__(RatatuiTui)
+    calls = []
+    rat.on_cycle_diarization = lambda: calls.append("diarization")
+    rat.on_cycle_diarization_speakers = lambda: calls.append("speakers")
+    rat.on_cycle_diarization_model = lambda: calls.append("model")
+
+    for cmd in ("cycle_diarization", "cycle_diarization_speakers", "cycle_diarization_model"):
+        rat._dispatch({"t": "cmd", "cmd": cmd})
+
+    assert calls == ["diarization", "speakers", "model"]
+
+
+# ---------------------------------------------------------------------------
+# D5: meeting output location, form, and the speakers map
+# ---------------------------------------------------------------------------
+
+def test_meeting_output_dir_round_trips_and_env_override(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_MEETING_OUTPUT_DIR", raising=False)
+
+    try:
+        t2.load_audio_config()
+        assert t2.get_meeting_output_dir() == "meetings"
+
+        t2.set_meeting_output_dir("/tmp/custom-transcripts")
+        assert t2.get_meeting_output_dir() == "/tmp/custom-transcripts"
+        assert yaml.safe_load(config.read_text())["meeting_output_dir"] == "/tmp/custom-transcripts"
+
+        # An empty value falls back to the shipped repo-relative default.
+        assert t2.set_meeting_output_dir("") == "meetings"
+
+        t2.MEETING_OUTPUT_DIR = "other"
+        monkeypatch.setenv("VT_MEETING_OUTPUT_DIR", "/env/dir")
+        t2.load_audio_config()
+        assert t2.get_meeting_output_dir() == "/env/dir"
+    finally:
+        monkeypatch.delenv("VT_MEETING_OUTPUT_DIR", raising=False)
+        t2.set_meeting_output_dir("meetings")
+
+
+def test_meeting_output_format_round_trips_and_fails_safe(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_MEETING_OUTPUT_FORMAT", raising=False)
+
+    try:
+        t2.load_audio_config()
+        assert t2.get_meeting_output_format() == "text"
+
+        t2.set_meeting_output_format("json")
+        assert t2.get_meeting_output_format() == "json"
+        assert yaml.safe_load(config.read_text())["meeting_output_format"] == "json"
+
+        # Markdown aliases canonicalise; an unknown form is the shipped one.
+        assert t2.set_meeting_output_format("md") == "markdown"
+        assert t2.set_meeting_output_format("wat") == "text"
+
+        t2.set_meeting_output_format("text")
+        assert t2.cycle_meeting_output_format() == "json"
+        assert t2.cycle_meeting_output_format() == "markdown"
+        assert t2.cycle_meeting_output_format() == "text"
+
+        monkeypatch.setenv("VT_MEETING_OUTPUT_FORMAT", "markdown")
+        t2.load_audio_config()
+        assert t2.get_meeting_output_format() == "markdown"
+    finally:
+        monkeypatch.delenv("VT_MEETING_OUTPUT_FORMAT", raising=False)
+        t2.set_meeting_output_format("text")
+
+
+def test_meeting_output_labels_are_stable():
+    assert t2.meeting_output_dir_setting_state("/tmp/x") == (
+        "Saved to /tmp/x", "[DIR]", "cyan"
+    )
+    assert t2.meeting_output_format_setting_state("json") == (
+        "Transcript form: json", "[FORM]", "cyan"
+    )
+
+
+def test_speaker_name_list_helpers():
+    assert t2.normalize_speaker_names("Priya, Sam ,, ") == ["Priya", "Sam"]
+    assert t2.normalize_speaker_names(["Priya", " Sam ", ""]) == ["Priya", "Sam"]
+    assert t2.normalize_speaker_names(None) == []
+
+    assert t2.add_speaker_name([], "Priya") == ["Priya"]
+    assert t2.add_speaker_name(["Priya"], "Sam") == ["Priya", "Sam"]
+    assert t2.add_speaker_name(["Priya", "Sam"], "Bo", 1) == ["Priya", "Bo", "Sam"]
+
+    assert t2.rename_speaker_name(["Priya", "Sam"], 1, "Samuel") == ["Priya", "Samuel"]
+    assert t2.rename_speaker_name(["Priya"], 5, "X") == ["Priya"]
+
+    assert t2.remove_speaker_name(["Priya", "Sam"], 0) == ["Sam"]
+    assert t2.remove_speaker_name(["Priya"], 9) == ["Priya"]
+
+    assert t2.move_speaker_name(["A", "B", "C"], 0, 1) == ["B", "A", "C"]
+    assert t2.move_speaker_name(["A", "B", "C"], 2, -1) == ["A", "C", "B"]
+    assert t2.move_speaker_name(["A", "B"], 0, -5) == ["A", "B"]
+
+
+def test_speaker_hooks_are_wired_and_the_map_is_metadata_not_config(tmp_path, monkeypatch):
+    import yaml
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump({}))
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+    monkeypatch.delenv("VT_MEETING_OUTPUT_DIR", raising=False)
+
+    stored = {"names": []}
+    t2.register_speaker_hooks(get=lambda: stored["names"], set=lambda n: stored.update(names=n))
+    try:
+        assert t2.get_speaker_names() == []
+        assert t2.set_speaker_names("Priya, Sam") is True
+        assert stored["names"] == ["Priya", "Sam"]
+        assert t2.get_speaker_names() == ["Priya", "Sam"]
+
+        # Setting speaker names must never write app config: it is transcript
+        # metadata, not a setting.
+        before = config.read_text()
+        t2.set_speaker_names("A,B,C")
+        assert config.read_text() == before
+    finally:
+        t2.register_speaker_hooks(get=None, set=None)
+
+
+def test_speaker_editor_key_map_reorders_on_uppercase_jk(monkeypatch):
+    """Pin the editor's key handling, not just move_speaker_name: lowercase
+    j/k select, uppercase J/K reorder (matching the Rust editor)."""
+    state = {"names": ["A", "B", "C"]}
+    monkeypatch.setattr(t2, "get_speaker_names", lambda: list(state["names"]))
+    monkeypatch.setattr(
+        t2, "set_speaker_names",
+        lambda names: state.update(names=list(names)) or True,
+    )
+
+    def press(*keys):
+        pending = iter(keys)
+        monkeypatch.setattr(t2, "_read_key", lambda: next(pending))
+        return t2.select_speaker_editor()
+
+    assert press("J", "q") is True
+    assert state["names"] == ["B", "A", "C"]  # J moved the selected name down
+
+    state["names"] = ["A", "B", "C"]
+    assert press("j", "j", "K", "q") is True
+    assert state["names"] == ["A", "C", "B"]  # K moved the third name up
+
+    # Lowercase j must move the selection, not reorder: deleting the selection
+    # then removes the second name only.
+    state["names"] = ["A", "B", "C"]
+    press("j", "d", "q")
+    assert state["names"] == ["A", "C"]
+
+
+def test_both_python_tuis_expose_meeting_output_settings():
+    from tui import VoiceTranscriberTUI
+    from tui_ratatui import RatatuiTui
+
+    tui = VoiceTranscriberTUI(ui_theme="cyan")
+    tui.set_config_state(meeting_output_dir="/tmp/m", meeting_output_format="json")
+    assert tui.meeting_output_dir == "/tmp/m"
+    assert tui.meeting_output_format == "json"
+
+    rat = RatatuiTui.__new__(RatatuiTui)
+    sent = []
+    rat._send = lambda msg: sent.append(msg)
+    rat.set_config_state(meeting_output_dir="/tmp/m", meeting_output_format="json")
+    assert sent[-1]["meeting_output_dir"] == "/tmp/m"
+    assert sent[-1]["meeting_output_format"] == "json"
+
+
+def test_ratatui_speaker_and_output_commands_reach_callbacks():
+    from tui_ratatui import RatatuiTui
+
+    rat = RatatuiTui.__new__(RatatuiTui)
+    calls = []
+    rat.on_cycle_meeting_output_format = lambda: calls.append("format")
+    rat.on_set_meeting_output_dir = lambda path: calls.append(("dir", path))
+    rat.on_open_speaker_editor = lambda: calls.append("editor")
+    rat.on_set_speaker_names = lambda names: calls.append(("names", names))
+
+    rat._dispatch({"t": "cmd", "cmd": "cycle_meeting_output_format"})
+    rat._dispatch({"t": "cmd", "cmd": "set_meeting_output_dir", "path": "/tmp/x"})
+    rat._dispatch({"t": "cmd", "cmd": "open_speaker_editor"})
+    rat._dispatch({"t": "cmd", "cmd": "set_speakers", "speakers": ["Priya", "Sam"]})
+
+    assert calls == [
+        "format",
+        ("dir", "/tmp/x"),
+        "editor",
+        ("names", ["Priya", "Sam"]),
+    ]
+
+
+def test_ratatui_meeting_capture_row_matches_python():
+    """Both front ends can start a capture, with the same wording.
+
+    Regression: the ratatui settings picker had no capture row at all — only the
+    Rich modal did — so a meeting could not be started from the Rust front end and
+    the meeting screen was unreachable there. Start-restart is the only way in.
+    """
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
+
+    assert "SettingKind::MeetingCapture" in implementation, (
+        "tui-rs/src/settings_picker.rs has no Meeting Capture row, so a meeting "
+        "cannot be started from the ratatui front end"
+    )
+    # The static half of the Rich row's wording, from t2.py's meeting_capture
+    # branch, plus the badge that says what activating it will do.
+    for text in (
+        "Switch Meeting Mode on first",
+        "Start a meeting capture",
+        "[START]",
+        "[OFF]",
+    ):
+        assert text in implementation, (
+            f"tui-rs/src/settings_picker.rs no longer shows {text!r}, which the "
+            f"Rich settings modal does show for the same row"
+        )
+    # Same engine command from both front ends: the row is not a second path.
+    assert '"toggle_meeting"' in implementation

@@ -90,8 +90,10 @@ def test_default_spill_threshold_is_ten_minutes():
     assert meeting.DEFAULT_SPILL_MINUTES == 10
     assert meeting.MIN_SPILL_MINUTES == 1
     assert meeting.MAX_SPILL_MINUTES == 240
-    # The shipped value is one the settings modal can actually reach.
-    assert meeting.DEFAULT_SPILL_MINUTES in meeting.SPILL_MINUTE_CHOICES
+    # The shipped value must be one the settings modal can reach, i.e. inside the
+    # accepted range (the cycle list itself lives in t2.MEETING_SPILL_CHOICES;
+    # meeting.py used to carry a third copy that nothing read).
+    assert meeting.MIN_SPILL_MINUTES <= meeting.DEFAULT_SPILL_MINUTES <= meeting.MAX_SPILL_MINUTES
 
 
 @pytest.mark.parametrize("value,expected", [
@@ -201,6 +203,22 @@ def test_read_back_reports_progress_per_block(tmp_path):
     assert seen
     assert seen[-1] == (250, 250)
     assert all(done <= total for done, total in seen)
+    buffer.close()
+
+
+def test_read_all_flags_a_truncated_spill_file(tmp_path):
+    """A short spill file is recorded, not silently papered over."""
+    buffer = meeting.AudioSpillBuffer(
+        sample_rate=1000, spill_after_s=1, directory=str(tmp_path)
+    )
+    buffer.append(np.zeros(2000, dtype=np.float32))
+    assert buffer.truncated is False
+    os.truncate(buffer.temp_path, 800 * meeting._BYTES_PER_SAMPLE)
+
+    audio = buffer.read_all()
+
+    assert audio.shape == (800,)  # the real frames, not uninitialised memory
+    assert buffer.truncated is True
     buffer.close()
 
 
@@ -334,6 +352,96 @@ def test_close_deletes_the_temp_file_while_recording(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_close_waits_for_the_finalize_it_cannot_see_yet(tmp_path):
+    """Regression: ``close()`` never joined the finalize thread.
+
+    ``_finalize`` is started by the capture thread's ``finally``, so it is still
+    ``None`` when ``close()`` builds its join tuple. ``close()`` therefore forced
+    the session idle while the finalize was still reading, and the finalize's own
+    ``finally`` then reset the buffer and state of whatever session was live by
+    the time it finished: every later chunk was dropped and ``stop()`` raised.
+    """
+    capture = SyntheticCapture([_audio_seconds(0.02, sample_rate=1000) for _ in range(4)])
+    session = meeting.MeetingSession(
+        sample_rate=1000, capture=capture, directory=str(tmp_path)
+    )
+    session.start(sample_rate=1000)
+    assert capture.ready.wait(5.0), "capture never started"
+
+    in_read = threading.Event()
+    release = threading.Event()
+
+    def gated_progress(processed, total):
+        # Hold the finalize mid-read-back, which is where the old ``close()``
+        # raced past it.
+        in_read.set()
+        release.wait(5.0)
+        session.set_progress(processed, total)
+
+    session._on_read_progress = gated_progress
+
+    closed = threading.Thread(target=session.close, name="test-close")
+    closed.start()
+    try:
+        assert in_read.wait(5.0), "the finalize never began reading the audio back"
+        # The finalize owns the session until it finishes. A new capture starting
+        # here is exactly what let the stale finalize wipe it.
+        assert session.state == "processing"
+        with pytest.raises(meeting.MeetingStateError):
+            session.start(sample_rate=1000)
+    finally:
+        release.set()
+        closed.join(10.0)
+
+    assert closed.is_alive() is False
+    assert session.state == "idle"
+
+    # ...and the session is genuinely reusable once the finalize has finished.
+    second = SyntheticCapture([_audio_seconds(0.02, sample_rate=1000)])
+    session._capture = second
+    session.start(sample_rate=1000)
+    assert second.ready.wait(5.0), "the second capture never started"
+    session._append_chunk(np.zeros(50, dtype=np.float32))
+    session.stop()
+    assert session.wait(5.0) is True
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_every_captured_chunk_is_tapped_for_a_live_view(tmp_path):
+    """The live transcript is fed by the capture, not by the read-back at the end.
+
+    The session stays model-free: it only forwards each chunk to whoever asked
+    (main.py feeds a micro-batcher, so the meeting screen can show words).
+    """
+    seen = []
+    capture = SyntheticCapture([_audio_seconds(0.02, sample_rate=1000) for _ in range(3)])
+    session = meeting.MeetingSession(
+        sample_rate=1000, capture=capture, directory=str(tmp_path), on_chunk=seen.append
+    )
+    _start_and_wait_ready(session, capture)
+    session.close()
+
+    assert len(seen) == 3
+    assert all(hasattr(chunk, "size") for chunk in seen)
+
+
+def test_a_failing_live_tap_cannot_break_the_capture(tmp_path):
+    """A displayed line is optional; the recording is not."""
+    def boom(chunk):
+        raise RuntimeError("the live view died")
+
+    capture = SyntheticCapture([_audio_seconds(0.05, sample_rate=1000)])
+    session = meeting.MeetingSession(
+        sample_rate=1000, capture=capture, directory=str(tmp_path), on_chunk=boom
+    )
+    _start_and_wait_ready(session, capture)
+
+    assert session.state == "recording"
+    assert session.status().error is None
+    session.close()
+    assert session.state == "idle"
+
+
 def test_audio_consumer_receives_the_read_back_audio(tmp_path):
     received = {}
 
@@ -352,6 +460,35 @@ def test_audio_consumer_receives_the_read_back_audio(tmp_path):
     assert received["rate"] == 1000
     assert received["audio"].shape == (50,)
     assert np.allclose(received["audio"], 0.25)
+
+
+def test_a_truncated_spill_file_is_reported_as_an_incomplete_recording(tmp_path):
+    """A short spill must reach the consumer, but with a loud error attached."""
+    received = {}
+
+    def consume(audio, rate):
+        received["audio"] = np.array(audio)
+
+    capture = SyntheticCapture([])
+    session = meeting.MeetingSession(
+        sample_rate=10, capture=capture, directory=str(tmp_path), on_audio=consume
+    )
+    session.start(spill_minutes=1, sample_rate=10)
+    assert capture.ready.wait(5.0), "capture never started"
+    # Two 600-frame chunks each cross the 600-frame threshold, so nothing is
+    # left in memory: the temp file is the whole recording the moment we stop.
+    for _ in range(2):
+        session._append_chunk(np.full(600, 0.5, dtype=np.float32))
+    path = session.temp_path
+    assert path is not None and os.path.exists(path)
+    # Simulate a full disk mid-spill: the file is shorter than the capture.
+    os.truncate(path, 800 * meeting._BYTES_PER_SAMPLE)
+
+    session.stop()
+    assert session.wait(5.0) is True
+    status = session.status()
+    assert status.error and "incomplete" in status.error.lower()
+    assert received["audio"].shape == (800,)
 
 
 # ---------------------------------------------------------------------------

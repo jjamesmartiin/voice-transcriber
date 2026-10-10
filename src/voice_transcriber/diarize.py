@@ -29,6 +29,8 @@ import math
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from voice_transcriber import backend_registry
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -58,24 +60,19 @@ REQUIRED_FUNCTIONS = ("available", "diarize")
 _loaded: dict[str, Any] = {}
 
 
-class UnknownBackendError(ValueError):
-    """A config named a diarization backend that is not in :data:`BACKENDS`."""
+#: Shared with the ASR and formatter registries; the message names diarization.
+UnknownBackendError = backend_registry.UnknownBackendError
 
 
 def available_backends() -> list[str]:
     """Every backend name a config may use, sorted."""
-    return sorted(BACKENDS)
+    return backend_registry.available_backends(BACKENDS)
 
 
 def resolve_backend_name(name: str | None = None) -> str:
     """Validate ``name`` against the registry without importing anything."""
-    resolved = str(name or DEFAULT_BACKEND).strip().lower()
-    if resolved not in BACKENDS:
-        raise UnknownBackendError(
-            f"Unknown diarization backend {resolved!r}. "
-            f"Available: {', '.join(available_backends())}"
-        )
-    return resolved
+    return backend_registry.resolve_backend_name(
+        name, BACKENDS, DEFAULT_BACKEND, "diarization")
 
 
 def load_backend(name: str | None = None) -> Any | None:
@@ -85,27 +82,14 @@ def load_backend(name: str | None = None) -> Any | None:
     enabled the feature, ``sherpa_onnx`` is simply not installed, and that must
     read as "no diarization" rather than as an error at startup.
     """
-    try:
-        resolved = resolve_backend_name(name)
-    except UnknownBackendError:
-        return None
-    if resolved in _loaded:
-        return _loaded[resolved]
-    try:
-        module = importlib.import_module(BACKENDS[resolved])
-    except Exception:
-        module = None
-    if module is not None:
-        missing = [fn for fn in REQUIRED_FUNCTIONS if not hasattr(module, fn)]
-        if missing:
-            module = None
-    _loaded[resolved] = module
-    return module
+    return backend_registry.load_backend(
+        name, BACKENDS, DEFAULT_BACKEND, REQUIRED_FUNCTIONS, _loaded,
+        "diarization", strict=False, import_module=importlib.import_module)
 
 
 def reset_backend_cache() -> None:
     """Forget loaded backends. For tests, and for a config change at runtime."""
-    _loaded.clear()
+    backend_registry.reset_backend_cache(_loaded)
 
 
 def warm(backend: str | None = None) -> bool:
@@ -198,8 +182,9 @@ def parse_speakers(value: Any) -> int | None:
     """Map the ``diarization_speakers`` setting onto ``num_speakers``.
 
     ``None`` means "auto", which the backend passes through as
-    ``num_clusters=-1``. Anything unparseable also means auto: an unknown value
-    must degrade to the safe behaviour, never crash a meeting capture.
+    ``num_clusters=-1``. Anything unparseable or outside the setting's 2..8
+    range also means auto, matching ``t2.normalize_diarization_speakers``: an
+    unknown value must degrade to the safe behaviour, never crash a capture.
     """
     if value is None:
         return None
@@ -210,7 +195,7 @@ def parse_speakers(value: Any) -> int | None:
         count = int(text)
     except (TypeError, ValueError):
         return None
-    return count if count > 0 else None
+    return count if 2 <= count <= 8 else None
 
 
 def speaker_count(turns: list[Turn]) -> int:

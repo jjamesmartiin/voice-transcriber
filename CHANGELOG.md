@@ -7,15 +7,25 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Entries are grouped as Added / Changed / Fixed / Security.
 
 The model weights are versioned **separately** from the app, on a
-revision-derived tag (`model-cohere-<rev>`). They are republished only when the
-underlying model revision changes — never per app release — so a new app version
-normally reuses the existing bundle. See
-[`docs/releasing.md`](docs/releasing.md).
+model-revision-derived tag (`model-<name>-<rev>` for `cohere`, `formatter` and
+`diarization`). They are republished only when the underlying model revision
+changes — never per app release — so a new app version normally reuses the
+existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
 ### Added
 
+- **The on-device formatter's first-use prompt states the model size before it
+  downloads.** Enabling the formatter (`formatter: on`) and dictating once is
+  wired to fetch the ~462 MiB S1-mini Q4 GGUF through the same verified split-xz
+  path the ASR uses, on a background thread, so dictation is never blocked. The
+  prompt names the model exactly as its licence requires - **"S1-mini" by
+  "Superwhisper"** (Apache-2.0 plus an additional naming term; the full text and
+  provenance are in `config/licenses/`). Meeting-mode diarization's ~40 MB
+  pyannote/3D-Speaker graphs are declared in the same model registry and packaged
+  by the same scripts. **No bundle has been published yet**, so until one is, the
+  weights must be placed under the model directory.
 - **List formatting (`structure_mode`).** Spoken enumerations become real
   lists: "I can list them like: Thing one. Thing two. Thing three." now comes out
   as a bulleted list, and spoken "new line" / "new paragraph" / "bullet point"
@@ -39,9 +49,45 @@ normally reuses the existing bundle. See
   `cleanup` control verb, or the config file. Number/date formatting, the
   dictionary, casing and the punctuation preset are separate settings and are not
   gated by it. See [`docs/cleanup_modes.md`](docs/cleanup_modes.md).
+- **Meeting mode: who spoke, and where the transcript goes.** Meeting capture
+  (off by default) is a long, non-injecting recording transcribed in the
+  background when you stop it. Three diarization settings label the speakers
+  (`diarization: on`; `off` never loads the model and transcribes as one
+  speaker), hint the expected count (`diarization_speakers: auto` or `2`–`8`),
+  and choose the model bundle (`diarization_model`). All three are on the settings
+  modal in both Python frontends, the control API and the config file. The
+  finished transcript is written to a repo-local, gitignored `<repo>/meetings/`
+  by default (`meeting_output_dir`; `VT_MEETING_OUTPUT_DIR` wins) as plain text,
+  one JSON object per turn, or a Markdown document (`meeting_output_format`).
+  Speaker names are an ordered, editable list on the meeting screen — per-meeting
+  transcript metadata rather than app configuration — and the same map is
+  scriptable through the `speakers` control verb.
+
+### Changed
+
+- **sherpa-onnx is pinned to ≥ 1.13.3 so Cohere Transcribe's ONNX path can load.**
+  The devshell shipped 1.12.25, which has no Cohere support at all. A second,
+  narrow nixpkgs input supplies only `sherpa-onnx` 1.13.3 (the newest build against
+  the locked glibc 2.42), so a full nixpkgs bump — which would move `torch` — is
+  not needed: `torch` stays 2.10.0. This makes the toolchain *capable* of the int8
+  ONNX path; the ASR backend that would use it is **not** implemented. The
+  override also takes `sherpa-onnx`'s own bundled `onnxruntime` from that input
+  (1.26.0, replacing the 1.24.4 the older `sherpa-onnx` used) — one library, one
+  owner, shared by the ONNX path and diarization, so the two cannot diverge.
+- **Parakeet TDT 0.6B v3 is selectable, but Cohere stays the default.** The
+  bake-off is recorded in [`docs/asr-bakeoff.md`](docs/asr-bakeoff.md): Parakeet is
+  ~5× faster and ~3× smaller in memory, but loses every accuracy slice (2.65 % vs
+  4.93 % whole-clip WER; 3.35 % vs 9.52 % through the shipped pipeline). Set
+  `model_backend: parakeet` in the config file to try it.
 
 ### Fixed
 
+- **"Reset to Defaults" now takes effect immediately.** It re-published only some
+  of the settings the post-processor keeps its own copy of, so the punctuation
+  preset kept the old value until the next launch even though the config file had
+  already been written. Reset now re-publishes every runtime copy (punctuation,
+  serial, spell, number, structure, cleanup, formatter) in the same order a config
+  load does.
 - **A clipboard tool can no longer hang a transcription.** The Linux sink ran
   `wl-copy` (or `xclip`) through `subprocess.run` with no timeout, and `wl-copy`
   keeps *serving the selection* instead of forking away on some setups

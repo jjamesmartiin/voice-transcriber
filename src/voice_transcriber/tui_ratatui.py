@@ -28,9 +28,11 @@ import tempfile
 import threading
 import time
 
+import accent
+
 logger = logging.getLogger(__name__)
 
-COLOR_PALETTES = ["auto", "green", "cyan", "blue", "magenta", "yellow", "red", "white"]
+COLOR_PALETTES = accent.COLOR_PALETTES
 
 _DEBUG_PATH = os.environ.get("VT_TUI_DEBUG", "")
 
@@ -66,6 +68,7 @@ class RatatuiTui:
         # --- state mirrored locally so callbacks/other code can read it ---
         self.state = "READY"
         self.sub_state_text = ""
+        self.meeting_live_text = ""
         self.active_device = "Detecting..."
         self.secondary_device = None
         self.model_backend = "cohere"
@@ -106,6 +109,13 @@ class RatatuiTui:
         self.on_toggle_meeting = None
         self.on_cycle_meeting = None
         self.on_cycle_meeting_spill = None
+        self.on_cycle_diarization = None
+        self.on_cycle_diarization_speakers = None
+        self.on_cycle_diarization_model = None
+        self.on_cycle_meeting_output_format = None
+        self.on_set_meeting_output_dir = None
+        self.on_open_speaker_editor = None
+        self.on_set_speaker_names = None
         self.on_set_punctuation = None
         self.on_reset_defaults = None
         self.on_reset_terminal = None
@@ -151,13 +161,15 @@ class RatatuiTui:
         self._server.bind(self.socket_path)
         self._server.listen(1)
 
-        # Hand the child the real terminal file descriptors explicitly.
+        # Hand the child the real terminal file descriptors explicitly, plus the
+        # already-resolved auto theme (see _child_env).
         self._proc = subprocess.Popen(
             [self.binary, "--connect", self.socket_path],
             stdin=0,
             stdout=1,
             stderr=2,
             close_fds=True,
+            env=self._child_env(),
         )
 
         self._server.settimeout(10.0)
@@ -315,6 +327,31 @@ class RatatuiTui:
         elif cmd in ("cycle_meeting_spill", "cycle_meeting_spill_minutes"):
             if getattr(self, "on_cycle_meeting_spill", None):
                 self.on_cycle_meeting_spill()
+        elif cmd in ("cycle_diarization", "cycle_diarization_mode"):
+            if getattr(self, "on_cycle_diarization", None):
+                self.on_cycle_diarization()
+        elif cmd in ("cycle_diarization_speakers", "cycle_diarization_speaker_count"):
+            if getattr(self, "on_cycle_diarization_speakers", None):
+                self.on_cycle_diarization_speakers()
+        elif cmd == "cycle_diarization_model":
+            if getattr(self, "on_cycle_diarization_model", None):
+                self.on_cycle_diarization_model()
+        elif cmd in ("cycle_meeting_output_format", "cycle_meeting_format"):
+            if getattr(self, "on_cycle_meeting_output_format", None):
+                self.on_cycle_meeting_output_format()
+        elif cmd in ("set_meeting_output_dir", "set_meeting_output_folder"):
+            path = msg.get("path") or msg.get("value")
+            if path is not None and getattr(self, "on_set_meeting_output_dir", None):
+                self.on_set_meeting_output_dir(path)
+        elif cmd in ("open_speaker_editor", "edit_speakers"):
+            if getattr(self, "on_open_speaker_editor", None):
+                self.on_open_speaker_editor()
+        elif cmd in ("set_speakers", "set_speaker_names"):
+            names = msg.get("speakers")
+            if names is None:
+                names = msg.get("value")
+            if getattr(self, "on_set_speaker_names", None):
+                self.on_set_speaker_names(names)
         elif cmd == "cycle_typing_wpm" and getattr(self, "on_cycle_typing_wpm", None):
             self.on_cycle_typing_wpm()
         elif cmd == "set_typing_wpm":
@@ -568,6 +605,20 @@ class RatatuiTui:
             return
         self.update_vu_level(max(levels.values()), levels=levels, force=force)
 
+    def set_meeting_live_text(self, text):
+        """Publish the growing in-meeting transcript (docs/meeting_mode.md).
+
+        Its own message rather than folding the text into ``update_state``, which
+        carries the elapsed timer and is re-sent on every progress tick: a chunk's
+        worth of text arrives at a different cadence and would drag a timer update
+        along with it. Only sent when it actually changed.
+        """
+        text = text or ""
+        if text == self.meeting_live_text:
+            return
+        self.meeting_live_text = text
+        self._send({"t": "meeting_text", "text": text})
+
     def update_state(self, state, sub_text=""):
         self.state = state
         self.sub_state_text = sub_text
@@ -607,6 +658,8 @@ class RatatuiTui:
     def set_config_state(self, backend=None, muted=None, auto_type=None, output_mode=None,
                          sound_theme=None, ui_theme=None, punctuation_mode=None, structure_mode=None, cleanup_mode=None,
                          meeting_mode=None, meeting_spill_minutes=None,
+                         diarization=None, diarization_speakers=None, diarization_model=None,
+                         meeting_output_dir=None, meeting_output_format=None, speakers=None,
                          formatter=None, formatter_model=None, formatter_style=None, formatter_context=None,
                          trailing_space=None, auto_punctuate=None, number_digits=None,
                          number_mode=None, serial_collapse=None, spell_command=None,
@@ -648,6 +701,26 @@ class RatatuiTui:
         if meeting_spill_minutes is not None:
             self.meeting_spill_minutes = int(meeting_spill_minutes)
             msg["meeting_spill_minutes"] = self.meeting_spill_minutes
+        if diarization is not None:
+            self.diarization = diarization
+            msg["diarization"] = diarization
+        if diarization_speakers is not None:
+            self.diarization_speakers = diarization_speakers
+            msg["diarization_speakers"] = diarization_speakers
+        if diarization_model is not None:
+            self.diarization_model = diarization_model
+            msg["diarization_model"] = diarization_model
+        if meeting_output_dir is not None:
+            self.meeting_output_dir = meeting_output_dir
+            msg["meeting_output_dir"] = meeting_output_dir
+        if meeting_output_format is not None:
+            self.meeting_output_format = meeting_output_format
+            msg["meeting_output_format"] = meeting_output_format
+        if speakers is not None:
+            # Transcript metadata, not config: the engine's ordered speaker-name
+            # list, pushed so the ratatui speaker editor seeds from it.
+            self.speaker_names = list(speakers)
+            msg["speakers"] = self.speaker_names
         if formatter is not None:
             self.formatter = formatter
             msg["formatter"] = formatter
@@ -694,14 +767,20 @@ class RatatuiTui:
             msg["hotkeys"] = self.hotkeys
         self._send(msg)
 
+    def _child_env(self):
+        """The environment for the ratatui binary.
+
+        It resolves ``auto`` itself but cannot run the desktop accent probe, so
+        the already-resolved colour is handed over as ``ACCENT_COLOR`` -- step 2
+        of the chain it runs itself (``vt-tui``'s ``detect_system_theme``). This
+        is what makes ``auto`` mean the same colour in both front ends; an
+        explicit ``VT_UI_THEME`` or a concrete configured theme still wins there.
+        """
+        return {**os.environ, "ACCENT_COLOR": self.get_effective_color()}
+
     def get_effective_color(self):
-        theme = (self.ui_theme or "auto").lower()
-        if theme in COLOR_PALETTES and theme != "auto":
-            return theme
-        accent = os.environ.get("ACCENT_COLOR", "").strip().lower()
-        if accent in COLOR_PALETTES:
-            return accent
-        return "green"
+        # One chain, in accent.resolve(): auto follows the desktop accent.
+        return accent.resolve(self.ui_theme)
 
     def set_ui_theme(self, theme_name):
         """Update UI color theme dynamically"""

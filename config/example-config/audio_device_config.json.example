@@ -4,9 +4,9 @@
   "secondary_device_name": null,
   "override_mode": "auto",
   "is_muted": true,
-  "auto_type": false,
+  "auto_type": true,
+  "output_mode": "type_fast",
   "sound_theme": "proximity",
   "keep_bluetooth_handsfree": true,
-  "model_backend": "cohere",
-  "copy_to_clipboard": true
+  "model_backend": "cohere"
 }

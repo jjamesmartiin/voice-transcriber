@@ -8,6 +8,7 @@
 //!
 //! Python -> Rust:
 //!   {"t":"state","state":"READY","sub":""}
+//!   {"t":"meeting_text","text":"accumulated transcript so far"}
 //!   {"t":"vu","level":0.42}
 //!   {"t":"vu","level":0.42,"levels":[{"i":4,"level":0.0},{"i":5,"level":0.44}]}
 //!   {"t":"cfg","mic":"...","secondary":"...","backend":"cohere",
@@ -28,7 +29,7 @@ use std::thread;
 
 use serde::{Deserialize, Serialize};
 
-use crate::app::{Level, OutStatus};
+use crate::app::{App, Level, OutStatus};
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AudioDeviceInfo {
@@ -57,6 +58,30 @@ pub struct VuLevel {
 // channel message and `IpcEvent` already boxes it, so boxing the config fields
 // individually would add indirection without meaningfully reducing stack use.
 #[allow(clippy::large_enum_variant)]
+/// The speaker-count hint is either the string ``"auto"`` or an integer
+/// ``2``-``8``. Serde cannot decode that into one concrete type, so it is a
+/// union; `App` stores the canonical string form.
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum SpeakerCount {
+    Auto(String),
+    Count(u32),
+}
+
+impl SpeakerCount {
+    /// The canonical string form the settings row and status carry.
+    pub fn as_string(&self) -> String {
+        match self {
+            SpeakerCount::Auto(s) => s.clone(),
+            SpeakerCount::Count(n) => n.to_string(),
+        }
+    }
+}
+
+#[allow(clippy::large_enum_variant)] // protocol-shaped: one `Wire` per channel
+                                     // message and the channel holds at most a frame's worth, so
+                                     // boxing the growable `Cfg` fields would add an allocation per
+                                     // message for negligible stack savings.
 #[derive(Deserialize, Debug)]
 #[serde(tag = "t")]
 pub enum Wire {
@@ -71,6 +96,14 @@ pub enum Wire {
         state: String,
         #[serde(default)]
         sub: String,
+    },
+    /// Live transcript streamed while a meeting records. `text` is the whole
+    /// accumulated transcript so far, not a delta, so the screen can simply
+    /// show its tail.
+    #[serde(rename = "meeting_text")]
+    MeetingText {
+        #[serde(default)]
+        text: String,
     },
     #[serde(rename = "vu")]
     Vu {
@@ -130,6 +163,27 @@ pub enum Wire {
         /// Meeting capture in-memory spill threshold, in minutes (1-240).
         #[serde(default)]
         meeting_spill_minutes: Option<u32>,
+        /// Configured diarization toggle: "off" or "on". Meeting transcripts
+        /// are labelled per speaker when on (see docs/meeting_mode.md).
+        #[serde(default)]
+        diarization: Option<String>,
+        /// Speaker-count hint: the string "auto" or an integer 2-8. The wire
+        /// form is genuinely both, so it needs a union rather than a String.
+        #[serde(default)]
+        diarization_speakers: Option<SpeakerCount>,
+        /// Configured diarization model registry id, e.g. "diarization".
+        #[serde(default)]
+        diarization_model: Option<String>,
+        /// Where the finished transcript is written (repo-relative by default).
+        #[serde(default)]
+        meeting_output_dir: Option<String>,
+        /// The artifact form: "text", "json" or "markdown".
+        #[serde(default)]
+        meeting_output_format: Option<String>,
+        /// The live speakers map: ordered names, index *i* names speaker *i*.
+        /// Transcript metadata, not config (see docs/meeting_mode.md).
+        #[serde(default)]
+        speakers: Option<Vec<String>>,
         #[serde(default)]
         trailing_space: Option<bool>,
         #[serde(default)]
@@ -281,6 +335,39 @@ fn write_line(stream: &UnixStream, line: &str) -> std::io::Result<()> {
     w.flush()
 }
 
+/// Send a fire-and-forget command, treating a dead writer as a disconnect.
+///
+/// Every modal arm that talks to the engine must do the same two things: skip
+/// the send when there is no engine (demo mode), and set `should_quit` when the
+/// socket is gone so the modal does not spin forever on a dead writer. Open-
+/// coding that pair invites a missed `.is_err()`; this is the one place it lives.
+/// A `None` writer is expected (demo mode) and is not a disconnect.
+pub fn fire(writer: Option<&UnixStream>, cmd: &str, app: &mut App) {
+    if let Some(w) = writer {
+        if send_cmd(w, cmd).is_err() {
+            app.should_quit = true;
+        }
+    }
+}
+
+/// As [`fire`], with one string property.
+pub fn fire_value(writer: Option<&UnixStream>, cmd: &str, key: &str, val: &str, app: &mut App) {
+    if let Some(w) = writer {
+        if send_cmd_value(w, cmd, key, val).is_err() {
+            app.should_quit = true;
+        }
+    }
+}
+
+/// As [`fire`], with a JSON payload (device names and speaker lists).
+pub fn fire_json(writer: Option<&UnixStream>, cmd: &str, payload: serde_json::Value, app: &mut App) {
+    if let Some(w) = writer {
+        if send_cmd_json(w, cmd, payload).is_err() {
+            app.should_quit = true;
+        }
+    }
+}
+
 pub fn status_from_wire(s: Option<&str>) -> OutStatus {
     match s.unwrap_or("copied") {
         "typed" => OutStatus::Typed,
@@ -345,6 +432,25 @@ mod tests {
         // A newer engine adding a field must not break an older TUI.
         let json = r#"{"t":"tx","text":"hi","rec":1.0,"proc":0.1,"ready":0.1,"status":"copied","time_saved":12.0,"session_time_saved":105.0,"lifetime_time_saved":3661.0,"words_per_second":9.9}"#;
         assert!(serde_json::from_str::<Wire>(json).is_ok());
+    }
+
+    /// The engine streams the accumulated meeting transcript while a capture
+    /// records; `text` defaults to empty so a minimal producer still parses.
+    #[test]
+    fn meeting_text_message_carries_the_accumulated_transcript() {
+        let json = r#"{"t":"meeting_text","text":"Alice: hello\nBob: hi"}"#;
+        match serde_json::from_str::<Wire>(json).expect("meeting_text must parse") {
+            Wire::MeetingText { text } => assert_eq!(text, "Alice: hello\nBob: hi"),
+            other => panic!("expected MeetingText, got {other:?}"),
+        }
+
+        // An empty payload is legitimate (a fresh capture before any words).
+        match serde_json::from_str::<Wire>(r#"{"t":"meeting_text"}"#)
+            .expect("empty meeting_text must parse")
+        {
+            Wire::MeetingText { text } => assert_eq!(text, ""),
+            other => panic!("expected MeetingText, got {other:?}"),
+        }
     }
 
     /// The picker used to receive a single scalar; it must still understand it.

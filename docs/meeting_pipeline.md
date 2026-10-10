@@ -154,6 +154,7 @@ transcriber and post-processor are injection seams):
 ## Not here (later milestones)
 
 * The speakers map and renamable labels, JSON/Markdown output (D5).
-* The `diarization` / `diarization_speakers` / `diarization_model` settings and
-  the `meeting_output_dir` key (D6).
+* `meeting_output_dir` (D5's output-location setting); the `diarization` /
+  `diarization_speakers` / `diarization_model` settings shipped in D6 and gate
+  the pass through `MeetingPipeline(diarization_gate=..., speakers_hint=...)`.
 * DER recorded in `eval/` (D7).

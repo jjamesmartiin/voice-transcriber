@@ -7,8 +7,14 @@ The load-bearing test in this file is
 has to mean the dictation path is indistinguishable from a build without it. Every
 other test here is about the feature working; that one is about it not existing.
 
-Model-free throughout. The formatter backend is stubbed, so nothing here needs
-the 462 MiB GGUF and nothing reaches the network.
+Model-free throughout. Every test that runs text through the formatter installs
+its own backend (``backend`` or ``unavailable_backend``) rather than trusting
+that the shipped one is absent, so nothing here needs the 462 MiB GGUF, nothing
+reaches the network, and nothing spawns a real ``llama-server`` - which
+``tests/shared/conftest.py`` enforces as a hard failure. An earlier version of
+``test_no_backend_means_the_text_passes_through`` relied on the module simply not
+being installed, and on a machine with the weights it ran real inference and
+leaked the server process.
 """
 import sys
 import types
@@ -23,6 +29,8 @@ if str(SRC_DIR) not in sys.path:
 import t2  # noqa: E402
 import post_processor as pp  # noqa: E402
 import formatter  # noqa: E402
+
+from ._rust_source import rust_implementation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUST_SETTINGS_PICKER = REPO_ROOT / "tui-rs" / "src" / "settings_picker.rs"
@@ -64,6 +72,43 @@ def backend(monkeypatch):
     t2.FORMATTER_MODEL = formatter.DEFAULT_MODEL
     yield _stub
     t2.FORMATTER_MODEL = saved_model
+    formatter.BACKENDS.clear()
+    formatter.BACKENDS.update(saved[0])
+    formatter._loaded.clear()
+    formatter._loaded.update(saved[1])
+
+
+def _unavailable(text, **kwargs):
+    _unavailable.calls.append((text, kwargs))
+    return "SHOULD NOT RUN"
+
+
+_unavailable.calls = []
+
+
+@pytest.fixture
+def unavailable_backend(monkeypatch):
+    """Install a backend whose ``available()`` is False, by construction.
+
+    Mirrors :func:`backend` but reports itself unavailable. Forcing that branch
+    this way is the whole point: the test below used to rely on the backend
+    *module* not being installed, which stopped being true when ``llama-server``
+    shipped and the conventional-install-path fallback started finding a
+    machine's weights. On such a machine it resolved the real backend, ran real
+    inference on the 462 MiB model, and leaked a ``llama-server`` process - all
+    inside the supposedly model-free shared tier.
+    """
+    _unavailable.calls = []
+    module = types.SimpleNamespace(
+        available=lambda model=None: False,
+        warm=lambda: None,
+        format_text=_unavailable,
+    )
+    saved = dict(formatter.BACKENDS), dict(formatter._loaded)
+    formatter.BACKENDS["unavailable"] = "voice_transcriber.formatters.unavailable"
+    formatter._loaded["unavailable"] = module
+    monkeypatch.setattr(formatter, "DEFAULT_BACKEND", "unavailable")
+    yield _unavailable
     formatter.BACKENDS.clear()
     formatter.BACKENDS.update(saved[0])
     formatter._loaded.clear()
@@ -190,28 +235,35 @@ def test_effective_formatter_reflects_the_cleanup_gate():
 # ---------------------------------------------------------------------------
 # Fail open
 # ---------------------------------------------------------------------------
-def test_no_backend_means_the_text_passes_through(cfg):
+def test_no_backend_means_the_text_passes_through(unavailable_backend, cfg):
+    """An unavailable backend is a no-op, and is never consulted.
+
+    The unavailable branch is forced by the ``unavailable_backend`` fixture
+    rather than inferred from the machine (no installed weights, not in a spawn
+    cooldown). Relying on the machine is how this test came to run the real
+    model, and only silently pass when a preceding failed spawn happened to be
+    holding the 60 s cooldown.
+    """
     t2.set_formatter("on")
-    # Registered, but its module is not installed - the common case for the
-    # in-process backend until C4 lands, and for any backend on a machine that
-    # never downloaded the weights.
-    t2.FORMATTER_MODEL = "s1-mini"
     assert _run() == pp.clean_speech_transcription(SAMPLE, skip_slm=True)
+    assert unavailable_backend.calls == [], (
+        "an unavailable backend must not be called")
 
 
-def test_a_raising_backend_leaves_the_text_alone(cfg):
+def test_a_raising_backend_leaves_the_text_alone(cfg, monkeypatch):
+    """A backend that raises mid-format falls back to the untouched text."""
     module = types.SimpleNamespace(
         available=lambda model=None: True, warm=lambda: None,
         format_text=lambda text, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
-    formatter.BACKENDS["boom"] = "voice_transcriber.formatters.boom"
-    formatter._loaded["boom"] = module
-    try:
-        t2.set_formatter("on")
-        t2.FORMATTER_MODEL = "boom"
-        assert _run() == pp.clean_speech_transcription(SAMPLE, skip_slm=True)
-    finally:
-        formatter.BACKENDS.pop("boom", None)
-        formatter._loaded.pop("boom", None)
+    monkeypatch.setitem(formatter.BACKENDS, "boom", "voice_transcriber.formatters.boom")
+    monkeypatch.setitem(formatter._loaded, "boom", module)
+    # The raising backend has to *be* the resolved backend. Setting only
+    # ``formatter_model`` did not do that, so this test used to exercise the
+    # shipping default backend and never test its own subject.
+    monkeypatch.setattr(formatter, "DEFAULT_BACKEND", "boom")
+    t2.set_formatter("on")
+    t2.FORMATTER_MODEL = "boom"
+    assert _run() == pp.clean_speech_transcription(SAMPLE, skip_slm=True)
 
 
 # ---------------------------------------------------------------------------
@@ -385,12 +437,16 @@ def test_formatter_labels():
         "Off: deterministic cleanup only", "[OFF]", "dim white")
     assert t2.formatter_setting_state("on") == (
         "Rewrites the transcript on this machine", "[ON]", "green")
+    # C9: the stored value stays the machine id, but the settings row names the
+    # model the way its licence requires.
+    assert t2.get_formatter_model() == "s1-mini"
+    assert t2.formatter_model_display_name("s1-mini") == '"S1-mini" by "Superwhisper"'
     assert t2.formatter_model_setting_state("s1-mini") == (
-        "Model: s1-mini", "[MODEL]", "cyan")
+        'Model: "S1-mini" by "Superwhisper"', "[MODEL]", "cyan")
     assert t2.formatter_style_setting_state("formal") == (
-        "Writing style: formal", "[STYLE]", "cyan")
+        "Writing style: formal (expands)", "[STYLE]", "cyan")
     assert t2.formatter_context_setting_state("email") == (
-        "Context: email", "[CONTEXT]", "cyan")
+        "Context: email (greeting/signoff)", "[CONTEXT]", "cyan")
 
 
 def test_ratatui_formatter_labels_match_python():
@@ -404,8 +460,7 @@ def test_ratatui_formatter_labels_match_python():
     the *prefix* is what can be matched - the Rust source holds the format
     string, never a rendered example.
     """
-    source = RUST_SETTINGS_PICKER.read_text(encoding="utf-8")
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
     assert "SettingKind::Formatter" in implementation, (
         "could not find the formatter rows in tui-rs/src/settings_picker.rs - "
         "the parity guard is looking in the wrong place")
@@ -427,6 +482,14 @@ def test_ratatui_formatter_labels_match_python():
     for command in ("cycle_formatter", "cycle_formatter_model",
                     "cycle_formatter_style", "cycle_formatter_context"):
         assert command in implementation, f"ratatui no longer sends {command}"
+
+    # C9: the ratatui row must render the licence label, not the machine id.
+    # The Rust literal escapes its quotes, so compare the escaped form.
+    label = t2.formatter_model_display_name("s1-mini")
+    assert "formatter_model_display" in implementation, (
+        "ratatui no longer resolves the formatter model display name")
+    assert label.replace('"', '\\"') in implementation, (
+        f"ratatui no longer shows {label!r}")
 
 
 # ---------------------------------------------------------------------------

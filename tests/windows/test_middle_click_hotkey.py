@@ -94,5 +94,12 @@ def test_windows_disabling_mouse_mode_mid_hold_stops_recording():
         # A release after disabling must not fire a second stop.
         manager._on_mouse_click(0, 0, Button.middle, False)
         assert cb_stop.call_count == 1
+
+        # Regression: that release is dropped by the `not middle_click_enabled`
+        # guard, so the pressed flag has to be cleared by the disable itself.
+        # Left set, `are_modifiers_pressed()` reports "still held" on every later
+        # recording and the engine adds its full hold-wait (0.4-1.0 s) each time.
+        assert manager.middle_pressed is False
+        assert manager.are_modifiers_pressed() is False
     finally:
         manager.cleanup()

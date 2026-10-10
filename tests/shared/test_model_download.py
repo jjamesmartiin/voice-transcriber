@@ -13,6 +13,7 @@ never stream gigabytes from a CDN in a background thread.
 """
 import dataclasses
 import hashlib
+import http.client
 import io
 import json
 import lzma
@@ -20,6 +21,8 @@ import os
 import subprocess
 import sys
 import tarfile
+import threading
+import types
 import urllib.error
 import zipfile
 from pathlib import Path
@@ -107,6 +110,272 @@ def test_get_spec_rejects_an_unknown_model():
         model_download.get_spec("nope")
 
 
+def test_formatter_and_diarization_specs_are_registered():
+    """The two redistributable non-ASR models resolve and carry their own data.
+
+    A fresh machine needs a download path for both; before C6 the registry held
+    only Cohere, so enabling the formatter or meeting mode did nothing unless the
+    files had been placed by hand.
+    """
+    formatter = model_download.get_spec("formatter")
+    assert formatter.repo_id == "superwhisper/s1-mini-GGUF"
+    assert formatter.target_subdir == "formatter"
+    assert formatter.required_local == ("s1-mini-q4_k_m.gguf",)
+    assert formatter.digests["s1-mini-q4_k_m.gguf"] == (
+        "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634")
+    assert formatter.model_ids == ("s1-mini",)
+    # The licence's naming term must survive as the display name.
+    assert formatter.display_name == '"S1-mini" by "Superwhisper"'
+
+    diarization = model_download.get_spec("diarization")
+    assert diarization.target_subdir == "diarization"
+    assert diarization.model_ids == ("diarization",)
+    assert set(diarization.required_local) == set(diarization.digests)
+    # Nested install layout the backend reads (diarizers/sherpa_onnx.py).
+    assert any(f.endswith("pyannote-segmentation-3-0/model.onnx")
+               for f in diarization.required_local)
+    assert any(f.endswith(".onnx") and "3dspeaker" in f
+               for f in diarization.required_local)
+
+
+def test_registry_name_for_model_maps_config_ids_to_registry_keys():
+    assert model_download.registry_name_for_model("s1-mini") == "formatter"
+    assert model_download.registry_name_for_model("S1-MINI") == "formatter"
+    assert model_download.registry_name_for_model("diarization") == "diarization"
+    assert model_download.registry_name_for_model("gpt-9-turbo") is None
+    assert model_download.registry_name_for_model("") is None
+    assert model_download.registry_name_for_model(None) is None
+
+
+def test_every_shipped_formatter_model_id_has_a_registry_entry():
+    """`formatter.MODELS` and the registry must not drift apart.
+
+    `formatter_model` names a *model id*; the registry is the single home for
+    what that id actually downloads. Without this pin, a new model in the
+    settings cycle could resolve to nothing at download time.
+    """
+    import formatter as formatter_module
+
+    for model_id in formatter_module.MODELS:
+        name = model_download.registry_name_for_model(model_id)
+        assert name is not None, f"no registry entry claims model id {model_id!r}"
+        spec = model_download.get_spec(name)
+        assert any(str(f).endswith(".gguf") for f in spec.required_local), (
+            f"{name} declares no GGUF for {model_id!r}")
+
+
+def test_models_dir_prefers_an_existing_per_user_install(monkeypatch, tmp_path):
+    """Registering an entry must not hide weights installed outside a checkout.
+
+    Regression the diarization graphs exposed: a writable checkout with no
+    `models/<subdir>` used to win over a complete per-user install, so adding the
+    `diarization` spec made already-present graphs unfindable.
+    """
+    monkeypatch.delenv("VT_MODEL_DIR", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(model_download, "find_repo_root", lambda: str(tmp_path / "repo"))
+    (tmp_path / "repo").mkdir()
+    spec = _synthetic_spec(name="synthetic", target_subdir="synthetic")
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+
+    installed = tmp_path / "vt" / "models" / "synthetic"
+    installed.mkdir(parents=True)
+    for req in spec.required_local:
+        (installed / req).write_text("stub", encoding="utf-8")
+
+    assert model_download.models_dir("synthetic") == str(installed)
+    # ... and a completely absent install still targets the writable checkout.
+    for req in spec.required_local:
+        (installed / req).unlink()
+    assert model_download.models_dir("synthetic") == os.path.join(
+        str(tmp_path), "repo", "models", "synthetic")
+
+
+def test_ensure_model_async_is_inert_without_a_status_handler(monkeypatch, tmp_path):
+    """No UI attached -> no background download (keeps shared tests hermetic)."""
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_status_handler", None)
+    called = []
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda *a, **k: called.append(a) or str(tmp_path))
+
+    assert model_download.ensure_model_async(spec.name, dest=str(tmp_path / "d")) is False
+    assert called == []
+
+
+def test_ensure_model_async_runs_the_install_on_a_daemon_thread(monkeypatch, tmp_path):
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_status_handler", lambda *a: None)
+    done = threading.Event()
+    calls = []
+
+    def fake_ensure(name, dest=None, base_url=None, revision=None):
+        calls.append((name, dest))
+        done.set()
+        return dest
+
+    monkeypatch.setattr(model_download, "ensure_model", fake_ensure)
+    dest = str(tmp_path / "d")
+    assert model_download.ensure_model_async(spec.name, dest=dest, consented=True) is True
+    assert done.wait(5), "the background install never ran"
+    assert calls == [(spec.name, dest)]
+    # A completed install must not start a second one.
+    monkeypatch.setattr(model_download, "is_model_complete", lambda *a, **k: True)
+    assert model_download.ensure_model_async(spec.name, dest=dest, consented=True) is False
+
+
+def test_prompt_policy_overrides_the_tty_heuristic(monkeypatch):
+    """A TUI owning the terminal must be able to forbid the stdin prompt."""
+    monkeypatch.setattr(model_download, "_prompt_allowed", None)
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    assert model_download._can_prompt() is True
+
+    model_download.set_prompt_allowed(False)
+    assert model_download._can_prompt() is False
+    model_download.set_prompt_allowed(True)
+    assert model_download._can_prompt() is True
+    model_download.set_prompt_allowed(None)
+    assert model_download._can_prompt() is True
+
+
+def test_ensure_model_async_waits_for_consent_under_a_tui(monkeypatch, tmp_path):
+    """With no safe way to ask, report the size and start nothing.
+
+    This is the fresh-machine-under-a-TUI case: the first-use path must not
+    prompt on stdin from a background thread (invisible, and it blocks on
+    keystrokes the TUI consumes), and it must not download without consent.
+    """
+    spec = _synthetic_spec(download_hint="~462 MiB")
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_prompt_allowed", False)
+    monkeypatch.setattr(model_download, "_async_consent_notified", set())
+    monkeypatch.delenv("VT_AUTO_DOWNLOAD_MODEL", raising=False)
+    notices = []
+    monkeypatch.setattr(
+        model_download, "_status_handler",
+        lambda stage, pct, text: notices.append((stage, pct, text)))
+    started = []
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda *a, **k: started.append(a))
+
+    dest = str(tmp_path / "d")
+    assert model_download.ensure_model_async(spec.name, dest=dest) is False
+    # A second first-use utterance does not spam the status line.
+    assert model_download.ensure_model_async(spec.name, dest=dest) is False
+    assert started == [], "started a download without consent"
+    assert len(notices) == 1, notices
+    _stage, _pct, text = notices[0]
+    assert "~462 MiB" in text
+    assert f"{spec.name}-download" in text
+
+
+def test_ensure_model_async_consent_starts_the_install(monkeypatch, tmp_path):
+    """The explicit command is what gets past the TUI consent gate."""
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_prompt_allowed", False)
+    monkeypatch.setattr(model_download, "_async_consent_notified", set())
+    monkeypatch.setattr(model_download, "_status_handler", lambda *a: None)
+    done = threading.Event()
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda name, **k: done.set())
+
+    assert model_download.ensure_model_async(
+        spec.name, dest=str(tmp_path / "d"), consented=True) is True
+    assert done.wait(5), "explicit consent did not start the install"
+
+
+def test_an_in_flight_install_is_never_reported_as_missing(monkeypatch, tmp_path):
+    """A first-use call during a consented download must ride along silently.
+
+    Checking consent before the in-flight set made an utterance that arrived mid
+    download re-report "not installed; run ...-download", which is both wrong and
+    noise the user cannot act on while the install is already running.
+    """
+    spec = _synthetic_spec(download_hint="~462 MiB")
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_prompt_allowed", False)
+    monkeypatch.setattr(model_download, "_async_consent_notified", set())
+    notices = []
+    monkeypatch.setattr(model_download, "_status_handler",
+                        lambda stage, pct, text: notices.append(text))
+    release = threading.Event()
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda name, **k: release.wait(5))
+
+    dest = str(tmp_path / "d")
+    assert model_download.ensure_model_async(
+        spec.name, dest=dest, consented=True) is True
+    assert model_download.ensure_model_async(spec.name, dest=dest) is True
+    assert notices == [], notices
+    release.set()
+
+
+def test_auto_download_env_is_standing_consent(monkeypatch, tmp_path):
+    """VT_AUTO_DOWNLOAD_MODEL=1 keeps its "do not ask" meaning."""
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_prompt_allowed", False)
+    monkeypatch.setattr(model_download, "_async_consent_notified", set())
+    monkeypatch.setattr(model_download, "_status_handler", lambda *a: None)
+    monkeypatch.setenv("VT_AUTO_DOWNLOAD_MODEL", "1")
+    done = threading.Event()
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda name, **k: done.set())
+
+    assert model_download.ensure_model_async(
+        spec.name, dest=str(tmp_path / "d")) is True
+    assert done.wait(5), "standing consent did not start the install"
+
+
+def test_the_download_prompt_states_the_size_before_fetching(capsys, monkeypatch, tmp_path):
+    """A clean machine must be told the size before anything downloads.
+
+    The prompt is answered "no" and the local-bundle probe is stubbed out, so
+    this proves the wording without touching the network or writing a file.
+    """
+    monkeypatch.setenv("VT_MODEL_DIR", str(tmp_path / "formatter"))
+    monkeypatch.delenv("VT_MODEL_SOURCE_DIR", raising=False)
+    monkeypatch.delenv("VT_MODEL_BUNDLE", raising=False)
+    monkeypatch.delenv("VT_AUTO_DOWNLOAD_MODEL", raising=False)
+    monkeypatch.setattr(model_download, "_local_model_source", lambda: (None, False))
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+
+    assert model_download.ensure_model("formatter") is None
+    out = capsys.readouterr().out
+    assert "Download size: ~462 MiB." in out, out
+    assert '"S1-mini" by "Superwhisper"' in out, out
+
+
+def test_ensure_model_never_prompts_when_the_policy_forbids_it(capsys, monkeypatch, tmp_path):
+    """The TUI case: state the size, but never call input() on stdin.
+
+    Under a full-screen TUI stdin is still a tty, so the old isatty-only guard
+    called input() from a background thread - an invisible prompt that blocked on
+    keystrokes the TUI was consuming.
+    """
+    monkeypatch.setenv("VT_MODEL_DIR", str(tmp_path / "formatter"))
+    monkeypatch.delenv("VT_MODEL_SOURCE_DIR", raising=False)
+    monkeypatch.delenv("VT_MODEL_BUNDLE", raising=False)
+    monkeypatch.delenv("VT_AUTO_DOWNLOAD_MODEL", raising=False)
+    monkeypatch.setattr(model_download, "_local_model_source", lambda: (None, False))
+    monkeypatch.setattr(model_download, "_prompt_allowed", False)
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("builtins.input",
+                        lambda *a, **k: pytest.fail("prompted on stdin under a TUI"))
+    # Stop before the network: the manifest fetch is the first network call.
+    monkeypatch.setattr(
+        model_download, "_fetch_part_manifest",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no network in this test")))
+
+    assert model_download.ensure_model("formatter") is None
+    out = capsys.readouterr().out
+    assert "Download size: ~462 MiB." in out, out
+
+
 def test_is_model_complete_is_per_spec(monkeypatch, tmp_path):
     spec = _synthetic_spec()
     monkeypatch.setitem(model_download.MODELS, spec.name, spec)
@@ -122,6 +391,39 @@ def test_is_model_complete_is_per_spec(monkeypatch, tmp_path):
     for req in spec.required_local:
         (tmp_path / req).write_text("stub", encoding="utf-8")
     assert model_download.is_model_complete("synthetic", str(tmp_path)) is True
+
+
+def test_a_stale_revision_recorded_in_source_json_is_not_complete(tmp_path, monkeypatch):
+    """The weights are keyed by revision, so a bump must re-install, not reuse.
+
+    Regression: completeness was "the required filenames exist", and the revision
+    written into SOURCE.json was never read back. After a revision bump every
+    existing user kept running the previous model, silently, and the doctor
+    reported their weights as verified.
+    """
+    import json
+
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    for req in spec.required_local:
+        (tmp_path / req).write_text("stub", encoding="utf-8")
+
+    # No SOURCE.json (a manual install) stays supported.
+    assert model_download.is_model_complete(spec.name, str(tmp_path)) is True
+
+    # The revision this spec wants, as written by _write_provenance.
+    (tmp_path / "SOURCE.json").write_text(
+        json.dumps({"model": spec.repo_id, "revision": spec.revision}), encoding="utf-8")
+    assert model_download.is_model_complete(spec.name, str(tmp_path)) is True
+
+    # An older install: same files, previous revision.
+    (tmp_path / "SOURCE.json").write_text(
+        json.dumps({"model": spec.repo_id, "revision": "an-older-revision"}), encoding="utf-8")
+    assert model_download.is_model_complete(spec.name, str(tmp_path)) is False
+
+    # Unreadable provenance must not force a re-download on its own.
+    (tmp_path / "SOURCE.json").write_text("{not json", encoding="utf-8")
+    assert model_download.is_model_complete(spec.name, str(tmp_path)) is True
 
 
 def test_find_repo_root():
@@ -248,6 +550,72 @@ def test_fetch_part_manifest_fast_fails_on_404(monkeypatch):
     # Verify it broke immediately on 404 rather than retrying 3 times
     assert call_count == 1
     assert "404" in str(exc_info.value)
+
+
+def _fake_body_response(payload, attempts, *, mode):
+    """A ``urlopen`` response that misbehaves on the first attempt only."""
+
+    class FakeResponse:
+        def __init__(self, data):
+            self._data = io.BytesIO(data)
+            self.headers = {"Content-Length": str(len(data))}
+
+        def read(self, size=-1):
+            if attempts["n"] == 1:
+                if mode == "incomplete":
+                    raise http.client.IncompleteRead(b"", len(payload))
+                if self._data.tell() >= len(payload) // 2:
+                    return b""  # short body: EOF halfway through
+            return self._data.read(size)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    return FakeResponse(payload)
+
+
+def test_http_get_retries_an_incomplete_read(monkeypatch, tmp_path):
+    """A dropped connection mid-part must be retried, not abort the install.
+
+    ``http.client.IncompleteRead`` is an ``HTTPException``, not an ``OSError``,
+    so it used to bypass the retry tuple and lose a whole 2.8 GB download.
+    """
+    payload = b"x" * (2 << 20)
+    attempts = {"n": 0}
+
+    def fake_urlopen(req, timeout=120):
+        attempts["n"] += 1
+        return _fake_body_response(payload, attempts, mode="incomplete")
+
+    monkeypatch.setattr(model_download.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(model_download.time, "sleep", lambda *a, **k: None)
+    dest = tmp_path / "part.xz"
+
+    assert model_download._http_get(
+        "https://example.com/p", str(dest), "part") == len(payload)
+    assert attempts["n"] == 2
+    assert dest.read_bytes() == payload
+
+
+def test_http_get_retries_a_short_body(monkeypatch, tmp_path):
+    """A response that ends before its declared length is retried too."""
+    payload = b"y" * (2 << 20)
+    attempts = {"n": 0}
+
+    def fake_urlopen(req, timeout=120):
+        attempts["n"] += 1
+        return _fake_body_response(payload, attempts, mode="short")
+
+    monkeypatch.setattr(model_download.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(model_download.time, "sleep", lambda *a, **k: None)
+    dest = tmp_path / "part.xz"
+
+    assert model_download._http_get(
+        "https://example.com/p", str(dest), "part") == len(payload)
+    assert attempts["n"] == 2
 
 
 def test_ensure_local_cohere_fallback_candidate_chain(monkeypatch, tmp_path):
@@ -391,6 +759,67 @@ def test_packager_selects_a_registry_model():
     assert "--model" in text
     assert "spec.asset_prefix" in text
     assert model_download.REVISION not in text
+    # It can locate an install the app itself made, so a machine that never
+    # touched the HF cache can still package.
+    assert "find_installed_model_dir" in text
+
+
+def test_packager_tars_nested_files_and_ships_a_verbatim_notice(tmp_path):
+    """A spec may nest package files and ship its own NOTICE verbatim.
+
+    Diarization's segmentation graph lives in a subdirectory, and S1-mini's
+    upstream NOTICE carries an operative naming clause that a generated NOTICE
+    would paraphrase, so both capabilities are load-bearing.
+    """
+    notice_text = 'S1-mini-GGUF\nCopyright 2026 Superwhisper\n'
+    notice_path = tmp_path / "NOTICE.upstream"
+    notice_path.write_text(notice_text, encoding="utf-8")
+    files = {"seg/model.onnx": b"ONNX-weights", "embed.onnx": b"EMB"}
+    spec = _synthetic_spec(files=files, notice_file=str(notice_path))
+    model_dir = tmp_path / "model"
+    for name, data in files.items():
+        path = model_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    packager = _load_packager()
+    tar_path = tmp_path / "model.tar"
+    packager.build_tar(spec, str(model_dir), str(tmp_path / "staging"), str(tar_path))
+
+    with tarfile.open(tar_path, "r") as tf:
+        names = tf.getnames()
+        assert "seg/model.onnx" in names, names
+        assert "embed.onnx" in names, names
+        assert tf.extractfile("NOTICE").read().decode() == notice_text
+
+
+def test_packager_falls_back_to_the_registry_install_dir(monkeypatch, tmp_path):
+    """A machine that installed through the app can package without --model-dir."""
+    spec = _synthetic_spec()
+    for req in spec.package_files:
+        (tmp_path / req).write_bytes(b"x")
+    monkeypatch.setattr(model_download, "models_dir", lambda name: str(tmp_path))
+    packager = _load_packager()
+    assert packager.find_installed_model_dir(spec) == str(tmp_path)
+    # A directory missing a declared file is not an install.
+    (tmp_path / spec.package_files[0]).unlink()
+    assert packager.find_installed_model_dir(spec) is None
+
+
+def test_install_from_a_bundle_with_a_nested_package_file(monkeypatch, tmp_path):
+    """The format-agnostic installer handles a nested layout (diarization)."""
+    files = {"seg/model.onnx": b"ONNX-weights", "embed.onnx": b"EMB"}
+    spec = _synthetic_spec(files=files)
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    bundle = _make_bundle(tmp_path, spec.asset_prefix, files)
+    dest = tmp_path / "dest"
+
+    result = model_download.install_model_from_local_bundle(
+        spec.name, str(bundle), dest=str(dest))
+
+    assert result == str(dest)
+    assert (dest / "seg" / "model.onnx").read_bytes() == files["seg/model.onnx"]
+    assert model_download.is_model_complete(spec.name, str(dest))
 
 
 def _load_packager():
@@ -441,6 +870,64 @@ def test_notice_formal_names_are_not_the_console_labels():
     assert spec.license_name == "Apache-2.0"
     assert spec.notice_title != spec.display_name
     assert spec.license_title != spec.license_name
+
+
+def test_s1_mini_notice_is_pinned_to_the_published_wording():
+    """The S1-mini NOTICE is a legal artifact and must never drift.
+
+    Its ADDITIONAL TERM requires the exact name '"S1-mini" by "Superwhisper"',
+    so the *upstream* NOTICE ships byte-for-byte through ``spec.notice_file``
+    instead of a generated one, which would paraphrase the operative clause.
+    Pinned here the same way the Cohere NOTICE is.
+    """
+    spec = model_download.get_spec("formatter")
+    assert spec.notice_file == "config/licenses/S1-mini-NOTICE.txt"
+    notice = (REPO_ROOT / spec.notice_file).read_text(encoding="utf-8")
+    assert notice == (
+        "S1-mini-GGUF\n"
+        "Copyright 2026 Superwhisper\n"
+        "\n"
+        "GGUF conversions of S1-mini, which is itself a derivative of Qwen3-0.6B,\n"
+        "Copyright 2024 Alibaba Cloud, licensed under the Apache License, Version 2.0.\n"
+        "\n"
+        "Any use, distribution, or integration of this model, whether unmodified or\n"
+        "as part of a derivative work or product, must continue to identify it by its\n"
+        'original name, "S1-mini" by "Superwhisper", using that exact capitalization.\n'
+        "This restates the ADDITIONAL TERM of the LICENSE file, which is the\n"
+        "operative text.\n"
+    )
+
+
+def test_s1_mini_licence_carries_provenance_and_the_full_upstream_text():
+    """The committed licence is the upstream text plus verifiable provenance."""
+    spec = model_download.get_spec("formatter")
+    lic = (REPO_ROOT / spec.license_file).read_text(encoding="utf-8")
+    assert spec.repo_id in lic, "provenance must name the source repo"
+    assert spec.revision in lic, "provenance must pin the revision"
+    assert spec.digests["s1-mini-q4_k_m.gguf"] in lic, "provenance must pin the digest"
+    # The full upstream text is retained: Apache-2.0 *and* the additional term.
+    assert "Apache License" in lic
+    assert "Version 2.0" in lic
+    assert "ADDITIONAL TERM" in lic
+    assert '"S1-mini" by "Superwhisper"' in lic
+
+
+def test_diarization_licences_and_provenance_are_committed():
+    """Both graphs' licences ship, with the digests that verify them."""
+    spec = model_download.get_spec("diarization")
+    lic = (REPO_ROOT / spec.license_file).read_text(encoding="utf-8")
+    assert "MIT License" in lic                 # pyannote segmentation
+    assert "Copyright (c) 2022 CNRS" in lic
+    assert "Apache License" in lic              # 3D-Speaker embedding
+    assert "recongition" in lic, "the upstream (misspelled) asset URL is provenance"
+    assert spec.repo_id in lic
+    for digest in spec.digests.values():
+        assert digest in lic, f"provenance must pin {digest}"
+
+    notice = (REPO_ROOT / spec.notice_file).read_text(encoding="utf-8")
+    assert "pyannote" in notice
+    assert "3D-Speaker" in notice
+    assert "MIT" in notice and "Apache" in notice
 
 
 def test_manifest_listing_missing_parts_is_skipped(monkeypatch, tmp_path):
@@ -633,6 +1120,77 @@ def test_install_rejects_a_bad_digest_map_entry(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError, match=r"Extracted weights\.gguf sha256 .* does not match"):
         model_download.install_model_from_local_bundle(
             spec.name, str(bundle), dest=str(tmp_path / "dest"))
+
+
+def _complete_dest_fixture(monkeypatch, tmp_path):
+    """A synthetic spec, a valid bundle and a pre-existing dest directory."""
+    files = {"config.json": b"{}", "weights.gguf": b"fake-gguf-weights"}
+    spec = _synthetic_spec(files=files)
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    bundle = _make_bundle(tmp_path, spec.asset_prefix, files)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "keep-me.txt").write_text("a good install", encoding="utf-8")
+    return spec, bundle, dest
+
+
+def test_a_second_installer_never_deletes_a_completed_install(monkeypatch, tmp_path):
+    """Two concurrent installs must not delete each other's weights.
+
+    With the destination already complete, the installer keeps it instead of
+    ``rmtree``-ing it just to move an identical copy into place.
+    """
+    spec, bundle, dest = _complete_dest_fixture(monkeypatch, tmp_path)
+    # Pretend a concurrent installer finished while we assembled: every
+    # completeness check now says yes, so this one must not touch ``dest``.
+    monkeypatch.setattr(model_download, "is_model_complete", lambda *a, **k: True)
+
+    result = model_download.install_model_from_local_bundle(
+        spec.name, str(bundle), dest=str(dest))
+
+    assert result == str(dest)
+    assert (dest / "keep-me.txt").read_text(encoding="utf-8") == "a good install"
+    assert not (tmp_path / "dest.lock").exists()  # lock released
+
+
+def test_a_held_install_lock_defers_to_the_other_installer(monkeypatch, tmp_path):
+    """A lock held by another process means its install is the one to use."""
+    spec, bundle, dest = _complete_dest_fixture(monkeypatch, tmp_path)
+    lock_dir = tmp_path / "dest.lock"
+    lock_dir.mkdir()
+    monkeypatch.setattr(model_download, "is_model_complete", lambda *a, **k: True)
+    monkeypatch.setattr(model_download.time, "sleep", lambda *a, **k: None)
+
+    result = model_download.install_model_from_local_bundle(
+        spec.name, str(bundle), dest=str(dest))
+
+    assert result == str(dest)
+    assert (dest / "keep-me.txt").read_text(encoding="utf-8") == "a good install"
+    # The other process's lock is not ours to remove.
+    assert lock_dir.exists()
+
+
+def test_a_stale_install_lock_does_not_block_a_later_install(monkeypatch, tmp_path, capsys):
+    """A lock left behind by a killed installer must not be permanent.
+
+    Regression guard: the wait used to end in a hard failure, so a ``.lock``
+    directory dropped by a crash blocked every later install until somebody
+    deleted it by hand. It now proceeds, because the re-check before the swap is
+    what actually protects a finished install — a lock nobody owns is not
+    evidence of anything.
+    """
+    spec, bundle, dest = _complete_dest_fixture(monkeypatch, tmp_path)
+    lock_dir = tmp_path / "dest.lock"
+    lock_dir.mkdir()
+    # The wait polls a destination that never becomes complete, so it runs out.
+    monkeypatch.setattr(model_download.time, "sleep", lambda *a, **k: None)
+
+    result = model_download.install_model_from_local_bundle(
+        spec.name, str(bundle), dest=str(dest))
+
+    assert result == str(dest)
+    assert "looks stuck; continuing" in capsys.readouterr().out
+    assert lock_dir.exists()  # still not ours to remove
 
 
 def test_ensure_model_installs_a_synthetic_spec_offline(monkeypatch, tmp_path):

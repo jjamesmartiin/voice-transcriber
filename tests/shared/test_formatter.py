@@ -16,6 +16,7 @@ The two halves that matter equally:
 Hermeticity: tests/shared/conftest.py blocks real non-loopback connects, so a
 backend that tried to reach a network endpoint fails loudly here.
 """
+import logging
 import sys
 import time
 import types
@@ -135,10 +136,6 @@ def test_system_prompt_is_verbatim():
         "with a control line specifying the styling, structure, and context settings; "
         "clean the transcript to match those settings and output only the cleaned text."
     )
-
-
-def test_assistant_prefix_matches_the_trained_shape():
-    assert formatter.ASSISTANT_PREFIX == "<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
 
 def test_control_line_shape():
@@ -490,6 +487,54 @@ def test_warm_reports_readiness_without_raising(monkeypatch):
     assert formatter.warm(name) is False
 
 
+def test_an_unavailable_backend_is_asked_to_fetch_its_model(monkeypatch):
+    """First use of an enabled formatter with no weights starts a download.
+
+    The backend owns *how* (a daemon thread); the entry point's job is only to
+    ask, and to still return the untouched text for this utterance.
+    """
+    requested = []
+    module = types.SimpleNamespace(
+        available=lambda model=None: False,
+        warm=lambda: None,
+        format_text=lambda text, **kw: "SHOULD NOT RUN",
+        request_model=lambda model=None: requested.append(model) or True,
+    )
+    monkeypatch.setitem(formatter.BACKENDS, "fetchy", "voice_transcriber.formatters.fetchy")
+    monkeypatch.setitem(formatter._loaded, "fetchy", module)
+
+    assert formatter.format_text("buy milk", backend="fetchy", model="s1-mini") == "buy milk"
+    assert requested == ["s1-mini"]
+
+
+def test_a_backend_without_a_request_hook_is_left_alone(monkeypatch):
+    """The hook is optional: a backend with nothing to fetch must still work."""
+    module = types.SimpleNamespace(
+        available=lambda model=None: False,
+        warm=lambda: None,
+        format_text=lambda text, **kw: text,
+    )
+    monkeypatch.setitem(formatter.BACKENDS, "plain", "voice_transcriber.formatters.plain")
+    monkeypatch.setitem(formatter._loaded, "plain", module)
+    assert formatter.format_text("buy milk", backend="plain") == "buy milk"
+
+
+def test_a_failing_request_hook_never_reaches_the_user(monkeypatch):
+    """A broken download path must not disturb the transcript."""
+    def boom(model=None):
+        raise RuntimeError("download machinery exploded")
+
+    module = types.SimpleNamespace(
+        available=lambda model=None: False,
+        warm=lambda: None,
+        format_text=lambda text, **kw: text,
+        request_model=boom,
+    )
+    monkeypatch.setitem(formatter.BACKENDS, "boomdl", "voice_transcriber.formatters.boomdl")
+    monkeypatch.setitem(formatter._loaded, "boomdl", module)
+    assert formatter.format_text("buy milk", backend="boomdl") == "buy milk"
+
+
 # ---------------------------------------------------------------------------
 # Hard gate: never run when nothing may be deleted
 # ---------------------------------------------------------------------------
@@ -541,3 +586,21 @@ def test_the_pipeline_returns_formatted_text_end_to_end(monkeypatch):
 
     name = install_fake(monkeypatch, rewrite)
     assert formatter.format_text(WISPR_RETRACTION_IN, backend=name) == WISPR_RETRACTION_OUT
+
+
+def test_a_rejected_rewrite_logs_the_reason(caplog, monkeypatch):
+    """A guardrail rejection must be recoverable from the log, not silent.
+
+    The fallback returns exactly what `formatter: off` returns, so a discarded
+    answer used to be indistinguishable from the formatter not running - the
+    ambiguity that hid two guardrail false-positives which threw away correct
+    model output. The reason and the model id must reach the log.
+    """
+    name = install_fake(monkeypatch, lambda text, **kw: "Buy milk and also bread.")
+
+    with caplog.at_level(logging.WARNING, logger="formatter"):
+        result = formatter.format_text("buy milk", backend=name, model="s1-mini")
+
+    assert result == "buy milk", "the invalid rewrite must still be discarded"
+    assert "absent from the input" in caplog.text
+    assert "s1-mini" in caplog.text

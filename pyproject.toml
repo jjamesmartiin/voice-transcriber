@@ -29,7 +29,6 @@ classifiers = [
 ]
 dependencies = [
     "accelerate",
-    "datasets",
     "huggingface-hub",
     "librosa",
     "numpy",
@@ -56,10 +55,15 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "pytest-timeout",
     "pytest-mock",
     "ruff",
     "pyinstaller",
+]
+# `datasets` is only imported by eval/build_eval.py (the AMI bakeoff), so it is a
+# developer dependency, not a runtime one: `pip install .` must not pull pyarrow
+# and pandas into a dictation app that never imports them.
+eval = [
+    "datasets",
 ]
 gui = [
     "gtts",

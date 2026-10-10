@@ -190,6 +190,17 @@ def load_merged_dictionary() -> Tuple[Dict[str, str], List[Dict[str, Any]], Dict
     return merged_map, merged_rules, key_sources
 
 
+def _yaml_scalar(value) -> str:
+    """A double-quoted YAML scalar that reads back as exactly this string.
+
+    ``json.dumps`` is the one quoting rule that survives everything the hand-rolled
+    version did not: a newline (which split the entry across lines and made the
+    whole file unparseable), a backslash, an embedded quote, and the values YAML
+    would otherwise re-type -- ``007`` became ``7``, ``yes`` became ``True``.
+    """
+    return json.dumps(str(value), ensure_ascii=False)
+
+
 def _format_yaml(mapping: Dict[str, str], contextual_rules: List[Dict[str, Any]], is_local: bool = False) -> str:
     """Format dictionary and contextual rules into clean, human-readable YAML."""
     header_title = "Personal / Local Custom Dictionary (Gitignored)" if is_local else "Custom Word & Technical Phrase Dictionary"
@@ -202,20 +213,9 @@ def _format_yaml(mapping: Dict[str, str], contextual_rules: List[Dict[str, Any]]
     ]
 
     for key in sorted(mapping.keys(), key=lambda s: s.lower()):
-        val = mapping[key]
         clean_key = " ".join(str(key).strip().split()).lower()
-        if any(c in clean_key for c in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "-", "<", ">", "=", "!", "%", "@", "\\", ".")):
-            key_repr = f'"{clean_key}"'
-        else:
-            key_repr = clean_key
-
-        clean_val = str(val).strip()
-        if any(c in clean_val for c in (":", "#", "{", "}", "[", "]", ",", "&", "*", "?", "|", "%", "@", "\\")) or clean_val.startswith(("-", ">", "<", "=")):
-            val_repr = f'"{clean_val}"'
-        else:
-            val_repr = clean_val
-
-        lines.append(f"  {key_repr}: {val_repr}\n")
+        clean_val = str(mapping[key]).strip()
+        lines.append(f"  {_yaml_scalar(clean_key)}: {_yaml_scalar(clean_val)}\n")
 
     if contextual_rules:
         lines.append("\n# ---------------------------------------------------------------------------\n")
@@ -223,32 +223,32 @@ def _format_yaml(mapping: Dict[str, str], contextual_rules: List[Dict[str, Any]]
         lines.append("# ---------------------------------------------------------------------------\n")
         lines.append("contextual_rules:\n")
         for rule in contextual_rules:
-            target = rule.get("target", "")
+            target = _yaml_scalar(rule.get("target", ""))
             lines.append(f"  - target: {target}\n")
 
             spoken = rule.get("spoken", [])
             if spoken:
                 lines.append("    spoken:\n")
                 for s in spoken:
-                    lines.append(f'      - "{s}"\n')
+                    lines.append(f"      - {_yaml_scalar(s)}\n")
 
             before = rule.get("triggers_before") or rule.get("before", [])
             if before:
                 lines.append("    triggers_before:\n")
                 for b in before:
-                    lines.append(f'      - "{b}"\n')
+                    lines.append(f"      - {_yaml_scalar(b)}\n")
 
             after = rule.get("triggers_after") or rule.get("after", [])
             if after:
                 lines.append("    triggers_after:\n")
                 for a in after:
-                    lines.append(f'      - "{a}"\n')
+                    lines.append(f"      - {_yaml_scalar(a)}\n")
 
             guards = rule.get("guards") or rule.get("protect", [])
             if guards:
                 lines.append("    guards:\n")
                 for g in guards:
-                    lines.append(f'      - "{g}"\n')
+                    lines.append(f"      - {_yaml_scalar(g)}\n")
             lines.append("\n")
 
     return "".join(lines)

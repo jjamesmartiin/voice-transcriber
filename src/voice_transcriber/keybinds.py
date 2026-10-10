@@ -232,7 +232,10 @@ def _reverse_pynput_map() -> dict[str, str]:
 
     Sided rows are declared before the bare ones, so a press resolves to the
     precise name (``rightctrl``, never ``ctrl``) while a bare ``alt`` stays the
-    either-side case for :func:`bind_hit`.
+    either-side case in :func:`bind_hit` -- which is the written statement of the
+    matching contract that ``TestBindMatching`` pins. The pynput backends
+    implement the same rule against pynput objects directly, because they must
+    match a *held* set rather than a list of names.
     """
     reverse: dict[str, str] = {}
     for key in KEYS:
@@ -393,7 +396,16 @@ def parse_binds(value) -> list[Bind]:
         not isinstance(value, (list, tuple)) and hasattr(value, "keys")
     ):
         return [parse_bind(value)]
-    binds = [parse_bind(entry) for entry in value]
+    try:
+        entries = list(value)
+    except TypeError:
+        # A scalar (``hotkeys: 12345``) is a typo, not a crash: callers catch
+        # KeybindError and keep the default chord, so the rest of the config
+        # must still load. Raising TypeError here skipped every setting after it.
+        raise KeybindError(
+            f"hotkeys must be a list of binds, got {type(value).__name__}"
+        ) from None
+    binds = [parse_bind(entry) for entry in entries]
     return binds or list(DEFAULT_BINDS)
 
 
@@ -457,9 +469,10 @@ DEFAULT_VK_BINDS = encode_vk_binds(DEFAULT_BINDS)
 def canonical_pynput_name(key, Key=None) -> str | None:
     """Canonical name for a pressed ``pynput`` key, or ``None`` if unbindable.
 
-    Resolving to a *name* (rather than comparing pynput objects) is what lets the
-    pynput backends reuse :func:`bind_hit` instead of each growing its own
-    chord-matching code, and keeps the platform tables in one place.
+    Resolving to a *name* (rather than comparing pynput objects) keeps the
+    platform tables in one place, and is what :func:`bind_hit` takes. The pynput
+    backends match pynput objects directly instead, so this is the reference
+    implementation of the name mapping rather than a call they make.
     """
     if Key is not None:
         for attr, name in PYNPUT_ATTR_TO_NAME.items():
@@ -474,9 +487,11 @@ def canonical_pynput_name(key, Key=None) -> str | None:
 def bind_hit(bind: Bind, held_names: Sequence[str]) -> bool:
     """Whether ``held_names`` (canonical) satisfy ``bind``.
 
-    A bare modifier matches either side; a named side matches only itself.
-    Backends that can resolve keys to canonical names (``pynput``) can call this
-    directly; the evdev and VK backends compare codes instead.
+    A bare modifier matches either side; a named side matches only itself. This
+    is the single written statement of the matching contract, and
+    ``TestBindMatching`` pins it: the pynput, evdev and VK backends each compare
+    their own key objects against the same rule, so a change here is a change to
+    what they must all do.
     """
     held = set(held_names)
     for name in bind.keys:

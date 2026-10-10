@@ -118,6 +118,15 @@ class WindowsHotkeyManager(BaseHotkeyManager):
         if hasattr(Key, "ctrl"):
             self.CTRL_KEYS.add(Key.ctrl)
 
+        # Super/Meta is a supported bind name, and the engine waits on
+        # are_modifiers_pressed() before injecting text: leaving it out typed
+        # letters while Super was down, which the desktop reads as shortcuts.
+        self.META_KEYS = set()
+        for attr in keybinds.PYNPUT_ATTRS.get("meta", ()):
+            member = getattr(Key, attr, None)
+            if member is not None:
+                self.META_KEYS.add(member)
+
         try:
             self.listener = pynput_keyboard.Listener(
                 on_press=self._on_press,
@@ -151,6 +160,11 @@ class WindowsHotkeyManager(BaseHotkeyManager):
                 if self._middle_click_timer:
                     self._middle_click_timer.cancel()
                     self._middle_click_timer = None
+                # The release event for a button held across the toggle is
+                # dropped by the `not middle_click_enabled` guard in
+                # _on_mouse_click, so the flag must be cleared here: left set, it
+                # reports "a modifier is still held" on every later recording.
+                self.middle_pressed = False
                 if self.middle_click_active:
                     self.middle_click_active = False
                     if not self._is_main_hotkey_pressed():
@@ -339,7 +353,7 @@ class WindowsHotkeyManager(BaseHotkeyManager):
 
     # -- state queries -----------------------------------------------------
     def are_modifiers_pressed(self):
-        return bool(self.pressed_keys & (self.ALT_KEYS | self.SHIFT_KEYS | self.CTRL_KEYS)) or self.middle_pressed
+        return bool(self.pressed_keys & (self.ALT_KEYS | self.SHIFT_KEYS | self.CTRL_KEYS | self.META_KEYS)) or self.middle_pressed
 
     def is_hotkey_pressed(self):
         return self.hotkey_active
