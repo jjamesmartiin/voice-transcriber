@@ -311,6 +311,40 @@ def _resolved_spec(name, revision=None):
 
 _status_handler = None  # set by the app: fn(stage: str, pct: int, text: str)
 
+#: Whether ``input()`` may be used for a consent prompt. ``None`` means "decide
+#: from ``sys.stdin.isatty()``" (standalone use). The app sets it to ``False``
+#: because a full-screen TUI (Rich or ratatui) owns the terminal in raw mode and
+#: consumes keystrokes: a prompt written there is invisible and blocks forever.
+_prompt_allowed = None
+
+
+def set_prompt_allowed(allowed):
+    """Tell the installer whether stdin is safe to prompt on.
+
+    ``None`` restores the tty heuristic; ``False`` is what the app passes once a
+    TUI owns the terminal. Prompting is a *courtesy* for standalone use
+    (``python -m voice_transcriber.model_download``); under a TUI consent has to
+    come through the status handler and an explicit command instead.
+    """
+    global _prompt_allowed
+    _prompt_allowed = None if allowed is None else bool(allowed)
+
+
+def _can_prompt() -> bool:
+    """Whether a yes/no prompt on stdin can be shown right now."""
+    if _prompt_allowed is not None:
+        return _prompt_allowed
+    try:
+        return bool(sys.stdin and sys.stdin.isatty())
+    except Exception:
+        return False
+
+
+def _auto_download_enabled() -> bool:
+    """True when ``VT_AUTO_DOWNLOAD_MODEL`` already carries the user's consent."""
+    return os.environ.get("VT_AUTO_DOWNLOAD_MODEL", "").strip().lower() in (
+        "1", "true", "yes", "always")
+
 
 def set_status_handler(fn):
     """Register a UI callback for download progress (optional)."""
@@ -899,7 +933,7 @@ def ensure_model(name, dest=None, base_url=None, revision=None):
         print(f"  Target location: {dest}")
         print(f"  Download size: {spec.download_hint}.")
         print("-" * 68)
-        if sys.stdin and hasattr(sys.stdin, "isatty") and sys.stdin.isatty():
+        if _can_prompt():
             try:
                 ans = input("  Would you like to download them automatically from GitHub now? [Y/n]: ").strip().lower()
                 if ans and ans not in ("y", "yes"):
@@ -974,24 +1008,36 @@ def ensure_model(name, dest=None, base_url=None, revision=None):
 #: Model names with a background install in flight, so a second utterance while
 #: the first download is still running does not start a duplicate.
 _async_inflight: set = set()
+#: Model names whose "not installed" notice has already been reported to the UI,
+#: so an utterance that keeps finding the model absent does not spam the status
+#: line on every dictation.
+_async_consent_notified: set = set()
 _async_lock = threading.Lock()
 
 
-def ensure_model_async(name, dest=None, base_url=None, revision=None):
+def ensure_model_async(name, dest=None, base_url=None, revision=None, *,
+                       consented=False):
     """Start installing ``name`` on a daemon thread; never blocks the caller.
 
     This is the first-use path for an optional, large model: the caller (a
     dictation, a settings change) must not wait for a ~462 MiB download, and the
-    hotkey/UI threads must never block on one. :func:`ensure_model` already
-    prints the download size and asks before fetching; running it on a
-    background thread keeps that prompt but moves the wait off the caller.
+    hotkey/UI threads must never block on one.
+
+    Consent is explicit, because there is nowhere to ask from a background
+    thread: a full-screen TUI owns the terminal, so an ``input()`` prompt would
+    be invisible and would block on keystrokes the TUI is consuming.
+
+    * ``consented=True`` - the user asked for this (the ``formatter-download``
+      control verb), so start it.
+    * prompting is possible (standalone use) - :func:`ensure_model` asks.
+    * ``VT_AUTO_DOWNLOAD_MODEL`` is truthy - the user pre-consented.
+    * otherwise - report the size and the explicit command through the status
+      handler and start nothing. The first-use path therefore *stops* under the
+      app's TUI rather than downloading; the verb is the way to proceed.
 
     Returns ``True`` when an install was started (or was already in flight),
-    ``False`` when there is nothing to do - the model is already complete, or no
-    user-facing app is attached. The status-handler gate is deliberate: without
-    a handler there is no UI to tell, and the shared (model-free) test tier must
-    stay hermetic, so a background download is only ever started for a running
-    app.
+    ``False`` when there is nothing to do - the model is already complete, no
+    user-facing app is attached, or the download is waiting for consent.
     """
     spec = _resolved_spec(name, revision)
     dest = dest or _models_dir_for(spec)
@@ -999,10 +1045,30 @@ def ensure_model_async(name, dest=None, base_url=None, revision=None):
         return False
     if _status_handler is None:
         return False
+
     with _async_lock:
+        # An install already running is always success, whatever started it - the
+        # check must come before the consent gate, or an utterance arriving while a
+        # consented download is in flight would re-report "not installed".
         if spec.name in _async_inflight:
             return True
-        _async_inflight.add(spec.name)
+        needs_consent = (not consented and not _can_prompt()
+                         and not _auto_download_enabled())
+        if needs_consent:
+            first_notice = spec.name not in _async_consent_notified
+            _async_consent_notified.add(spec.name)
+        else:
+            _async_inflight.add(spec.name)
+
+    if needs_consent:
+        # No safe way to ask. Tell the user the size and how to proceed, once.
+        if first_notice:
+            _notify(
+                "Model download", 0,
+                f"{spec.display_name} model not installed "
+                f"({spec.download_hint}); run \"{spec.name}-download\" to install it.",
+            )
+        return False
 
     def _install():
         try:
@@ -1013,6 +1079,7 @@ def ensure_model_async(name, dest=None, base_url=None, revision=None):
         finally:
             with _async_lock:
                 _async_inflight.discard(spec.name)
+                _async_consent_notified.discard(spec.name)
 
     threading.Thread(target=_install, name=f"vt-model-install-{spec.name}",
                      daemon=True).start()

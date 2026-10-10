@@ -226,7 +226,7 @@ regardless of the console's encoding.
 `settings`,
 `mic`, `theme`, `output`, `numbers`, `punctuation`, `structure`, `cleanup`, `trailing-space`,
 `auto-punctuate`, `serial`, `spell`, `middle-click`, `hotkey`, `mute`, `reset-defaults`,
-`reset-terminal`, `ping`, `doctor`, `help`, `quit`.
+`reset-terminal`, `ping`, `doctor`, `help`, `formatter-download`, `quit`.
 
 Get this catalogue programmatically — it is the machine-readable source of truth
 (see [For LLM agents](#for-llm-agents)). `help --json` is served locally, so it
@@ -296,6 +296,24 @@ the settings modal would.
 | `wpm` | words-per-minute | Integer WPM, e.g. `40`, `60`, `80` (omit to cycle presets) |
 
 `on`/`off` also accept `true`/`false`, `1`/`0`, `yes`/`no`, `enable`/`disable`.
+
+### Optional model downloads
+
+Required weights (the ASR) install themselves on first run. The optional
+on-device formatter model does **not** download on its own under a terminal UI: a
+full-screen TUI owns the terminal in raw mode, so a consent prompt on stdin from
+a background download thread would be drawn underneath the TUI and would block
+on keystrokes the TUI is consuming. Instead, the first use of an enabled
+formatter reports the model and its size through the status line and waits.
+
+| Verb | Notes |
+| :--- | :--- |
+| `formatter-download` | Explicitly fetch the formatter model (e.g. `"S1-mini" by "Superwhisper"`, ~462 MiB). Runs on a daemon thread; progress arrives through the same status handler as the ASR download. Returns `formatter_download: true` when an install was started, `false` when the weights are already present or `llama-server` is unavailable |
+
+`VT_AUTO_DOWNLOAD_MODEL=1` is standing consent and skips the gate; `0` disables
+model downloads entirely. Standalone use (`python -m
+voice_transcriber.model_download --model formatter`) still prompts on a real
+terminal, where `input()` actually works.
 
 ### Push-to-talk binds
 

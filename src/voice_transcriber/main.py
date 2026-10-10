@@ -189,6 +189,12 @@ class SimpleVoiceTranscriber:
         try:
             import model_download
             model_download.set_status_handler(self._on_model_download_status)
+            # A full-screen TUI owns the terminal in raw mode and consumes
+            # keystrokes, so a consent prompt on stdin from a download thread would
+            # be invisible and would block. The engine never prompts; the
+            # `formatter-download` verb is the explicit way to fetch the optional
+            # formatter model (required models still install on their own).
+            model_download.set_prompt_allowed(False)
         except Exception:
             pass
 
@@ -1570,6 +1576,24 @@ class SimpleVoiceTranscriber:
         except meeting.MeetingStateError as exc:
             raise ValueError(str(exc)) from None
 
+    def _control_formatter_download(self) -> bool:
+        """Explicit consent to fetch the optional formatter weights.
+
+        The first-use path reports the size and stops under a TUI, because there
+        is no safe way to prompt on stdin from a background thread. This is the
+        deliberate way to proceed; the fetch runs on a daemon thread and its
+        progress goes through the same status handler as every other download.
+
+        Returns whether an install was started (False when the weights are
+        already present, or the backend cannot run without them).
+        """
+        try:
+            from voice_transcriber.formatters import llama_server
+        except Exception:
+            return False
+        return bool(llama_server.request_model(
+            t2.get_formatter_model(), consented=True))
+
     def handle_control(self, cmd, request):
         """Dispatch one control-API request.
 
@@ -1780,6 +1804,13 @@ class SimpleVoiceTranscriber:
             t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)
+
+        if verb in ("formatter-download", "formatter_download"):
+            # An action, not a setting: explicit consent to fetch the optional
+            # weights, which the first-use path deliberately will not do under a
+            # TUI because it cannot ask.
+            return self._control_status(
+                verb, formatter_download=self._control_formatter_download())
 
         if verb == "trailing-space":
             state = self._control_on_off(value)

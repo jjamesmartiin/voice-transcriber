@@ -583,6 +583,26 @@ class TestEngineVerbs:
         with pytest.raises(ValueError, match="no input device matching"):
             engine.handle_control("set-mic", {"value": "zzz-not-a-real-device-zzz"})
 
+    def test_formatter_download_is_explicit_consent(self, engine, monkeypatch):
+        """The first-use path will not fetch under a TUI; this verb will.
+
+        It must reach the backend with ``consented=True`` - otherwise it would hit
+        the same refusal it exists to bypass.
+        """
+        from voice_transcriber.formatters import llama_server
+        t2 = pytest.importorskip("t2")
+
+        calls = []
+        monkeypatch.setattr(
+            llama_server, "request_model",
+            lambda model=None, **kw: calls.append((model, kw)) or True)
+
+        reply = engine.handle_control("formatter-download", {})
+
+        assert reply["ok"] is True
+        assert reply["formatter_download"] is True
+        assert calls == [(t2.get_formatter_model(), {"consented": True})]
+
     def test_every_documented_verb_is_recognised(self, engine):
         """Guard against docs drift: no documented verb may be unknown.
 
@@ -592,7 +612,7 @@ class TestEngineVerbs:
         blocking = {
             "start", "stop", "toggle", "settings", "mic", "theme",
             "reset-defaults", "reset-terminal", "quit", "set-mic", "mics",
-            "rescan-mics", "meeting-start", "meeting-stop",
+            "rescan-mics", "meeting-start", "meeting-stop", "formatter-download",
         }
         for verb in control.VERBS:
             if verb in blocking:

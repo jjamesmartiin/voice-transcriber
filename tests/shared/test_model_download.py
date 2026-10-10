@@ -217,12 +217,116 @@ def test_ensure_model_async_runs_the_install_on_a_daemon_thread(monkeypatch, tmp
 
     monkeypatch.setattr(model_download, "ensure_model", fake_ensure)
     dest = str(tmp_path / "d")
-    assert model_download.ensure_model_async(spec.name, dest=dest) is True
+    assert model_download.ensure_model_async(spec.name, dest=dest, consented=True) is True
     assert done.wait(5), "the background install never ran"
     assert calls == [(spec.name, dest)]
     # A completed install must not start a second one.
     monkeypatch.setattr(model_download, "is_model_complete", lambda *a, **k: True)
+    assert model_download.ensure_model_async(spec.name, dest=dest, consented=True) is False
+
+
+def test_prompt_policy_overrides_the_tty_heuristic(monkeypatch):
+    """A TUI owning the terminal must be able to forbid the stdin prompt."""
+    monkeypatch.setattr(model_download, "_prompt_allowed", None)
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    assert model_download._can_prompt() is True
+
+    model_download.set_prompt_allowed(False)
+    assert model_download._can_prompt() is False
+    model_download.set_prompt_allowed(True)
+    assert model_download._can_prompt() is True
+    model_download.set_prompt_allowed(None)
+    assert model_download._can_prompt() is True
+
+
+def test_ensure_model_async_waits_for_consent_under_a_tui(monkeypatch, tmp_path):
+    """With no safe way to ask, report the size and start nothing.
+
+    This is the fresh-machine-under-a-TUI case: the first-use path must not
+    prompt on stdin from a background thread (invisible, and it blocks on
+    keystrokes the TUI consumes), and it must not download without consent.
+    """
+    spec = _synthetic_spec(download_hint="~462 MiB")
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_prompt_allowed", False)
+    monkeypatch.setattr(model_download, "_async_consent_notified", set())
+    monkeypatch.delenv("VT_AUTO_DOWNLOAD_MODEL", raising=False)
+    notices = []
+    monkeypatch.setattr(
+        model_download, "_status_handler",
+        lambda stage, pct, text: notices.append((stage, pct, text)))
+    started = []
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda *a, **k: started.append(a))
+
+    dest = str(tmp_path / "d")
     assert model_download.ensure_model_async(spec.name, dest=dest) is False
+    # A second first-use utterance does not spam the status line.
+    assert model_download.ensure_model_async(spec.name, dest=dest) is False
+    assert started == [], "started a download without consent"
+    assert len(notices) == 1, notices
+    _stage, _pct, text = notices[0]
+    assert "~462 MiB" in text
+    assert f"{spec.name}-download" in text
+
+
+def test_ensure_model_async_consent_starts_the_install(monkeypatch, tmp_path):
+    """The explicit command is what gets past the TUI consent gate."""
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_prompt_allowed", False)
+    monkeypatch.setattr(model_download, "_async_consent_notified", set())
+    monkeypatch.setattr(model_download, "_status_handler", lambda *a: None)
+    done = threading.Event()
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda name, **k: done.set())
+
+    assert model_download.ensure_model_async(
+        spec.name, dest=str(tmp_path / "d"), consented=True) is True
+    assert done.wait(5), "explicit consent did not start the install"
+
+
+def test_an_in_flight_install_is_never_reported_as_missing(monkeypatch, tmp_path):
+    """A first-use call during a consented download must ride along silently.
+
+    Checking consent before the in-flight set made an utterance that arrived mid
+    download re-report "not installed; run ...-download", which is both wrong and
+    noise the user cannot act on while the install is already running.
+    """
+    spec = _synthetic_spec(download_hint="~462 MiB")
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_prompt_allowed", False)
+    monkeypatch.setattr(model_download, "_async_consent_notified", set())
+    notices = []
+    monkeypatch.setattr(model_download, "_status_handler",
+                        lambda stage, pct, text: notices.append(text))
+    release = threading.Event()
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda name, **k: release.wait(5))
+
+    dest = str(tmp_path / "d")
+    assert model_download.ensure_model_async(
+        spec.name, dest=dest, consented=True) is True
+    assert model_download.ensure_model_async(spec.name, dest=dest) is True
+    assert notices == [], notices
+    release.set()
+
+
+def test_auto_download_env_is_standing_consent(monkeypatch, tmp_path):
+    """VT_AUTO_DOWNLOAD_MODEL=1 keeps its "do not ask" meaning."""
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    monkeypatch.setattr(model_download, "_prompt_allowed", False)
+    monkeypatch.setattr(model_download, "_async_consent_notified", set())
+    monkeypatch.setattr(model_download, "_status_handler", lambda *a: None)
+    monkeypatch.setenv("VT_AUTO_DOWNLOAD_MODEL", "1")
+    done = threading.Event()
+    monkeypatch.setattr(model_download, "ensure_model",
+                        lambda name, **k: done.set())
+
+    assert model_download.ensure_model_async(
+        spec.name, dest=str(tmp_path / "d")) is True
+    assert done.wait(5), "standing consent did not start the install"
 
 
 def test_the_download_prompt_states_the_size_before_fetching(capsys, monkeypatch, tmp_path):
@@ -243,6 +347,32 @@ def test_the_download_prompt_states_the_size_before_fetching(capsys, monkeypatch
     out = capsys.readouterr().out
     assert "Download size: ~462 MiB." in out, out
     assert '"S1-mini" by "Superwhisper"' in out, out
+
+
+def test_ensure_model_never_prompts_when_the_policy_forbids_it(capsys, monkeypatch, tmp_path):
+    """The TUI case: state the size, but never call input() on stdin.
+
+    Under a full-screen TUI stdin is still a tty, so the old isatty-only guard
+    called input() from a background thread - an invisible prompt that blocked on
+    keystrokes the TUI was consuming.
+    """
+    monkeypatch.setenv("VT_MODEL_DIR", str(tmp_path / "formatter"))
+    monkeypatch.delenv("VT_MODEL_SOURCE_DIR", raising=False)
+    monkeypatch.delenv("VT_MODEL_BUNDLE", raising=False)
+    monkeypatch.delenv("VT_AUTO_DOWNLOAD_MODEL", raising=False)
+    monkeypatch.setattr(model_download, "_local_model_source", lambda: (None, False))
+    monkeypatch.setattr(model_download, "_prompt_allowed", False)
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("builtins.input",
+                        lambda *a, **k: pytest.fail("prompted on stdin under a TUI"))
+    # Stop before the network: the manifest fetch is the first network call.
+    monkeypatch.setattr(
+        model_download, "_fetch_part_manifest",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no network in this test")))
+
+    assert model_download.ensure_model("formatter") is None
+    out = capsys.readouterr().out
+    assert "Download size: ~462 MiB." in out, out
 
 
 def test_is_model_complete_is_per_spec(monkeypatch, tmp_path):

@@ -272,8 +272,8 @@ def _model_path(model: str | None = None) -> str | None:
     return None
 
 
-def request_model(model: str | None = None) -> bool:
-    """Start a non-blocking first-use install of the formatter weights.
+def request_model(model: str | None = None, *, consented: bool = False) -> bool:
+    """Start a non-blocking install of the formatter weights, if it is needed.
 
     Called when the formatter is enabled and in use but the GGUF is absent.
     Returns ``True`` when an install was started, ``False`` when there is nothing
@@ -285,9 +285,10 @@ def request_model(model: str | None = None) -> bool:
     * a model already resolves: nothing to fetch;
     * the model id is not a redistributable registry entry: not ours to fetch.
 
-    The download itself runs on a daemon thread (see
-    :func:`model_download.ensure_model_async`), so neither the hotkey thread nor
-    the UI thread ever waits on it.
+    ``consented=True`` means the user explicitly asked for the download (the
+    ``formatter-download`` control verb). The first-use path leaves it False, so
+    under a TUI the request reports the size and waits instead of prompting on
+    stdin from a background thread (see :func:`model_download.ensure_model_async`).
     """
     if (os.environ.get(ENV_SERVER_URL) or "").strip():
         return False
@@ -301,7 +302,8 @@ def request_model(model: str | None = None) -> bool:
             str(model or DEFAULT_MODEL_ID).strip().lower())
         if not registry_name:
             return False
-        return bool(model_download.ensure_model_async(registry_name))
+        return bool(model_download.ensure_model_async(
+            registry_name, consented=consented))
     except Exception:
         return False
 
