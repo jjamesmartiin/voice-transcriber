@@ -8,6 +8,7 @@
 //!
 //! Python -> Rust:
 //!   {"t":"state","state":"READY","sub":""}
+//!   {"t":"meeting_text","text":"accumulated transcript so far"}
 //!   {"t":"vu","level":0.42}
 //!   {"t":"vu","level":0.42,"levels":[{"i":4,"level":0.0},{"i":5,"level":0.44}]}
 //!   {"t":"cfg","mic":"...","secondary":"...","backend":"cohere",
@@ -95,6 +96,14 @@ pub enum Wire {
         state: String,
         #[serde(default)]
         sub: String,
+    },
+    /// Live transcript streamed while a meeting records. `text` is the whole
+    /// accumulated transcript so far, not a delta, so the screen can simply
+    /// show its tail.
+    #[serde(rename = "meeting_text")]
+    MeetingText {
+        #[serde(default)]
+        text: String,
     },
     #[serde(rename = "vu")]
     Vu {
@@ -423,6 +432,25 @@ mod tests {
         // A newer engine adding a field must not break an older TUI.
         let json = r#"{"t":"tx","text":"hi","rec":1.0,"proc":0.1,"ready":0.1,"status":"copied","time_saved":12.0,"session_time_saved":105.0,"lifetime_time_saved":3661.0,"words_per_second":9.9}"#;
         assert!(serde_json::from_str::<Wire>(json).is_ok());
+    }
+
+    /// The engine streams the accumulated meeting transcript while a capture
+    /// records; `text` defaults to empty so a minimal producer still parses.
+    #[test]
+    fn meeting_text_message_carries_the_accumulated_transcript() {
+        let json = r#"{"t":"meeting_text","text":"Alice: hello\nBob: hi"}"#;
+        match serde_json::from_str::<Wire>(json).expect("meeting_text must parse") {
+            Wire::MeetingText { text } => assert_eq!(text, "Alice: hello\nBob: hi"),
+            other => panic!("expected MeetingText, got {other:?}"),
+        }
+
+        // An empty payload is legitimate (a fresh capture before any words).
+        match serde_json::from_str::<Wire>(r#"{"t":"meeting_text"}"#)
+            .expect("empty meeting_text must parse")
+        {
+            Wire::MeetingText { text } => assert_eq!(text, ""),
+            other => panic!("expected MeetingText, got {other:?}"),
+        }
     }
 
     /// The picker used to receive a single scalar; it must still understand it.

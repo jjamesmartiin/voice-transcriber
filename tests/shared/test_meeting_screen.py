@@ -187,3 +187,39 @@ class TestRatatuiSpeakerBridge:
         # The Rust wire decodes the same field.
         ipc = (REPO_ROOT / "tui-rs" / "src" / "ipc.rs").read_text(encoding="utf-8")
         assert "speakers: Option<Vec<String>>" in ipc
+
+    def test_live_meeting_text_is_its_own_message_and_only_when_it_changes(self):
+        """The in-meeting transcript is published per chunk, not per timer tick.
+
+        It is a separate message from ``update_state`` (which carries the elapsed
+        timer and is re-sent on every progress tick), and it is only sent when the
+        text actually grew, so a slow meeting is not one socket write per tick.
+        """
+        from tui_ratatui import RatatuiTui
+
+        rat = RatatuiTui.__new__(RatatuiTui)
+        rat.meeting_live_text = ""
+        sent = []
+        rat._send = lambda msg: sent.append(msg)
+
+        rat.set_meeting_live_text("hello")
+        rat.set_meeting_live_text("hello")  # unchanged: not re-sent
+        rat.set_meeting_live_text("hello world")
+
+        assert sent == [
+            {"t": "meeting_text", "text": "hello"},
+            {"t": "meeting_text", "text": "hello world"},
+        ]
+
+    def test_the_live_text_wire_message_is_declared_in_rust(self):
+        """The engine sends it; the front end must declare it or serde drops it.
+
+        Same guard the `cfg` fields have: an undeclared key is silently ignored,
+        so the live view would simply never appear with nothing to debug.
+        """
+        ipc = (REPO_ROOT / "tui-rs" / "src" / "ipc.rs").read_text(encoding="utf-8")
+        assert 'rename = "meeting_text"' in ipc
+        assert "MeetingText" in ipc
+        assert "meeting_live_text" in (
+            REPO_ROOT / "tui-rs" / "src" / "app.rs"
+        ).read_text(encoding="utf-8")

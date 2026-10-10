@@ -64,6 +64,17 @@ def _common_prefix_len(a: str, b: str) -> int:
         i += 1
     return i
 
+def _display_text(raw: str) -> str:
+    """Strip the internal cut markers from a stitched transcript.
+
+    The segment sentinels are how a pause survives the stitcher, but they are
+    control characters and must never reach a terminal: a clean cut becomes a
+    line break (a paragraph is what the final transcript renders it as), a soft
+    cut a space.
+    """
+    return raw.replace(SEGMENT_SENTINEL, "\n").replace(SOFT_SEGMENT_SENTINEL, " ").strip()
+
+
 def deduplicate_text_overlap(
     prev_text: str,
     new_text: str,
@@ -245,10 +256,17 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
     return flat
 
 class StreamingMicroBatcher:
-    def __init__(self, sample_rate=16000, mode=None, min_chunk_sec=4.5, max_chunk_sec=7.0, silence_thresh=0.015, min_silence_sec=0.25, overlap_sec=0.3, tui=None):
+    def __init__(self, sample_rate=16000, mode=None, min_chunk_sec=4.5, max_chunk_sec=7.0, silence_thresh=0.015, min_silence_sec=0.25, overlap_sec=0.3, tui=None, on_text=None):
         self.sample_rate = sample_rate
         self.mode = mode or os.environ.get('VT_MICRO_BATCHING', 'auto').lower()
         self.tui = tui
+        #: Called with the running transcript after each transcribed chunk, for
+        #: a live view (meeting mode). Optional: dictation passes none, so this
+        #: costs it nothing. See :meth:`_advance_live_text` for why the running
+        #: text is folded incrementally instead of re-stitched per chunk.
+        self.on_text = on_text
+        self._live_text = ''
+        self._live_index = -1
 
         # Configure thresholds based on mode
         if self.mode == 'always' or self.mode == '1' or self.mode == 'true':
@@ -286,10 +304,52 @@ class StreamingMicroBatcher:
         self.silence_samples = 0
         self.transcribed_chunks = []
         self.next_chunk_idx = 0
+        self._live_text = ''
+        self._live_index = -1
         self.running = True
 
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.worker_thread.start()
+
+    def stop(self):
+        """Release the worker without waiting for a final stitch.
+
+        For the live-view use (meeting mode) the authoritative transcript comes
+        from elsewhere, so its teardown must not join: the caller is a control
+        request that has to return immediately.
+        """
+        self.running = False
+        self.chunk_queue.put(None)
+
+    def current_text(self):
+        """The running transcript so far, safe to show in a terminal."""
+        with self.results_lock:
+            return _display_text(self._live_text)
+
+    def _advance_live_text(self, chunk_index, text, has_overlap, is_forced):
+        """Fold one chunk's transcript into the running text (caller holds the lock).
+
+        Returns the raw running text, or ``None`` when there is nothing new to
+        publish. This is the same fold ``finish_and_get_text`` does over the whole
+        list, done incrementally: the overlap search only looks at the boundary
+        between two chunks (a few words), so a long meeting stays O(1) per chunk
+        instead of re-stitching the entire transcript every time.
+        """
+        if chunk_index <= self._live_index:
+            # Out of order or a repeat. The final pass re-stitches from the
+            # whole list, so skipping this one costs nothing but a late line.
+            return None
+        self._live_index = chunk_index
+        if not text:
+            return None
+        if not self._live_text:
+            self._live_text = text.strip()
+        else:
+            separator = SOFT_SEGMENT_SENTINEL if is_forced else SEGMENT_SENTINEL
+            self._live_text = deduplicate_text_overlap(
+                self._live_text, text, has_speech_overlap=has_overlap, separator=separator
+            )
+        return self._live_text
 
     def _worker_loop(self):
         while self.running or not self.chunk_queue.empty():
@@ -344,6 +404,17 @@ class StreamingMicroBatcher:
                     # silence cut is a real pause, a forced energy-trough cut is a
                     # weaker boundary. The stitcher turns that into a sentinel.
                     self.transcribed_chunks.append((chunk_index, text, has_overlap, is_forced))
+                    live_text = self._advance_live_text(
+                        chunk_index, text, has_overlap, is_forced)
+
+                # Published outside the results lock, because the callback writes
+                # to a socket. Guarded separately so a display failure is not
+                # reported as a transcription failure.
+                if live_text and self.on_text is not None:
+                    try:
+                        self.on_text(_display_text(live_text))
+                    except Exception as e:
+                        print(f'Micro-batch live-text callback error: {e}')
             except Exception as e:
                 print(f'Micro-batch worker error: {e}')
             finally:

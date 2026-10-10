@@ -128,6 +128,7 @@ VERBS: dict[str, dict] = {
             "meeting", "meeting_setting", "meeting_state", "meeting_elapsed_s",
             "meeting_progress", "meeting_spill_minutes", "meeting_stage",
             "meeting_transcript", "meeting_transcript_path", "meeting_speakers",
+            "meeting_live_transcript",
             "diarization", "diarization_setting", "diarization_speakers",
             "diarization_model",
             "meeting_output_dir", "meeting_output_format", "speakers",

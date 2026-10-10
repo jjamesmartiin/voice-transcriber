@@ -105,7 +105,17 @@ class SimpleVoiceTranscriber:
         # Meeting mode is a second, non-injecting capture lifecycle (see
         # docs/meeting_mode.md). Constructed here so `status` can report it from
         # the first control request; it opens no device until `meeting-start`.
-        self.meeting = meeting.MeetingSession(on_change=self._on_meeting_change)
+        self.meeting = meeting.MeetingSession(
+            on_change=self._on_meeting_change,
+            on_chunk=self._on_meeting_chunk,
+        )
+        # Live (in-meeting) transcription: a second micro-batcher whose only job
+        # is to turn chunks into text while the capture runs, so the meeting
+        # screen shows words instead of just a timer. The transcript that gets
+        # written is still the diarized batch one, so this is display-only and is
+        # released as soon as the capture stops.
+        self._meeting_batcher = None
+        self.meeting_live_text = ""
         # The speakers map is transcript metadata, not app config: an ordered list
         # of names applied to speaker indices when the transcript is rendered. It
         # is edited live from the meeting screen, so it lives on the engine and is
@@ -725,6 +735,11 @@ class SimpleVoiceTranscriber:
 
     def _on_meeting_change(self, status):
         """Push a meeting status snapshot into the TUI (elapsed timer + %)."""
+        # Any transition out of recording releases the live view, whatever caused
+        # it: an explicit stop, a capture that failed, or a forced close. Hooking
+        # it here means no stop path can leave the display batcher running.
+        if status.state != "recording":
+            self._stop_meeting_live_batcher()
         tui = getattr(self, "tui", None)
         if tui is None:
             return
@@ -783,6 +798,10 @@ class SimpleVoiceTranscriber:
             return
         if session.recording:
             session.stop()
+            # The live view stops with the capture: the batch pipeline owns the
+            # transcript from here, and stealing ASR time from it would only slow
+            # the thing the user is now waiting for.
+            self._stop_meeting_live_batcher()
             self.tui.print_event(
                 "⏹ Meeting",
                 "Stop requested — reading the recording back.",
@@ -805,12 +824,66 @@ class SimpleVoiceTranscriber:
         except meeting.MeetingStateError as exc:
             self.tui.print_warning("Meeting", str(exc))
             return
+        self._start_meeting_live_batcher()
         self.tui.update_state("MEETING", "00:00 · 0%")
         self.tui.print_event(
             "⏺ Meeting",
             "Meeting capture started — audio is held, nothing is typed.",
             level="info",
         )
+
+    # -- live (in-meeting) transcription -----------------------------------
+
+    def _start_meeting_live_batcher(self):
+        """Start the display-only transcription of a running meeting capture.
+
+        A meeting must not show only a timer. The batch pipeline still produces the
+        written transcript, which is why this one is thrown away when the capture
+        stops and why a failure here is not allowed to fail the capture: the
+        pipeline is the authoritative path, this is a view of the audio.
+        """
+        self._stop_meeting_live_batcher()
+        try:
+            from micro_batcher import StreamingMicroBatcher
+            self.meeting_live_text = ""
+            self._meeting_batcher = StreamingMicroBatcher(
+                sample_rate=self.meeting.sample_rate,
+                tui=self.tui,
+                on_text=self._on_meeting_live_text,
+            )
+            self._meeting_batcher.start()
+        except Exception as exc:
+            logger.debug("meeting live transcription unavailable: %s", exc)
+            self._meeting_batcher = None
+
+    def _stop_meeting_live_batcher(self):
+        batcher = getattr(self, "_meeting_batcher", None)
+        if batcher is None:
+            return
+        self._meeting_batcher = None
+        try:
+            batcher.stop()
+        except Exception:
+            logger.debug("meeting live batcher stop failed", exc_info=True)
+
+    def _on_meeting_chunk(self, chunk):
+        """Feed one captured chunk to the live batcher (called on the capture thread).
+
+        Skipped while a dictation is in flight: the batch pipeline yields to
+        dictation between turns for the same reason, and the live view is the one
+        thing here that is allowed to be incomplete.
+        """
+        batcher = getattr(self, "_meeting_batcher", None)
+        if batcher is not None and not getattr(self, "recording", False):
+            batcher.feed_audio(chunk)
+
+    def _on_meeting_live_text(self, text):
+        """Publish the running transcript to the front end (called on the ASR worker)."""
+        self.meeting_live_text = text
+        tui = getattr(self, "tui", None)
+        publish = getattr(tui, "set_meeting_live_text", None)
+        if publish is not None:
+            publish(text)
 
     def _on_tui_cycle_meeting(self):
         import t2
@@ -1570,6 +1643,10 @@ class SimpleVoiceTranscriber:
             # The finished document, kept in memory so a caller can read it back
             # over the control API without touching the filesystem.
             "meeting_transcript": getattr(transcript, "text", "") if transcript else "",
+            # The live view while a capture runs (empty once it stops). Separate
+            # from ``meeting_transcript``, which is the finished, diarized,
+            # written artifact: this one is provisional and unfiltered.
+            "meeting_live_transcript": getattr(self, "meeting_live_text", ""),
             "meeting_transcript_path": getattr(transcript, "path", None) if transcript else None,
             "meeting_speakers": getattr(transcript, "speaker_count", 0) if transcript else 0,
         }
@@ -1722,6 +1799,7 @@ class SimpleVoiceTranscriber:
             session.stop()
         except meeting.MeetingStateError as exc:
             raise ValueError(str(exc)) from None
+        self._stop_meeting_live_batcher()
 
     def _control_formatter_download(self) -> bool:
         """Explicit consent to fetch the optional formatter weights.

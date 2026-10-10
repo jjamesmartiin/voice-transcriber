@@ -124,6 +124,14 @@ Outside the meeting screen the global contract is exactly what it always was:
 `Space`/`Enter` record, `s`/`S`/`,` settings, `r` reset, `q`/`Esc`/`Ctrl+C` quit.
 Both halves are pinned by `tests/shared/test_meeting_screen.py`.
 
+> **To end a capture, press `Space`** (or activate the *Meeting Capture* settings
+> row, or send the `meeting-stop` verb). **Do not reach for `q` or `Esc`:** those
+> quit the engine, and the shutdown path *cancels* the finalize
+> (`MeetingSession.close` sets the cancel flag) so the audio is read back and
+> then discarded — no transcript is written. Cancelling is deliberate, since a
+> long finalize would otherwise block quitting, but it means quitting mid-meeting
+> loses the recording.
+
 The map is live: it is read at render time, so a name changed while the pipeline
 is still transcribing turns is applied to the finished document. The control API
 also exposes it as metadata (`speakers`, aliases `speaker-names` / `speaker-map`)
@@ -177,7 +185,9 @@ Setting `speakers` is **transcript metadata**, so it does **not** write
 (configured) — the same value today, reported as a pair like the formatter —
 plus `diarization_speakers`, `diarization_model`, `meeting_output_dir`,
 `meeting_output_format`, `speakers`, and the D4 trio `meeting_transcript`,
-`meeting_transcript_path`, `meeting_speakers`.
+`meeting_transcript_path`, `meeting_speakers`. While a capture is running,
+`meeting_live_transcript` carries the provisional transcript described below
+(empty once it stops); `meeting_transcript` is the finished, written artifact.
 
 **Python → Rust (`cfg` wire):** `diarization` (string `off`/`on`),
 `diarization_speakers` (either the string `auto` or an integer `2`–`8`),
@@ -231,6 +241,7 @@ literals are pinned against them by the parity guards.
 | `meeting_state` | `idle`, `recording` or `processing` |
 | `meeting_elapsed_s` | seconds since capture began; frozen once processing starts |
 | `meeting_progress` | batch-phase completion, 0–100 |
+| `meeting_live_transcript` | provisional transcript of the running capture (empty unless recording) |
 | `meeting_spill_minutes` | the configured threshold |
 | `diarization` | effective diarization toggle (`off`/`on`) |
 | `diarization_setting` | configured diarization toggle (same value today; reported as a pair so a future gate cannot quietly turn one into the other) |
@@ -249,6 +260,41 @@ drives it; D4 will drive it from the diarizer.)
 The TUI shows the meeting state as `MEETING`, with the elapsed timer and
 percentage in the sub-state line. It is a distinct state from `RECORDING`, so
 dictation's `wait`/settle logic is not confused by a meeting in progress.
+
+### The live transcript (what the screen shows while recording)
+
+A meeting that showed only a timer would be a poor way to notice the microphone
+is wrong, so the ratatui meeting screen also renders **the words spoken so far**.
+Three things about it are deliberate:
+
+- **It is a view, not the transcript.** A second `StreamingMicroBatcher` is
+  created when a capture starts and released the instant it stops
+  (`_start_meeting_live_batcher` / `_stop_meeting_live_batcher` in `main.py`).
+  The artifact that gets written is still the diarized batch one produced after
+  the stop, so the live view is display-only: it may contain ASR noise the
+  written transcript cleans up, and it does not slow the batch pass down by
+  holding the ASR lock any longer than it must.
+- **It has no speaker labels and never will, until a streaming diarizer exists.**
+  Offline clustering cannot know the speaker count from the first seconds of a
+  meeting, so labels are assigned after the stop (see `plan-diarization.md`
+  §4.5 for the one model that would change that). The screen says so rather than
+  leaving the reader to wonder why every line looks like it came from one person.
+- **It is tapped, not captured twice.** `MeetingSession(on_chunk=…)` forwards each
+  captured chunk from `_append_chunk`; `main.py` feeds that to the display
+  batcher. The session stays model-free (it only forwards), the tap runs on the
+  capture thread and only appends to a queue, and a raising tap is swallowed -
+  a lost line must never wedge a capture that is otherwise recording fine.
+
+The wire message is its own (`{"t":"meeting_text","text":"…"}`) rather than
+part of the `state` update, which carries the elapsed timer and is re-sent on
+every progress tick. The Rust side renders a **fixed number of lines** holding
+the wrapped *tail* of the text: the row feeds the front end's reserved status
+height, so a growing transcript must not move the layout.
+
+The **Rich** front end does not render this block: it is a scrolling REPL rather
+than a fixed layout, and printing on every chunk would fight the prompt. It gets
+the text on `status` like every other front end, and `_on_meeting_live_text`
+tolerates a front end with no `set_meeting_live_text` at all.
 
 ## Memory: the temp-file spill
 

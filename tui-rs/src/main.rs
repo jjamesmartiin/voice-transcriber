@@ -180,6 +180,7 @@ impl Runtime {
         match wire {
             Wire::Devices { devices } => app.update_devices(devices),
             Wire::State { state, sub } => app.update_state(RunState::from_wire(&state), sub),
+            Wire::MeetingText { text } => app.meeting_live_text = text,
             Wire::Vu { level, levels } => app.apply_vu_wire(level, levels.as_deref()),
             Wire::Cfg {
                 mic,
@@ -216,12 +217,10 @@ impl Runtime {
                 speakers,
             } => app.apply_config(
                 mic,
-                secondary,
                 backend,
                 muted,
                 auto_type,
                 output_mode,
-                sound_theme,
                 ui_theme,
                 punctuation_mode,
                 structure_mode,
@@ -247,6 +246,8 @@ impl Runtime {
                 meeting_output_dir,
                 meeting_output_format,
                 speakers,
+                secondary,
+                sound_theme,
             ),
             Wire::Tx {
                 text,
@@ -368,7 +369,7 @@ impl Runtime {
         self.terminal.draw(|frame| {
             let area = frame.area();
             frame.render_widget(Clear, area);
-            let text = ui::status_text(app);
+            let text = ui::status_text(app, area.width);
             // Bottom-align within the viewport, and never draw outside it.
             let h = (Paragraph::new(text.clone())
                 .wrap(Wrap { trim: false })

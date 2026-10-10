@@ -66,6 +66,7 @@ class RatatuiTui:
         # --- state mirrored locally so callbacks/other code can read it ---
         self.state = "READY"
         self.sub_state_text = ""
+        self.meeting_live_text = ""
         self.active_device = "Detecting..."
         self.secondary_device = None
         self.model_backend = "cohere"
@@ -599,6 +600,20 @@ class RatatuiTui:
         if not levels:
             return
         self.update_vu_level(max(levels.values()), levels=levels, force=force)
+
+    def set_meeting_live_text(self, text):
+        """Publish the growing in-meeting transcript (docs/meeting_mode.md).
+
+        Its own message rather than folding the text into ``update_state``, which
+        carries the elapsed timer and is re-sent on every progress tick: a chunk's
+        worth of text arrives at a different cadence and would drag a timer update
+        along with it. Only sent when it actually changed.
+        """
+        text = text or ""
+        if text == self.meeting_live_text:
+            return
+        self.meeting_live_text = text
+        self._send({"t": "meeting_text", "text": text})
 
     def update_state(self, state, sub_text=""):
         self.state = state

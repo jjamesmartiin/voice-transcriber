@@ -344,5 +344,71 @@ class TestTailAndOverlapDispatch(unittest.TestCase):
         self.assertFalse(has_overlap, "silence-only overlap must preserve spoken repetitions")
 
 
+class TestLiveTranscript(unittest.TestCase):
+    """The live (in-meeting) view: the optional ``on_text`` seam.
+
+    Meeting mode shows text while it records, so the batcher can publish the
+    running transcript as chunks land. The fold is asserted here; the socket send
+    belongs to the front end and is pinned in ``test_meeting_screen.py``.
+    """
+
+    def _fresh(self, on_text=None):
+        batcher = StreamingMicroBatcher(sample_rate=16000, on_text=on_text)
+        batcher._live_text = ''
+        batcher._live_index = -1
+        return batcher
+
+    def test_the_fold_dedups_the_boundary_and_keeps_control_chars_out(self):
+        batcher = self._fresh()
+        self.assertEqual(
+            batcher._advance_live_text(0, 'the quick brown fox', True, False),
+            'the quick brown fox')
+        # An acoustic overlap is what the stitcher exists for: "fox" is one word.
+        self.assertEqual(
+            batcher._advance_live_text(1, 'fox jumps over', True, False),
+            'the quick brown fox jumps over')
+        # A clean pause carries a boundary sentinel, which must never reach a
+        # terminal: it displays as a paragraph break.
+        raw = batcher._advance_live_text(2, 'a new topic', False, False)
+        shown = micro_batcher._display_text(raw)
+        self.assertNotIn('\x1e', shown)
+        self.assertNotIn('\x1f', shown)
+        self.assertTrue(shown.endswith('a new topic'))
+
+    def test_a_stale_or_empty_chunk_publishes_nothing(self):
+        batcher = self._fresh()
+        batcher._advance_live_text(1, 'second', True, False)
+        self.assertIsNone(batcher._advance_live_text(0, 'stale', True, False))
+        self.assertIsNone(batcher._advance_live_text(1, 'duplicate', True, False))
+        self.assertEqual(batcher._live_index, 1)
+        self.assertEqual(batcher.current_text(), 'second')
+        self.assertIsNone(batcher._advance_live_text(2, '', True, False))
+        self.assertEqual(batcher.current_text(), 'second')
+
+    def test_on_text_fires_per_transcribed_chunk_with_clean_text(self):
+        published = []
+        with mock.patch.object(micro_batcher.transcribe2, 'transcribe_audio',
+                               return_value='hello world'):
+            batcher = self._fresh(on_text=published.append)
+            batcher.start()
+            speech = np.random.uniform(-0.05, 0.05, 16000).astype(np.float32)
+            for _ in range(10):
+                batcher.feed_audio(speech)
+            batcher.finish_and_get_text()
+        self.assertTrue(published, 'the live view never received a line')
+        for text in published:
+            self.assertNotIn('\x1e', text)
+            self.assertNotIn('\x1f', text)
+
+    def test_stop_releases_the_worker_without_a_final_stitch(self):
+        """A control request must not block on a stitch it will never read."""
+        with mock.patch.object(micro_batcher.transcribe2, 'transcribe_audio',
+                               return_value='x'):
+            batcher = self._fresh()
+            batcher.start()
+            batcher.stop()
+        self.assertFalse(batcher.running)
+
+
 if __name__ == "__main__":
     unittest.main(argv=['first-arg'], exit=False)

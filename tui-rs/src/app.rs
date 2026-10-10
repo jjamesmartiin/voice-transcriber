@@ -223,6 +223,11 @@ pub struct App {
     pub meeting_output_dir: String,
     /// The artifact form: "text", "json" or "markdown".
     pub meeting_output_format: String,
+    /// The live transcript streamed by the engine while a meeting records. It is
+    /// the whole accumulated text so far; the meeting screen shows its tail.
+    /// Cleared when a capture starts or ends so a new capture never inherits
+    /// the previous one (see `update_state`).
+    pub meeting_live_text: String,
     /// The live speakers map: ordered names, index *i* names speaker *i*. It is
     /// transcript metadata rather than config, edited from the meeting screen.
     pub speaker_names: Vec<String>,
@@ -305,6 +310,7 @@ impl App {
             diarization_model: "diarization".to_string(),
             meeting_output_dir: "meetings".to_string(),
             meeting_output_format: "text".to_string(),
+            meeting_live_text: String::new(),
             speaker_names: Vec::new(),
             sound_theme: "proximity".to_string(),
             ui_theme,
@@ -345,6 +351,14 @@ impl App {
 
     /// `update_state()` from the Python TUI.
     pub fn update_state(&mut self, state: RunState, sub_text: String) {
+        // A new capture must never show the previous transcript. Clear the live
+        // text whenever the meeting-ness changes - entering a meeting (which
+        // also covers re-entering one after a finalize) or leaving it - but not
+        // on the per-tick `MEETING` state updates the engine sends during a
+        // capture, which would otherwise wipe the transcript every second.
+        if (self.state == RunState::Meeting) != (state == RunState::Meeting) {
+            self.meeting_live_text.clear();
+        }
         let starts_timer = matches!(
             state,
             RunState::Recording | RunState::Meeting | RunState::Processing | RunState::Rewriting
@@ -652,6 +666,7 @@ impl App {
     pub fn handle_modal_wire(&mut self, wire: Wire) {
         match wire {
             Wire::Tx { .. } | Wire::Ev { .. } => self.pending_output.push(wire),
+            Wire::MeetingText { text } => self.meeting_live_text = text,
             Wire::Devices { devices } => self.update_devices(devices),
             Wire::State { state, sub } => self.update_state(RunState::from_wire(&state), sub),
             Wire::Vu { level, levels } => self.apply_vu_wire(level, levels.as_deref()),
@@ -690,12 +705,10 @@ impl App {
                 speakers,
             } => self.apply_config(
                 mic,
-                secondary,
                 backend,
                 muted,
                 auto_type,
                 output_mode,
-                sound_theme,
                 ui_theme,
                 punctuation_mode,
                 structure_mode,
@@ -721,6 +734,8 @@ impl App {
                 meeting_output_dir,
                 meeting_output_format,
                 speakers,
+                secondary,
+                sound_theme,
             ),
             Wire::Quit => self.should_quit = true,
             Wire::Header | Wire::Suspend | Wire::Resume => {}
@@ -752,12 +767,10 @@ impl App {
     pub fn apply_config(
         &mut self,
         mic: Option<String>,
-        secondary: Option<String>,
         backend: Option<String>,
         muted: Option<bool>,
         auto_type: Option<bool>,
         output_mode: Option<String>,
-        sound_theme: Option<String>,
         ui_theme: Option<String>,
         punctuation_mode: Option<String>,
         structure_mode: Option<String>,
@@ -783,6 +796,8 @@ impl App {
         meeting_output_dir: Option<String>,
         meeting_output_format: Option<String>,
         speakers: Option<Vec<String>>,
+        secondary: Option<String>,
+        sound_theme: Option<String>,
     ) {
         if let Some(m) = mic {
             self.active_device = m;

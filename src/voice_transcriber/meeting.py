@@ -453,6 +453,7 @@ class MeetingSession:
         directory: str | None = None,
         on_audio: Callable[[np.ndarray, int], None] | None = None,
         on_change: Callable[[MeetingStatus], None] | None = None,
+        on_chunk: Callable[[Any], None] | None = None,
     ) -> None:
         self._lock = threading.RLock()
         self._sample_rate = int(sample_rate)
@@ -460,6 +461,10 @@ class MeetingSession:
         self._directory = directory
         self._on_audio = on_audio
         self._on_change = on_change
+        #: Tapped with every captured chunk, for a live (in-meeting) view. The
+        #: session itself stays model-free: this only forwards, and the caller
+        #: owns whatever consumes it (see docs/meeting_mode.md).
+        self._on_chunk = on_chunk
 
         self._buffer: AudioSpillBuffer | None = None
         self._state = MeetingState.IDLE
@@ -484,6 +489,11 @@ class MeetingSession:
         self._error: str | None = None
 
     # -- introspection -----------------------------------------------------
+    @property
+    def sample_rate(self) -> int:
+        """Rate the captured chunks are at (what a live consumer must assume)."""
+        return self._sample_rate
+
     @property
     def state(self) -> MeetingState:
         with self._lock:
@@ -683,8 +693,16 @@ class MeetingSession:
     def _append_chunk(self, chunk: Any) -> None:
         with self._lock:
             buffer = self._buffer
-        if buffer is not None:
-            buffer.append(chunk)
+        if buffer is None:
+            return
+        buffer.append(chunk)
+        if self._on_chunk is not None:
+            try:
+                self._on_chunk(chunk)
+            except Exception:
+                # A live-view tap is optional: losing a displayed line must never
+                # wedge a capture that is otherwise recording fine.
+                logger.debug("meeting chunk tap failed", exc_info=True)
 
     def _tick(self) -> None:
         """Nudge the UI about once a second so the elapsed timer moves."""

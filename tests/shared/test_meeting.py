@@ -404,6 +404,42 @@ def test_close_waits_for_the_finalize_it_cannot_see_yet(tmp_path):
     assert session.wait(5.0) is True
     assert list(tmp_path.iterdir()) == []
 
+
+def test_every_captured_chunk_is_tapped_for_a_live_view(tmp_path):
+    """The live transcript is fed by the capture, not by the read-back at the end.
+
+    The session stays model-free: it only forwards each chunk to whoever asked
+    (main.py feeds a micro-batcher, so the meeting screen can show words).
+    """
+    seen = []
+    capture = SyntheticCapture([_audio_seconds(0.02, sample_rate=1000) for _ in range(3)])
+    session = meeting.MeetingSession(
+        sample_rate=1000, capture=capture, directory=str(tmp_path), on_chunk=seen.append
+    )
+    _start_and_wait_ready(session, capture)
+    session.close()
+
+    assert len(seen) == 3
+    assert all(hasattr(chunk, "size") for chunk in seen)
+
+
+def test_a_failing_live_tap_cannot_break_the_capture(tmp_path):
+    """A displayed line is optional; the recording is not."""
+    def boom(chunk):
+        raise RuntimeError("the live view died")
+
+    capture = SyntheticCapture([_audio_seconds(0.05, sample_rate=1000)])
+    session = meeting.MeetingSession(
+        sample_rate=1000, capture=capture, directory=str(tmp_path), on_chunk=boom
+    )
+    _start_and_wait_ready(session, capture)
+
+    assert session.state == "recording"
+    assert session.status().error is None
+    session.close()
+    assert session.state == "idle"
+
+
 def test_audio_consumer_receives_the_read_back_audio(tmp_path):
     received = {}
 

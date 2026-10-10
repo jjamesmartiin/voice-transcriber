@@ -7,6 +7,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 
+use unicode_width::UnicodeWidthChar;
+
 use crate::app::{App, Level, OutStatus, RunState};
 
 pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -56,37 +58,91 @@ pub fn header_line(app: &App) -> Line<'static> {
 }
 
 /// The inline prompt / status bar as Text.
-pub fn status_text(app: &App) -> Text<'static> {
-    status_text_for(app, &app.state, &app.sub_state_text)
+pub fn status_text(app: &App, width: u16) -> Text<'static> {
+    status_text_for(app, &app.state, &app.sub_state_text, width)
 }
 
-/// The inline prompt / status bar lines.
-#[allow(dead_code)]
-pub fn status_lines(app: &App) -> Vec<Line<'static>> {
-    status_lines_for(app, &app.state, &app.sub_state_text)
+pub fn status_text_for(app: &App, state: &RunState, sub_state: &str, width: u16) -> Text<'static> {
+    Text::from(status_lines_for(app, state, sub_state, width))
 }
 
-/// The inline prompt / status bar (first line). Mirrors `_render_status_bar()`.
-#[allow(dead_code)]
-pub fn status_line(app: &App) -> Line<'static> {
-    status_line_for(app, &app.state, &app.sub_state_text)
-}
+/// What the meeting screen reserves for the live transcript, in lines. The
+/// count is fixed so `max_status_height` - which samples states once to size the
+/// inline viewport - never grows as text accumulates. See `tail_wrapped`.
+const MEETING_TEXT_LINES: usize = 3;
 
-pub fn status_text_for(app: &App, state: &RunState, sub_state: &str) -> Text<'static> {
-    Text::from(status_lines_for(app, state, sub_state))
-}
+/// Hard-wrap the **tail** of `text` into exactly `max_lines` lines of at most
+/// `width` display cells, padding the top with empty lines.
+///
+/// The meeting transcript only ever grows, so the renderer must not let the
+/// row's height follow it: the inline viewport is sized once from the tallest
+/// state, and resizing it wipes scrollback. Pre-wrapping to a fixed box (whose
+/// lines are already <= `width`, so `Paragraph`'s own wrapping is a no-op) makes
+/// the row a constant height whatever the text and the terminal width. Only the
+/// tail is kept because the newest words are the interesting ones.
+fn tail_wrapped(text: &str, width: usize, max_lines: usize) -> Vec<String> {
+    if width == 0 || max_lines == 0 {
+        return vec![String::new(); max_lines];
+    }
+    // Walk backwards only far enough to fill the box: the transcript can be
+    // hours long and this keeps the per-frame work bounded by the visible
+    // window rather than the whole text.
+    let budget = width * max_lines;
+    let mut chars: Vec<char> = Vec::new();
+    let mut used = 0usize;
+    for c in text.chars().rev() {
+        let cw = UnicodeWidthChar::width(c).unwrap_or(0);
+        if used + cw > budget {
+            break;
+        }
+        chars.push(c);
+        used += cw;
+    }
+    chars.reverse();
 
-#[allow(dead_code)]
-pub fn status_line_for(app: &App, state: &RunState, sub_state: &str) -> Line<'static> {
-    status_lines_for(app, state, sub_state)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| Line::from(vec![]))
+    // Hard-wrap, as any terminal would: a word longer than the box is split.
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_w = 0usize;
+    for c in chars {
+        let cw = UnicodeWidthChar::width(c).unwrap_or(0);
+        if cur_w + cw > width && !cur.is_empty() {
+            lines.push(std::mem::take(&mut cur));
+            cur_w = 0;
+        }
+        cur.push(c);
+        cur_w += cw;
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    // A line that is only whitespace counts as two rendered lines at some
+    // widths (ratatui wraps its trailing space into a phantom line), which
+    // would make the height depend on where a word happens to fall. The spaces
+    // are invisible anyway, so trim them off; an all-space split then collapses
+    // to an empty line and counts like every other blank.
+    for line in lines.iter_mut() {
+        *line = line.trim().to_string();
+    }
+    // Keep the newest lines and pad the top, so the newest text always sits on
+    // the bottom row and the reader's eye stays put.
+    while lines.len() > max_lines {
+        lines.remove(0);
+    }
+    while lines.len() < max_lines {
+        lines.insert(0, String::new());
+    }
+    lines
 }
 
 /// Render the prompt lines for an arbitrary (state, sub-text) pair. Used so we can
 /// measure the tallest state without mutating the app.
-pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Line<'static>> {
+pub fn status_lines_for(
+    app: &App,
+    state: &RunState,
+    sub_state: &str,
+    width: u16,
+) -> Vec<Line<'static>> {
     let c = app.effective_color().color();
 
     match state {
@@ -194,7 +250,7 @@ pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Lin
             } else {
                 sub_state.to_string()
             };
-            vec![Line::from(vec![
+            let mut lines = vec![Line::from(vec![
                 Span::styled("❯ ", bold(c)),
                 Span::styled(
                     "MEETING ",
@@ -205,7 +261,34 @@ pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Lin
                 ),
                 Span::raw(" "),
                 Span::styled(msg, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            ])]
+            ])];
+            // The live transcript the engine streams while a capture records.
+            // It is pre-wrapped into a fixed box (see `tail_wrapped`) so the
+            // row's height cannot grow as words accumulate; the empty state
+            // keeps the same height and says what is happening instead.
+            let wrap_w = width.max(1) as usize;
+            // Speaker labels may carry newlines; flatten them so a line break
+            // cannot add height the fixed box did not budget for.
+            let live = app.meeting_live_text.replace(['\n', '\r', '\t'], " ");
+            let text = live.trim();
+            if text.is_empty() {
+                let hint = crate::textfit::truncate(
+                    "listening · Space stops · labels when you stop",
+                    wrap_w,
+                );
+                lines.push(Line::from(Span::styled(hint, dim())));
+                for _ in 1..MEETING_TEXT_LINES {
+                    lines.push(Line::from(""));
+                }
+            } else {
+                for row in tail_wrapped(text, wrap_w, MEETING_TEXT_LINES) {
+                    lines.push(Line::from(Span::styled(
+                        row,
+                        Style::default().fg(Color::White),
+                    )));
+                }
+            }
+            lines
         }
         RunState::Processing => {
             let spinner = SPINNER[app.spinner % SPINNER.len()];
@@ -254,7 +337,7 @@ pub fn status_lines_for(app: &App, state: &RunState, sub_state: &str) -> Vec<Lin
 
 /// Height needed by the status bar for `state` at `width`.
 pub fn status_height_for(app: &App, state: &RunState, sub: &str, width: u16) -> u16 {
-    Paragraph::new(status_text_for(app, state, sub))
+    Paragraph::new(status_text_for(app, state, sub, width))
         .wrap(Wrap { trim: false })
         .line_count(width)
         .max(1) as u16
@@ -590,5 +673,54 @@ mod tests {
         assert_eq!(format_duration(135.0), "2m 15s");
         assert_eq!(format_duration(3900.0), "1h 05m");
         assert_eq!(format_duration(-5.0), "0s");
+    }
+
+    /// The property that matters for the live transcript: whatever it says, the
+    /// meeting row must occupy the same number of lines, because
+    /// `max_status_height` sizes the inline viewport once and a growing row
+    /// would move the whole layout (and resizing the viewport wipes scrollback).
+    #[test]
+    fn test_meeting_live_text_keeps_a_constant_status_height() {
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        app.update_state(RunState::Meeting, "01:05 · 40%".to_string());
+
+        let samples = [
+            String::new(),
+            "Alice: hello".to_string(),
+            "word ".repeat(500),
+            "a".repeat(4_000),
+            "Alice: hello\nBob: hi\n".repeat(50),
+        ];
+        for width in [1u16, 2, 3, 20, 40, 80, 120] {
+            app.meeting_live_text.clear();
+            let baseline =
+                status_height_for(&app, &RunState::Meeting, &app.sub_state_text, width);
+            for text in &samples {
+                app.meeting_live_text = text.clone();
+                let h = status_height_for(&app, &RunState::Meeting, &app.sub_state_text, width);
+                assert_eq!(h, baseline, "height changed at width {width} for {text:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_meeting_status_renders_on_a_tiny_terminal() {
+        let mut app = App::new("1.1.1", Theme::Cyan);
+        app.update_state(RunState::Meeting, "01:05 · 40%".to_string());
+        app.meeting_live_text =
+            "Alice: a long transcript that keeps accumulating ".repeat(50);
+        for (w, h) in [(80, 24), (174, 3), (20, 2), (1, 1)] {
+            let backend = ratatui::backend::TestBackend::new(w, h);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| {
+                    let text = status_text(&app, f.area().width);
+                    f.render_widget(
+                        Paragraph::new(text).wrap(Wrap { trim: false }),
+                        f.area(),
+                    );
+                })
+                .unwrap_or_else(|e| panic!("{w}x{h} failed to draw: {e}"));
+        }
     }
 }
