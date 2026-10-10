@@ -41,6 +41,7 @@ if _is_wsl():
 import queue
 import threading
 import atexit
+import locale
 import time
 import numpy as np
 import sounddevice as sd
@@ -867,9 +868,61 @@ def _normalize_bool(value, default: bool = False) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on", "enabled", "enable")
 
 
+#: Guards the config read-modify-write. The TUI thread and a control-API worker
+#: can both save, and an interleaved save loses one side's change.
+_CONFIG_LOCK = threading.Lock()
+
+
+def _read_config_file(path):
+    """Return ``(config, problem)`` for *path*.
+
+    ``problem`` is ``None`` when the file is absent, empty, or parses. A file
+    that exists but does **not** parse is not an empty file: callers must treat
+    it as a failure, or the next save would replace the user's settings with
+    defaults. The file is UTF-8, with a fallback to the platform default for a
+    config written by an older build on Windows.
+    """
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return {}, None
+    except OSError as e:
+        return {}, f"{type(e).__name__}: {e}"
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        content = raw.decode(locale.getpreferredencoding(False), errors="replace")
+    if not content.strip():
+        return {}, None
+    try:
+        if path.suffix == ".toml":
+            import tomllib
+            return tomllib.loads(content), None
+        if path.suffix in (".yaml", ".yml"):
+            import yaml
+            return yaml.safe_load(content) or {}, None
+        return json.loads(content), None
+    except Exception as e:
+        return {}, f"{type(e).__name__}: {e}"
+
+
+def _backup_unreadable_config(path, problem) -> None:
+    """Move an unparseable config aside so a save cannot destroy the user's settings."""
+    backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
+    try:
+        os.replace(path, backup)
+    except OSError as e:  # pragma: no cover - the save still proceeds
+        logger.error(f"⚠️  {path} is unreadable ({problem}) and could not be moved aside ({e}).")
+        return
+    logger.error(
+        f"⚠️  {path} is unreadable ({problem}); it was preserved at {backup} and "
+        f"this save starts from the shipped defaults."
+    )
+
+
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
-    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, MEETING, MEETING_SPILL_MINUTES, DIARIZATION, DIARIZATION_SPEAKERS, DIARIZATION_MODEL, MEETING_OUTPUT_DIR, MEETING_OUTPUT_FORMAT, FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, TYPING_WPM, CONFIG_FILE
+    global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, MEETING, MEETING_SPILL_MINUTES, DIARIZATION, DIARIZATION_SPEAKERS, DIARIZATION_MODEL, MEETING_OUTPUT_DIR, MEETING_OUTPUT_FORMAT, FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, TYPING_WPM, CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     else:
@@ -879,28 +932,22 @@ def load_audio_config(file_path=None):
     try:
         config = {}
         if CONFIG_FILE.exists():
-            with open(CONFIG_FILE, 'r') as f:
-                content = f.read()
-            if CONFIG_FILE.suffix == '.toml':
-                try:
-                    import tomllib
-                    config = tomllib.loads(content)
-                except Exception as e:
-                    logger.warning(f"⚠️  Could not parse {CONFIG_FILE} as TOML ({e}); using defaults (file left untouched).")
-                    config = {}
-            elif CONFIG_FILE.suffix in ['.yaml', '.yml']:
-                try:
-                    import yaml
-                    config = yaml.safe_load(content) or {}
-                except Exception:
-                    config = json.loads(content) if content.strip() else {}
-            else:
-                config = json.loads(content) if content.strip() else {}
+            config, problem = _read_config_file(CONFIG_FILE)
+            if problem:
+                # Keep the defaults in memory, but never let a later save treat
+                # this as an empty file: it is backed up first (see
+                # ``_backup_unreadable_config``), so the user's settings survive.
+                logger.error(
+                    f"⚠️  Could not read {CONFIG_FILE} ({problem}); using the shipped "
+                    f"defaults for this run. Your settings are recoverable: the file "
+                    f"is backed up before the next save."
+                )
+                config = {}
 
             PRIMARY_DEVICE_NAME = config.get('primary_device_name')
             SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
             OVERRIDE_MODE = config.get('override_mode', 'auto')
-            IS_MUTED = config.get('is_muted', True)
+            IS_MUTED = _normalize_bool(config.get('is_muted', True), default=True)
             raw_out_mode = config.get('output_mode')
             if raw_out_mode in OUTPUT_MODES:
                 OUTPUT_MODE = raw_out_mode
@@ -916,10 +963,11 @@ def load_audio_config(file_path=None):
             NUMBER_DIGITS = NUMBER_MODE != "words"
             SERIAL_COLLAPSE = _normalize_bool(config.get('serial_collapse', True), default=True)
             SPELL_COMMAND = _normalize_bool(config.get('spell_command', True), default=True)
-            MIDDLE_CLICK_ENABLED = config.get('middle_click_enabled', False)
+            MIDDLE_CLICK_ENABLED = _normalize_bool(config.get('middle_click_enabled', False))
             HOTKEY_BINDS = _load_hotkey_binds(config.get('hotkeys'))
             MODEL_BACKEND = _load_model_backend(config.get('model_backend'))
-            KEEP_BLUETOOTH_HANDSFREE = config.get('keep_bluetooth_handsfree', True)
+            KEEP_BLUETOOTH_HANDSFREE = _normalize_bool(
+                config.get('keep_bluetooth_handsfree', True), default=True)
 
             raw_punct = config.get('preset') or config.get('mode_preset') or config.get('punctuation_mode') or config.get('formatting_level') or DEFAULT_PUNCTUATION_MODE
             PUNCTUATION_MODE = get_canonical_preset_name(raw_punct)
@@ -1010,14 +1058,15 @@ def load_audio_config(file_path=None):
             # flag is published below.
             os.environ["VT_LANGUAGE"] = LANGUAGE
 
-            WAIT_FOR_MODEL_ON_STARTUP = config.get('wait_for_model_on_startup', True)
+            WAIT_FOR_MODEL_ON_STARTUP = _normalize_bool(
+                config.get('wait_for_model_on_startup', True), default=True)
             env_wait = os.environ.get("VT_WAIT_FOR_MODEL_ON_STARTUP", "").strip().lower()
             if env_wait in ["1", "true", "yes"]:
                 WAIT_FOR_MODEL_ON_STARTUP = True
             elif env_wait in ["0", "false", "no"]:
                 WAIT_FOR_MODEL_ON_STARTUP = False
 
-            ENABLE_SLM = config.get('enable_slm', False)
+            ENABLE_SLM = _normalize_bool(config.get('enable_slm', False))
             env_slm = os.environ.get("VT_ENABLE_SLM", "").strip().lower()
             if env_slm in ["1", "true", "yes"]:
                 ENABLE_SLM = True
@@ -1032,7 +1081,8 @@ def load_audio_config(file_path=None):
             except (ValueError, TypeError):
                 TYPING_WPM = 40
 
-            AUTO_TYPE_TRAILING_SPACE = config.get('auto_type_trailing_space', True)
+            AUTO_TYPE_TRAILING_SPACE = _normalize_bool(
+                config.get('auto_type_trailing_space', True), default=True)
             env_trailing_space = os.environ.get("VT_AUTO_TYPE_TRAILING_SPACE", "").strip().lower()
             if env_trailing_space in ["1", "true", "yes"]:
                 AUTO_TYPE_TRAILING_SPACE = True
@@ -1215,32 +1265,24 @@ def load_audio_config(file_path=None):
 
 def save_audio_config(file_path=None):
     """Save audio device configuration to local file preserving existing keys and format"""
-    global CONFIG_FILE, AUTO_TYPE, OUTPUT_MODE, COPY_TO_CLIPBOARD, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, SERIAL_COLLAPSE, SPELL_COMMAND, TYPING_WPM
+    global CONFIG_FILE
     if file_path is not None:
         CONFIG_FILE = Path(file_path)
     elif CONFIG_FILE is None:
         CONFIG_FILE = get_config_file()
+    with _CONFIG_LOCK:
+        _write_audio_config()
+
+
+def _write_audio_config():
+    """The read-modify-write half of :func:`save_audio_config`, under its lock."""
+    global AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, SERIAL_COLLAPSE, SPELL_COMMAND, TYPING_WPM
     try:
         existing_config = {}
         if CONFIG_FILE.exists():
-            try:
-                with open(CONFIG_FILE, 'r') as f:
-                    content = f.read()
-                if CONFIG_FILE.suffix == '.toml':
-                    try:
-                        import tomllib
-                        existing_config = tomllib.loads(content)
-                    except Exception:
-                        existing_config = {}
-                elif CONFIG_FILE.suffix in ['.yaml', '.yml']:
-                    try:
-                        import yaml
-                        existing_config = yaml.safe_load(content) or {}
-                    except Exception:
-                        existing_config = json.loads(content) if content.strip() else {}
-                else:
-                    existing_config = json.loads(content) if content.strip() else {}
-            except Exception:
+            existing_config, problem = _read_config_file(CONFIG_FILE)
+            if problem:
+                _backup_unreadable_config(CONFIG_FILE, problem)
                 existing_config = {}
 
         if not isinstance(existing_config, dict):
@@ -1306,8 +1348,13 @@ def save_audio_config(file_path=None):
         else:
             out_content = json.dumps(existing_config, indent=2)
 
-        with open(CONFIG_FILE, 'w') as f:
+        # Same-directory temp + replace, so an interrupted write cannot truncate
+        # the user's config (``stats.py:_write_file`` does this for the same
+        # reason). A failed write leaves the previous file in place.
+        tmp_path = CONFIG_FILE.with_name(CONFIG_FILE.name + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(out_content)
+        os.replace(tmp_path, CONFIG_FILE)
         logger.debug(f"Saved audio device config to {CONFIG_FILE}")
     except Exception as e:
         logger.error(f"Could not save audio config: {e}")

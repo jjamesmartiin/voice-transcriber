@@ -393,7 +393,16 @@ def parse_binds(value) -> list[Bind]:
         not isinstance(value, (list, tuple)) and hasattr(value, "keys")
     ):
         return [parse_bind(value)]
-    binds = [parse_bind(entry) for entry in value]
+    try:
+        entries = list(value)
+    except TypeError:
+        # A scalar (``hotkeys: 12345``) is a typo, not a crash: callers catch
+        # KeybindError and keep the default chord, so the rest of the config
+        # must still load. Raising TypeError here skipped every setting after it.
+        raise KeybindError(
+            f"hotkeys must be a list of binds, got {type(value).__name__}"
+        ) from None
+    binds = [parse_bind(entry) for entry in entries]
     return binds or list(DEFAULT_BINDS)
 
 

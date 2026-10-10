@@ -340,6 +340,52 @@ def test_malformed_toml_is_not_silently_wiped(tmp_path, monkeypatch):
     assert toml_file.read_text() == bad  # untouched
 
 
+def test_a_truncated_config_is_backed_up_before_a_save_overwrites_it(tmp_path, monkeypatch):
+    """An interrupted write must not cost the user their settings.
+
+    Regression: the save was a truncating ``open(..., 'w')``, and the loader
+    treated a file that failed to parse exactly like a missing one. A half-written
+    file therefore reverted every setting and the next save rewrote it as pure
+    defaults, with the original gone. The original is now preserved and named in
+    the error.
+    """
+    config = tmp_path / "config.yaml"
+    good = "ui_theme: magenta\npunctuation_mode: casual\ntyping_wpm: 85\n"
+    config.write_text(good[: len(good) // 2])  # a write cut off mid-file
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    t2.load_audio_config()  # degrades to the shipped defaults, does not raise
+    t2.set_typing_wpm(90)
+
+    backups = list(tmp_path.glob("config.yaml.corrupt-*"))
+    assert len(backups) == 1, "the unreadable file must be preserved, not overwritten"
+    assert backups[0].read_text() == good[: len(good) // 2]
+    assert not list(tmp_path.glob("*.tmp")), "no temp file may be left behind"
+    import yaml
+    saved = yaml.safe_load(config.read_text())
+    assert saved["typing_wpm"] == 90
+    assert config.read_text()  # the new file is valid YAML, not a stub
+
+
+def test_a_bad_hotkeys_scalar_does_not_skip_the_rest_of_the_config(tmp_path, monkeypatch):
+    """One typo'd key must not abort the whole load.
+
+    ``parse_binds`` raised TypeError (not KeybindError) for a scalar, so it
+    escaped the loader's narrow catch and every later setting silently kept its
+    default.
+    """
+    config = tmp_path / "config.yaml"
+    config.write_text("hotkeys: 12345\nui_theme: dark\ncleanup_mode: artifacts\n")
+    monkeypatch.setattr(t2, 'get_config_file', lambda: config)
+
+    t2.load_audio_config()
+
+    assert t2.UI_THEME == "dark"
+    assert t2.CLEANUP_MODE == "artifacts"
+    assert t2.keybinds.format_chord(t2.HOTKEY_BINDS[0].keys) == t2.keybinds.format_chord(
+        t2.keybinds.DEFAULT_CHORD)
+
+
 def test_punctuation_modes_in_post_processor():
     from post_processor import clean_speech_transcription, set_punctuation_mode
 

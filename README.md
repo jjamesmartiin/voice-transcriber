@@ -745,6 +745,14 @@ key, including the ones not listed above (`primary_device_name`,
 `middle_click_enabled`, …). Any option can be overridden per-session with its
 `VT_*` environment variable, e.g. `VT_OUTPUT_MODE=clipboard`, `VT_UI_THEME=cyan`.
 
+> **Your settings are saved atomically.** Every settings change is written to a
+> temp file and moved into place, so a crash, a `Ctrl+C` or a full disk mid-save
+> cannot truncate `config.yaml`. If a config file *does* become unreadable (a
+> YAML typo from a hand-edit, a disk error), the app starts from the shipped
+> defaults for that run, preserves the file as `config.yaml.corrupt-<timestamp>`
+> beside it, logs an error naming the file, and only then writes a new one — an
+> unreadable config is never silently replaced with defaults.
+
 > **Not everything is config.** The all-time time-saved totals live in
 > `stats.json` in the platform data directory (`$XDG_DATA_HOME/vt/`,
 > `~/.local/share/vt/`, or `%LOCALAPPDATA%\vt\`), **not** in `config.yaml` —
