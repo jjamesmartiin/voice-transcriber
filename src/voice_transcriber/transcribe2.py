@@ -21,6 +21,8 @@ import importlib
 import logging
 import threading
 
+from voice_transcriber import backend_registry
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -50,8 +52,8 @@ logger = logging.getLogger(__name__)
 inference_lock = threading.RLock()
 
 
-class UnknownBackendError(ValueError):
-    """A `model_backend` value that is not in the registry, or a broken backend."""
+#: Shared with the formatter and diarization registries; the message names ASR.
+UnknownBackendError = backend_registry.UnknownBackendError
 
 
 #: Backend name -> import path. One line per backend; everything else is derived.
@@ -74,38 +76,20 @@ _active: str | None = None
 
 def available_backends() -> list[str]:
     """Every backend name a config may use, sorted."""
-    return sorted(BACKENDS)
+    return backend_registry.available_backends(BACKENDS)
 
 
 def resolve_backend_name(name: str | None = None) -> str:
     """Validate ``name`` against the registry without importing anything."""
-    resolved = (name or _active or DEFAULT_BACKEND)
-    resolved = str(resolved).strip().lower()
-    if resolved not in BACKENDS:
-        raise UnknownBackendError(
-            f"Unknown ASR backend {resolved!r}. Available: {', '.join(available_backends())}"
-        )
-    return resolved
+    return backend_registry.resolve_backend_name(
+        name, BACKENDS, DEFAULT_BACKEND, "ASR", active=_active)
 
 
 def _load(name: str):
     """Import and validate a backend module (cached)."""
-    if name in _loaded:
-        return _loaded[name]
-    path = BACKENDS[name]
-    try:
-        module = importlib.import_module(path)
-    except ImportError as e:  # pragma: no cover - depends on the environment
-        raise UnknownBackendError(
-            f"ASR backend {name!r} is declared as {path!r} but could not be imported: {e}"
-        ) from e
-    missing = [fn for fn in REQUIRED_FUNCTIONS if not callable(getattr(module, fn, None))]
-    if missing:
-        raise UnknownBackendError(
-            f"ASR backend {name!r} ({path}) does not expose: {', '.join(missing)}"
-        )
-    _loaded[name] = module
-    return module
+    return backend_registry.load_backend(
+        name, BACKENDS, DEFAULT_BACKEND, REQUIRED_FUNCTIONS, _loaded, "ASR",
+        strict=True, import_module=importlib.import_module, active=_active)
 
 
 def get_backend(name: str | None = None):
