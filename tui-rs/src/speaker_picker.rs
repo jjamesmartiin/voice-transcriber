@@ -16,7 +16,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
@@ -69,23 +69,11 @@ impl SpeakerPickerState {
     }
 
     fn move_up(&mut self) {
-        if self.names.is_empty() {
-            self.selected = 0;
-        } else if self.selected > 0 {
-            self.selected -= 1;
-        } else {
-            self.selected = self.names.len() - 1;
-        }
+        crate::modal::move_cursor_up(&mut self.selected, self.names.len());
     }
 
     fn move_down(&mut self) {
-        if self.names.is_empty() {
-            self.selected = 0;
-        } else if self.selected + 1 < self.names.len() {
-            self.selected += 1;
-        } else {
-            self.selected = 0;
-        }
+        crate::modal::move_cursor_down(&mut self.selected, self.names.len());
     }
 
     /// Swap the selected entry with its neighbour; `false` when it is already
@@ -242,29 +230,13 @@ impl SpeakerPickerState {
     }
 }
 
-/// Tell the engine the current ordered list.
-fn push_names(writer: Option<&UnixStream>, names: &[String], should_quit: &mut bool) {
-    if let Some(w) = writer {
-        if ipc::send_cmd_json(w, "set_speakers", serde_json::json!({ "speakers": names })).is_err() {
-            *should_quit = true;
-        }
-    }
-}
-
 pub fn render_speaker_picker(frame: &mut Frame, state: &SpeakerPickerState, app: &App) {
     let area = frame.area();
     let theme_color = app.effective_color().color();
 
     let popup_w = 64u16.min(area.width.saturating_sub(4)).max(34).min(area.width);
     let popup_h = 16u16.min(area.height.saturating_sub(2)).max(8).min(area.height);
-    let x = (area.width.saturating_sub(popup_w)) / 2;
-    let y = (area.height.saturating_sub(popup_h)) / 2;
-    let popup_area = Rect {
-        x,
-        y,
-        width: popup_w,
-        height: popup_h,
-    };
+    let popup_area = crate::modal::centered_rect(area, popup_w, popup_h);
 
     frame.render_widget(Clear, area);
 
@@ -390,14 +362,7 @@ pub fn render_speaker_picker(frame: &mut Frame, state: &SpeakerPickerState, app:
     if let Some((mode, buffer)) = &state.input {
         let prompt_w = 60u16.min(area.width.saturating_sub(4)).max(34);
         let prompt_h = 6u16.min(area.height.saturating_sub(2)).max(5);
-        let px = (area.width.saturating_sub(prompt_w)) / 2;
-        let py = (area.height.saturating_sub(prompt_h)) / 2;
-        let prompt_area = Rect {
-            x: px,
-            y: py,
-            width: prompt_w,
-            height: prompt_h,
-        };
+        let prompt_area = crate::modal::centered_rect(area, prompt_w, prompt_h);
 
         frame.render_widget(Clear, prompt_area);
 
@@ -472,13 +437,7 @@ pub fn run_speaker_picker(
     rx: Option<&mpsc::Receiver<IpcEvent>>,
     app: &mut App,
 ) -> io::Result<()> {
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
-
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.hide_cursor()?;
-    terminal.clear()?;
+    let mut terminal = crate::modal::enter_modal_screen()?;
 
     let mut state = SpeakerPickerState::new(app.speaker_names.clone());
 
@@ -511,7 +470,12 @@ pub fn run_speaker_picker(
                         SpeakerPickerAction::Continue => {}
                         SpeakerPickerAction::Changed => {
                             app.speaker_names = state.names.clone();
-                            push_names(writer, &state.names, &mut app.should_quit);
+                            ipc::fire_json(
+                                writer,
+                                "set_speakers",
+                                serde_json::json!({ "speakers": &state.names }),
+                                app,
+                            );
                         }
                     }
                 }
@@ -523,7 +487,7 @@ pub fn run_speaker_picker(
     // is no engine, so keep the local copy so the screen stays consistent.
     app.speaker_names = state.names.clone();
 
-    let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    crate::modal::leave_modal_screen();
     Ok(())
 }
 

@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
@@ -110,32 +110,14 @@ pub fn score_theme(query: &str, opt: &ThemeOption) -> Option<i32> {
         return Some(300 - pos as i32 * 5);
     }
     // Fuzzy subsequence in name
-    if let Some(dist) = fuzzy_subsequence(&q, &name) {
+    if let Some(dist) = textfit::fuzzy_subsequence(&q, &name) {
         return Some(200 - dist as i32);
     }
     // Fuzzy subsequence in description
-    if let Some(dist) = fuzzy_subsequence(&q, &desc) {
+    if let Some(dist) = textfit::fuzzy_subsequence(&q, &desc) {
         return Some(100 - dist as i32);
     }
     None
-}
-
-fn fuzzy_subsequence(pattern: &str, target: &str) -> Option<usize> {
-    let mut p_chars = pattern.chars().peekable();
-    let mut dist = 0;
-    for (i, c) in target.chars().enumerate() {
-        if let Some(&p) = p_chars.peek() {
-            if c == p {
-                p_chars.next();
-                dist += i;
-            }
-        }
-    }
-    if p_chars.peek().is_none() {
-        Some(dist)
-    } else {
-        None
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -182,21 +164,11 @@ impl PickerState {
     }
 
     pub fn move_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-        } else if !self.filtered_indices.is_empty() {
-            self.selected_index = self.filtered_indices.len() - 1;
-        }
+        crate::modal::move_cursor_up(&mut self.selected_index, self.filtered_indices.len());
     }
 
     pub fn move_down(&mut self) {
-        if !self.filtered_indices.is_empty() {
-            if self.selected_index + 1 < self.filtered_indices.len() {
-                self.selected_index += 1;
-            } else {
-                self.selected_index = 0;
-            }
-        }
+        crate::modal::move_cursor_down(&mut self.selected_index, self.filtered_indices.len());
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> PickerAction {
@@ -375,14 +347,7 @@ pub fn render_picker(frame: &mut Frame, state: &PickerState) {
     // Centered popup modal
     let popup_w = 66u16.min(area.width.saturating_sub(4)).max(30);
     let popup_h = 16u16.min(area.height.saturating_sub(2)).max(10);
-    let x = (area.width.saturating_sub(popup_w)) / 2;
-    let y = (area.height.saturating_sub(popup_h)) / 2;
-    let popup_area = Rect {
-        x,
-        y,
-        width: popup_w,
-        height: popup_h,
-    };
+    let popup_area = crate::modal::centered_rect(area, popup_w, popup_h);
 
     frame.render_widget(Clear, popup_area);
 
@@ -509,12 +474,7 @@ pub fn run_theme_picker(
     rx: Option<&mpsc::Receiver<IpcEvent>>,
     app: &mut App,
 ) -> io::Result<Option<Theme>> {
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
-
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.hide_cursor()?;
+    let mut terminal = crate::modal::enter_modal_screen()?;
 
     let mut state = PickerState::new(current_theme);
     let mut result: Option<Theme> = None;
@@ -558,15 +518,11 @@ pub fn run_theme_picker(
         }
     }
 
-    let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    crate::modal::leave_modal_screen();
 
     if let Some(theme) = result {
         app.ui_theme = theme;
-        if let Some(w) = writer {
-            if ipc::send_cmd_value(w, "set_theme", "theme", theme.name()).is_err() {
-                app.should_quit = true;
-            }
-        }
+        ipc::fire_value(writer, "set_theme", "theme", theme.name(), app);
     }
 
     Ok(result)

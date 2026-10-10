@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
@@ -795,32 +795,14 @@ pub fn score_setting(query: &str, item: &SettingItem) -> Option<i32> {
         return Some(400 - pos as i32 * 5);
     }
     // Fuzzy subsequence in title
-    if let Some(dist) = fuzzy_subsequence(&q, &title) {
+    if let Some(dist) = textfit::fuzzy_subsequence(&q, &title) {
         return Some(200 - dist as i32);
     }
     // Fuzzy subsequence in keywords
-    if let Some(dist) = fuzzy_subsequence(&q, &kw) {
+    if let Some(dist) = textfit::fuzzy_subsequence(&q, &kw) {
         return Some(100 - dist as i32);
     }
     None
-}
-
-fn fuzzy_subsequence(pattern: &str, target: &str) -> Option<usize> {
-    let mut p_chars = pattern.chars().peekable();
-    let mut dist = 0;
-    for (i, c) in target.chars().enumerate() {
-        if let Some(&p) = p_chars.peek() {
-            if c == p {
-                p_chars.next();
-                dist += i;
-            }
-        }
-    }
-    if p_chars.peek().is_none() {
-        Some(dist)
-    } else {
-        None
-    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -1108,14 +1090,7 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
         .min(area.height.saturating_sub(2))
         .max(12)
         .min(area.height);
-    let x = (area.width.saturating_sub(popup_w)) / 2;
-    let y = (area.height.saturating_sub(popup_h)) / 2;
-    let popup_area = Rect {
-        x,
-        y,
-        width: popup_w,
-        height: popup_h,
-    };
+    let popup_area = crate::modal::centered_rect(area, popup_w, popup_h);
 
     frame.render_widget(Clear, area);
 
@@ -1261,14 +1236,7 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
     if let Some(ref input) = state.wpm_input {
         let prompt_w = 52u16.min(area.width.saturating_sub(4)).max(34);
         let prompt_h = 7u16.min(area.height.saturating_sub(2)).max(5);
-        let px = (area.width.saturating_sub(prompt_w)) / 2;
-        let py = (area.height.saturating_sub(prompt_h)) / 2;
-        let prompt_area = Rect {
-            x: px,
-            y: py,
-            width: prompt_w,
-            height: prompt_h,
-        };
+        let prompt_area = crate::modal::centered_rect(area, prompt_w, prompt_h);
 
         frame.render_widget(Clear, prompt_area);
 
@@ -1368,14 +1336,7 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
     if let Some(ref input) = state.dir_input {
         let prompt_w = 60u16.min(area.width.saturating_sub(4)).max(34);
         let prompt_h = 7u16.min(area.height.saturating_sub(2)).max(5);
-        let px = (area.width.saturating_sub(prompt_w)) / 2;
-        let py = (area.height.saturating_sub(prompt_h)) / 2;
-        let prompt_area = Rect {
-            x: px,
-            y: py,
-            width: prompt_w,
-            height: prompt_h,
-        };
+        let prompt_area = crate::modal::centered_rect(area, prompt_w, prompt_h);
 
         frame.render_widget(Clear, prompt_area);
 
@@ -1500,13 +1461,7 @@ pub fn run_settings_picker(
     rx: Option<&mpsc::Receiver<IpcEvent>>,
     app: &mut App,
 ) -> io::Result<()> {
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
-
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.hide_cursor()?;
-    terminal.clear()?;
+    let mut terminal = crate::modal::enter_modal_screen()?;
 
     let mut state = SettingsPickerState::new();
 
@@ -1542,13 +1497,7 @@ pub fn run_settings_picker(
                         SettingsPickerAction::Continue => {}
                         SettingsPickerAction::SetWpm(val) => {
                             app.typing_wpm = val;
-                            if let Some(w) = writer {
-                                if ipc::send_cmd_value(w, "set_typing_wpm", "wpm", &val.to_string())
-                                    .is_err()
-                                {
-                                    app.should_quit = true;
-                                }
-                            }
+                            ipc::fire_value(writer, "set_typing_wpm", "wpm", &val.to_string(), app);
                         }
                         SettingsPickerAction::SetMeetingOutputDir(path) => {
                             // The engine is authoritative: it normalises an empty
@@ -1559,31 +1508,17 @@ pub fn run_settings_picker(
                             } else {
                                 path.clone()
                             };
-                            if let Some(w) = writer {
-                                if ipc::send_cmd_value(w, "set_meeting_output_dir", "path", &path)
-                                    .is_err()
-                                {
-                                    app.should_quit = true;
-                                }
-                            }
+                            ipc::fire_value(writer, "set_meeting_output_dir", "path", &path, app);
                         }
                         SettingsPickerAction::Toggle(kind) => {
                             match kind {
                                 SettingKind::TrailingSpace => {
                                     app.trailing_space = !app.trailing_space;
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "toggle_trailing_space").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "toggle_trailing_space", app);
                                 }
                                 SettingKind::AutoPunctuate => {
                                     app.auto_punctuate = !app.auto_punctuate;
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "toggle_auto_punctuate").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "toggle_auto_punctuate", app);
                                 }
                                 SettingKind::NumberDigits => {
                                     app.number_mode = match app.number_mode.as_str() {
@@ -1592,43 +1527,23 @@ pub fn run_settings_picker(
                                         _ => "auto".to_string(),
                                     };
                                     app.number_digits = app.number_mode != "words";
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "toggle_numbers").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "toggle_numbers", app);
                                 }
                                 SettingKind::SerialCollapse => {
                                     app.serial_collapse = !app.serial_collapse;
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "toggle_serial_collapse").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "toggle_serial_collapse", app);
                                 }
                                 SettingKind::SpellCommand => {
                                     app.spell_command = !app.spell_command;
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "toggle_spell_command").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "toggle_spell_command", app);
                                 }
                                 SettingKind::TypingWpm => {
                                     app.cycle_typing_wpm();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_typing_wpm").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_typing_wpm", app);
                                 }
                                 SettingKind::MiddleClick => {
                                     app.middle_click_enabled = !app.middle_click_enabled;
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "toggle_middle_click").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "toggle_middle_click", app);
                                 }
                                 SettingKind::Hotkeys => {
                                     // Nested push-to-talk bind picker modal.
@@ -1638,71 +1553,35 @@ pub fn run_settings_picker(
                                 }
                                 SettingKind::SoundMute => {
                                     app.is_muted = !app.is_muted;
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "toggle_mute").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "toggle_mute", app);
                                 }
                                 SettingKind::CleanupMode => {
                                     app.cycle_cleanup_mode();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_cleanup").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_cleanup", app);
                                 }
                                 SettingKind::MeetingMode => {
                                     app.cycle_meeting_mode();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_meeting").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_meeting", app);
                                 }
                                 SettingKind::MeetingSpill => {
                                     app.cycle_meeting_spill();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_meeting_spill").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_meeting_spill", app);
                                 }
                                 SettingKind::Diarization => {
                                     app.cycle_diarization();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_diarization").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_diarization", app);
                                 }
                                 SettingKind::DiarizationSpeakers => {
                                     app.cycle_diarization_speakers();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_diarization_speakers")
-                                            .is_err()
-                                        {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_diarization_speakers", app);
                                 }
                                 SettingKind::DiarizationModel => {
                                     app.cycle_diarization_model();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_diarization_model").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_diarization_model", app);
                                 }
                                 SettingKind::MeetingOutputFormat => {
                                     app.cycle_meeting_output_format();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_meeting_output_format")
-                                            .is_err()
-                                        {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_meeting_output_format", app);
                                 }
                                 SettingKind::MeetingOutputDir => {
                                     // Enter/Space open the path prompt in
@@ -1711,51 +1590,27 @@ pub fn run_settings_picker(
                                 }
                                 SettingKind::StructureMode => {
                                     app.cycle_structure_mode();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_structure").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_structure", app);
                                 }
                                 SettingKind::Formatter => {
                                     app.cycle_formatter();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_formatter").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_formatter", app);
                                 }
                                 SettingKind::FormatterModel => {
                                     app.cycle_formatter_model();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_formatter_model").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_formatter_model", app);
                                 }
                                 SettingKind::FormatterStyle => {
                                     app.cycle_formatter_style();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_formatter_style").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_formatter_style", app);
                                 }
                                 SettingKind::FormatterContext => {
                                     app.cycle_formatter_context();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_formatter_context").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_formatter_context", app);
                                 }
                                 SettingKind::OutputMode => {
                                     app.cycle_output_mode();
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "cycle_output_mode").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "cycle_output_mode", app);
                                 }
                                 SettingKind::PunctuationMode => {
                                     // Nested preset picker modal.
@@ -1784,19 +1639,11 @@ pub fn run_settings_picker(
                                     // The engine re-enumerates PortAudio and
                                     // reports what came back (including any mic
                                     // another app is still holding) as an event.
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "rescan_mics").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "rescan_mics", app);
                                     state.mic_rescan_done = true;
                                 }
                                 SettingKind::ResetTerminal => {
-                                    if let Some(w) = writer {
-                                        if ipc::send_cmd(w, "reset_terminal").is_err() {
-                                            app.should_quit = true;
-                                        }
-                                    }
+                                    ipc::fire(writer, "reset_terminal", app);
                                     state.reset_done = true;
                                     let _ = crossterm::terminal::enable_raw_mode();
                                     let _ =
@@ -1805,11 +1652,7 @@ pub fn run_settings_picker(
                                 }
                                 SettingKind::ResetDefaults => {
                                     if state.confirm_reset_defaults() {
-                                        if let Some(w) = writer {
-                                            if ipc::send_cmd(w, "reset_defaults").is_err() {
-                                                app.should_quit = true;
-                                            }
-                                        }
+                                        ipc::fire(writer, "reset_defaults", app);
                                         let _ = crossterm::terminal::enable_raw_mode();
                                         let _ = crossterm::execute!(
                                             io::stdout(),
@@ -1826,7 +1669,7 @@ pub fn run_settings_picker(
         }
     }
 
-    let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    crate::modal::leave_modal_screen();
     Ok(())
 }
 

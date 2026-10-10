@@ -28,7 +28,7 @@ use std::thread;
 
 use serde::{Deserialize, Serialize};
 
-use crate::app::{Level, OutStatus};
+use crate::app::{App, Level, OutStatus};
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AudioDeviceInfo {
@@ -324,6 +324,39 @@ fn write_line(stream: &UnixStream, line: &str) -> std::io::Result<()> {
     let mut w = stream;
     w.write_all(line.as_bytes())?;
     w.flush()
+}
+
+/// Send a fire-and-forget command, treating a dead writer as a disconnect.
+///
+/// Every modal arm that talks to the engine must do the same two things: skip
+/// the send when there is no engine (demo mode), and set `should_quit` when the
+/// socket is gone so the modal does not spin forever on a dead writer. Open-
+/// coding that pair invites a missed `.is_err()`; this is the one place it lives.
+/// A `None` writer is expected (demo mode) and is not a disconnect.
+pub fn fire(writer: Option<&UnixStream>, cmd: &str, app: &mut App) {
+    if let Some(w) = writer {
+        if send_cmd(w, cmd).is_err() {
+            app.should_quit = true;
+        }
+    }
+}
+
+/// As [`fire`], with one string property.
+pub fn fire_value(writer: Option<&UnixStream>, cmd: &str, key: &str, val: &str, app: &mut App) {
+    if let Some(w) = writer {
+        if send_cmd_value(w, cmd, key, val).is_err() {
+            app.should_quit = true;
+        }
+    }
+}
+
+/// As [`fire`], with a JSON payload (device names and speaker lists).
+pub fn fire_json(writer: Option<&UnixStream>, cmd: &str, payload: serde_json::Value, app: &mut App) {
+    if let Some(w) = writer {
+        if send_cmd_json(w, cmd, payload).is_err() {
+            app.should_quit = true;
+        }
+    }
 }
 
 pub fn status_from_wire(s: Option<&str>) -> OutStatus {

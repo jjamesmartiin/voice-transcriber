@@ -13,6 +13,7 @@ mod bind_picker;
 mod demo;
 mod ipc;
 mod mic_picker;
+mod modal;
 mod preset_picker;
 mod settings_picker;
 mod speaker_picker;
@@ -424,14 +425,10 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                                     app.should_quit = true;
                                 }
                                 Intent::ToggleRecord => {
-                                    if ipc::send_cmd(&writer, "toggle_record").is_err() {
-                                        app.should_quit = true;
-                                    }
+                                    ipc::fire(Some(&writer), "toggle_record", &mut app);
                                 }
                                 Intent::ToggleMeeting => {
-                                    if ipc::send_cmd(&writer, "toggle_meeting").is_err() {
-                                        app.should_quit = true;
-                                    }
+                                    ipc::fire(Some(&writer), "toggle_meeting", &mut app);
                                 }
                                 Intent::OpenSettingsPicker => {
                                     settings_picker::run_settings_picker(
@@ -450,9 +447,7 @@ fn run_ipc(path: &str, theme: Theme) -> io::Result<()> {
                                     rt.flush_pending(&mut app)?;
                                 }
                                 Intent::ResetTerminal => {
-                                    if ipc::send_cmd(&writer, "reset_terminal").is_err() {
-                                        app.should_quit = true;
-                                    }
+                                    ipc::fire(Some(&writer), "reset_terminal", &mut app);
                                 }
                             }
                         }

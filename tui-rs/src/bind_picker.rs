@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
@@ -57,23 +57,11 @@ impl BindPickerState {
     }
 
     pub fn move_up(&mut self, len: usize) {
-        if len == 0 {
-            self.selected_index = 0;
-        } else if self.selected_index > 0 {
-            self.selected_index -= 1;
-        } else {
-            self.selected_index = len - 1;
-        }
+        crate::modal::move_cursor_up(&mut self.selected_index, len);
     }
 
     pub fn move_down(&mut self, len: usize) {
-        if len == 0 {
-            self.selected_index = 0;
-        } else if self.selected_index + 1 < len {
-            self.selected_index += 1;
-        } else {
-            self.selected_index = 0;
-        }
+        crate::modal::move_cursor_down(&mut self.selected_index, len);
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, binds: &[String]) -> BindPickerAction {
@@ -186,14 +174,7 @@ pub fn render_bind_picker(frame: &mut Frame, state: &BindPickerState, app: &App)
         .min(area.height.saturating_sub(2))
         .max(9)
         .min(area.height);
-    let x = (area.width.saturating_sub(popup_w)) / 2;
-    let y = (area.height.saturating_sub(popup_h)) / 2;
-    let popup_area = Rect {
-        x,
-        y,
-        width: popup_w,
-        height: popup_h,
-    };
+    let popup_area = crate::modal::centered_rect(area, popup_w, popup_h);
 
     frame.render_widget(Clear, area);
 
@@ -314,14 +295,7 @@ pub fn render_bind_picker(frame: &mut Frame, state: &BindPickerState, app: &App)
             .min(area.height.saturating_sub(2))
             .max(5)
             .min(area.height);
-        let px = (area.width.saturating_sub(prompt_w)) / 2;
-        let py = (area.height.saturating_sub(prompt_h)) / 2;
-        let prompt_area = Rect {
-            x: px,
-            y: py,
-            width: prompt_w,
-            height: prompt_h,
-        };
+        let prompt_area = crate::modal::centered_rect(area, prompt_w, prompt_h);
 
         frame.render_widget(Clear, prompt_area);
 
@@ -408,13 +382,7 @@ pub fn run_bind_picker(
     rx: Option<&mpsc::Receiver<IpcEvent>>,
     app: &mut App,
 ) -> io::Result<()> {
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
-
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.hide_cursor()?;
-    terminal.clear()?;
+    let mut terminal = crate::modal::enter_modal_screen()?;
 
     let mut state = BindPickerState::new();
 
@@ -448,20 +416,10 @@ pub fn run_bind_picker(
                         BindPickerAction::Close => break,
                         BindPickerAction::Continue => {}
                         BindPickerAction::Add(chord) => {
-                            if let Some(w) = writer {
-                                if ipc::send_cmd_value(w, "hotkey_add", "chord", &chord).is_err() {
-                                    app.should_quit = true;
-                                }
-                            }
+                            ipc::fire_value(writer, "hotkey_add", "chord", &chord, app);
                         }
                         BindPickerAction::Remove(chord) => {
-                            if let Some(w) = writer {
-                                if ipc::send_cmd_value(w, "hotkey_remove", "chord", &chord)
-                                    .is_err()
-                                {
-                                    app.should_quit = true;
-                                }
-                            }
+                            ipc::fire_value(writer, "hotkey_remove", "chord", &chord, app);
                         }
                     }
                 }
@@ -469,7 +427,7 @@ pub fn run_bind_picker(
         }
     }
 
-    let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    crate::modal::leave_modal_screen();
     Ok(())
 }
 
