@@ -535,6 +535,30 @@ class TestEngineVerbs:
         assert response["ok"] is True
         assert key in response
 
+    @pytest.mark.parametrize(
+        "verb,value",
+        [
+            ("diarization", "on"),
+            ("diarization-speakers", "3"),
+            ("diarization-model", "diarization"),
+            ("meeting-format", "json"),
+            ("meeting-output", "meetings-out"),
+        ],
+    )
+    def test_new_setting_verbs_save_the_config_exactly_once(
+        self, engine, verb, value, monkeypatch
+    ):
+        """The setters own the save; the control layer must not save again."""
+        import t2
+
+        saves = []
+        monkeypatch.setattr(t2, "save_audio_config", lambda: saves.append(1))
+
+        response = engine.handle_control(verb, {"value": value})
+
+        assert response["ok"] is True
+        assert len(saves) == 1, f"{verb} saved the config {len(saves)} times"
+
     def test_mute_toggles_without_a_value(self, engine):
         import t2
 
