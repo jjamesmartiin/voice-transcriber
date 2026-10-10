@@ -44,7 +44,7 @@
     "component_gate": 0.025,
     "passed": true,
     "progress_calls": 24,
-    "git_rev": "b3da92a1c8bdb33a1ffb4f579f4961a4824647d8",
+    "git_rev": "37e099742c980b23ebc4d42a776fb346190c17d0",
     "git_dirty": false,
     "invocation": [
       "python",
