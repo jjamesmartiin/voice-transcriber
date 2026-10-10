@@ -1242,6 +1242,35 @@ def test_speaker_hooks_are_wired_and_the_map_is_metadata_not_config(tmp_path, mo
         t2.register_speaker_hooks(get=None, set=None)
 
 
+def test_speaker_editor_key_map_reorders_on_uppercase_jk(monkeypatch):
+    """Pin the editor's key handling, not just move_speaker_name: lowercase
+    j/k select, uppercase J/K reorder (matching the Rust editor)."""
+    state = {"names": ["A", "B", "C"]}
+    monkeypatch.setattr(t2, "get_speaker_names", lambda: list(state["names"]))
+    monkeypatch.setattr(
+        t2, "set_speaker_names",
+        lambda names: state.update(names=list(names)) or True,
+    )
+
+    def press(*keys):
+        pending = iter(keys)
+        monkeypatch.setattr(t2, "_read_key", lambda: next(pending))
+        return t2.select_speaker_editor()
+
+    assert press("J", "q") is True
+    assert state["names"] == ["B", "A", "C"]  # J moved the selected name down
+
+    state["names"] = ["A", "B", "C"]
+    assert press("j", "j", "K", "q") is True
+    assert state["names"] == ["A", "C", "B"]  # K moved the third name up
+
+    # Lowercase j must move the selection, not reorder: deleting the selection
+    # then removes the second name only.
+    state["names"] = ["A", "B", "C"]
+    press("j", "d", "q")
+    assert state["names"] == ["A", "C"]
+
+
 def test_both_python_tuis_expose_meeting_output_settings():
     from tui import VoiceTranscriberTUI
     from tui_ratatui import RatatuiTui

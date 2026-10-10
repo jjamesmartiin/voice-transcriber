@@ -3581,8 +3581,8 @@ def select_speaker_editor():
     is no "Speaker 1/2" concept in the UI - it is just names; the renderer falls
     back to a readable ``Speaker N`` for any slot left unnamed.
 
-    Keys: up/down move, Enter renames, ``a`` adds, ``d`` deletes, ``J``/``K``
-    reorder, ``s``/Esc saves, ``q``/Ctrl+C cancels. Changes are applied to the
+    Keys: up/down (or ``k``/``j``) move, Enter renames, ``a`` adds, ``d``
+    deletes, ``J``/``K`` reorder, ``s``/Esc saves, ``q``/Ctrl+C cancels. Changes are applied to the
     engine as they are made, so the map stays live even if this is closed with
     ``q``. Returns True when names were changed, False otherwise.
     """
@@ -3652,9 +3652,9 @@ def select_speaker_editor():
         if key in ("q", "CTRL_C"):
             console.clear()
             return changed
-        if key in ("UP", "K"):
+        if key in ("UP", "k"):
             selected = max(0, selected - 1)
-        elif key in ("DOWN", "J"):
+        elif key in ("DOWN", "j"):
             selected = min(max(0, len(names) - 1), selected + 1)
         elif key == "a":
             console.print("Name for the new speaker:")
