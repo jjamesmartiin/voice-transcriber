@@ -151,7 +151,12 @@ def _max_weight_assignment(weights: list[list[float]]) -> dict[int, int]:
             for j in range(1, cols + 1):
                 if used[j]:
                     continue
-                cur = -weights[i0 - 1][j - 1] + u[i0] + v[j]
+                # Kuhn-Munkres for MINIMISATION over cost = -weight. The
+                # potential update below is u += delta / v -= delta, so the
+                # reduced cost is a - u - v. Writing a + u + v here returns a
+                # suboptimal mapping (it over-reports DER) and the property
+                # test in tests/shared/test_diarization_der.py catches that.
+                cur = -weights[i0 - 1][j - 1] - u[i0] - v[j]
                 if cur < minv[j]:
                     minv[j] = cur
                     way[j] = j0

@@ -75,6 +75,47 @@ def test_max_weight_assignment_handles_empty():
     assert sd._max_weight_assignment([[]]) == {}
 
 
+def test_max_weight_assignment_beats_the_greedy_answer():
+    """The 2x2 the reduced-cost sign error got wrong.
+
+    The optimum is the anti-diagonal (8 + 5 = 13); a greedy pick from the corner
+    takes 5 + 6 = 11. Diagonal-dominant matrices like the one above pass even
+    with a wrong sign, which is why this survived until the algorithm was fuzzed.
+    """
+    assert sd._max_weight_assignment([[5.0, 8.0], [5.0, 6.0]]) == {0: 1, 1: 0}
+
+
+def _brute_force_max_weight(weights):
+    """Optimal total weight by exhaustive search. Small matrices only."""
+    import itertools
+    rows, cols = len(weights), len(weights[0])
+    if rows <= cols:
+        return max(sum(weights[i][c] for i, c in enumerate(p))
+                   for p in itertools.permutations(range(cols), rows))
+    return max(sum(weights[r][j] for j, r in enumerate(p))
+               for p in itertools.permutations(range(rows), cols))
+
+
+def test_max_weight_assignment_is_optimal_against_brute_force():
+    """Property test: never worse than an exhaustive search of the same matrix.
+
+    The hand-rolled Kuhn-Munkres returned a suboptimal mapping on 431 of 3000
+    random matrices while the reduced cost had the wrong sign, so this checks
+    the algorithm rather than one hand-picked case. A wrong mapping over-reports
+    DER, and nothing else here would notice.
+    """
+    import random
+    rng = random.Random(20261009)
+    for _ in range(300):
+        rows, cols = rng.randint(1, 4), rng.randint(1, 4)
+        weights = [[float(rng.randint(0, 9)) for _ in range(cols)]
+                   for _ in range(rows)]
+        got = sd._max_weight_assignment(weights)
+        total = sum(weights[i][j] for i, j in got.items())
+        best = _brute_force_max_weight(weights)
+        assert total == best, f"{weights} -> {got} ({total}), optimum {best}"
+
+
 def test_optimal_speaker_mapping_prefers_the_larger_overlap():
     overlap = {"A": {"X": 5.0, "Y": 1.0}, "B": {"X": 1.0, "Y": 4.0}}
     assert sd.optimal_speaker_mapping(overlap) == {"A": "X", "B": "Y"}

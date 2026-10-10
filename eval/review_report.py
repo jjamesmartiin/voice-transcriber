@@ -123,7 +123,11 @@ def _slice_summary(clips: list) -> dict:
         d["wer"] = (d["we"] / d["wr"]) if d["wr"] else None
         d["cer"] = (d["ce"] / d["cr"]) if d["cr"] else None
         d["exact_rate"] = (d["exact"] / d["n"]) if d["n"] else None
-        d["silence_halluc_rate"] = (d["empty"] / d["n"]) if s == "silence" and d["n"] else None
+        # A hallucination is a NON-EMPTY hypothesis on a silence clip -- the
+        # same direction as eval/score.py's silence_hallucination_rate. This
+        # counted the empty ones, so it reported 1.0 where score.py said 0.0.
+        d["silence_halluc_rate"] = (
+            ((d["n"] - d["empty"]) / d["n"]) if s == "silence" and d["n"] else None)
     return out
 
 
