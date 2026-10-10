@@ -544,11 +544,7 @@ pub fn run_theme_picker(
 
     if let Some(theme) = result {
         app.ui_theme = theme;
-        if let Some(w) = writer {
-            if ipc::send_cmd_value(w, "set_theme", "theme", theme.name()).is_err() {
-                app.should_quit = true;
-            }
-        }
+        ipc::fire_value(writer, "set_theme", "theme", theme.name(), app);
     }
 
     Ok(result)

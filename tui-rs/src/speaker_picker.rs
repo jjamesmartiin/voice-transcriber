@@ -242,15 +242,6 @@ impl SpeakerPickerState {
     }
 }
 
-/// Tell the engine the current ordered list.
-fn push_names(writer: Option<&UnixStream>, names: &[String], should_quit: &mut bool) {
-    if let Some(w) = writer {
-        if ipc::send_cmd_json(w, "set_speakers", serde_json::json!({ "speakers": names })).is_err() {
-            *should_quit = true;
-        }
-    }
-}
-
 pub fn render_speaker_picker(frame: &mut Frame, state: &SpeakerPickerState, app: &App) {
     let area = frame.area();
     let theme_color = app.effective_color().color();
@@ -511,7 +502,12 @@ pub fn run_speaker_picker(
                         SpeakerPickerAction::Continue => {}
                         SpeakerPickerAction::Changed => {
                             app.speaker_names = state.names.clone();
-                            push_names(writer, &state.names, &mut app.should_quit);
+                            ipc::fire_json(
+                                writer,
+                                "set_speakers",
+                                serde_json::json!({ "speakers": &state.names }),
+                                app,
+                            );
                         }
                     }
                 }

@@ -448,20 +448,10 @@ pub fn run_bind_picker(
                         BindPickerAction::Close => break,
                         BindPickerAction::Continue => {}
                         BindPickerAction::Add(chord) => {
-                            if let Some(w) = writer {
-                                if ipc::send_cmd_value(w, "hotkey_add", "chord", &chord).is_err() {
-                                    app.should_quit = true;
-                                }
-                            }
+                            ipc::fire_value(writer, "hotkey_add", "chord", &chord, app);
                         }
                         BindPickerAction::Remove(chord) => {
-                            if let Some(w) = writer {
-                                if ipc::send_cmd_value(w, "hotkey_remove", "chord", &chord)
-                                    .is_err()
-                                {
-                                    app.should_quit = true;
-                                }
-                            }
+                            ipc::fire_value(writer, "hotkey_remove", "chord", &chord, app);
                         }
                     }
                 }

@@ -523,11 +523,7 @@ pub fn run_mic_picker(
 
     // Request fresh device list from Python backend. The monitored set is
     // derived from what is actually on screen, so the loop below commands it.
-    if let Some(w) = writer {
-        if ipc::send_cmd(w, "get_devices").is_err() {
-            app.should_quit = true;
-        }
-    }
+    ipc::fire(writer, "get_devices", app);
 
     let mut state = MicPickerState::new(app.audio_devices.len());
     // Position cursor on currently active device if possible
@@ -592,13 +588,12 @@ pub fn run_mic_picker(
         // when scrolling or filtering actually changes the visible set.
         if visible != state.monitored {
             state.monitored = visible.clone();
-            if let Some(w) = writer {
-                if ipc::send_cmd_json(w, "start_mic_monitor", serde_json::json!({ "indices": visible }))
-                    .is_err()
-                {
-                    app.should_quit = true;
-                }
-            }
+            ipc::fire_json(
+                writer,
+                "start_mic_monitor",
+                serde_json::json!({ "indices": visible }),
+                app,
+            );
         }
 
         terminal.draw(|f| render_mic_picker(f, &state, app))?;
@@ -614,20 +609,15 @@ pub fn run_mic_picker(
                                 let dev_name = dev.name.clone();
                                 let dev_index = dev.index;
                                 app.active_device = dev_name.clone();
-                                if let Some(w) = writer {
-                                    if ipc::send_cmd_json(
-                                        w,
-                                        "set_device",
-                                        serde_json::json!({
-                                            "device": dev_name,
-                                            "index": dev_index,
-                                        }),
-                                    )
-                                    .is_err()
-                                    {
-                                        app.should_quit = true;
-                                    }
-                                }
+                                ipc::fire_json(
+                                    writer,
+                                    "set_device",
+                                    serde_json::json!({
+                                        "device": dev_name,
+                                        "index": dev_index,
+                                    }),
+                                    app,
+                                );
                             }
                             break;
                         }
@@ -638,11 +628,7 @@ pub fn run_mic_picker(
     }
 
     // Stop live mic monitoring stream on exit
-    if let Some(w) = writer {
-        if ipc::send_cmd(w, "stop_mic_monitor").is_err() {
-            app.should_quit = true;
-        }
-    }
+    ipc::fire(writer, "stop_mic_monitor", app);
 
     let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
     Ok(())

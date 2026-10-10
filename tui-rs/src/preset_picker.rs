@@ -549,11 +549,7 @@ pub fn run_preset_picker(
 
     if let Some(canon) = result {
         app.punctuation_mode = canon.to_string();
-        if let Some(w) = writer {
-            if ipc::send_cmd_value(w, "set_punctuation", "mode", canon).is_err() {
-                app.should_quit = true;
-            }
-        }
+        ipc::fire_value(writer, "set_punctuation", "mode", canon, app);
     }
 
     Ok(result)
