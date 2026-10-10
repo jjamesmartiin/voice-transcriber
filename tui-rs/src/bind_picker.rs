@@ -57,23 +57,11 @@ impl BindPickerState {
     }
 
     pub fn move_up(&mut self, len: usize) {
-        if len == 0 {
-            self.selected_index = 0;
-        } else if self.selected_index > 0 {
-            self.selected_index -= 1;
-        } else {
-            self.selected_index = len - 1;
-        }
+        crate::modal::move_cursor_up(&mut self.selected_index, len);
     }
 
     pub fn move_down(&mut self, len: usize) {
-        if len == 0 {
-            self.selected_index = 0;
-        } else if self.selected_index + 1 < len {
-            self.selected_index += 1;
-        } else {
-            self.selected_index = 0;
-        }
+        crate::modal::move_cursor_down(&mut self.selected_index, len);
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, binds: &[String]) -> BindPickerAction {

@@ -175,21 +175,11 @@ impl PresetPickerState {
     }
 
     pub fn move_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-        } else if !self.filtered_indices.is_empty() {
-            self.selected_index = self.filtered_indices.len() - 1;
-        }
+        crate::modal::move_cursor_up(&mut self.selected_index, self.filtered_indices.len());
     }
 
     pub fn move_down(&mut self) {
-        if !self.filtered_indices.is_empty() {
-            if self.selected_index + 1 < self.filtered_indices.len() {
-                self.selected_index += 1;
-            } else {
-                self.selected_index = 0;
-            }
-        }
+        crate::modal::move_cursor_down(&mut self.selected_index, self.filtered_indices.len());
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> PresetPickerAction {

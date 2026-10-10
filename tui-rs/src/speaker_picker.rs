@@ -69,23 +69,11 @@ impl SpeakerPickerState {
     }
 
     fn move_up(&mut self) {
-        if self.names.is_empty() {
-            self.selected = 0;
-        } else if self.selected > 0 {
-            self.selected -= 1;
-        } else {
-            self.selected = self.names.len() - 1;
-        }
+        crate::modal::move_cursor_up(&mut self.selected, self.names.len());
     }
 
     fn move_down(&mut self) {
-        if self.names.is_empty() {
-            self.selected = 0;
-        } else if self.selected + 1 < self.names.len() {
-            self.selected += 1;
-        } else {
-            self.selected = 0;
-        }
+        crate::modal::move_cursor_down(&mut self.selected, self.names.len());
     }
 
     /// Swap the selected entry with its neighbour; `false` when it is already

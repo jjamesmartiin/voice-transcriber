@@ -44,3 +44,52 @@ pub fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
         height,
     }
 }
+
+/// Move a list cursor up one, wrapping from the top to the bottom.
+///
+/// Each picker reimplemented the same wraparound; the only real difference was
+/// whether the length came from a parameter or from the filtered list. The
+/// `len == 0` case parks the cursor at 0, matching the old code; every list
+/// mutation clamps the cursor, so a stale non-zero cursor with an empty list is
+/// not reachable.
+pub fn move_cursor_up(selected: &mut usize, len: usize) {
+    if len == 0 {
+        *selected = 0;
+    } else if *selected > 0 {
+        *selected -= 1;
+    } else {
+        *selected = len - 1;
+    }
+}
+
+/// Move a list cursor down one, wrapping from the bottom back to the top.
+pub fn move_cursor_down(selected: &mut usize, len: usize) {
+    if len == 0 {
+        *selected = 0;
+    } else if *selected + 1 < len {
+        *selected += 1;
+    } else {
+        *selected = 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cursor_wraps_and_parks_on_an_empty_list() {
+        let mut c = 0;
+        move_cursor_up(&mut c, 3);
+        assert_eq!(c, 2, "up from the top wraps to the bottom");
+        move_cursor_down(&mut c, 3);
+        assert_eq!(c, 0, "down from the bottom wraps to the top");
+        move_cursor_down(&mut c, 3);
+        assert_eq!(c, 1);
+
+        move_cursor_up(&mut c, 0);
+        assert_eq!(c, 0, "an empty list parks rather than underflows");
+        move_cursor_down(&mut c, 0);
+        assert_eq!(c, 0);
+    }
+}
