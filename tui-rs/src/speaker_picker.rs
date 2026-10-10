@@ -469,6 +469,11 @@ pub fn run_speaker_picker(
                         SpeakerPickerAction::Close => break,
                         SpeakerPickerAction::Continue => {}
                         SpeakerPickerAction::Changed => {
+                            // Every change is pushed to the engine here; the engine
+                            // echoes the canonical list back in `cfg`. Nothing is
+                            // written back on close: the engine is authoritative,
+                            // and overwriting from the local copy reverted a list
+                            // the control API had changed while the modal was open.
                             app.speaker_names = state.names.clone();
                             ipc::fire_json(
                                 writer,
@@ -482,10 +487,6 @@ pub fn run_speaker_picker(
             }
         }
     }
-
-    // The engine echoes the canonical list in `cfg`; in standalone mode there
-    // is no engine, so keep the local copy so the screen stays consistent.
-    app.speaker_names = state.names.clone();
 
     crate::modal::leave_modal_screen();
     Ok(())

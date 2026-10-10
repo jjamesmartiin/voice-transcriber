@@ -538,6 +538,21 @@ mod tests {
     use super::*;
     use crate::app::Theme;
 
+    /// Regression: same oversized-popup panic as the theme picker — the modal
+    /// was never drawn in a test, so the crash went unnoticed.
+    #[test]
+    fn test_render_on_a_terminal_narrower_than_the_popup_minimum() {
+        let app = App::new("1.1.1", Theme::Cyan);
+        for (w, h) in [(80, 24), (20, 24), (174, 3), (1, 1)] {
+            let state = PresetPickerState::new("full");
+            let backend = ratatui::backend::TestBackend::new(w, h);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| render_preset_picker(f, &state, &app))
+                .unwrap_or_else(|e| panic!("{w}x{h} failed to draw: {e}"));
+        }
+    }
+
     #[test]
     fn test_preset_picker_fuzzy_matching() {
         let opt_casual = PRESET_OPTIONS

@@ -37,6 +37,12 @@ pub fn leave_modal_screen() {
 /// caller, so this is behaviour-identical, but including `area.x`/`area.y`
 /// keeps the helper honest if it is ever handed a sub-rectangle.
 pub fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    // Every caller clamps its popup to the terminal and then raises a floor
+    // (`.max(30)`), so the floor can win: on a 20-column terminal the theme
+    // picker asks for 30. Returning that oversized rect panicked, because the
+    // callers hand it straight to `Clear`, which indexes the frame buffer.
+    let width = width.min(area.width);
+    let height = height.min(area.height);
     Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
@@ -91,5 +97,19 @@ mod tests {
         assert_eq!(c, 0, "an empty list parks rather than underflows");
         move_cursor_down(&mut c, 0);
         assert_eq!(c, 0);
+    }
+
+    #[test]
+    fn centered_rect_never_exceeds_the_area() {
+        // A popup asking for more room than the terminal has must be clamped:
+        // the result goes to `Clear`, which indexes the frame buffer directly.
+        let area = Rect::new(0, 0, 20, 5);
+        assert_eq!(centered_rect(area, 66, 16), Rect::new(0, 0, 20, 5));
+
+        let framed = Rect::new(5, 2, 40, 20);
+        let clamped = centered_rect(framed, 100, 100);
+        assert_eq!(clamped.width, 40);
+        assert_eq!(clamped.height, 20);
+        assert!(clamped.right() <= framed.right() && clamped.bottom() <= framed.bottom());
     }
 }

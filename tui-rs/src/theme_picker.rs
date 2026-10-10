@@ -532,6 +532,21 @@ pub fn run_theme_picker(
 mod tests {
     use super::*;
 
+    /// Regression: `centered_rect` returned the requested size even when it
+    /// exceeded the terminal, and `Clear` indexes the frame buffer directly.
+    /// The popup's `.max(30)` floor means a 20-column terminal asked for 30.
+    #[test]
+    fn test_render_on_a_terminal_narrower_than_the_popup_minimum() {
+        for (w, h) in [(80, 24), (20, 24), (174, 3), (1, 1)] {
+            let state = PickerState::new(Theme::Cyan);
+            let backend = ratatui::backend::TestBackend::new(w, h);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| render_picker(f, &state))
+                .unwrap_or_else(|e| panic!("{w}x{h} failed to draw: {e}"));
+        }
+    }
+
     #[test]
     fn test_picker_fuzzy_matching() {
         let opt_cyan = THEME_OPTIONS.iter().find(|o| o.theme == Theme::Cyan).unwrap();
