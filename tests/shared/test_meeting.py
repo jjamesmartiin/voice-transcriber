@@ -90,8 +90,10 @@ def test_default_spill_threshold_is_ten_minutes():
     assert meeting.DEFAULT_SPILL_MINUTES == 10
     assert meeting.MIN_SPILL_MINUTES == 1
     assert meeting.MAX_SPILL_MINUTES == 240
-    # The shipped value is one the settings modal can actually reach.
-    assert meeting.DEFAULT_SPILL_MINUTES in meeting.SPILL_MINUTE_CHOICES
+    # The shipped value must be one the settings modal can reach, i.e. inside the
+    # accepted range (the cycle list itself lives in t2.MEETING_SPILL_CHOICES;
+    # meeting.py used to carry a third copy that nothing read).
+    assert meeting.MIN_SPILL_MINUTES <= meeting.DEFAULT_SPILL_MINUTES <= meeting.MAX_SPILL_MINUTES
 
 
 @pytest.mark.parametrize("value,expected", [

@@ -27,10 +27,10 @@ def copy_with_progress(src, dst, desc="Copying"):
                 total_size += item.stat().st_size
     else:
         total_size = src.stat().st_size
-    
+
     size_mb = total_size / (1024 * 1024)
     print(f"{desc}: {src.name} ({size_mb:.1f} MB)...")
-    
+
     copied = [0]
     def progress_copy():
         if src.is_dir():
@@ -40,7 +40,7 @@ def copy_with_progress(src, dst, desc="Copying"):
             shutil.copy2(src, dst)
             copied[0] = total_size
         print(f"{desc} complete: {size_mb:.1f} MB")
-    
+
     if size_mb > 100:
         thread = threading.Thread(target=progress_copy)
         thread.start()
@@ -76,19 +76,19 @@ def ensure_cached_models():
         print("  Run the app once (online) to install it from the GitHub release assets.")
 
     print()
-    
+
 def prepare_bundled_models():
     """Copy models to build directory for bundling"""
     print("=" * 60)
     print("Preparing bundled models...")
     print("=" * 60)
-    
+
     # Clean up old models
     if MODELS_DIR.exists():
         print("Cleaning up old build models...")
         shutil.rmtree(MODELS_DIR)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     # The runtime loads from models/cohere (installed from the GitHub release
     # assets on first run). Bundle that directory so the EXE runs fully offline.
     if (LOCAL_COHERE / "model.safetensors").exists():
@@ -98,9 +98,9 @@ def prepare_bundled_models():
     else:
         print(f"\nWARNING: No local Cohere model found at {LOCAL_COHERE}")
         print("  Run the app once (online) to install it, then rebuild.")
-    
+
     print(f"\nBundle prepared at: {MODELS_DIR}")
-    
+
     # Print summary of what's being bundled
     total_size = sum(f.stat().st_size for f in MODELS_DIR.rglob("*") if f.is_file())
     print(f"Total bundle size: {total_size / (1024*1024):.1f} MB")
@@ -111,7 +111,7 @@ def build_exe():
     print("=" * 60)
     print("Building EXE with PyInstaller...")
     print("=" * 60)
-    
+
     # PyInstaller options - copy src files to root of bundle (not in src/ subfolder)
     pyinstaller_args = [
         sys.executable, "-m", "PyInstaller",
@@ -122,7 +122,7 @@ def build_exe():
         "--clean",
         "-y",
         "--log-level=INFO",
-        
+
         # Add models directory
         f"--add-data={MODELS_DIR}{os.pathsep}models",
 
@@ -132,13 +132,13 @@ def build_exe():
         # src/platform/__init__.py loads this copy so numpy/torch/pkg_resources
         # keep a working platform.system()/uname().
         f"--add-data={_stdlib_platform.__file__}{os.pathsep}stdlib_shim",
-        
+
         # Add all src files to root (not in src/ subfolder)
         f"--add-data={SRC_DIR}{os.pathsep}.",
-        
+
         # Add config files (common dictionary, presets, examples)
         f"--add-data={PROJECT_ROOT / 'config'}{os.pathsep}config",
-        
+
         # Hidden imports
         "--hidden-import=hal",
         "--hidden-import=voice_transcriber",
@@ -186,28 +186,28 @@ def build_exe():
         "--hidden-import=tokenizers",
         "--hidden-import=onnxruntime",
         "--hidden-import=rich",
-        
+
         # Collect all for these packages
         "--collect-all=transformers",
         "--collect-all=torch",
         "--collect-all=tokenizers",
-        
+
         # Disable upx to avoid issues with large bundles
         "--upx-dir=NONE",
     ]
-    
+
     icon_path = PROJECT_ROOT / "packaging" / "icon.ico"
     if icon_path.exists():
         pyinstaller_args.append(f"--icon={icon_path}")
-    
+
     # Filter out NONE value
     pyinstaller_args = [arg for arg in pyinstaller_args if arg != "NONE"]
-    
+
     print("Running:", " ".join(pyinstaller_args[:10]) + "...")
     print()
-    
+
     result = subprocess.run(pyinstaller_args, cwd=PROJECT_ROOT)
-    
+
     if result.returncode == 0:
         print()
         print("=" * 60)
@@ -243,7 +243,7 @@ def main():
     print("Voice Transcriber - Offline Build Script")
     print("=" * 60)
     print()
-    
+
     # Check prerequisites
     try:
         import PyInstaller
@@ -267,7 +267,7 @@ def main():
 
         # Prepare bundled models
         prepare_bundled_models()
-    
+
     # Build the EXE
     build_exe()
 

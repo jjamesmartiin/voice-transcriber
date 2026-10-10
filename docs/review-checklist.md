@@ -174,3 +174,141 @@ that matter. The real number would need AMI SDM, which is recorded as a follow-u
   formatter on. It used to grow by one per test run.
 - **`off` means off:** every feature above has an `off` that must be byte-identical to before. If
   any `off` changes your output, that is a bug worth reporting immediately.
+
+---
+
+## 8. The audit pass (2026-10-10): what to try, and what is still yours to check
+
+Everything below has a model-free test that fails when the fix is reverted, so these are the
+*judgement* checks — the ones a test cannot make. Ordered by how much damage a miss would do.
+
+### 8.1 Your live config is the thing to check first
+
+The save path changed from a truncating write to temp-file + `os.replace`, and an unreadable
+config is now renamed to `config.yaml.corrupt-<timestamp>` instead of being overwritten with
+defaults. Verify against your **real** config:
+
+```bash
+cp config/config.yaml /tmp/config.backup.yaml      # belt and braces
+nix develop --command python src/main.py           # starts clean, no .corrupt- file appears
+ls config/                                          # expect config.yaml and nothing new
+```
+
+**Wrong if:** a `config.yaml.corrupt-*` file appears while you did nothing, or any setting you
+had set has reverted to a shipped default.
+
+### 8.1b Exercising the backup path without touching your real config
+
+There is no env var for the config path (`get_config_file()` probes a fixed candidate list), so
+drive the loader directly against a temp copy. This is the shape of the regression test, run by
+hand:
+
+```bash
+nix develop --command python - <<'PY'
+import os, sys, tempfile
+sys.path.insert(0, "src")
+import t2
+d = tempfile.mkdtemp(); p = os.path.join(d, "config.yaml")
+open(p, "w").write("ui_theme: magenta\npunctuation")   # a write cut off mid-file
+t2.load_audio_config(p)                                 # warns, falls back to defaults
+t2.set_typing_wpm(90)                                   # any settings change saves
+print(sorted(os.listdir(d)))
+PY
+```
+
+**Expect:** `['config.yaml', 'config.yaml.corrupt-<timestamp>']` — the original bytes preserved
+in the backup, a fresh valid config, and no `.tmp` file left behind.
+
+### 8.2 The four output fixes, read with your own eyes
+
+These are deterministic, so the suite proves them; what it cannot tell you is whether the result
+reads well. Dictate each, then read the injected text:
+
+| Say | Expect |
+| :--- | :--- |
+| "call 555 1212" | `call 5551212` — still collapses |
+| "we need 500 2000 more" | `we need 500 2000 more` — *not* `5002000` |
+| "bullet point milk. bullet point eggs." with `structure blocks` | two bullets on separate lines |
+| "connect to 10 dot 0 dot 0 dot 0 slash 24" | `10.0.0.0/24` |
+
+Then set `cleanup off` and say *"that is a eyes thing"* — **expect `that is a eyes thing`**,
+verbatim. `off` used to quietly rewrite it to `AI`.
+
+**One deliberate regression to judge:** with no preposition, `"call bob I mean alice"` is no
+longer resolved (it stays as spoken). That is the cost of stopping the matcher from eating
+`"know what"` in `"you know what I mean right"`. If losing that rewrite annoys you more than the
+old bug did, say so — the guard is one condition.
+
+### 8.3 Hotkeys on a real desktop (Linux first, then the other hosts)
+
+- With a `meta`-based bind (`hotkeys` in config, or `hotkey add meta+shift`), hold it, release it,
+  and make sure **no OS shortcut fires** — the engine now waits for Super to be released before
+  typing. Before the fix it typed while Super was still down.
+- Toggle middle-click push-to-talk **off while you are holding the middle button**, then dictate
+  normally. Expect normal latency. The stale flag used to add the full hold-wait to every
+  dictation for the rest of the run.
+- In the Rich TUI, press `Esc` — it should quit (it used to do nothing). **Press an arrow key
+  too**: that must *not* quit.
+
+### 8.4 A real first-run download, and a real meeting
+
+```bash
+rm -rf ~/.local/share/vt/models/cohere     # ~2.8 GB to re-fetch — only if you have the link
+nix develop --command python src/main.py
+```
+
+**Expect:** the download survives a dropped connection (it retries a truncated part instead of
+aborting the install), and a second engine started at the same time waits rather than deleting
+the first one's weights. Do this on a tethered or flaky link if you can — a clean fast link will
+not exercise it. The revision check itself only proves useful the next time `REVISION` is bumped.
+
+Meeting mode: start a capture, **stop it mid-recording**, then immediately start another and let
+it finish. Both should produce transcripts, and the second must not lose its audio (that was the
+`close()` race). If you have a way to fill a disk, a short spill file should now mark the
+transcript as incomplete rather than presenting it as whole.
+
+### 8.5 Not checkable here at all — say the word and I will stop claiming otherwise
+
+- **Native Windows**: never launched on a Windows machine by this project. The Super/Meta fix,
+  the middle-click fix, the `VT_CONTROL_SOCKET` + TCP control API, and the release ZIP all ship
+  on tests and review only. `scripts\run.bat doctor` output is the useful thing to send.
+- **macOS**: never launched. The middle-click fix is untested there, and the *unfixed* letter
+  bind gap still stands — a letter or digit bind on macOS reports success and never fires.
+- **WSL**: the PowerShell bridge has still never executed anywhere.
+- **`tests/e2e/`**: needs the weights and a microphone, so nothing in it ran for this pass.
+
+### 8.6 Meeting mode: start it from the TUI, and watch it transcribe live
+
+Meeting mode used to be startable only through the control API, and it showed a
+timer with no words until you stopped. Both are fixed; this is the manual check.
+
+1. In the settings modal, turn **Meeting Mode** on first (the capture row says so
+   if you skip this), then choose **Meeting Capture** → *Start a meeting capture*.
+   The modal closes and you land on the meeting screen.
+2. Talk. **Expect:** a `❯ MEETING` line with the elapsed timer, and below it the
+   words you just said, updating as you speak — the newest few lines, wrapped,
+   in a block of fixed height (it must not grow, or the screen would move as you
+   talk). A pause shows as a space there; the paragraph break it really is shows
+   up in the written transcript.
+3. **Expect no floating notification pill.** Meeting capture never shows one
+   (the pill belongs to dictation); if you see one, that is a bug.
+4. Choose **Meeting Capture** again (or press Space on the meeting screen) to
+   stop. **Expect:** the live block is replaced by `Finishing · N%`, and when the
+   batch pass finishes you get a transcript file with `[Speaker N]` labels —
+   the labels appear only at the end, which is a limitation, not a bug
+   (`docs/plan-diarization.md` §4.5 explains why live labelling needs a
+   different model).
+
+**Known and deliberate:** the live text is provisional and unfiltered — it may
+contain ASR noise that the written transcript cleans up, and it has no speaker
+labels. `status.meeting_live_transcript` carries the same text if you want to
+watch it from a script:
+
+```bash
+nix develop --command python src/main.py status --json | python -c 'import json,sys; print(json.load(sys.stdin)["meeting_live_transcript"])'
+```
+
+**Wrong if:** the words never appear while you talk (check `meeting_live_transcript`
+in `status` — if that grows, the engine is fine and the front end is not), or the
+screen jumps up and down as text accumulates (the live block is meant to hold a
+fixed height).

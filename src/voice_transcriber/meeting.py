@@ -64,9 +64,6 @@ _BYTES_PER_SAMPLE = 4
 #: Shipped spill threshold, in minutes. The plan suggests ~10 minutes.
 DEFAULT_SPILL_MINUTES = 10
 
-#: Values the settings modal cycles through (the config accepts any 1..240).
-SPILL_MINUTE_CHOICES = (5, 10, 20, 30, 60)
-
 #: Accepted range for the spill threshold, so a typo cannot disable the spill.
 MIN_SPILL_MINUTES = 1
 MAX_SPILL_MINUTES = 240

@@ -164,10 +164,6 @@ SYSTEM_PROMPT = (
     "clean the transcript to match those settings and output only the cleaned text."
 )
 
-#: The rendered assistant prefix S1-mini was trained against. Only needed if a
-#: prompt is ever assembled by hand instead of through the chat template.
-ASSISTANT_PREFIX = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
-
 STYLES = ("casual", "semi-casual", "semi-formal", "formal")
 STRUCTURES = ("prose", "lists")
 CONTEXTS = ("general", "email")

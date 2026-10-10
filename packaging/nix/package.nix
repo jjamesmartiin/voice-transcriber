@@ -37,7 +37,6 @@ python3Packages.buildPythonApplication {
 
   dependencies = with python3Packages; [
     accelerate
-    datasets
     evdev
     huggingface-hub
     keyboard

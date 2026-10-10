@@ -51,7 +51,7 @@ def run_pytest_suite() -> bool:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     env = dict(os.environ)
     env["PYTHONPATH"] = SRC_DIR + (os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
-    
+
     res = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/"],
         cwd=repo_root, capture_output=True, text=True, env=env
@@ -61,17 +61,17 @@ def run_pytest_suite() -> bool:
 def benchmark_post_processor() -> float:
     """Measures latency (ms per sample) of the post-processing pipeline."""
     import post_processor
-    
+
     # Warmup
     for text in BENCHMARK_TEXT_SAMPLES[:2]:
         post_processor.clean_speech_transcription(text)
-        
+
     start_time = time.perf_counter()
     iterations = 5
     for _ in range(iterations):
         for text in BENCHMARK_TEXT_SAMPLES:
             post_processor.clean_speech_transcription(text)
-            
+
     total_time = time.perf_counter() - start_time
     avg_ms = (total_time / (iterations * len(BENCHMARK_TEXT_SAMPLES))) * 1000.0
     return round(avg_ms, 3)
@@ -79,19 +79,19 @@ def benchmark_post_processor() -> float:
 def benchmark_buffer_processing() -> float:
     """Measures latency (ms) of buffer audio processing."""
     import t2
-    
+
     sample_rate = 16000
     mock_frames = np.random.randn(int(sample_rate * 1.0)).astype(np.float32)
-    
+
     # Warmup
     t2.process_audio_stream(mock_frames)
-    
+
     latencies = []
     for _ in range(10):
         start = time.perf_counter()
         t2.process_audio_stream(mock_frames)
         latencies.append((time.perf_counter() - start) * 1000.0)
-        
+
     return round(float(np.median(latencies)), 3)
 
 def main():
@@ -113,13 +113,13 @@ def main():
                 "buffer_proc_ms": 999999.0
             }))
             sys.exit(1)
-            
+
         # 2. Benchmark latency
         post_proc_ms = benchmark_post_processor()
         buffer_proc_ms = benchmark_buffer_processing()
-        
+
         total_latency_ms = post_proc_ms + buffer_proc_ms
-        
+
         output = {
             "agent": args.agent_tag,
             "passed": True,
@@ -128,7 +128,7 @@ def main():
             "buffer_proc_ms": buffer_proc_ms,
             "samples_evaluated": len(BENCHMARK_TEXT_SAMPLES)
         }
-        
+
         print(json.dumps(output))
 
 if __name__ == "__main__":

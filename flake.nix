@@ -107,10 +107,10 @@
             protobuf
             accelerate
             librosa
-            datasets
             sherpaOnnx
             psutil
             pyyaml
+            rich
           ] ++ (pkgs.lib.optionals isLinux [ evdev python-uinput ]));
 
           # ratatui frontend (Rust), built from the tui-rs/ crate.
@@ -207,11 +207,11 @@
             protobuf
             accelerate
             librosa
-            datasets
             sherpaOnnx
             pytest
             psutil
             pyyaml
+            rich
           ] ++ (pkgs.lib.optionals isLinux [ evdev python-uinput ]));
 
           linuxRuntimeDeps = with pkgs; [
@@ -365,6 +365,7 @@
             pytest
             psutil
             pyyaml
+            rich
           ] ++ (pkgs.lib.optionals isLinux [ evdev python-uinput ]));
         in
         {

@@ -55,11 +55,6 @@ impl Theme {
             .find(|t| t.name() == s.trim().to_lowercase())
     }
 
-    pub fn next(self) -> Theme {
-        let i = Theme::ALL.iter().position(|t| *t == self).unwrap_or(0);
-        Theme::ALL[(i + 1) % Theme::ALL.len()]
-    }
-
     pub fn color(self) -> Color {
         match self {
             Theme::Auto | Theme::Green => Color::Green,
@@ -125,15 +120,6 @@ impl Level {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn default_color(self) -> Color {
-        match self {
-            Level::Info => Color::Green,
-            Level::Success => Color::Green,
-            Level::Warning => Color::Yellow,
-            Level::Error => Color::Red,
-        }
-    }
 }
 
 /// Actions produced by the demo script (or by the keyboard in interactive mode).
@@ -163,7 +149,6 @@ pub struct App {
     pub state_started: Option<Instant>,
     pub rec_started: Option<Instant>,
     pub vu_level: f32,
-    pub vu_peak: f32,
     /// Timestamp of the last scalar VU update, used to decay the meter in real
     /// time rather than once per message.
     vu_last_update: Instant,
@@ -252,7 +237,6 @@ impl App {
             state_started: None,
             rec_started: None,
             vu_level: 0.0,
-            vu_peak: 0.0,
             vu_last_update: Instant::now(),
             vu_levels: HashMap::new(),
             vu_levels_last_update: Instant::now(),
@@ -369,7 +353,6 @@ impl App {
         if state == RunState::Ready {
             self.state_started = None;
             self.vu_level = 0.0;
-            self.vu_peak = 0.0;
             self.vu_levels.clear();
             self.rec_started = None;
         }
@@ -384,7 +367,6 @@ impl App {
     pub fn update_vu(&mut self, level: f32) {
         let decay = self.vu_decay();
         self.vu_level = level.max(self.vu_level * decay);
-        self.vu_peak = self.vu_peak.max(self.vu_level);
     }
 
     /// Exponential decay over the time since the previous scalar update. The
@@ -452,12 +434,6 @@ impl App {
                 // handled by caller
             }
         }
-    }
-
-    #[allow(dead_code)] // theme selection now lives in the settings modal
-    pub fn cycle_theme(&mut self) -> Theme {
-        self.ui_theme = self.ui_theme.next();
-        self.ui_theme
     }
 
     /// Advance the list-formatting mode through the three the engine knows
@@ -624,18 +600,6 @@ impl App {
             .unwrap_or(0);
         self.meeting_output_format = FORMATS[idx].to_string();
         &self.meeting_output_format
-    }
-
-    #[allow(dead_code)] // retained to mirror Python's `cycle_punctuation`; the
-                        // preset modal owns punctuation selection on this frontend.
-    pub fn cycle_punctuation(&mut self) {
-        self.punctuation_mode = match self.punctuation_mode.as_str() {
-            "full" | "default" => "no_terminal_period".to_string(),
-            "no_terminal_period" | "casual" => "no_punctuation".to_string(),
-            "no_punctuation" | "autocorrect" => "aesthetic_lowercase".to_string(),
-            "aesthetic_lowercase" | "aesthetic" => "lowercase_no_punctuation".to_string(),
-            _ => "full".to_string(),
-        };
     }
 
     /// Advance the output mode through the three modes the engine actually
@@ -805,6 +769,9 @@ impl App {
         if let Some(s) = secondary {
             self.secondary_device = Some(s);
         }
+        if let Some(s) = sound_theme {
+            self.sound_theme = s;
+        }
         if let Some(b) = backend {
             self.model_backend = b;
         }
@@ -821,9 +788,6 @@ impl App {
             } else {
                 "clipboard".to_string()
             };
-        }
-        if let Some(s) = sound_theme {
-            self.sound_theme = s;
         }
         if let Some(t) = ui_theme {
             if let Some(theme) = Theme::from_name(&t) {

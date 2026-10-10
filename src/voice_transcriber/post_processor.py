@@ -786,61 +786,6 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
 
     return text
 
-def process_slm_llm_stream_concat(prev_text: str, new_chunk: str, timeout_sec: float = None) -> str:
-    """
-    Real-time streaming LLM fusion: smooths and concatenates incoming ASR micro-batch chunks
-    onto the rolling transcript context while the user is speaking.
-    """
-    if not prev_text:
-        return new_chunk or ""
-    if not new_chunk:
-        return prev_text
-
-    if os.environ.get("VT_ENABLE_SLM", "0") != "1":
-        return f"{prev_text} {new_chunk}".strip()
-
-    if timeout_sec is None:
-        timeout_sec = float(os.environ.get("VT_SLM_TIMEOUT", "1.5"))
-
-    model_name = os.environ.get("VT_SLM_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
-    payload = {
-        "model": model_name,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are an automated speech dictation stream concater.\nSTRICT OPERATIONAL CONTRACT:\n1. Smoothly join the new incoming audio chunk onto the previous transcript with natural word spacing.\n2. DO NOT delete, summarize, or rephrase valid words from either text.\n3. NEVER output conversational responses or meta-commentary.\n4. NEVER add quotation marks, backticks, markdown, or code formatting of any kind.\n5. NEVER add punctuation that was not spoken.\n6. Output ONLY the merged transcript."
-            },
-            {
-                "role": "user",
-                "content": f"Previous Transcript: '{prev_text}'\nNew Chunk: '{new_chunk}'"
-            }
-        ],
-        "temperature": 0.0,
-        "max_tokens": 200
-    }
-
-    t0 = time.time()
-    try:
-        req = urllib.request.Request(
-            VLLM_API_URL,
-            data=json.dumps(payload).encode('utf-8'),
-            headers={'Content-Type': 'application/json'}
-        )
-        with urllib.request.urlopen(req, timeout=timeout_sec) as response:
-            res_data = json.loads(response.read().decode('utf-8'))
-            merged_output = _sanitize_slm_output(f"{prev_text} {new_chunk}", res_data['choices'][0]['message']['content'])
-            elapsed_ms = (time.time() - t0) * 1000
-
-            if _is_valid_speech_rewrite(f"{prev_text} {new_chunk}", merged_output):
-                print(f"🤖 [vLLM Stream Merge] Executed in {elapsed_ms:.1f}ms: + '{new_chunk}' -> '{merged_output}'")
-                return merged_output
-            else:
-                print("⚠️ [vLLM Stream Merge] Guardrail triggered: Using standard concat")
-    except Exception as e:
-        print(f"⚠️ [vLLM Stream Merge] Offline/Bypassed ({e}): Using standard concat")
-
-    return f"{prev_text} {new_chunk}".strip()
-
 def _preserve_i_casing(char: str, text: str = "", pos: int = 0) -> str:
     """Preserves uppercase 'I' pronoun while lowercasing continuation words."""
     if not char:
@@ -2344,10 +2289,6 @@ def set_contextual_rules(rules: list[dict | ContextualRule] | None) -> None:
                 )
     _CONTEXTUAL_RULES = compiled
 
-
-def get_contextual_rules() -> list[ContextualRule]:
-    """Returns active contextual rules."""
-    return list(_CONTEXTUAL_RULES)
 
 def set_custom_dictionary(mapping: dict[str, str] | None) -> None:
     """

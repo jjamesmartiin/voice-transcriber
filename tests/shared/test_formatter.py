@@ -138,10 +138,6 @@ def test_system_prompt_is_verbatim():
     )
 
 
-def test_assistant_prefix_matches_the_trained_shape():
-    assert formatter.ASSISTANT_PREFIX == "<|im_start|>assistant\n<think>\n\n</think>\n\n"
-
-
 def test_control_line_shape():
     assert formatter.build_control_line("casual", "lists", "email") == (
         "[Styling: casual] [Structure: lists] [Context: email]")

@@ -223,7 +223,10 @@ def verify(spec, outdir, parts_raw, original_tar):
     xz = find_xz()
     combined = os.path.join(outdir, ".verify.tar")
     with open(combined, "wb") as out:
-        for i, piece in enumerate(parts_raw, start=1):
+        # The part filename is derived from the position, so the path itself is
+        # unused here: `split_file` returns them in part1..partN order, which is
+        # the same numbering the compressed names and SHA256SUMS use.
+        for i, _piece in enumerate(parts_raw, start=1):
             part_xz = os.path.join(outdir, f"{prefix}.part{i}.xz")
             if xz:
                 with subprocess.Popen([xz, "-dc", part_xz], stdout=subprocess.PIPE) as proc:
