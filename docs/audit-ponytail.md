@@ -17,6 +17,41 @@ being listed first, and **unbuilt-but-intended features are out of scope for del
 
 ---
 
+## Status — updated after the cleanup waves
+
+**All 13 defects in §1 are fixed and merged.** Each fix is pinned by a test that was proven to
+*fail* when the bug is reintroduced. The two that mattered most were found by `audit-eval` in
+code written this same session, and both were wrong in the expensive half: the DER assignment
+returned a suboptimal mapping on 431/3000 fuzzed matrices, and the review report's
+silence-hallucination rate was inverted.
+
+**§2 duplication is folded.** The Rust items landed in one wave (net **-171 lines**: four
+byte-identical `fuzzy_subsequence` copies, the ~40 hand-rolled send-or-quit sites, six run loops,
+nine centring sites, the cursor wraparound) — which also fixed a real bug, since
+`theme_picker` and `preset_picker` were missing the `terminal.clear()` the other four had. The
+three backend registries landed in another (net **-80 lines** of triplicated logic), with the
+user-visible error text verified character-for-character and the lazy-import property re-pinned
+by its existing subprocess tests.
+
+**§3 modularity is NOT started, and that is the honest remaining gap:** `t2.py` (4,247 lines),
+`post_processor.py` (3,433 lines including a network SLM client — against `src/`'s offline-first
+rule), and the seven settings hand-mirrored from `t2` into `post_processor`. These move a lot of
+code for a branch that is ~74 commits from a release, so they are waiting on an owner decision
+rather than on effort.
+
+**§4 "probably dead" is untouched by design — nothing has been deleted.** The list still needs
+an explicit yes/no per item, including the one that is a real trade-off rather than free: 14
+unpinned `_dispatch` aliases buy tolerance for an older `vt-tui` binary.
+
+One §4 entry stopped being true and is worth correcting here: `_SPAWN_ATTEMPTS` was listed as
+dead state, and it was — but the fix was to *assert* it rather than delete it, because a spawn
+attempted on a background thread only surfaces as a warning. It is now a real guard.
+
+Verified after the merges: `tests/shared + tests/linux + tests/wsl + tests/windows` **1684
+passed, 3 skipped**; `ruff` clean; `cargo test` 63 passed and `clippy -D warnings` clean.
+
+---
+
 ## 1. Real defects — fixes, not removals
 
 | # | Defect | Status |
