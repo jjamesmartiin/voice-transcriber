@@ -193,6 +193,9 @@ class AudioSpillBuffer:
         self._handle: Any = None
         self._path: str | None = None
         self._closed = False
+        #: Set when ``read_all`` had to return less audio than was captured
+        #: (a truncated spill file, e.g. a full disk during ``_spill``).
+        self._truncated = False
 
     # -- introspection -----------------------------------------------------
     @property
@@ -218,6 +221,10 @@ class AudioSpillBuffer:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    @property
+    def truncated(self) -> bool:
+        return self._truncated
 
     # -- writing -----------------------------------------------------------
     def append(self, chunk: Any) -> None:
@@ -327,6 +334,7 @@ class AudioSpillBuffer:
                 "meeting spill file %s is short: %d of %d frames",
                 self._path, written, total,
             )
+            self._truncated = True
             output = output[:written]
         return output
 
@@ -636,9 +644,17 @@ class MeetingSession:
         # daemon thread, but cancelling lets it stop at the next turn boundary
         # instead of running the whole meeting out while the app is quitting.
         self._cancel.set()
-        for thread in (self._ticker_thread, self._capture_thread, self._finalize_thread):
+        for thread in (self._ticker_thread, self._capture_thread):
             if thread is not None and thread.is_alive():
                 thread.join(timeout=5.0)
+        # The capture thread starts the finalize in its ``finally``, so
+        # ``_finalize_thread`` is still ``None`` while the tuple above is built.
+        # Read it back now: an unjoined finalize outlives this call, and its own
+        # ``finally`` then resets the buffer and state of whatever session is
+        # recording by the time it gets there.
+        finalize = self._finalize_thread
+        if finalize is not None and finalize.is_alive():
+            finalize.join(timeout=5.0)
         with self._lock:
             if self._buffer is not None and self._state is not MeetingState.IDLE:
                 # The finalize never ran (or is stuck); free the spill file here.
@@ -718,6 +734,14 @@ class MeetingSession:
             if buffer is None:  # pragma: no cover - defensive
                 return
             audio = buffer.read_all(progress=self._on_read_progress)
+            if buffer.truncated:
+                # A partial transcript plus a loud error beats no transcript at
+                # all, so keep the audio and tell the user it is incomplete.
+                with self._lock:
+                    self._error = (
+                        "recording is incomplete: the audio spill file was "
+                        "truncated (out of disk space?)"
+                    )
             self._duration_s = len(audio) / float(buffer.sample_rate)
             if self._on_audio is not None and not self._cancel.is_set():
                 try:
@@ -738,9 +762,14 @@ class MeetingSession:
                     buffer.close()
             finally:
                 with self._lock:
-                    self._buffer = None
-                    self._state = MeetingState.IDLE
-                    self._stage = "idle"
+                    # Only clear state this session still owns. A forced ``close``
+                    # frees the buffer from under a stuck finalize, and by then a
+                    # new capture may own a different buffer: resetting here
+                    # would leave that session recording into ``None``.
+                    if self._buffer is buffer:
+                        self._buffer = None
+                        self._state = MeetingState.IDLE
+                        self._stage = "idle"
                 self._notify()
 
     def _on_read_progress(self, processed: int, total: int) -> None:
