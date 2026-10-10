@@ -95,48 +95,6 @@ pub const SETTINGS: [SettingItem; 31] = [
         menu: SettingsMenu::Main,
     },
     SettingItem {
-        kind: SettingKind::CleanupMode,
-        icon: "•",
-        title: "Format: Cleanup",
-        keywords: "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
-        menu: SettingsMenu::Main,
-    },
-    SettingItem {
-        kind: SettingKind::StructureMode,
-        icon: "•",
-        title: "Format: List Blocks",
-        keywords: "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
-        menu: SettingsMenu::Main,
-    },
-    SettingItem {
-        kind: SettingKind::NumberDigits,
-        icon: "•",
-        title: "Format: Numbers",
-        keywords: "numbers digits words spelled format numeric conversion digits auto",
-        menu: SettingsMenu::Main,
-    },
-    SettingItem {
-        kind: SettingKind::PunctuationMode,
-        icon: "✨",
-        title: "Format: Preset",
-        keywords: "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
-        menu: SettingsMenu::Main,
-    },
-    SettingItem {
-        kind: SettingKind::SerialCollapse,
-        icon: "•",
-        title: "Format: Serials",
-        keywords: "serial code alphanumeric nato phonetic spelled collapse spacing identifier model vin license plate",
-        menu: SettingsMenu::Main,
-    },
-    SettingItem {
-        kind: SettingKind::SpellCommand,
-        icon: "•",
-        title: "Format: Spell Cmd",
-        keywords: "spell spelled verbal command letters c a t acronym dictation spelling",
-        menu: SettingsMenu::Main,
-    },
-    SettingItem {
         kind: SettingKind::Hotkeys,
         icon: "•",
         title: "Hotkey: Keys (PTT)",
@@ -153,8 +111,8 @@ pub const SETTINGS: [SettingItem; 31] = [
     SettingItem {
         kind: SettingKind::FormatterMenu,
         icon: "✦",
-        title: "Menu: Formatter",
-        keywords: "formatter format rewrite slm llm model style context s1-mini rewrite offline language polish menu",
+        title: "Menu: Formatting",
+        keywords: "formatter format rewrite slm llm model style context cleanup preset number spell serial list blocks menu",
         menu: SettingsMenu::Main,
     },
     SettingItem {
@@ -214,7 +172,14 @@ pub const SETTINGS: [SettingItem; 31] = [
         menu: SettingsMenu::Main,
     },
 
-    // --- Formatter Submenu ---
+    // --- Formatting & Style Submenu ---
+    SettingItem {
+        kind: SettingKind::CleanupMode,
+        icon: "•",
+        title: "Format: Cleanup",
+        keywords: "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
+        menu: SettingsMenu::Formatter,
+    },
     SettingItem {
         kind: SettingKind::Formatter,
         icon: "•",
@@ -241,6 +206,41 @@ pub const SETTINGS: [SettingItem; 31] = [
         icon: "•",
         title: "Formatter Context",
         keywords: "formatter context general email message writing rewrite",
+        menu: SettingsMenu::Formatter,
+    },
+    SettingItem {
+        kind: SettingKind::PunctuationMode,
+        icon: "✨",
+        title: "Format: Preset",
+        keywords: "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
+        menu: SettingsMenu::Formatter,
+    },
+    SettingItem {
+        kind: SettingKind::StructureMode,
+        icon: "•",
+        title: "Format: List Blocks",
+        keywords: "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
+        menu: SettingsMenu::Formatter,
+    },
+    SettingItem {
+        kind: SettingKind::NumberDigits,
+        icon: "•",
+        title: "Format: Numbers",
+        keywords: "numbers digits words spelled format numeric conversion digits auto",
+        menu: SettingsMenu::Formatter,
+    },
+    SettingItem {
+        kind: SettingKind::SerialCollapse,
+        icon: "•",
+        title: "Format: Serials",
+        keywords: "serial code alphanumeric nato phonetic spelled collapse spacing identifier model vin license plate",
+        menu: SettingsMenu::Formatter,
+    },
+    SettingItem {
+        kind: SettingKind::SpellCommand,
+        icon: "•",
+        title: "Format: Spell Cmd",
+        keywords: "spell spelled verbal command letters c a t acronym dictation spelling",
         menu: SettingsMenu::Formatter,
     },
 
@@ -613,6 +613,12 @@ impl SettingItem {
                         "Active · rewrites transcript".to_string(),
                         "[ON]",
                         Color::Green,
+                    )
+                } else if app.cleanup_mode != "off" {
+                    (
+                        format!("Cleanup: {} · LLM off", app.cleanup_mode),
+                        "[CLEAN]",
+                        Color::Cyan,
                     )
                 } else {
                     (
@@ -1289,7 +1295,7 @@ pub fn render_settings_picker(frame: &mut Frame, state: &SettingsPickerState, ap
         .title(Span::styled(
             match state.current_menu {
                 SettingsMenu::Main => " ⚙️  Settings & Configuration ",
-                SettingsMenu::Formatter => " ✦  Settings · Formatter ",
+                SettingsMenu::Formatter => " ✦  Settings · Formatting & Style ",
                 SettingsMenu::Meeting => " ⏺  Settings · Meeting & Diarization ",
             },
             Style::default()
@@ -1919,8 +1925,8 @@ mod tests {
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert_eq!(state.current_menu, SettingsMenu::Formatter);
-        assert_eq!(state.filtered_indices.len(), 4);
-        assert_eq!(SETTINGS[state.filtered_indices[0]].kind, SettingKind::Formatter);
+        assert_eq!(state.filtered_indices.len(), 10);
+        assert_eq!(SETTINGS[state.filtered_indices[0]].kind, SettingKind::CleanupMode);
 
         // Esc returns to Main and parks on Formatter Settings
         state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));

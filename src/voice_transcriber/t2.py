@@ -2935,7 +2935,7 @@ def select_microphone_picker():
         tip = Text.from_markup("  [yellow]🎙 Live Monitor:[/yellow] [dim]Speak or hold Alt+Shift to preview audio levels in real time[/dim]\n")
 
         footer = Text.from_markup(
-            "  [cyan][↑/↓][/cyan] Navigate   [cyan][Type][/cyan] Search   [green][Enter][/green] Select   [red][Esc][/red] Cancel"
+            "  [cyan][↑/↓][/cyan] Navigate   [cyan][Type][/cyan] Search   [green][Enter][/green] Select   [yellow][Ctrl+R][/yellow] Rescan   [red][Esc][/red] Cancel"
         )
 
         main_content = Table.grid(expand=True)
@@ -2958,6 +2958,11 @@ def select_microphone_picker():
         if key in ('ESC', 'CTRL_C'):
             console.clear()
             return None
+        elif key in ('\x12', 'CTRL_R') or (key in ('r', 'R') and not query):
+            rescan_audio_devices()
+            devices = get_input_devices()
+            selected_idx = 0
+            continue
         elif key == 'ENTER' or (key == ' ' and not query):
             if matches:
                 chosen_dev = matches[selected_idx][1]
@@ -3143,45 +3148,9 @@ def select_settings_picker():
         },
         {
             "id": "sound_mute",
-            "icon": "🔔 ",
+            "icon": "🔊 ",
             "title": "Audio: Sound Cues",
             "keywords": "sound effects mute volume chimes audio audio cues notify silent audio sounds",
-        },
-        {
-            "id": "cleanup",
-            "icon": "🧹 ",
-            "title": "Format: Cleanup",
-            "keywords": "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
-        },
-        {
-            "id": "structure",
-            "icon": "☰ ",
-            "title": "Format: List Blocks",
-            "keywords": "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
-        },
-        {
-            "id": "number_digits",
-            "icon": "🔢 ",
-            "title": "Format: Numbers",
-            "keywords": "numbers digits words spelled format numeric conversion digits auto",
-        },
-        {
-            "id": "preset",
-            "icon": "✨ ",
-            "title": "Format: Preset",
-            "keywords": "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
-        },
-        {
-            "id": "serial_collapse",
-            "icon": "🔤 ",
-            "title": "Format: Serials",
-            "keywords": "serial code alphanumeric nato phonetic spelled collapse spacing identifier model vin license plate",
-        },
-        {
-            "id": "spell_command",
-            "icon": "✍️ ",
-            "title": "Format: Spell Cmd",
-            "keywords": "spell spelled verbal command letters c a t acronym dictation spelling",
         },
         {
             "id": "middle_click",
@@ -3192,8 +3161,8 @@ def select_settings_picker():
         {
             "id": "formatter_menu",
             "icon": "✦ ",
-            "title": "Menu: Formatter",
-            "keywords": "formatter format rewrite slm llm model style context s1-mini rewrite offline language polish menu",
+            "title": "Menu: Formatting",
+            "keywords": "formatter format rewrite slm llm model style context cleanup preset number spell serial list blocks menu",
         },
         {
             "id": "meeting_menu",
@@ -3203,7 +3172,7 @@ def select_settings_picker():
         },
         {
             "id": "output_mode",
-            "icon": "📤 ",
+            "icon": "📋 ",
             "title": "Output: Delivery",
             "keywords": "output mode delivery clipboard type typing paste speed fast slow safe",
         },
@@ -3233,7 +3202,7 @@ def select_settings_picker():
         },
         {
             "id": "reset_terminal",
-            "icon": "💻 ",
+            "icon": "🖥 ",
             "title": "Reset: Terminal",
             "keywords": "reset terminal clipboard bridge clear state fix",
         },
@@ -3247,14 +3216,20 @@ def select_settings_picker():
 
     FORMATTER_SETTINGS_DEFS = [
         {
+            "id": "cleanup",
+            "icon": "🧹 ",
+            "title": "Format: Cleanup",
+            "keywords": "cleanup mode corrections retractions hallucination filler stutter verbatim artifacts noise full off",
+        },
+        {
             "id": "formatter",
-            "icon": "🧠 ",
+            "icon": "✦ ",
             "title": "Formatter",
             "keywords": "formatter local rewrite slm llm language model cleanup polish rewrite offline on off",
         },
         {
             "id": "formatter_model",
-            "icon": "🤖 ",
+            "icon": "📦 ",
             "title": "Formatter Backend",
             "keywords": "formatter model backend s1-mini llama-server which model swap",
         },
@@ -3269,6 +3244,36 @@ def select_settings_picker():
             "icon": "✉️ ",
             "title": "Formatter Context",
             "keywords": "formatter context general email message greeting sign-off destination",
+        },
+        {
+            "id": "preset",
+            "icon": "✨ ",
+            "title": "Format: Preset",
+            "keywords": "mode preset switcher formatting gen z casual autocorrect aesthetic default punctuation capitalization grammar",
+        },
+        {
+            "id": "structure",
+            "icon": "☰ ",
+            "title": "Format: List Blocks",
+            "keywords": "structure list bullet bullets enumeration spoken lists formatting newline paragraph break clipboard inline",
+        },
+        {
+            "id": "number_digits",
+            "icon": "🔢 ",
+            "title": "Format: Numbers",
+            "keywords": "numbers digits words spelled format numeric conversion digits auto",
+        },
+        {
+            "id": "serial_collapse",
+            "icon": "🔤 ",
+            "title": "Format: Serials",
+            "keywords": "serial code alphanumeric nato phonetic spelled collapse spacing identifier model vin license plate",
+        },
+        {
+            "id": "spell_command",
+            "icon": "✍️ ",
+            "title": "Format: Spell Cmd",
+            "keywords": "spell spelled verbal command letters c a t acronym dictation spelling",
         },
     ]
 
@@ -3340,6 +3345,8 @@ def select_settings_picker():
         elif item_id == "formatter_menu":
             if FORMATTER == "on":
                 return "Active · rewrites transcript", "[ON]", "green"
+            elif CLEANUP_MODE != "off":
+                return f"Cleanup: {CLEANUP_MODE} · LLM off", "[CLEAN]", "cyan"
             else:
                 return "Off · deterministic cleanup only", "[OFF]", "dim white"
         elif item_id == "meeting_menu":
@@ -3526,7 +3533,7 @@ def select_settings_picker():
 
         menu_titles = {
             "main": "⚙️  Settings & Configuration",
-            "formatter": "✦  Settings · Formatter",
+            "formatter": "✦  Settings · Formatting & Style",
             "meeting": "⏺  Settings · Meeting & Diarization",
         }
         title_text = menu_titles.get(current_menu, "⚙️  Settings & Configuration")
@@ -3560,7 +3567,7 @@ def select_settings_picker():
                 prev = current_menu
                 current_menu = "main"
                 query = ""
-                selected_idx = 2 if prev == "formatter" else 4
+                selected_idx = 3 if prev == "formatter" else 4
                 continue
             save_audio_config()
             console.clear()
@@ -3570,7 +3577,7 @@ def select_settings_picker():
                 prev = current_menu
                 current_menu = "main"
                 query = ""
-                selected_idx = 2 if prev == "formatter" else 4
+                selected_idx = 3 if prev == "formatter" else 4
                 continue
             save_audio_config()
             console.clear()
@@ -3578,7 +3585,7 @@ def select_settings_picker():
         elif key == 'BACKSPACE' and not query and current_menu != "main":
             prev = current_menu
             current_menu = "main"
-            selected_idx = 2 if prev == "formatter" else 4
+            selected_idx = 3 if prev == "formatter" else 4
             continue
         elif key == 'ENTER' or (key == ' ' and not query):
             if matches:

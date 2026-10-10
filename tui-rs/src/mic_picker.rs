@@ -21,6 +21,7 @@ pub enum MicPickerAction {
     Select(usize),
     Cancel,
     Continue,
+    Rescan,
 }
 
 pub struct MicPickerState {
@@ -82,6 +83,7 @@ impl MicPickerState {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c') => return MicPickerAction::Cancel,
+                KeyCode::Char('r') => return MicPickerAction::Rescan,
                 KeyCode::Char('p') | KeyCode::Char('k') => {
                     self.move_up();
                     return MicPickerAction::Continue;
@@ -101,6 +103,8 @@ impl MicPickerState {
 
         match key.code {
             KeyCode::Esc => MicPickerAction::Cancel,
+            KeyCode::F(5) => return MicPickerAction::Rescan,
+            KeyCode::Char('r') if self.query.is_empty() => return MicPickerAction::Rescan,
             KeyCode::Enter => {
                 if let Some(&idx) = self.filtered_indices.get(self.selected_index) {
                     MicPickerAction::Select(idx)
@@ -482,6 +486,8 @@ pub fn render_mic_picker(frame: &mut Frame, state: &MicPickerState, app: &App) {
         Span::styled("Navigate   ", Style::default().add_modifier(Modifier::DIM)),
         Span::styled("[Enter/Space] ", Style::default().fg(Color::Green)),
         Span::styled("Select   ", Style::default().add_modifier(Modifier::DIM)),
+        Span::styled("[Ctrl+R] ", Style::default().fg(Color::Yellow)),
+        Span::styled("Rescan   ", Style::default().add_modifier(Modifier::DIM)),
         Span::styled("[Type] ", Style::default().fg(Color::Cyan)),
         Span::styled("Filter   ", Style::default().add_modifier(Modifier::DIM)),
         Span::styled("[Esc] ", Style::default().fg(Color::Red)),
@@ -581,6 +587,9 @@ pub fn run_mic_picker(
                     match state.handle_key(key, &app.audio_devices) {
                         MicPickerAction::Cancel => break,
                         MicPickerAction::Continue => {}
+                        MicPickerAction::Rescan => {
+                            ipc::fire(writer, "rescan_mics", app);
+                        }
                         MicPickerAction::Select(idx) => {
                             if let Some(dev) = app.audio_devices.get(idx) {
                                 let dev_name = dev.name.clone();
@@ -736,6 +745,30 @@ mod tests {
 
         let action = state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &app.audio_devices);
         assert_eq!(action, MicPickerAction::Select(0));
+    }
+
+    #[test]
+    fn test_mic_picker_rescan_action() {
+        let app = App::new("1.1.1", Theme::Cyan);
+        let mut state = MicPickerState::new(app.audio_devices.len());
+
+        let action = state.handle_key(
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+            &app.audio_devices,
+        );
+        assert_eq!(action, MicPickerAction::Rescan);
+
+        let action_f5 = state.handle_key(
+            KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE),
+            &app.audio_devices,
+        );
+        assert_eq!(action_f5, MicPickerAction::Rescan);
+
+        let action_r_empty = state.handle_key(
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+            &app.audio_devices,
+        );
+        assert_eq!(action_r_empty, MicPickerAction::Rescan);
     }
 
     #[test]
