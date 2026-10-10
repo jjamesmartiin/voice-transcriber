@@ -47,16 +47,27 @@ guards = _shared_conftest()
 # ---------------------------------------------------------------------------
 def test_the_real_llama_server_spawn_guard_fires():
     """Spawning the production binary by bare name is refused."""
-    with pytest.raises(guards.RealLlamaServerSpawnBlocked):
-        subprocess.Popen(["llama-server", "--version"])
+    try:
+        with pytest.raises(guards.RealLlamaServerSpawnBlocked):
+            subprocess.Popen(["llama-server", "--version"])
+    finally:
+        # Provoked on purpose. The fixture's teardown treats a non-empty tally as
+        # an accidental leak -- and for a spawn attempted on a BACKGROUND thread
+        # that tally is the only thing that catches it, since the guard's raise
+        # there is just a warning -- so a deliberate provocation puts the tally
+        # back, exactly as the network tests below do for _BLOCKED.
+        guards._SPAWN_ATTEMPTS.clear()
 
 
 def test_the_spawn_guard_matches_the_basename_not_the_arguments():
     """The guard keys on the program, not on how it was invoked."""
-    with pytest.raises(guards.RealLlamaServerSpawnBlocked):
-        subprocess.Popen(["/run/current-system/sw/bin/llama-server"])
-    with pytest.raises(guards.RealLlamaServerSpawnBlocked):
-        subprocess.run(["llama-server", "--version"], check=False)
+    try:
+        with pytest.raises(guards.RealLlamaServerSpawnBlocked):
+            subprocess.Popen(["/run/current-system/sw/bin/llama-server"])
+        with pytest.raises(guards.RealLlamaServerSpawnBlocked):
+            subprocess.run(["llama-server", "--version"], check=False)
+    finally:
+        guards._SPAWN_ATTEMPTS.clear()
 
 
 def test_the_spawn_guard_does_not_block_other_programs():
