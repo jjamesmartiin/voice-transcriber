@@ -884,6 +884,11 @@ fn decay_factor(dt_secs: f32) -> f32 {
 }
 
 fn detect_system_theme() -> Theme {
+    // `auto` is resolved here. The Python engine runs the desktop accent probe it
+    // cannot run itself (it is the one process that must not shell out twice) and
+    // hands the answer down as ACCENT_COLOR, which is why that step follows
+    // VT_UI_THEME rather than replacing it. Standalone runs (--demo, by hand)
+    // have neither and fall through to the terminal heuristic.
     if let Ok(t) = std::env::var("VT_UI_THEME") {
         if let Some(theme) = Theme::from_name(&t) {
             if theme != Theme::Auto {

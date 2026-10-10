@@ -318,11 +318,12 @@ sound_theme: "proximity"
 # UI Color Theme
 # Accent color for the terminal UI (the ratatui frontend and the Rich fallback).
 # Available Options:
-#   - "auto"      : Follow the terminal/system accent color
+#   - "auto"      : Follow the desktop's accent color (GNOME today), else the
+#                   terminal heuristic, else green
 #   - "green" | "cyan" | "blue" | "magenta" | "yellow" | "red" | "white"
-# Default: "red"
+# Default: "auto"
 #   (Also overrideable per-session with VT_UI_THEME or ACCENT_COLOR.)
-ui_theme: "red"
+ui_theme: "auto"
 
 # ------------------------------------------------------------------------------
 # Average Typing Speed (Words Per Minute)

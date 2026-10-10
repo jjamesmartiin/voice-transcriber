@@ -5,6 +5,7 @@
 import os
 import sys
 
+from voice_transcriber import accent
 from voice_transcriber import keybinds
 
 _current_t2 = sys.modules.get(__name__)
@@ -132,7 +133,7 @@ MIDDLE_CLICK_ENABLED = False  # Push-to-talk by holding middle mouse button (>= 
 HOTKEY_BINDS = keybinds.parse_binds(None)  # Push-to-talk chords; default is hold Alt+Shift
 KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
-UI_THEME = "red"
+UI_THEME = "auto"
 #: The shipped punctuation preset — the ONE owner for this default.
 #: ``PUNCTUATION_MODE`` (the runtime/config fallback), ``DEFAULT_SETTINGS`` (the
 #: "Reset to Defaults" target) and the config-file fallback in
@@ -255,7 +256,7 @@ DEFAULT_SETTINGS = {
     'MIDDLE_CLICK_ENABLED': False,
     'KEEP_BLUETOOTH_HANDSFREE': True,
     'SOUND_THEME': "proximity",
-    'UI_THEME': "red",
+    'UI_THEME': "auto",
     # The shipped preset is one value in one place (DEFAULT_PUNCTUATION_MODE),
     # so the reset target and the first-run default are the same by construction.
     # See the comment on that constant for why `full` and not `no_punctuation`.
@@ -1134,7 +1135,7 @@ def load_audio_config(file_path=None):
                 IS_MUTED = True
 
             env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
-            UI_THEME = env_theme or config.get('ui_theme', 'red')
+            UI_THEME = env_theme or config.get('ui_theme', 'auto')
 
             # If we have an override, try that first
             if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
@@ -2558,7 +2559,19 @@ def get_dictionary():
         return {}
 
 
-COLOR_PALETTES = ["auto", "green", "cyan", "blue", "magenta", "yellow", "red", "white"]
+#: The theme vocabulary and the resolution of ``auto`` live in ``accent`` (the
+#: Rich TUI and the ratatui binary draw the same colours; see that module).
+COLOR_PALETTES = accent.COLOR_PALETTES
+
+
+def effective_ui_theme() -> str:
+    """The colour to paint with: ``UI_THEME`` with ``auto`` resolved.
+
+    ``auto`` follows the desktop accent where one can be read, so every modal
+    resolves through here rather than falling back to green on its own -- that
+    would paint the settings panel a different colour than the status bar.
+    """
+    return accent.resolve(UI_THEME)
 
 
 def _fuzzy_subsequence(pattern: str, target: str) -> int | None:
@@ -2686,7 +2699,7 @@ def select_theme_picker(current_theme=None):
     from rich import box
 
     palettes = [
-        ("auto", "Auto", "Detect from system terminal accent color"),
+        ("auto", "Auto", "Follow the desktop accent color"),
         ("green", "Green", "Classic emerald / forest green"),
         ("cyan", "Cyan", "Cyber electric cyan / aqua"),
         ("blue", "Blue", "Ocean royal blue / cobalt"),
@@ -2865,7 +2878,7 @@ def select_microphone_picker():
         if selected_idx >= len(matches):
             selected_idx = max(0, len(matches) - 1)
 
-        theme_color = UI_THEME.lower() if UI_THEME and UI_THEME.lower() in COLOR_PALETTES and UI_THEME.lower() != "auto" else "green"
+        theme_color = effective_ui_theme()
 
         table = Table(box=None, padding=(0, 1), show_header=False, expand=True)
         table.add_column("Ind", justify="right", width=2)
@@ -3014,7 +3027,7 @@ def select_preset_picker(current_preset=None):
         if selected_idx >= len(matches):
             selected_idx = max(0, len(matches) - 1)
 
-        eff_theme = UI_THEME.lower() if UI_THEME and UI_THEME.lower() in COLOR_PALETTES and UI_THEME.lower() != "auto" else "green"
+        eff_theme = effective_ui_theme()
 
         table = Table(box=None, padding=(0, 1), show_header=False, expand=True)
         table.add_column("Indicator", justify="center", width=3)
@@ -3302,7 +3315,7 @@ def select_settings_picker():
     ]
 
     def get_setting_state(item_id):
-        eff_theme = UI_THEME.lower() if UI_THEME and UI_THEME.lower() in COLOR_PALETTES and UI_THEME.lower() != "auto" else "green"
+        eff_theme = effective_ui_theme()
         if item_id in ("preset", "punctuation_mode"):
             # Same sample sentence the ratatui settings modal shows, so the
             # style of each preset is visible at a glance.
@@ -3463,7 +3476,7 @@ def select_settings_picker():
         if selected_idx >= len(matches):
             selected_idx = max(0, len(matches) - 1)
 
-        eff_theme = UI_THEME.lower() if UI_THEME and UI_THEME.lower() in COLOR_PALETTES and UI_THEME.lower() != "auto" else "green"
+        eff_theme = effective_ui_theme()
 
         table = Table(box=None, padding=(0, 1), show_header=False, expand=True)
         table.add_column("Ind", justify="right", width=2)

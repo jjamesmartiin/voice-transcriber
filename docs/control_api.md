@@ -157,7 +157,7 @@ Every reply is a JSON object with at least `ok`:
   "structure_mode": "inline",
   "structure_setting": "blocks",
   "cleanup_mode": "full",
-  "ui_theme": "red",
+  "ui_theme": "auto",
   "middle_click": false,
   "last_transcription": "I deployed on NixOS using kubectl.",
   "session_words": 30,

@@ -734,7 +734,7 @@ Supported options:
 - `cleanup_mode`: how much the post-processing pass may change the words — `off` (keeps every word, deletes nothing), `artifacts` (removes noise: silence hallucinations, filler, stutters, trailing mutterings — but leaves your corrections verbatim), or `full` (default: also resolves self-corrections such as `"Tuesday no sorry Wednesday"` → `"Wednesday"`). Number/date formatting, the dictionary, casing and the punctuation preset are separate settings and are not gated by it. See [`docs/cleanup_modes.md`](docs/cleanup_modes.md).
 - `enable_slm`: `true` to enable the optional local vLLM grammar-polish pass (default `false`).
 - `sound_theme`: audio cue pack — `proximity` (default), `pop`, `chime`, or `silent`.
-- `ui_theme`: `auto` (follow the terminal) or one of `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white`.
+- `ui_theme`: `auto` (default: follow your desktop's accent color — GNOME's `accent-color` today — falling back to the terminal heuristic and then green) or one of `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white`. `VT_UI_THEME` overrides it per session.
 - `typing_wpm`: words-per-minute typing baseline used for the `⚡ saved` estimate (default `40`; preset cycling lives in the `wpm` control verb).
 - `dictionary`: key-value map of custom phrase replacements (see `config/dictionary.yaml`).
 - `dictionary_file`: path to an external YAML/JSON dictionary; takes precedence over the inline `dictionary` map.

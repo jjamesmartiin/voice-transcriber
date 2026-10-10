@@ -419,7 +419,10 @@ class TestResetToDefaults:
         assert t2.DEFAULT_SETTINGS["MIDDLE_CLICK_ENABLED"] is False  # opt-in
         assert t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"] == "full"
         assert t2.DEFAULT_SETTINGS["NUMBER_MODE"] == "auto"
-        assert t2.DEFAULT_SETTINGS["UI_THEME"] == "red"
+        # The theme follows the desktop accent rather than a fixed colour: what
+        # is pinned is that intent, not a colour, because the resolved colour is
+        # a property of the machine (see tests/shared/test_accent.py).
+        assert t2.DEFAULT_SETTINGS["UI_THEME"] == "auto"
         assert t2.DEFAULT_SETTINGS["AUTO_TYPE_AUTO_PUNCTUATE"] is False
 
         # Heavyweight, model-backed features stay off by default: a reset must

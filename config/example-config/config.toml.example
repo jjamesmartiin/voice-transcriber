@@ -72,8 +72,8 @@ keep_bluetooth_handsfree = true
 # Sound cue theme: "proximity", "pop", "chime", or "silent"
 sound_theme = "proximity"
 
-# Terminal UI theme: "auto" or green/cyan/blue/magenta/yellow/red/white
-ui_theme = "red"
+# Terminal UI theme: "auto" (follow the desktop accent) or green/cyan/blue/magenta/yellow/red/white
+ui_theme = "auto"
 
 # Average typing speed (WPM) for estimated time saved calculations (default: 40).
 # The all-time total lives outside the config, in <data dir>/stats.json.

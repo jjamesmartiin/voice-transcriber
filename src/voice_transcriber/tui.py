@@ -28,31 +28,18 @@ from rich.live import Live
 from rich.text import Text
 
 import console_text
+import accent
 
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-COLOR_PALETTES = ["auto", "green", "cyan", "blue", "magenta", "yellow", "red", "white"]
+COLOR_PALETTES = accent.COLOR_PALETTES
 
 def detect_system_theme_color():
-    """Detect system terminal accent color"""
-    env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
-    if env_theme in COLOR_PALETTES and env_theme != "auto":
-        return env_theme
+    """Resolve the ``auto`` theme: the desktop accent, else the terminal.
 
-    accent = os.environ.get("ACCENT_COLOR", "").strip().lower()
-    if accent in COLOR_PALETTES:
-        return accent
-
-    term_prog = os.environ.get("TERM_PROGRAM", "").lower()
-    if "vscode" in term_prog:
-        return "cyan"
-    elif "kitty" in term_prog:
-        return "magenta"
-    elif "apple_terminal" in term_prog:
-        return "blue"
-    elif "alacritty" in term_prog:
-        return "yellow"
-
-    return "green"
+    The chain lives in :mod:`accent` so that this front end, the ratatui binary
+    and the settings modals cannot disagree about what ``auto`` means.
+    """
+    return accent.resolve("auto")
 
 
 def _format_duration_helper(seconds):

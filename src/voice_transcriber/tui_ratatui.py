@@ -28,9 +28,11 @@ import tempfile
 import threading
 import time
 
+import accent
+
 logger = logging.getLogger(__name__)
 
-COLOR_PALETTES = ["auto", "green", "cyan", "blue", "magenta", "yellow", "red", "white"]
+COLOR_PALETTES = accent.COLOR_PALETTES
 
 _DEBUG_PATH = os.environ.get("VT_TUI_DEBUG", "")
 
@@ -159,13 +161,15 @@ class RatatuiTui:
         self._server.bind(self.socket_path)
         self._server.listen(1)
 
-        # Hand the child the real terminal file descriptors explicitly.
+        # Hand the child the real terminal file descriptors explicitly, plus the
+        # already-resolved auto theme (see _child_env).
         self._proc = subprocess.Popen(
             [self.binary, "--connect", self.socket_path],
             stdin=0,
             stdout=1,
             stderr=2,
             close_fds=True,
+            env=self._child_env(),
         )
 
         self._server.settimeout(10.0)
@@ -763,14 +767,20 @@ class RatatuiTui:
             msg["hotkeys"] = self.hotkeys
         self._send(msg)
 
+    def _child_env(self):
+        """The environment for the ratatui binary.
+
+        It resolves ``auto`` itself but cannot run the desktop accent probe, so
+        the already-resolved colour is handed over as ``ACCENT_COLOR`` -- step 2
+        of the chain it runs itself (``vt-tui``'s ``detect_system_theme``). This
+        is what makes ``auto`` mean the same colour in both front ends; an
+        explicit ``VT_UI_THEME`` or a concrete configured theme still wins there.
+        """
+        return {**os.environ, "ACCENT_COLOR": self.get_effective_color()}
+
     def get_effective_color(self):
-        theme = (self.ui_theme or "auto").lower()
-        if theme in COLOR_PALETTES and theme != "auto":
-            return theme
-        accent = os.environ.get("ACCENT_COLOR", "").strip().lower()
-        if accent in COLOR_PALETTES:
-            return accent
-        return "green"
+        # One chain, in accent.resolve(): auto follows the desktop accent.
+        return accent.resolve(self.ui_theme)
 
     def set_ui_theme(self, theme_name):
         """Update UI color theme dynamically"""

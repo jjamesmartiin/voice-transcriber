@@ -145,6 +145,7 @@ def build_exe():
         "--hidden-import=voice_transcriber.main",
         "--hidden-import=voice_transcriber.hal",
         "--hidden-import=voice_transcriber.audio_state",
+        "--hidden-import=voice_transcriber.accent",
         "--hidden-import=voice_transcriber.check_devices",
         "--hidden-import=voice_transcriber.console_text",
         "--hidden-import=voice_transcriber.control",

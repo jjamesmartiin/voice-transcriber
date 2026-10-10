@@ -29,7 +29,7 @@ pub const THEME_OPTIONS: [ThemeOption; 8] = [
         theme: Theme::Auto,
         name: "auto",
         label: "Auto",
-        desc: "Detect from system terminal accent color",
+        desc: "Follow the desktop accent color",
     },
     ThemeOption {
         theme: Theme::Green,
