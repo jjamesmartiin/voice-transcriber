@@ -886,12 +886,6 @@ class SimpleVoiceTranscriber:
         self._sync_tui_state()
         self.tui.print_event("🧠 Speaker Model", f"Using {new_model}", level="info")
 
-    def _on_tui_cycle_diarization_model(self):
-        import t2
-        new_model = t2.cycle_diarization_model()
-        self._sync_tui_state()
-        self.tui.print_event("🧠 Speaker Model", f"Using {new_model}", level="info")
-
     def _on_tui_cycle_meeting_output_format(self):
         import t2
         fmt = t2.cycle_meeting_output_format()
