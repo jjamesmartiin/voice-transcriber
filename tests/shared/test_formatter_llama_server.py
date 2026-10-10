@@ -646,11 +646,17 @@ def test_request_model_starts_the_registry_install(monkeypatch):
 
     monkeypatch.setattr(llama_server, "_binary", lambda: "/bin/llama-server")
     monkeypatch.setattr(llama_server, "_model_path", lambda model=None: None)
-    started = []
+    calls = []
     monkeypatch.setattr(model_download, "ensure_model_async",
-                        lambda name, **k: started.append(name) or True)
+                        lambda name, **k: calls.append((name, k)) or True)
+    # The first-use path must NOT claim consent; under a TUI that is what makes it
+    # report the size and wait instead of prompting on a background thread.
     assert llama_server.request_model("s1-mini") is True
-    assert started == ["formatter"]
+    assert calls == [("formatter", {"consented": False})]
+    # The explicit verb forwards its consent through to the installer.
+    calls.clear()
+    assert llama_server.request_model("s1-mini", consented=True) is True
+    assert calls == [("formatter", {"consented": True})]
 
 
 def test_request_model_ignores_an_unregistered_model_id(monkeypatch):

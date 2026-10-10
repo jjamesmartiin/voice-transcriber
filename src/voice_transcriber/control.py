@@ -271,6 +271,11 @@ VERBS: dict[str, dict] = {
         "required": True,
         "returns": ["formatter_context"],
     },
+    "formatter-download": {
+        "summary": ("Download the formatter model now (explicit consent; the "
+                    "first-use path will not prompt under a TUI)"),
+        "returns": ["formatter_download"],
+    },
     "trailing-space": {
         "summary": "Append a space to auto-typed text",
         "value": "state",
