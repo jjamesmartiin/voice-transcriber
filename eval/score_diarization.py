@@ -497,13 +497,19 @@ def main() -> int:
 
     turn_count = len(sys_turns)
     ordering_ok = sys_order == ref_order
+    # The fixture itself must still say what the gate claims it says. Without
+    # this, EXPECTED_ORDER was recorded in the JSON but never compared, so
+    # editing it (or the RTTM) left every test green while the recorded
+    # expected_order field lied.
+    fixture_ok = ref_order == EXPECTED_ORDER
     der_ok = metrics["der"] <= DER_GATE
     components_ok = (
         metrics["missed"] < COMPONENT_GATE
         and metrics["false_alarm"] < COMPONENT_GATE
     )
     passed = (
-        turn_count == EXPECTED_TURNS and ordering_ok and der_ok and components_ok
+        turn_count == EXPECTED_TURNS and ordering_ok and fixture_ok
+        and der_ok and components_ok
     )
 
     version, version_source = sherpa_onnx_version()
@@ -596,6 +602,7 @@ def main() -> int:
                 "expected_turns": EXPECTED_TURNS,
                 "ordering": sys_order,
                 "expected_order": EXPECTED_ORDER,
+                "expected_order_ok": fixture_ok,
                 "ordering_ok": ordering_ok,
                 "der_gate": DER_GATE,
                 "component_gate": COMPONENT_GATE,

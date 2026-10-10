@@ -149,4 +149,13 @@ def _block_real_llama_server(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", guarded_popen)
     _SPAWN_ATTEMPTS.clear()
     yield
+    # A spawn attempted from a background thread surfaces only as a pytest
+    # warning, so make it a hard failure for the test that caused it -- the same
+    # reason the network guard above asserts its own tally rather than relying
+    # on the synchronous raise alone.
+    if _SPAWN_ATTEMPTS:
+        attempts = ", ".join(_SPAWN_ATTEMPTS)
+        _SPAWN_ATTEMPTS.clear()
+        raise AssertionError(
+            f"test attempted to spawn the real llama-server binary: {attempts}")
     _SPAWN_ATTEMPTS.clear()

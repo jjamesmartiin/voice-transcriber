@@ -53,3 +53,24 @@ def test_every_silence_clip_hallucinating_reads_as_one():
 def test_speech_slices_get_no_silence_rate():
     summary = rr._slice_summary([_clip("clean", "some words")])
     assert summary["clean"]["silence_halluc_rate"] is None
+
+
+def test_reported_slice_counts_match_the_recorded_aggregate():
+    """Two aggregations of the same clips must agree.
+
+    ``review_report`` re-derives per-slice counts from the clip list while
+    ``score.py`` records its own in ``results["per_slice"]``. Both feed numbers a
+    human reads, so a drift in either would be invisible -- this compares them on
+    the real recorded baseline instead of trusting them to match.
+    """
+    import json
+
+    results = json.loads((EVAL_DIR / "results.json").read_text())
+    derived = rr._slice_summary(results["results"])
+    stored = results["per_slice"]
+    assert set(derived) == set(stored)
+    for name, got in derived.items():
+        for key in ("n", "we", "wr", "ce", "cr", "exact", "empty"):
+            assert got[key] == stored[name][key], (
+                f"{name}.{key}: report says {got[key]}, recorded says "
+                f"{stored[name][key]}")
