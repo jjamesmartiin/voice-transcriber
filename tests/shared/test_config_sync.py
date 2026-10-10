@@ -784,6 +784,16 @@ def test_diarization_speakers_round_trips_and_cycles(tmp_path, monkeypatch):
         t2.set_diarization_speakers("auto")
 
 
+def test_speaker_count_validators_agree_on_the_2_to_8_range():
+    """t2 and diarize must not disagree about what a valid hint is."""
+    from voice_transcriber import diarize
+
+    for value in (None, "auto", "none", "garbage", 0, 1, 2, 5, 8, 9, 100):
+        normalized = t2.normalize_diarization_speakers(value)
+        expected = None if normalized == "auto" else normalized
+        assert diarize.parse_speakers(value) == expected, value
+
+
 def test_diarization_speakers_env_override(tmp_path, monkeypatch):
     import yaml
     config = tmp_path / "config.yaml"

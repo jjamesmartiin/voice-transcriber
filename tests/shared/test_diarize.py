@@ -222,6 +222,10 @@ def test_clustering_threshold_is_passed_through_unchanged():
     (2, 2),
     ("3", 3),
     (" 4 ", 4),
+    (8, 8),
+    (1, None),
+    (9, None),
+    (100, None),
 ])
 def test_parse_speakers(value, expected):
     assert diarize.parse_speakers(value) == expected
