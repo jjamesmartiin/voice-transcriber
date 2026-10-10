@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import t2
 
+from ._rust_source import rust_implementation
+
 
 def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
     # Setup temporary yaml config file
@@ -784,6 +786,16 @@ def test_diarization_speakers_round_trips_and_cycles(tmp_path, monkeypatch):
         t2.set_diarization_speakers("auto")
 
 
+def test_speaker_count_validators_agree_on_the_2_to_8_range():
+    """t2 and diarize must not disagree about what a valid hint is."""
+    from voice_transcriber import diarize
+
+    for value in (None, "auto", "none", "garbage", 0, 1, 2, 5, 8, 9, 100):
+        normalized = t2.normalize_diarization_speakers(value)
+        expected = None if normalized == "auto" else normalized
+        assert diarize.parse_speakers(value) == expected, value
+
+
 def test_diarization_speakers_env_override(tmp_path, monkeypatch):
     import yaml
     config = tmp_path / "config.yaml"
@@ -952,8 +964,7 @@ def test_ratatui_structure_labels_match_python():
     Rust test repeats these strings, and matching those would let the real
     implementation drift. Mirrors the guard in tests/shared/test_mode_presets.py.
     """
-    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
     assert "SettingKind::StructureMode" in implementation, (
         "could not find the structure row in tui-rs/src/settings_picker.rs - the "
         "parity guard is looking in the wrong place"
@@ -978,8 +989,7 @@ def test_ratatui_meeting_labels_match_python():
     Same source-scoped guard as the structure labels above: the Rust test
     repeats these strings, so only the non-test half of the file is searched.
     """
-    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
     assert "SettingKind::MeetingMode" in implementation, (
         "could not find the meeting row in tui-rs/src/settings_picker.rs - the "
         "parity guard is looking in the wrong place"
@@ -1009,8 +1019,7 @@ def test_ratatui_diarization_and_output_labels_match_python():
     ``t2.*_setting_state()`` helpers the Rich modal uses, so neither language can
     drift without failing here.
     """
-    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
     for kind in ("Diarization", "DiarizationSpeakers", "DiarizationModel",
                  "MeetingOutputDir", "MeetingOutputFormat"):
         assert f"SettingKind::{kind}" in implementation, (
@@ -1240,6 +1249,35 @@ def test_speaker_hooks_are_wired_and_the_map_is_metadata_not_config(tmp_path, mo
         assert config.read_text() == before
     finally:
         t2.register_speaker_hooks(get=None, set=None)
+
+
+def test_speaker_editor_key_map_reorders_on_uppercase_jk(monkeypatch):
+    """Pin the editor's key handling, not just move_speaker_name: lowercase
+    j/k select, uppercase J/K reorder (matching the Rust editor)."""
+    state = {"names": ["A", "B", "C"]}
+    monkeypatch.setattr(t2, "get_speaker_names", lambda: list(state["names"]))
+    monkeypatch.setattr(
+        t2, "set_speaker_names",
+        lambda names: state.update(names=list(names)) or True,
+    )
+
+    def press(*keys):
+        pending = iter(keys)
+        monkeypatch.setattr(t2, "_read_key", lambda: next(pending))
+        return t2.select_speaker_editor()
+
+    assert press("J", "q") is True
+    assert state["names"] == ["B", "A", "C"]  # J moved the selected name down
+
+    state["names"] = ["A", "B", "C"]
+    assert press("j", "j", "K", "q") is True
+    assert state["names"] == ["A", "C", "B"]  # K moved the third name up
+
+    # Lowercase j must move the selection, not reorder: deleting the selection
+    # then removes the second name only.
+    state["names"] = ["A", "B", "C"]
+    press("j", "d", "q")
+    assert state["names"] == ["A", "C"]
 
 
 def test_both_python_tuis_expose_meeting_output_settings():

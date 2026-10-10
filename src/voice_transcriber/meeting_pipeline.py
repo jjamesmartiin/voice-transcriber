@@ -111,6 +111,8 @@ def meeting_output_dir(
     A relative setting is resolved against the repo root when there is one, so
     the shipped default (``meetings``) lands inside the project and is
     gitignored, rather than in a user data dir the user has to go looking for.
+    With no checkout (an installed build), it resolves under the per-user data
+    dir instead of the launch directory.
     """
     if explicit:
         return os.path.abspath(os.path.expanduser(str(explicit)))
@@ -122,7 +124,11 @@ def meeting_output_dir(
         expanded = os.path.expanduser(configured)
         if os.path.isabs(expanded):
             return os.path.abspath(expanded)
-        return os.path.abspath(os.path.join(_repo_root() or os.getcwd(), expanded))
+        root = _repo_root()
+        if root is None:
+            from voice_transcriber import model_download
+            root = model_download.get_data_dir()
+        return os.path.abspath(os.path.join(root, expanded))
     root = _repo_root()
     if root:
         return os.path.join(root, OUTPUT_DIR_NAME)
@@ -422,16 +428,19 @@ class MeetingPipeline:
 
         self._set_stage("rendering")
         fmt = self._output_format()
-        rendered = self._render(
-            produced, labelled, duration, created_text, speaker_names, fmt
-        )
         path: str | None = None
         error: str | None = None
         try:
+            rendered = self._render(
+                produced, labelled, duration, created_text, speaker_names, fmt
+            )
             path = self._write(rendered, created, fmt)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
-            logger.warning("could not write the meeting transcript: %s", exc)
+            logger.warning("could not render or write the meeting transcript: %s", exc)
+            # A formatter bug costs the file, never the meeting: keep the plain
+            # in-memory form, as the cancelled path does.
+            rendered = self._render_body(produced, labelled, speaker_names)
         self._report(_TOTAL_UNITS, _TOTAL_UNITS)
         return MeetingTranscript(
             turns=produced,

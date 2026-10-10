@@ -466,6 +466,25 @@ def test_write_failure_keeps_the_transcript_in_memory(tmp_path):
     assert list(tmp_path.iterdir()) == [blocker]
 
 
+def test_render_failure_keeps_the_transcript_in_memory(tmp_path, monkeypatch):
+    """A formatter bug costs the file, not the meeting."""
+    pipeline, _ = _make_pipeline(
+        tmp_path, turns=[Turn(0.0, 1.0, 0)], texts=["hello"]
+    )
+
+    def boom(*args, **kwargs):
+        raise ValueError("render exploded")
+
+    monkeypatch.setattr(pipeline, "_render", boom)
+    result = pipeline.process(_audio(1.0), 16000)
+
+    assert result.error is not None
+    assert result.path is None
+    assert [turn.text for turn in result.turns] == ["hello"]
+    assert "hello" in result.text
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_invalid_audio_returns_an_error_and_never_raises(tmp_path):
     pipeline = mp.MeetingPipeline(
         diarizer=_scripted([Turn(0.0, 1.0, 0)]),
@@ -680,6 +699,25 @@ def test_output_dir_setting_is_used_when_no_explicit_dir(tmp_path, monkeypatch):
     )
     result2 = pipeline2.process(_audio(1.0), 16000)
     assert str(env_target) in str(result2.path)
+
+
+def test_relative_output_dir_without_a_checkout_uses_the_data_dir(tmp_path, monkeypatch):
+    """An installed build must not write meetings into the launch directory."""
+    from voice_transcriber import model_download
+
+    monkeypatch.delenv(mp.OUTPUT_DIR_ENV, raising=False)
+    monkeypatch.setattr(mp, "_repo_root", lambda: None)
+    monkeypatch.setattr(model_download, "get_data_dir", lambda: str(tmp_path / "data"))
+
+    assert mp.meeting_output_dir(setting="meetings") == str(tmp_path / "data" / "meetings")
+
+
+def test_relative_output_dir_with_a_checkout_stays_in_the_repo(tmp_path, monkeypatch):
+    """Decision S8: a checkout keeps the repo-relative ``meetings`` default."""
+    monkeypatch.delenv(mp.OUTPUT_DIR_ENV, raising=False)
+    monkeypatch.setattr(mp, "_repo_root", lambda: str(tmp_path / "checkout"))
+
+    assert mp.meeting_output_dir(setting="meetings") == str(tmp_path / "checkout" / "meetings")
 
 
 # ---------------------------------------------------------------------------

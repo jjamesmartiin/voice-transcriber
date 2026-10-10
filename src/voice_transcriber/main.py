@@ -886,12 +886,6 @@ class SimpleVoiceTranscriber:
         self._sync_tui_state()
         self.tui.print_event("🧠 Speaker Model", f"Using {new_model}", level="info")
 
-    def _on_tui_cycle_diarization_model(self):
-        import t2
-        new_model = t2.cycle_diarization_model()
-        self._sync_tui_state()
-        self.tui.print_event("🧠 Speaker Model", f"Using {new_model}", level="info")
-
     def _on_tui_cycle_meeting_output_format(self):
         import t2
         fmt = t2.cycle_meeting_output_format()
@@ -1935,7 +1929,6 @@ class SimpleVoiceTranscriber:
             state = self._control_on_off(value)
             current = t2.get_diarization() == "on"
             t2.set_diarization((not current) if state is None else state)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb, diarization=t2.get_diarization())
 
@@ -1944,7 +1937,6 @@ class SimpleVoiceTranscriber:
                 t2.set_diarization_speakers(value)
             else:
                 t2.cycle_diarization_speakers()
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(
                 verb, diarization_speakers=t2.get_diarization_speakers()
@@ -1953,7 +1945,6 @@ class SimpleVoiceTranscriber:
         if verb in ("diarization-model", "diarization_model"):
             need_value()
             t2.set_diarization_model(value)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)
 
@@ -1961,7 +1952,6 @@ class SimpleVoiceTranscriber:
         if verb in ("meeting-output", "meeting-output-dir", "meeting_output_dir"):
             if value is not None and str(value).strip():
                 t2.set_meeting_output_dir(value)
-                t2.save_audio_config()
                 self._sync_tui_state()
             return self._control_status(
                 verb, meeting_output_dir=t2.get_meeting_output_dir()
@@ -1972,7 +1962,6 @@ class SimpleVoiceTranscriber:
                 t2.set_meeting_output_format(value)
             else:
                 t2.cycle_meeting_output_format()
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(
                 verb, meeting_output_format=t2.get_meeting_output_format()

@@ -198,8 +198,9 @@ def parse_speakers(value: Any) -> int | None:
     """Map the ``diarization_speakers`` setting onto ``num_speakers``.
 
     ``None`` means "auto", which the backend passes through as
-    ``num_clusters=-1``. Anything unparseable also means auto: an unknown value
-    must degrade to the safe behaviour, never crash a meeting capture.
+    ``num_clusters=-1``. Anything unparseable or outside the setting's 2..8
+    range also means auto, matching ``t2.normalize_diarization_speakers``: an
+    unknown value must degrade to the safe behaviour, never crash a capture.
     """
     if value is None:
         return None
@@ -210,7 +211,7 @@ def parse_speakers(value: Any) -> int | None:
         count = int(text)
     except (TypeError, ValueError):
         return None
-    return count if count > 0 else None
+    return count if 2 <= count <= 8 else None
 
 
 def speaker_count(turns: list[Turn]) -> int:

@@ -30,6 +30,8 @@ import t2  # noqa: E402
 import post_processor as pp  # noqa: E402
 import formatter  # noqa: E402
 
+from ._rust_source import rust_implementation
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUST_SETTINGS_PICKER = REPO_ROOT / "tui-rs" / "src" / "settings_picker.rs"
 
@@ -458,8 +460,7 @@ def test_ratatui_formatter_labels_match_python():
     the *prefix* is what can be matched - the Rust source holds the format
     string, never a rendered example.
     """
-    source = RUST_SETTINGS_PICKER.read_text(encoding="utf-8")
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
     assert "SettingKind::Formatter" in implementation, (
         "could not find the formatter rows in tui-rs/src/settings_picker.rs - "
         "the parity guard is looking in the wrong place")

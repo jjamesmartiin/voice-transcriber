@@ -18,6 +18,8 @@ if str(SRC_DIR) not in sys.path:
 import t2  # noqa: E402
 from tui import VoiceTranscriberTUI  # noqa: E402
 
+from ._rust_source import rust_implementation
+
 
 def _tui_with_spies(state="READY"):
     tui = VoiceTranscriberTUI(ui_theme="cyan")
@@ -143,8 +145,7 @@ class TestRatatuiMeetingScreen:
     """
 
     def _implementation(self, path):
-        source = path.read_text(encoding="utf-8")
-        return source.split("\n#[cfg(test)]", 1)[0]
+        return rust_implementation(path)
 
     def test_meeting_screen_keys_are_scoped_to_the_meeting_state(self):
         implementation = self._implementation(RUST_MAIN)
