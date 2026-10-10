@@ -149,7 +149,6 @@ class VoiceTranscriberTUI:
         self.formatter_model = "s1-mini"
         self.formatter_style = "semi-formal"
         self.formatter_context = "general"
-        self.copy_to_clipboard = True
         self.sound_theme = "proximity"
         self.last_transcription = ""
 

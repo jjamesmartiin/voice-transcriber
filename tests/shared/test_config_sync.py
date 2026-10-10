@@ -411,29 +411,26 @@ def test_punctuation_modes_in_post_processor():
     assert clean_speech_transcription(sample, punctuation_mode="gen_z") == "hello world this is voice transcriber"
 
 
-def test_output_mode_cycle():
+def test_output_mode_cycle(monkeypatch):
+    monkeypatch.setattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True)
     t2.set_output_mode("clipboard")
     assert t2.get_output_mode() == "clipboard"
     assert t2.AUTO_TYPE is False
-    assert t2.COPY_TO_CLIPBOARD is True
 
     # 1. clipboard -> type (auto-switches punctuation to full)
     t2.set_punctuation_mode("no_punctuation")
     assert t2.cycle_output_mode() == "type"
     assert t2.AUTO_TYPE is True
-    assert t2.COPY_TO_CLIPBOARD is False
     assert t2.PUNCTUATION_MODE == "full"
 
     # 2. type -> type_fast (remains in full)
     assert t2.cycle_output_mode() == "type_fast"
     assert t2.AUTO_TYPE is True
-    assert t2.COPY_TO_CLIPBOARD is False
     assert t2.PUNCTUATION_MODE == "full"
 
     # 3. type_fast -> clipboard
     assert t2.cycle_output_mode() == "clipboard"
     assert t2.AUTO_TYPE is False
-    assert t2.COPY_TO_CLIPBOARD is True
 
 
 def test_output_mode_config_sync(tmp_path, monkeypatch):

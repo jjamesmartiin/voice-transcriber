@@ -434,7 +434,6 @@ class TestResetToDefaults:
         # Derived mirrors must agree with their source of truth.
         mode = t2.DEFAULT_SETTINGS["OUTPUT_MODE"]
         assert t2.DEFAULT_SETTINGS["AUTO_TYPE"] == (mode in ("type", "type_fast"))
-        assert t2.DEFAULT_SETTINGS["COPY_TO_CLIPBOARD"] == (mode not in ("type", "type_fast"))
         assert t2.DEFAULT_SETTINGS["NUMBER_DIGITS"] == (t2.DEFAULT_SETTINGS["NUMBER_MODE"] != "words")
 
     def test_punctuation_default_has_one_owner(self):
@@ -446,6 +445,13 @@ class TestResetToDefaults:
         """
         assert t2.PUNCTUATION_MODE == t2.DEFAULT_PUNCTUATION_MODE
         assert t2.DEFAULT_SETTINGS["PUNCTUATION_MODE"] == t2.DEFAULT_PUNCTUATION_MODE
+
+    def test_initial_globals_match_default_settings(self):
+        """A fresh clone with no config file must start on the shipped defaults."""
+        for name, expected in t2.DEFAULT_SETTINGS.items():
+            assert getattr(t2, name) == expected, (
+                f"module global {name} drifted from DEFAULT_SETTINGS"
+            )
 
     def test_example_config_documents_the_shipped_defaults(self):
         """Both example configs must document every shipped setting.

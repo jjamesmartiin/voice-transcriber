@@ -67,12 +67,6 @@ auto_type_auto_punctuate: false
 # Clipboard Copy Setting
 # Controls whether transcribed text is automatically placed in system clipboard.
 # Available Options:
-#   - true  : Automatically copy transcribed text to clipboard
-#   - false : Do not copy transcribed text to clipboard
-# Default: false
-#   (Derived from output_mode; clipboard/type outputs set this automatically.)
-copy_to_clipboard: false
-
 # ------------------------------------------------------------------------------
 # Mode Preset (Formatting & Capitalization Style)
 # Controls grammar rules, casing, and punctuation styles for output.

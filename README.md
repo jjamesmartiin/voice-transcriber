@@ -723,7 +723,6 @@ Supported options:
 - `is_muted`: `true` or `false`.
 - `output_mode`: `clipboard`, `type` (slow/safe), or `type_fast` (optimized).
 - `auto_type`: `true` (direct keystroke injection) or `false` (clipboard only).
-- `copy_to_clipboard`: `true` or `false`.
 - `auto_type_trailing_space`: append a space after auto-typed text.
 - `auto_type_auto_punctuate`: enforce terminal punctuation on auto-typed text.
 - `number_digits`: `auto` (default: only consecutive spoken digit chains such as phone/serial numbers become digits, while ordinals and small isolated counts read as words — `"the 5th item"` → `"the fifth item"`, `"I have 2 dogs"` → `"I have two dogs"`), `digits` (always convert), or `words` (never convert). Legacy `true`/`false` are accepted as aliases for `digits`/`words`. Spoken dates are the one exception in `auto`/`digits`: the day is always written as an ordinal numeral (`"October twentieth"` → `"October 20th"`, `"the twentieth of October"` → `"the 20th of October"`, `"October twentieth twenty twenty five"` → `"October 20th, 2025"`); `words` mode leaves them spelled out.

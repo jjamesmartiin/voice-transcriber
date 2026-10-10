@@ -118,12 +118,11 @@ LAST_USED_DEVICE_NAME = "Unknown"
 ACTUAL_RATE = RATE
 OVERRIDE_MODE = 'auto' # 'auto', 'primary', or 'secondary'
 MODEL_BACKEND = "cohere"  # Cohere Transcribe is the only ASR backend
-COPY_TO_CLIPBOARD = True
-AUTO_TYPE = False
+AUTO_TYPE = True
 OUTPUT_MODES = ["clipboard", "type", "type_fast"]
-OUTPUT_MODE = "clipboard"
+OUTPUT_MODE = "type_fast"
 AUTO_TYPE_TRAILING_SPACE = True
-AUTO_TYPE_AUTO_PUNCTUATE = True
+AUTO_TYPE_AUTO_PUNCTUATE = False
 IS_MUTED = True
 NUMBER_MODE = "auto"  # Spoken-number formatting: "auto" | "digits" | "words"
 NUMBER_DIGITS = True  # Back-compat mirror: False only when NUMBER_MODE == "words"
@@ -133,7 +132,7 @@ MIDDLE_CLICK_ENABLED = False  # Push-to-talk by holding middle mouse button (>= 
 HOTKEY_BINDS = keybinds.parse_binds(None)  # Push-to-talk chords; default is hold Alt+Shift
 KEEP_BLUETOOTH_HANDSFREE = True  # Prevent WirePlumber/PipeWire from auto-reverting to headphone profile (pausing media)
 SOUND_THEME = "proximity"
-UI_THEME = "auto"
+UI_THEME = "red"
 #: The shipped punctuation preset — the ONE owner for this default.
 #: ``PUNCTUATION_MODE`` (the runtime/config fallback), ``DEFAULT_SETTINGS`` (the
 #: "Reset to Defaults" target) and the config-file fallback in
@@ -246,7 +245,6 @@ DEFAULT_SETTINGS = {
     'OVERRIDE_MODE': 'auto',
     'OUTPUT_MODE': "type_fast",
     'AUTO_TYPE': True,
-    'COPY_TO_CLIPBOARD': False,
     'AUTO_TYPE_TRAILING_SPACE': True,
     'AUTO_TYPE_AUTO_PUNCTUATE': False,
     'IS_MUTED': True,
@@ -955,10 +953,11 @@ def load_audio_config(file_path=None):
                 OUTPUT_MODE = "type_fast"
             elif config.get('auto_type', False):
                 OUTPUT_MODE = "type"
+            elif 'output_mode' not in config and 'auto_type' not in config:
+                OUTPUT_MODE = "type_fast"
             else:
                 OUTPUT_MODE = "clipboard"
             AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
-            COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
             NUMBER_MODE = _normalize_number_mode(config.get('number_digits', config.get('number_mode', 'auto')))
             NUMBER_DIGITS = NUMBER_MODE != "words"
             SERIAL_COLLAPSE = _normalize_bool(config.get('serial_collapse', True), default=True)
@@ -1089,7 +1088,8 @@ def load_audio_config(file_path=None):
             elif env_trailing_space in ["0", "false", "no"]:
                 AUTO_TYPE_TRAILING_SPACE = False
 
-            AUTO_TYPE_AUTO_PUNCTUATE = config.get('auto_type_auto_punctuate', True)
+            AUTO_TYPE_AUTO_PUNCTUATE = _normalize_bool(
+                config.get('auto_type_auto_punctuate', False), default=False)
             env_auto_punctuate = os.environ.get("VT_AUTO_TYPE_AUTO_PUNCTUATE", "").strip().lower()
             if env_auto_punctuate in ["1", "true", "yes"]:
                 AUTO_TYPE_AUTO_PUNCTUATE = True
@@ -1127,17 +1127,14 @@ def load_audio_config(file_path=None):
                 OUTPUT_MODE = "type_fast"
 
             AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
-            COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
 
             env_sound = os.environ.get("VT_SOUND_THEME", "").strip()
             SOUND_THEME = env_sound or config.get('sound_theme', 'proximity')
             if SOUND_THEME.lower() in ["silent", "muted", "none"]:
                 IS_MUTED = True
 
-            COPY_TO_CLIPBOARD = config.get('copy_to_clipboard', True)
-
             env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
-            UI_THEME = env_theme or config.get('ui_theme', 'auto')
+            UI_THEME = env_theme or config.get('ui_theme', 'red')
 
             # If we have an override, try that first
             if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
@@ -1294,7 +1291,6 @@ def _write_audio_config():
         elif not AUTO_TYPE and OUTPUT_MODE in ("type", "type_fast"):
             OUTPUT_MODE = "clipboard"
         AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
-        COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
 
         existing_config.update({
             'input_device_index': INPUT_DEVICE_INDEX,
@@ -1307,7 +1303,6 @@ def _write_audio_config():
             'auto_type_trailing_space': AUTO_TYPE_TRAILING_SPACE,
             'auto_type_auto_punctuate': AUTO_TYPE_AUTO_PUNCTUATE,
             'sound_theme': SOUND_THEME,
-            'copy_to_clipboard': COPY_TO_CLIPBOARD,
             'ui_theme': UI_THEME,
             'number_digits': NUMBER_MODE,
             'serial_collapse': SERIAL_COLLAPSE,
@@ -1399,11 +1394,10 @@ def reset_to_defaults() -> dict:
 
 def cycle_output_mode() -> str:
     """Cycle output mode: clipboard -> type -> type_fast."""
-    global OUTPUT_MODE, AUTO_TYPE, COPY_TO_CLIPBOARD
+    global OUTPUT_MODE, AUTO_TYPE
     idx = (OUTPUT_MODES.index(OUTPUT_MODE) + 1) % len(OUTPUT_MODES)
     OUTPUT_MODE = OUTPUT_MODES[idx]
     AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
-    COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
     if AUTO_TYPE and AUTO_TYPE_AUTO_PUNCTUATE:
         set_punctuation_mode("full")
     _push_structure_mode()
@@ -1412,16 +1406,14 @@ def cycle_output_mode() -> str:
 
 def set_output_mode(mode: str) -> str:
     """Set output mode: clipboard, type, or type_fast."""
-    global OUTPUT_MODE, AUTO_TYPE, COPY_TO_CLIPBOARD
+    global OUTPUT_MODE, AUTO_TYPE
     clean = str(mode).strip().lower()
     if clean in OUTPUT_MODES:
         OUTPUT_MODE = clean
         AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
-        COPY_TO_CLIPBOARD = (OUTPUT_MODE not in ("type", "type_fast"))
     elif clean in ("paste", "paste_terminal"):
         OUTPUT_MODE = "type_fast"
         AUTO_TYPE = True
-        COPY_TO_CLIPBOARD = False
     if AUTO_TYPE and AUTO_TYPE_AUTO_PUNCTUATE:
         set_punctuation_mode("full")
     _push_structure_mode()
@@ -3092,7 +3084,7 @@ def select_preset_picker(current_preset=None):
 def select_settings_picker():
     """Interactive settings picker modal with live in-place toggling and fuzzy search."""
     global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE
-    global MODEL_BACKEND, COPY_TO_CLIPBOARD, IS_MUTED, SOUND_THEME, AUTO_TYPE
+    global MODEL_BACKEND, IS_MUTED, SOUND_THEME, AUTO_TYPE
     global UI_THEME, NUMBER_DIGITS, NUMBER_MODE, MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE
     global AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, OUTPUT_MODE, PUNCTUATION_MODE
 
