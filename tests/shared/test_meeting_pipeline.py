@@ -466,6 +466,25 @@ def test_write_failure_keeps_the_transcript_in_memory(tmp_path):
     assert list(tmp_path.iterdir()) == [blocker]
 
 
+def test_render_failure_keeps_the_transcript_in_memory(tmp_path, monkeypatch):
+    """A formatter bug costs the file, not the meeting."""
+    pipeline, _ = _make_pipeline(
+        tmp_path, turns=[Turn(0.0, 1.0, 0)], texts=["hello"]
+    )
+
+    def boom(*args, **kwargs):
+        raise ValueError("render exploded")
+
+    monkeypatch.setattr(pipeline, "_render", boom)
+    result = pipeline.process(_audio(1.0), 16000)
+
+    assert result.error is not None
+    assert result.path is None
+    assert [turn.text for turn in result.turns] == ["hello"]
+    assert "hello" in result.text
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_invalid_audio_returns_an_error_and_never_raises(tmp_path):
     pipeline = mp.MeetingPipeline(
         diarizer=_scripted([Turn(0.0, 1.0, 0)]),

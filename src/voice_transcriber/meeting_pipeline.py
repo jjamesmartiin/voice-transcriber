@@ -428,16 +428,19 @@ class MeetingPipeline:
 
         self._set_stage("rendering")
         fmt = self._output_format()
-        rendered = self._render(
-            produced, labelled, duration, created_text, speaker_names, fmt
-        )
         path: str | None = None
         error: str | None = None
         try:
+            rendered = self._render(
+                produced, labelled, duration, created_text, speaker_names, fmt
+            )
             path = self._write(rendered, created, fmt)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
-            logger.warning("could not write the meeting transcript: %s", exc)
+            logger.warning("could not render or write the meeting transcript: %s", exc)
+            # A formatter bug costs the file, never the meeting: keep the plain
+            # in-memory form, as the cancelled path does.
+            rendered = self._render_body(produced, labelled, speaker_names)
         self._report(_TOTAL_UNITS, _TOTAL_UNITS)
         return MeetingTranscript(
             turns=produced,
