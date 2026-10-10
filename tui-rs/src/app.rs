@@ -883,7 +883,7 @@ fn decay_factor(dt_secs: f32) -> f32 {
     PER_STEP.powf(dt_secs / NOMINAL_DT_SECS)
 }
 
-fn detect_system_theme() -> Theme {
+pub(crate) fn detect_system_theme() -> Theme {
     // `auto` is resolved here. The Python engine runs the desktop accent probe it
     // cannot run itself (it is the one process that must not shell out twice) and
     // hands the answer down as ACCENT_COLOR, which is why that step follows

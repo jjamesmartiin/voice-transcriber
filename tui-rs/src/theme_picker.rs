@@ -132,6 +132,10 @@ pub struct PickerState {
     pub selected_index: usize,
     pub filtered_indices: Vec<usize>,
     pub current_theme: Theme,
+    /// What `auto` is drawn as, captured once when the picker opens. Held here
+    /// rather than re-read per frame, and so a render test can say what the
+    /// accent is instead of depending on the machine's desktop.
+    pub auto_accent: Theme,
 }
 
 impl PickerState {
@@ -141,6 +145,7 @@ impl PickerState {
             selected_index: 0,
             filtered_indices: (0..THEME_OPTIONS.len()).collect(),
             current_theme: current,
+            auto_accent: crate::app::detect_system_theme(),
         };
         if let Some(pos) = THEME_OPTIONS.iter().position(|o| o.theme == current) {
             s.selected_index = pos;
@@ -278,6 +283,17 @@ impl ThemeRowLayout {
     }
 }
 
+/// The colour a theme entry is drawn in.
+///
+/// `auto` is drawn as the colour this front end actually resolves it to -- the
+/// accent the engine handed down -- and never as a fixed green: the popup
+/// previews the highlighted entry, so a wrong answer here is visible before the
+/// user commits to it.
+fn swatch(theme: Theme, auto_accent: Theme) -> Color {
+    let resolved = if theme == Theme::Auto { auto_accent } else { theme };
+    resolved.color()
+}
+
 /// Render one theme row. Columns are padded by display width so the action
 /// pill lands on the same columns on every line.
 fn theme_row(
@@ -285,8 +301,9 @@ fn theme_row(
     is_selected: bool,
     is_current: bool,
     layout: &ThemeRowLayout,
+    auto_accent: Theme,
 ) -> Line<'static> {
-    let opt_color = opt.theme.color();
+    let opt_color = swatch(opt.theme, auto_accent);
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     // Pointer column.
@@ -352,7 +369,7 @@ pub fn render_picker(frame: &mut Frame, state: &PickerState) {
     frame.render_widget(Clear, popup_area);
 
     let preview_theme = state.active_theme_preview();
-    let preview_color = preview_theme.color();
+    let preview_color = swatch(preview_theme, state.auto_accent);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -441,7 +458,7 @@ pub fn render_picker(frame: &mut Frame, state: &PickerState) {
             let opt = &THEME_OPTIONS[opt_idx];
             let is_current = opt.theme == state.current_theme;
 
-            list_lines.push(theme_row(opt, is_selected, is_current, &layout));
+            list_lines.push(theme_row(opt, is_selected, is_current, &layout, state.auto_accent));
         }
         frame.render_widget(Paragraph::new(list_lines), list_area);
     }
@@ -547,6 +564,39 @@ mod tests {
         }
     }
 
+    /// `auto` has no colour of its own: it is drawn as whatever the front end
+    /// resolved for it. It used to be drawn as `Theme::color()`'s Auto arm -- a
+    /// hard-coded green -- so the popup previewed a colour the app then never
+    /// showed once the theme was actually applied.
+    #[test]
+    fn test_the_auto_swatch_is_the_resolved_accent() {
+        assert_eq!(swatch(Theme::Auto, Theme::Red), Color::Red);
+        assert_eq!(swatch(Theme::Auto, Theme::Cyan), Color::Cyan);
+        // A concrete theme is itself, whatever the accent is.
+        assert_eq!(swatch(Theme::Magenta, Theme::Red), Color::Magenta);
+    }
+
+    #[test]
+    fn test_the_auto_row_is_drawn_in_the_resolved_accent() {
+        let layout = ThemeRowLayout::new(80);
+        let auto = THEME_OPTIONS
+            .iter()
+            .find(|o| o.theme == Theme::Auto)
+            .expect("the theme list still offers auto");
+
+        let line = theme_row(auto, true, false, &layout, Theme::Red);
+
+        let green = line
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(Color::Green));
+        assert!(!green, "the auto row is still painted green");
+        assert!(
+            line.spans.iter().any(|s| s.style.fg == Some(Color::Red)),
+            "the auto row never shows the accent"
+        );
+    }
+
     #[test]
     fn test_picker_fuzzy_matching() {
         let opt_cyan = THEME_OPTIONS.iter().find(|o| o.theme == Theme::Cyan).unwrap();
@@ -610,7 +660,7 @@ mod tests {
             for opt in THEME_OPTIONS.iter() {
                 for is_selected in [true, false] {
                     for is_current in [true, false] {
-                        let line = theme_row(opt, is_selected, is_current, &layout);
+                        let line = theme_row(opt, is_selected, is_current, &layout, Theme::Red);
                         assert_eq!(
                             line.width(),
                             expected,

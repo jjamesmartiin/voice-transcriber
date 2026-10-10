@@ -2574,6 +2574,17 @@ def effective_ui_theme() -> str:
     return accent.resolve(UI_THEME)
 
 
+def theme_swatch_color(theme_name: str) -> str:
+    """The colour a theme entry is drawn in.
+
+    ``auto`` is shown as the colour it actually resolves to (the desktop
+    accent), never as a hard-coded green: the picker previews the highlighted
+    entry, so a wrong answer here is visible before the user commits to it --
+    which is exactly how a preview can disagree with the screen that follows.
+    """
+    return accent.resolve(theme_name)
+
+
 def _fuzzy_subsequence(pattern: str, target: str) -> int | None:
     p_idx = 0
     dist = 0
@@ -2754,9 +2765,7 @@ def select_theme_picker(current_theme=None):
         if selected_idx >= len(matches):
             selected_idx = max(0, len(matches) - 1)
 
-        preview_color = matches[selected_idx][1][0] if matches else active
-        if preview_color == "auto":
-            preview_color = "green"
+        preview_color = theme_swatch_color(matches[selected_idx][1][0]) if matches else theme_swatch_color(active)
 
         table = Table(box=None, padding=(0, 1), show_header=False)
         table.add_column("Ind", justify="right", width=2)
@@ -2768,7 +2777,7 @@ def select_theme_picker(current_theme=None):
         for row_i, (_orig_i, (name, label, desc)) in enumerate(matches):
             is_sel = (row_i == selected_idx)
             is_active = (name == active)
-            dot_color = "green" if name == "auto" else name
+            dot_color = theme_swatch_color(name)
 
             ind = "❯" if is_sel else " "
             ind_style = f"bold {dot_color}" if is_sel else "dim white"

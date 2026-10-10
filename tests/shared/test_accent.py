@@ -200,3 +200,21 @@ def test_the_settings_modals_paint_the_accent_not_green(monkeypatch):
 
     monkeypatch.setattr(t2, "UI_THEME", "cyan")
     assert t2.effective_ui_theme() == "cyan"
+
+
+def test_the_theme_picker_draws_auto_in_the_accent(monkeypatch):
+    """Regression: the picker's swatch was `"green" if name == "auto"`.
+
+    The picker previews the highlighted entry, so browsing onto auto painted a
+    green popup and then the app applied the accent -- the preview disagreed with
+    the screen it produced.
+    """
+    import t2
+
+    _desktop_accent_is(monkeypatch, "red")
+
+    assert t2.theme_swatch_color("auto") == "red"
+    assert t2.theme_swatch_color("cyan") == "cyan"  # a concrete entry is itself
+    # Whatever comes back must be paintable: the picker passes it to Rich as a
+    # style name, and an unknown name raises there rather than falling back.
+    assert t2.theme_swatch_color("not-a-theme") in accent.COLOR_PALETTES
