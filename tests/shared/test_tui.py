@@ -124,6 +124,15 @@ def test_tui_handle_keypress():
     tui._handle_keypress('r')
     assert called == ["reset_terminal"]
 
+    # The documented quit keys are q / Esc / Ctrl+C (AGENTS.md pins the list).
+    # Esc was missing here, so it did nothing in this frontend while the ratatui
+    # one honoured it.
+    tui.on_quit = lambda: called.append("quit")
+    called.clear()
+    for key in ('q', 'Q', '\x1b', '\x03'):
+        tui._handle_keypress(key)
+    assert called == ["quit", "quit", "quit", "quit"]
+    called.clear()
     # The one-off toggles are gone, and so is every non-settings picker key:
     # the microphone/theme pickers are reached from inside the settings modal.
     # `i` and `M` were removed outright (they meant different things in the

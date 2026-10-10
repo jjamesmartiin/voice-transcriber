@@ -710,6 +710,14 @@ class VoiceTranscriberTUI:
                     ch = sys.stdin.read(1)
                     if not ch:
                         break
+                    if ch == '\x1b':
+                        # An arrow or function key arrives as Esc followed by more
+                        # bytes; a bare Esc is the documented quit key. Only
+                        # forward it when nothing follows, or every arrow press
+                        # would quit the app.
+                        more, _, _ = select.select([fd], [], [], 0.02)
+                        if more:
+                            continue
                     self._handle_keypress(ch)
             except Exception:
                 break
@@ -745,6 +753,6 @@ class VoiceTranscriberTUI:
         elif ch.lower() == 'r':
             if self.on_reset_terminal:
                 self.on_reset_terminal()
-        elif ch.lower() == 'q' or ch == '\x03':  # 'q' or Ctrl+C
+        elif ch.lower() == 'q' or ch in ('\x03', '\x1b'):  # 'q', Ctrl+C or Esc
             if self.on_quit:
                 self.on_quit()
