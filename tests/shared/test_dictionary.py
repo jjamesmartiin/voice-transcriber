@@ -305,6 +305,29 @@ def test_contextual_rules_developer_vs_social_disambiguation():
     assert "UART" not in social_4
 
 
+@pytest.mark.parametrize("target", [r"\1", r"path\end", "trail\\", r"C:\new"])
+def test_a_contextual_target_is_inserted_literally(target):
+    """A backslash in a user-supplied replacement is text, not a template.
+
+    Regression: ``target`` was passed to ``re.sub`` as a replacement *template*,
+    where ``\\1`` is a back-reference and ``\\e`` is a bad escape. The first
+    echoed the matched text back ("push the push the now"), and the second raised
+    ``PatternError`` -- which the ASR caller catches by setting the transcript to
+    an empty string, silently throwing the dictation away.
+    """
+    post_processor.set_contextual_rules([{
+        "target": target,
+        "spoken": ["walk end"],
+        "triggers_before": ["push the"],
+    }])
+    try:
+        assert post_processor.clean_speech_transcription(
+            "push the walk end now", skip_slm=True
+        ) == f"push the {target} now."
+    finally:
+        post_processor.set_contextual_rules(None)
+
+
 def test_contextual_rules_cli_and_roundtrip(tmp_path):
     import dictionary
     custom_yaml = tmp_path / "test_contextual.yaml"

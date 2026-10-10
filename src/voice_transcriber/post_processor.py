@@ -575,8 +575,22 @@ def process_verbal_retractions(text: str, text_lower: str | None = None) -> str:
     if has_trigger and RETRACTION_REPLACEMENT_PATTERNS[1].search(cleaned):
         def _phrase_repl(m):
             trigger = m.group("trig").lower()
-            # "I mean" is never a verb phrase, and names have no category.
-            return _retraction_replacement(m, require_category="i mean" not in trigger)
+            if "i mean" not in trigger:
+                return _retraction_replacement(m, require_category=True)
+            # "I mean" needs no category because names have none ("to Bob I mean
+            # Alice"), but the marker alone is ordinary English -- "you know what
+            # I mean right" matched with old="know what" and new="right", which
+            # stripped "know what" from the sentence. So require something that
+            # actually says a retraction happened: a preposition, or values of
+            # the same known kind on both sides.
+            old_category = _value_category(m.group("old"))
+            new_category = _value_category(m.group("new"))
+            if not (
+                m.group("pre")
+                or (old_category is not None and old_category == new_category)
+            ):
+                return m.group(0)
+            return _retraction_replacement(m, require_category=False)
 
         cleaned = RETRACTION_REPLACEMENT_PATTERNS[1].sub(_phrase_repl, cleaned)
 
@@ -896,16 +910,31 @@ _DIGIT_TOKEN = rf"(?:(?:double|triple)\s+)?(?:\b(?:{_DIGIT_WORD_ALT})\b|\d)"
 # Two or more consecutive digit words / digits: "six seven zero" / "double oh seven" / "7 o 2" / "7 0 2"
 _DIGIT_STRING_REGEX = re.compile(rf"\b(?:{_DIGIT_TOKEN})(?:\s+(?:{_DIGIT_TOKEN}))+\b", re.IGNORECASE)
 
-# Standard phone number groupings (e.g. "702 555 1234" -> "7025551234", "555 1212" -> "5551212")
-_PHONE_NUMBER_GROUP_10_11 = re.compile(r"\b(?:(1)\s+)?(\d{3})\s+(\d{3})\s+(\d{4})\b")
-_PHONE_NUMBER_GROUP_7 = re.compile(r"\b(\d{3})\s+(\d{4})\b")
+#: A grouping of digits only collapses behind a phrase that says a number is
+#: being read out. The grouping alone is not evidence: with no lead-in, "we need
+#: 500 2000 more" matches the 3+4 form and comes out as "5002000".
+_PHONE_LEAD_IN = (
+    r"(?P<lead>\b(?:call|dial|dialing|dialling|phone|phoning|ring|ringing|text"
+    r"|texting|mobile|cell|fax|whatsapp|number|extension|ext|reached)\s+"
+    r"(?:(?:me|them|him|her|us|it)\s+)?(?:at\s+|is\s+)?)"
+)
+# Standard phone number groupings (e.g. "call 702 555 1234" -> "call 7025551234")
+_PHONE_NUMBER_GROUP_10_11 = re.compile(
+    _PHONE_LEAD_IN + r"(?:(?P<cc>1)\s+)?(?P<a>\d{3})\s+(?P<b>\d{3})\s+(?P<c>\d{4})\b"
+)
+_PHONE_NUMBER_GROUP_7 = re.compile(
+    _PHONE_LEAD_IN + r"(?P<a>\d{3})\s+(?P<b>\d{4})\b"
+)
 
 # Cheap single-scan gate: several passes only matter when digits exist at all.
 _ANY_DIGIT_REGEX = re.compile(r"\d")
 
 def _collapse_phone_10_11(m: re.Match) -> str:
-    cc = m.group(1) or ""
-    return f"{cc}{m.group(2)}{m.group(3)}{m.group(4)}"
+    cc = m.group("cc") or ""
+    return f"{m.group('lead')}{cc}{m.group('a')}{m.group('b')}{m.group('c')}"
+
+def _collapse_phone_7(m: re.Match) -> str:
+    return f"{m.group('lead')}{m.group('a')}{m.group('b')}"
 
 class _TrieNode:
     __slots__ = ("children", "is_end")
@@ -1372,7 +1401,7 @@ def convert_number_words_to_digits(text: str, text_lower: str | None = None, mod
             if _PHONE_NUMBER_GROUP_10_11.search(text):
                 text = _PHONE_NUMBER_GROUP_10_11.sub(_collapse_phone_10_11, text)
             if _PHONE_NUMBER_GROUP_7.search(text):
-                text = _PHONE_NUMBER_GROUP_7.sub(r"\1\2", text)
+                text = _PHONE_NUMBER_GROUP_7.sub(_collapse_phone_7, text)
         return text
 
     if text_lower is None:
@@ -1382,7 +1411,7 @@ def convert_number_words_to_digits(text: str, text_lower: str | None = None, mod
             if _PHONE_NUMBER_GROUP_10_11.search(text):
                 text = _PHONE_NUMBER_GROUP_10_11.sub(_collapse_phone_10_11, text)
             if _PHONE_NUMBER_GROUP_7.search(text):
-                text = _PHONE_NUMBER_GROUP_7.sub(r"\1\2", text)
+                text = _PHONE_NUMBER_GROUP_7.sub(_collapse_phone_7, text)
         return text
     converted = _NUMBER_PHRASE_REGEX.sub(_convert_number_phrase, text)
     if _DIGIT_STRING_REGEX.search(converted):
@@ -1391,7 +1420,7 @@ def convert_number_words_to_digits(text: str, text_lower: str | None = None, mod
         if _PHONE_NUMBER_GROUP_10_11.search(converted):
             converted = _PHONE_NUMBER_GROUP_10_11.sub(_collapse_phone_10_11, converted)
         if _PHONE_NUMBER_GROUP_7.search(converted):
-            converted = _PHONE_NUMBER_GROUP_7.sub(r"\1\2", converted)
+            converted = _PHONE_NUMBER_GROUP_7.sub(_collapse_phone_7, converted)
     return converted
 
 
@@ -1442,6 +1471,9 @@ _STANDALONE_CARDINAL_REGEX = re.compile(
 
 # Preceding words that mean the digits are an identifier, not a count.
 _CARDINAL_BEFORE_GUARD = frozenset({
+    # "dot"/"slash" keep spoken IP and CIDR digits intact for the path pass,
+    # which runs later and needs them as digits: "10 dot 0 dot 0 dot 0 slash 24".
+    "dot", "slash",
     "version", "ver", "v", "ios", "iphone", "ipad", "ipod", "android", "windows",
     "macos", "covid", "sars", "h264", "h265", "mp3", "mp4",
     "chapter", "ch", "page", "pg", "section", "sec", "figure", "fig", "table",
@@ -1459,6 +1491,8 @@ _CARDINAL_BEFORE_GUARD = frozenset({
 
 # Following tokens where digits are conventional (times, units, symbols).
 _CARDINAL_AFTER_GUARD = frozenset({
+    # "dot" marks a spoken IP: the digits before it must stay digits.
+    "dot",
     "pm", "am", "a.m.", "p.m.", "percent", "%", "°", "o'clock", "oclock",
     "kg", "km", "cm", "mm", "lbs", "lb", "oz", "gb", "mb", "kb", "tb",
     "ms", "ft", "fahrenheit", "celsius", "kelvin",
@@ -2261,9 +2295,13 @@ class ContextualRule:
 
         for kind, pat in self.patterns:
             if kind == "before":
-                text = pat.sub(rf"\1 {self.target}", text)
+                # A function replacement, not a template: `target` is user data,
+                # and in a template a backslash is a back-reference ("\1" echoed
+                # the matched text) or a bad escape (raise PatternError, which the
+                # ASR caller swallows into an empty transcript).
+                text = pat.sub(lambda m: f"{m.group(1)} {self.target}", text)
             elif kind == "after":
-                text = pat.sub(rf"{self.target} \2", text)
+                text = pat.sub(lambda m: f"{self.target} {m.group(2)}", text)
         return text
 
     def to_dict(self) -> dict:
@@ -2953,6 +2991,15 @@ def _pause_is_a_boundary(before: str) -> bool:
     return last not in _CLAUSE_CONTINUATION_WORDS
 
 
+def _effective_structure_mode(structure_mode: str | None) -> str:
+    """The structure mode in force: the argument wins over the module global.
+
+    One rule, one place: both the pause-sentinel stage and the sentence-boundary
+    stage need it, and they must agree on which mode is active.
+    """
+    return _STRUCTURE_MODE if structure_mode is None else normalize_structure_mode(structure_mode)
+
+
 def _resolve_segment_sentinels(text: str, structure_mode: str | None, is_intermediate: bool) -> str:
     """Turn microphone-pause sentinels into the layout the current mode asks for.
 
@@ -2968,7 +3015,7 @@ def _resolve_segment_sentinels(text: str, structure_mode: str | None, is_interme
     """
     if is_intermediate:
         return _strip_segment_sentinels(text)
-    effective = _STRUCTURE_MODE if structure_mode is None else normalize_structure_mode(structure_mode)
+    effective = _effective_structure_mode(structure_mode)
     if effective != "blocks":
         return _strip_segment_sentinels(text)
 
@@ -3224,8 +3271,10 @@ def clean_speech_transcription(
             cleaned = FILLER_WORDS_REGEX.sub(" ", cleaned)
             cleaned_lower = cleaned.lower()
 
-    # 0b. Recover the "AI" acronym from common ASR mis-hearings ("a eyes" -> "AI")
-    if "eyes" in cleaned_lower:
+    # 0b. Recover the "AI" acronym from common ASR mis-hearings ("a eyes" -> "AI").
+    #     Gated like its neighbours: it deletes the "a", so "off" must leave the
+    #     words exactly as they were spoken.
+    if _removes_noise() and "eyes" in cleaned_lower:
         cleaned = AI_MISHEARINGS_REGEX.sub("AI", cleaned)
         cleaned_lower = cleaned.lower()
 
@@ -3234,8 +3283,9 @@ def clean_speech_transcription(
         cleaned = LEADING_STRAY_T_REGEX.sub(r"\1", cleaned)
         cleaned_lower = cleaned.lower()
 
-    # 0d. Recover phonetic mis-hearings of "addressing" ("needs a. dressing" / "needs a dressing" -> "needs addressing")
-    if "dressing" in cleaned_lower:
+    # 0d. Recover phonetic mis-hearings of "addressing" ("needs a. dressing" / "needs a dressing" -> "needs addressing").
+    #     Gated like 0b: it drops the "a", so "off" leaves the words alone.
+    if _removes_noise() and "dressing" in cleaned_lower:
         cleaned = ADDRESSING_MISHEARINGS_REGEX.sub(r"\1 addressing", cleaned)
         cleaned_lower = cleaned.lower()
 
@@ -3322,8 +3372,11 @@ def clean_speech_transcription(
                 "though" in cleaned_lower or "although" in cleaned_lower):
                 cleaned = SUBORD_CONJUNCTIONS_REGEX.sub(lambda m: f" {m.group(1).lower()}", cleaned)
 
-            # 9. General lowercase continuation after period (e.g. ". something" -> " something")
-            if LOWERCASE_AFTER_PERIOD_REGEX.search(cleaned):
+            # 9. General lowercase continuation after period (e.g. ". something" -> " something").
+            #    Skipped when a spoken layout is in force: this deletes the period,
+            #    and the structure stage (15) needs the sentence boundaries to see
+            #    the items a lowercase cue marks ("bullet point milk. bullet point eggs.").
+            if _effective_structure_mode(structure_mode) == "off" and LOWERCASE_AFTER_PERIOD_REGEX.search(cleaned):
                 cleaned = LOWERCASE_AFTER_PERIOD_REGEX.sub(r" \1", cleaned)
 
     # 10. Clean up duplicate punctuation and normalize spacing

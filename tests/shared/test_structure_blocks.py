@@ -147,6 +147,24 @@ def test_spoken_bullet_point_starts_a_bullet():
                   "blocks") == "Things to do.\n- Install it.\n- Configure it."
 
 
+def test_lowercase_bullet_cues_become_a_list_in_blocks_mode():
+    """Regression: the sentence-boundary repair ran before the list stage and
+
+    deleted the periods the list stage needs, so a lowercase cue welded every
+    item into one bullet. Capitalised items happened to survive, which is why
+    the case above passed the whole time.
+    """
+    assert render("bullet point milk. bullet point eggs. bullet point bread.",
+                  "blocks") == "- milk\n- eggs\n- bread"
+    assert render("step one: install. step two: configure. step three: run",
+                  "blocks") == "1. install\n2. configure\n3. run"
+
+
+def test_lowercase_bullet_cues_stay_one_line_inline_mode():
+    """Only "blocks" may emit a newline; the boundaries may still be repaired."""
+    assert render("bullet point milk. bullet point eggs.", "inline") == " - milk.  - eggs."
+
+
 def test_spoken_new_paragraph_starts_a_paragraph():
     assert render("Here is the plan. New paragraph. Then we ship.", "blocks") == (
         "Here is the plan.\n\nThen we ship."

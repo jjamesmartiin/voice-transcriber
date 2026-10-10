@@ -192,6 +192,21 @@ def test_off_keeps_repeated_single_letters_spaced(text, expected_at_off):
     assert render(text, "off") == expected_at_off
 
 
+@pytest.mark.parametrize("text,expected_at_off", [
+    # Both repairs delete a word - "a eyes" -> "AI" drops the article, and "a
+    # dressing" -> "addressing" drops it too - so `off` must leave them alone.
+    # Regression: these were the only two word-rewriting steps in the noise
+    # block missing the `_removes_noise()` gate that 0a (filler) and 0c (clipped
+    # onset) both have, so `off` silently deleted the article.
+    ("that is a eyes thing", "that is a eyes thing."),
+    ("needs a dressing", "needs a dressing."),
+])
+def test_the_homophone_repairs_are_gated_by_cleanup_mode(text, expected_at_off):
+    assert render(text, "off") == expected_at_off
+    assert render(text, "artifacts") != expected_at_off
+    assert render(text, "full") != expected_at_off
+
+
 @pytest.mark.parametrize("mode", ["off", "artifacts", "full"])
 def test_no_mode_joins_repeated_single_letters_into_a_serial(mode):
     """The serial pass must never merge them, in any mode.
