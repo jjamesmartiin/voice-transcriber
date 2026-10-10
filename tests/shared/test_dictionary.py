@@ -118,6 +118,45 @@ dictionary:
     assert res == "we run OpenAI models on NixOS."
 
 
+def test_saved_values_round_trip_exactly(tmp_path):
+    """A saved dictionary must read back as the values that went in.
+
+    Regression: the file was written by hand with a short "needs quoting"
+    character list. A value containing a newline produced a file that could not
+    be parsed at all -- and since the save reads the file back for its contextual
+    rules, the save itself raised, leaving the corrupt file on disk and breaking
+    every later add/remove. Values YAML re-types were silently changed too
+    ("007" -> "7", "yes" -> "True").
+    """
+    import dictionary
+
+    saved = {
+        "plain": "DeepSeek",
+        "newline": "line1\nline2",
+        "numeric": "007",
+        "bool": "yes",
+        "null": "null",
+        "backslash": r"C:\new\path",
+        "quote": 'he said "hi"',
+        "tab": "a\tb",
+        "emoji": "café 🎤",
+        "colon": "a: b",
+        "dash": "- lead",
+    }
+    path = tmp_path / "dict.yaml"
+
+    dictionary.save_dictionary(saved, path)
+
+    assert dictionary.load_dictionary(path) == saved
+
+    # The save must leave a file its own reader accepts, so the next entry is
+    # added rather than failing or starting from an empty mapping.
+    assert dictionary.add_entry("another", "Another", path=path) is True
+    reloaded = dictionary.load_dictionary(path)
+    assert reloaded["another"] == "Another"
+    assert reloaded["newline"] == "line1\nline2"
+
+
 def test_load_from_json_file(tmp_path):
     json_file = tmp_path / "dict.json"
     data = {
