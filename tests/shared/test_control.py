@@ -15,6 +15,7 @@ import shutil
 import socket
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -138,6 +139,13 @@ class TestDispatch:
         assert response["ok"] is False
         assert "control handler" in response["error"]
 
+    def test_a_wait_timeout_is_bounded(self):
+        """A days-long wait must not pin a control thread for days."""
+        engine = _FakeEngine()
+        _router(engine).dispatch(json.dumps({"cmd": "wait", "value": "1000000"}))
+        _, request = engine.calls[0]
+        assert float(request["value"]) <= control.MAX_WAIT_SECONDS
+
 
 # ---------------------------------------------------------------------------
 # Transport
@@ -236,6 +244,42 @@ class TestSocketTransport:
         server = _server(sock_path)
         assert server.transport == control.UNIX
 
+    def test_connections_past_the_cap_are_closed(self, sock_path, monkeypatch):
+        """A local process must not be able to pin unbounded engine threads."""
+        gate = threading.Event()
+        entered = threading.Event()
+
+        class BlockingEngine(_FakeEngine):
+            def handle_control(self, cmd, request):
+                entered.set()
+                gate.wait(5.0)
+                return {"ok": True, "cmd": cmd}
+
+        # One slot: the first connection takes it and blocks in the handler, so
+        # the second must be refused instead of spawning another thread.
+        monkeypatch.setattr(control, "_CONNECTION_SLOTS", threading.Semaphore(1))
+        server = _server(sock_path, BlockingEngine())
+        assert server.start() is True
+        first = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        first.settimeout(5.0)
+        first.connect(server.socket_path)
+        first.sendall(b"status\n")
+        try:
+            assert entered.wait(5.0), "the first client never reached the handler"
+            second = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            second.settimeout(5.0)
+            second.connect(server.socket_path)
+            assert second.recv(4096) == b""  # refused and closed
+            second.close()
+        finally:
+            gate.set()
+            try:
+                first.recv(4096)  # let the handler finish before we restore
+            except OSError:
+                pass
+            first.close()
+            server.stop()
+
 
 class TestSocketPathLength:
     """``sun_path`` is 104 bytes on macOS and 108 on Linux, NUL included.
@@ -283,6 +327,12 @@ class TestTransportSelection:
 
     def test_tcp_is_used_when_af_unix_is_absent(self, monkeypatch):
         monkeypatch.setattr(control, "unix_sockets_supported", lambda: False)
+        assert control.default_transport() == control.TCP
+
+    def test_a_socket_path_does_not_disable_the_api_without_af_unix(self, monkeypatch):
+        """VT_CONTROL_SOCKET must not force AF_UNIX where the OS lacks it."""
+        monkeypatch.setattr(control, "unix_sockets_supported", lambda: False)
+        monkeypatch.setenv(control.CONTROL_SOCKET_ENV, "/tmp/whatever.sock")
         assert control.default_transport() == control.TCP
 
     def test_the_transport_can_be_forced(self, monkeypatch):
@@ -376,6 +426,12 @@ class TestTcpTransport:
         assert reply["ok"] is False
         assert reply["error"] == "unauthorized"
 
+    def test_a_non_ascii_token_is_rejected_not_raised(self, server):
+        """``compare_digest`` raises on non-ASCII str; it must answer instead."""
+        reply = server.dispatch(json.dumps({"cmd": "status", "token": "t\u00f6k\u00e9n"}))
+        assert reply["ok"] is False
+        assert reply["error"] == "unauthorized"
+
     def test_a_request_with_the_token_is_served(self, server):
         reply = server.dispatch(json.dumps({"cmd": "status", "token": server.token}))
         assert reply["ok"] is True
@@ -393,6 +449,13 @@ class TestTcpTransport:
 
     def test_a_corrupt_endpoint_file_is_a_clean_error(self, endpoint_file):
         endpoint_file.write_text("{not json")
+        response = control.send_command("status")
+        assert response["ok"] is False
+        assert "no running Voice Transcriber" in response["error"]
+
+        # A structurally-valid file with a non-integer port must not raise
+        # ``ValueError`` out of ``send_command``.
+        endpoint_file.write_text('{"port": "abc", "token": "x"}')
         response = control.send_command("status")
         assert response["ok"] is False
         assert "no running Voice Transcriber" in response["error"]

@@ -84,7 +84,10 @@ unmerged). Windows therefore uses **loopback TCP**:
   `0600`, which the client reads to find the engine and which is removed on clean
   shutdown;
 - the client falls back to TCP automatically when there is no `AF_UNIX` socket on
-disk but a published endpoint exists, so a WSL client can drive a Windows engine.
+  disk but a published endpoint exists, so a WSL client can drive a Windows
+  engine: point `VT_CONTROL_ENDPOINT_FILE` at the Windows-side file (its path is
+  given in the error the client prints), because the default location is
+  computed per-host and the WSL and Windows paths differ.
 
 Loopback is not a security boundary on a shared machine — any process can
 connect to `127.0.0.1` — which is exactly why the token exists: it stands in for
@@ -208,10 +211,10 @@ rm "${XDG_DATA_HOME:-$HOME/.local/share}/vt/stats.json" # wipe the all-time tota
 ```
 
 > **Native Windows:** the file and the `⚡ saved` badge work exactly as on
-> Linux/macOS, but the command above does not — the control API needs
-> `AF_UNIX`, which stock CPython does not expose on Windows (see the note at the
-> top of this document). Read the totals from the badge, or from
-> `%LOCALAPPDATA%\vt\stats.json`.
+> Linux/macOS. The `rm` above is a POSIX shell command rather than a control-API
+> verb, so use your own path: `%LOCALAPPDATA%\vt\stats.json`. Reading the totals
+> works there too — the control API has a Windows transport (loopback TCP, see
+> the note at the top of this document).
 
 Human-readable CLI output is encoding-safe: on a stream that cannot encode the
 `·` separator or the `✓`/`✗` markers they become `|`, `+` and `x` rather than
@@ -249,7 +252,7 @@ is a plain socket client and fails when no instance is running.
 | `start` | — | Recording starts immediately. If the model is still loading, recording proceeds and transcription waits — same as pressing the hotkey |
 | `stop` | — | Schedules transcription. Pass `copy: false` to respect the configured output mode |
 | `toggle` | — | `start` if idle, `stop` if recording |
-| `wait` | `seconds` (default 30) | Blocks until `state != PROCESSING`, then returns status plus `timed_out` |
+| `wait` | `seconds` (default 30, capped at 3600) | Blocks until `state != PROCESSING`, then returns status plus `timed_out`. The cap keeps one request from pinning a control thread indefinitely |
 
 `start`, `stop` and `toggle` wait (up to 1 s) for the UI state to settle before
 replying, so `stop` reports `PROCESSING`/`READY` rather than a stale `RECORDING`.
