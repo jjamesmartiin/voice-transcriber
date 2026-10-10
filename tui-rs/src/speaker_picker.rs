@@ -16,7 +16,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
@@ -248,14 +248,7 @@ pub fn render_speaker_picker(frame: &mut Frame, state: &SpeakerPickerState, app:
 
     let popup_w = 64u16.min(area.width.saturating_sub(4)).max(34).min(area.width);
     let popup_h = 16u16.min(area.height.saturating_sub(2)).max(8).min(area.height);
-    let x = (area.width.saturating_sub(popup_w)) / 2;
-    let y = (area.height.saturating_sub(popup_h)) / 2;
-    let popup_area = Rect {
-        x,
-        y,
-        width: popup_w,
-        height: popup_h,
-    };
+    let popup_area = crate::modal::centered_rect(area, popup_w, popup_h);
 
     frame.render_widget(Clear, area);
 
@@ -381,14 +374,7 @@ pub fn render_speaker_picker(frame: &mut Frame, state: &SpeakerPickerState, app:
     if let Some((mode, buffer)) = &state.input {
         let prompt_w = 60u16.min(area.width.saturating_sub(4)).max(34);
         let prompt_h = 6u16.min(area.height.saturating_sub(2)).max(5);
-        let px = (area.width.saturating_sub(prompt_w)) / 2;
-        let py = (area.height.saturating_sub(prompt_h)) / 2;
-        let prompt_area = Rect {
-            x: px,
-            y: py,
-            width: prompt_w,
-            height: prompt_h,
-        };
+        let prompt_area = crate::modal::centered_rect(area, prompt_w, prompt_h);
 
         frame.render_widget(Clear, prompt_area);
 

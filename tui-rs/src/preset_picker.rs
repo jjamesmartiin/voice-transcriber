@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
@@ -369,14 +369,7 @@ pub fn render_preset_picker(frame: &mut Frame, state: &PresetPickerState, app: &
     // Centered popup modal
     let popup_w = 76u16.min(area.width.saturating_sub(4)).max(36);
     let popup_h = 15u16.min(area.height.saturating_sub(2)).max(10);
-    let x = (area.width.saturating_sub(popup_w)) / 2;
-    let y = (area.height.saturating_sub(popup_h)) / 2;
-    let popup_area = Rect {
-        x,
-        y,
-        width: popup_w,
-        height: popup_h,
-    };
+    let popup_area = crate::modal::centered_rect(area, popup_w, popup_h);
 
     frame.render_widget(Clear, popup_area);
 
