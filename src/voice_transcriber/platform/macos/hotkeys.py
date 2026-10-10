@@ -159,6 +159,11 @@ class MacOSHotkeyManager(BaseHotkeyManager):
                 if self._middle_click_timer:
                     self._middle_click_timer.cancel()
                     self._middle_click_timer = None
+                # The release event for a button held across the toggle is
+                # dropped by the `not middle_click_enabled` guard in
+                # _on_mouse_click, so the flag must be cleared here: left set, it
+                # reports "a modifier is still held" on every later recording.
+                self.middle_pressed = False
                 if self.middle_click_active:
                     self.middle_click_active = False
                     if not self._is_main_hotkey_pressed():

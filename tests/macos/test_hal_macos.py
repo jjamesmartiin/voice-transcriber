@@ -340,6 +340,18 @@ class TestMacOSHotkeyManager:
             assert manager.hotkey_active is False
             assert manager.middle_click_active is False
             cb_stop.assert_called_once_with(copy_to_clipboard=False)
+
+            # Regression: with the mode switched off mid-hold the release event is
+            # dropped, so the disable has to clear the pressed flag itself. Left
+            # set, `are_modifiers_pressed()` reports "still held" forever and the
+            # engine adds its full hold-wait (0.4-1.0 s) to every later dictation.
+            manager.set_middle_click_enabled(True)
+            manager._on_mouse_click(0, 0, FakeButton.middle, True)
+            assert manager.are_modifiers_pressed() is True
+            manager.set_middle_click_enabled(False)
+            manager._on_mouse_click(0, 0, FakeButton.middle, False)
+            assert manager.middle_pressed is False
+            assert manager.are_modifiers_pressed() is False
         finally:
             manager.cleanup()
 

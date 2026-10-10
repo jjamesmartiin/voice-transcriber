@@ -54,6 +54,10 @@ class LinuxHotkeyManager(BaseHotkeyManager):
 
         # Modifier key codes (Ctrl is also the clipboard override at release).
         self.CTRL_KEYS = [29, 97]  # KEY_LEFTCTRL, KEY_RIGHTCTRL
+        # Super/Meta is a supported bind name, and the engine waits on
+        # are_modifiers_pressed() before injecting text: leaving it out typed
+        # letters while Super was down, which the desktop reads as shortcuts.
+        self.META_KEYS = [125, 126]  # KEY_LEFTMETA, KEY_RIGHTMETA
 
         # Middle mouse button code (BTN_MIDDLE = 274) and hold delay (quarter second)
         self.MIDDLE_MOUSE_KEYS = [274]
@@ -526,12 +530,13 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         return self.is_key_pressed(self.CTRL_KEYS)
 
     def are_modifiers_pressed(self):
-        """Check if any modifier keys (Alt, Shift, Ctrl) or middle click are still pressed."""
+        """Check if any modifier keys (Alt, Shift, Ctrl, Super) or middle click are still pressed."""
         alt_pressed = self.is_key_pressed(self.ALT_KEYS)
         shift_pressed = self.is_key_pressed(self.SHIFT_KEYS)
         ctrl_pressed = self.is_key_pressed(self.CTRL_KEYS)
+        meta_pressed = self.is_key_pressed(self.META_KEYS)
         middle_pressed = self.is_middle_click_pressed()
-        return alt_pressed or shift_pressed or ctrl_pressed or middle_pressed
+        return alt_pressed or shift_pressed or ctrl_pressed or meta_pressed or middle_pressed
 
     def is_hotkey_released(self):
         """Check if the hotkey combination is no longer fully pressed."""
