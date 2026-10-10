@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import t2
 
+from ._rust_source import rust_implementation
+
 
 def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
     # Setup temporary yaml config file
@@ -962,8 +964,7 @@ def test_ratatui_structure_labels_match_python():
     Rust test repeats these strings, and matching those would let the real
     implementation drift. Mirrors the guard in tests/shared/test_mode_presets.py.
     """
-    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
     assert "SettingKind::StructureMode" in implementation, (
         "could not find the structure row in tui-rs/src/settings_picker.rs - the "
         "parity guard is looking in the wrong place"
@@ -988,8 +989,7 @@ def test_ratatui_meeting_labels_match_python():
     Same source-scoped guard as the structure labels above: the Rust test
     repeats these strings, so only the non-test half of the file is searched.
     """
-    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
     assert "SettingKind::MeetingMode" in implementation, (
         "could not find the meeting row in tui-rs/src/settings_picker.rs - the "
         "parity guard is looking in the wrong place"
@@ -1019,8 +1019,7 @@ def test_ratatui_diarization_and_output_labels_match_python():
     ``t2.*_setting_state()`` helpers the Rich modal uses, so neither language can
     drift without failing here.
     """
-    source = open(RUST_SETTINGS_PICKER, encoding="utf-8").read()
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_PICKER)
     for kind in ("Diarization", "DiarizationSpeakers", "DiarizationModel",
                  "MeetingOutputDir", "MeetingOutputFormat"):
         assert f"SettingKind::{kind}" in implementation, (

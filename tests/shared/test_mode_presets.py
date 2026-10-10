@@ -25,6 +25,8 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 import post_processor as pp  # noqa: E402
 import t2  # noqa: E402
 
+from ._rust_source import rust_implementation
+
 
 # ---------------------------------------------------------------------------
 # The spec, transcribed from docs/mode_presets.md
@@ -257,8 +259,7 @@ def test_ratatui_settings_modal_shows_the_spec():
     deliberately scoped to the non-test half of the file: the Rust test repeats
     these literals, and matching those would let the real implementation drift.
     """
-    source = RUST_SETTINGS_ROW.read_text(encoding="utf-8")
-    implementation = source.split("\n#[cfg(test)]", 1)[0]
+    implementation = rust_implementation(RUST_SETTINGS_ROW)
     assert "SettingKind::PunctuationMode" in implementation, (
         "could not find the preset row in tui-rs/src/settings_picker.rs - the "
         "parity guard is looking in the wrong place"
