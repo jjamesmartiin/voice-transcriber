@@ -38,12 +38,13 @@
       "A",
       "B"
     ],
+    "expected_order_ok": true,
     "ordering_ok": true,
     "der_gate": 0.025,
     "component_gate": 0.025,
     "passed": true,
     "progress_calls": 24,
-    "git_rev": "d2ba14257800c057cb86231d905ef88ad415b573",
+    "git_rev": "b3da92a1c8bdb33a1ffb4f579f4961a4824647d8",
     "git_dirty": false,
     "invocation": [
       "python",
