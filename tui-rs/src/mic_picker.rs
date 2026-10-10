@@ -58,7 +58,7 @@ impl MicPickerState {
                     scored.push((i, 800 - q.len() as i32));
                 } else if let Some(pos) = name.find(&q).or_else(|| disp.find(&q)) {
                     scored.push((i, 600 - pos as i32 * 10));
-                } else if let Some(dist) = fuzzy_subsequence(&q, &name).or_else(|| fuzzy_subsequence(&q, &disp)) {
+                } else if let Some(dist) = textfit::fuzzy_subsequence(&q, &name).or_else(|| textfit::fuzzy_subsequence(&q, &disp)) {
                     scored.push((i, 200 - dist as i32));
                 }
             }
@@ -163,24 +163,6 @@ impl MicPickerState {
             }
             _ => MicPickerAction::Continue,
         }
-    }
-}
-
-fn fuzzy_subsequence(pattern: &str, target: &str) -> Option<usize> {
-    let mut p_chars = pattern.chars().peekable();
-    let mut dist = 0;
-    for (i, c) in target.chars().enumerate() {
-        if let Some(&p) = p_chars.peek() {
-            if c == p {
-                p_chars.next();
-                dist += i;
-            }
-        }
-    }
-    if p_chars.peek().is_none() {
-        Some(dist)
-    } else {
-        None
     }
 }
 

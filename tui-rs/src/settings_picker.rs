@@ -795,32 +795,14 @@ pub fn score_setting(query: &str, item: &SettingItem) -> Option<i32> {
         return Some(400 - pos as i32 * 5);
     }
     // Fuzzy subsequence in title
-    if let Some(dist) = fuzzy_subsequence(&q, &title) {
+    if let Some(dist) = textfit::fuzzy_subsequence(&q, &title) {
         return Some(200 - dist as i32);
     }
     // Fuzzy subsequence in keywords
-    if let Some(dist) = fuzzy_subsequence(&q, &kw) {
+    if let Some(dist) = textfit::fuzzy_subsequence(&q, &kw) {
         return Some(100 - dist as i32);
     }
     None
-}
-
-fn fuzzy_subsequence(pattern: &str, target: &str) -> Option<usize> {
-    let mut p_chars = pattern.chars().peekable();
-    let mut dist = 0;
-    for (i, c) in target.chars().enumerate() {
-        if let Some(&p) = p_chars.peek() {
-            if c == p {
-                p_chars.next();
-                dist += i;
-            }
-        }
-    }
-    if p_chars.peek().is_none() {
-        Some(dist)
-    } else {
-        None
-    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
