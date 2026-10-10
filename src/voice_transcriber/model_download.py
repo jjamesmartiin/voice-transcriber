@@ -30,6 +30,7 @@ Env knobs:
 """
 import dataclasses
 import hashlib
+import http.client
 import lzma
 import os
 import re
@@ -570,12 +571,41 @@ def _asset_exists(url):
     return False
 
 
+def _recorded_revision(directory):
+    """The revision recorded in ``directory``'s ``SOURCE.json``, else ``None``.
+
+    ``None`` means "unknown" (no file, unreadable, or no revision field) and is
+    treated as "do not block" -- a hand-installed weights directory never has a
+    SOURCE.json, and forcing a multi-gigabyte re-download over a JSON typo is
+    worse than trusting the file list.
+    """
+    try:
+        import json as _json
+        with open(os.path.join(directory, "SOURCE.json"), "r", encoding="utf-8") as f:
+            recorded = _json.load(f)
+    except (OSError, ValueError):
+        return None
+    if isinstance(recorded, dict):
+        revision = recorded.get("revision")
+        if isinstance(revision, str) and revision.strip():
+            return revision.strip()
+    return None
+
+
 def is_model_complete(name, directory=None):
-    """True when a loadable local copy of ``name`` already exists (offline-ready)."""
+    """True when a loadable local copy of ``name`` already exists (offline-ready).
+
+    A revision recorded in ``SOURCE.json`` that differs from the spec's counts as
+    incomplete: the weights are keyed by revision, so without this check a
+    revision bump would leave every existing user silently running the previous
+    model forever.
+    """
     spec = get_spec(name)
     directory = directory or models_dir(name)
-    return all(os.path.exists(os.path.join(directory, f))
-               for f in spec.required_local)
+    if not all(os.path.exists(os.path.join(directory, f))
+               for f in spec.required_local):
+        return False
+    return _recorded_revision(directory) in (None, spec.revision)
 
 
 def is_local_model_complete(directory=None):
@@ -608,8 +638,17 @@ def _http_get(url, dest, descr):
                                 last_pct = pct
                                 _notify("Downloading model", pct,
                                         f"Downloading {descr}: {done/1e9:.2f}/{total/1e9:.2f} GB")
+            if total and done != total:
+                # A short read is a dropped connection, not a fatal one. Raise
+                # (an OSError, so the loop below retries) rather than install a
+                # truncated part that will fail its SHA-256 anyway.
+                raise ConnectionError(
+                    f"short read: {done} of {total} bytes for {descr}")
             return done
-        except (urllib.error.URLError, OSError, socket.timeout) as e:
+        except (urllib.error.URLError, OSError, socket.timeout,
+                http.client.HTTPException) as e:
+            # IncompleteRead is an HTTPException, not an OSError: without it in
+            # this tuple one blip mid-part aborted the whole install.
             last_err = e
             print(f"Download attempt {attempt}/3 for {url} failed: {e}", flush=True)
             time.sleep(2 * attempt)
@@ -820,6 +859,25 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
     part_names = sorted(manifest)
     dest_parent = os.path.dirname(os.path.abspath(dest))
     os.makedirs(dest_parent, exist_ok=True)
+    lock_dir = dest + ".lock"
+    owns_lock = False
+    try:
+        os.mkdir(lock_dir)
+        owns_lock = True
+    except FileExistsError:
+        # Another process is installing the same model. Wait briefly rather
+        # than racing its rmtree: if it finishes, its install is the one to
+        # use, and deleting a good install to rewrite an identical one is the
+        # one outcome worth never risking.
+        for _ in range(60):
+            time.sleep(0.5)
+            if is_model_complete(spec.name, dest):
+                return dest
+        # Then carry on anyway. The re-check before the rmtree below is what
+        # actually protects a finished install, whereas giving up here would
+        # leave a lock dropped by a killed installer blocking every later
+        # attempt until someone deleted it by hand.
+        print(f"Another install of {spec.display_name} looks stuck; continuing.", flush=True)
     tmp_root = tempfile.mkdtemp(prefix="vt-model-install-", dir=dest_parent)
     try:
         tar_path = os.path.join(tmp_root, "model.tar")
@@ -860,6 +918,10 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
         if not is_model_complete(spec.name, staging):
             raise RuntimeError("Extracted model directory is missing required files.")
 
+        if is_model_complete(spec.name, dest):
+            # A concurrent install landed while we assembled. Keep it; ours is
+            # an identical copy and the existing one is already loadable.
+            return dest
         if os.path.isdir(dest):
             shutil.rmtree(dest)
         shutil.move(staging, dest)
@@ -869,6 +931,13 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
         return dest
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
+        if owns_lock:
+            # Only ever remove our own lock: the not-owned path above proceeds
+            # alongside another installer, whose lock must survive us.
+            try:
+                os.rmdir(lock_dir)
+            except OSError:
+                pass
 
 
 def _print_manual_install_instructions(spec, dest):

@@ -13,6 +13,7 @@ never stream gigabytes from a CDN in a background thread.
 """
 import dataclasses
 import hashlib
+import http.client
 import io
 import json
 import lzma
@@ -392,6 +393,39 @@ def test_is_model_complete_is_per_spec(monkeypatch, tmp_path):
     assert model_download.is_model_complete("synthetic", str(tmp_path)) is True
 
 
+def test_a_stale_revision_recorded_in_source_json_is_not_complete(tmp_path, monkeypatch):
+    """The weights are keyed by revision, so a bump must re-install, not reuse.
+
+    Regression: completeness was "the required filenames exist", and the revision
+    written into SOURCE.json was never read back. After a revision bump every
+    existing user kept running the previous model, silently, and the doctor
+    reported their weights as verified.
+    """
+    import json
+
+    spec = _synthetic_spec()
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    for req in spec.required_local:
+        (tmp_path / req).write_text("stub", encoding="utf-8")
+
+    # No SOURCE.json (a manual install) stays supported.
+    assert model_download.is_model_complete(spec.name, str(tmp_path)) is True
+
+    # The revision this spec wants, as written by _write_provenance.
+    (tmp_path / "SOURCE.json").write_text(
+        json.dumps({"model": spec.repo_id, "revision": spec.revision}), encoding="utf-8")
+    assert model_download.is_model_complete(spec.name, str(tmp_path)) is True
+
+    # An older install: same files, previous revision.
+    (tmp_path / "SOURCE.json").write_text(
+        json.dumps({"model": spec.repo_id, "revision": "an-older-revision"}), encoding="utf-8")
+    assert model_download.is_model_complete(spec.name, str(tmp_path)) is False
+
+    # Unreadable provenance must not force a re-download on its own.
+    (tmp_path / "SOURCE.json").write_text("{not json", encoding="utf-8")
+    assert model_download.is_model_complete(spec.name, str(tmp_path)) is True
+
+
 def test_find_repo_root():
     """A real checkout is found from this file's own path."""
     root = model_download.find_repo_root()
@@ -516,6 +550,72 @@ def test_fetch_part_manifest_fast_fails_on_404(monkeypatch):
     # Verify it broke immediately on 404 rather than retrying 3 times
     assert call_count == 1
     assert "404" in str(exc_info.value)
+
+
+def _fake_body_response(payload, attempts, *, mode):
+    """A ``urlopen`` response that misbehaves on the first attempt only."""
+
+    class FakeResponse:
+        def __init__(self, data):
+            self._data = io.BytesIO(data)
+            self.headers = {"Content-Length": str(len(data))}
+
+        def read(self, size=-1):
+            if attempts["n"] == 1:
+                if mode == "incomplete":
+                    raise http.client.IncompleteRead(b"", len(payload))
+                if self._data.tell() >= len(payload) // 2:
+                    return b""  # short body: EOF halfway through
+            return self._data.read(size)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    return FakeResponse(payload)
+
+
+def test_http_get_retries_an_incomplete_read(monkeypatch, tmp_path):
+    """A dropped connection mid-part must be retried, not abort the install.
+
+    ``http.client.IncompleteRead`` is an ``HTTPException``, not an ``OSError``,
+    so it used to bypass the retry tuple and lose a whole 2.8 GB download.
+    """
+    payload = b"x" * (2 << 20)
+    attempts = {"n": 0}
+
+    def fake_urlopen(req, timeout=120):
+        attempts["n"] += 1
+        return _fake_body_response(payload, attempts, mode="incomplete")
+
+    monkeypatch.setattr(model_download.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(model_download.time, "sleep", lambda *a, **k: None)
+    dest = tmp_path / "part.xz"
+
+    assert model_download._http_get(
+        "https://example.com/p", str(dest), "part") == len(payload)
+    assert attempts["n"] == 2
+    assert dest.read_bytes() == payload
+
+
+def test_http_get_retries_a_short_body(monkeypatch, tmp_path):
+    """A response that ends before its declared length is retried too."""
+    payload = b"y" * (2 << 20)
+    attempts = {"n": 0}
+
+    def fake_urlopen(req, timeout=120):
+        attempts["n"] += 1
+        return _fake_body_response(payload, attempts, mode="short")
+
+    monkeypatch.setattr(model_download.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(model_download.time, "sleep", lambda *a, **k: None)
+    dest = tmp_path / "part.xz"
+
+    assert model_download._http_get(
+        "https://example.com/p", str(dest), "part") == len(payload)
+    assert attempts["n"] == 2
 
 
 def test_ensure_local_cohere_fallback_candidate_chain(monkeypatch, tmp_path):
@@ -1020,6 +1120,77 @@ def test_install_rejects_a_bad_digest_map_entry(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError, match=r"Extracted weights\.gguf sha256 .* does not match"):
         model_download.install_model_from_local_bundle(
             spec.name, str(bundle), dest=str(tmp_path / "dest"))
+
+
+def _complete_dest_fixture(monkeypatch, tmp_path):
+    """A synthetic spec, a valid bundle and a pre-existing dest directory."""
+    files = {"config.json": b"{}", "weights.gguf": b"fake-gguf-weights"}
+    spec = _synthetic_spec(files=files)
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    bundle = _make_bundle(tmp_path, spec.asset_prefix, files)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "keep-me.txt").write_text("a good install", encoding="utf-8")
+    return spec, bundle, dest
+
+
+def test_a_second_installer_never_deletes_a_completed_install(monkeypatch, tmp_path):
+    """Two concurrent installs must not delete each other's weights.
+
+    With the destination already complete, the installer keeps it instead of
+    ``rmtree``-ing it just to move an identical copy into place.
+    """
+    spec, bundle, dest = _complete_dest_fixture(monkeypatch, tmp_path)
+    # Pretend a concurrent installer finished while we assembled: every
+    # completeness check now says yes, so this one must not touch ``dest``.
+    monkeypatch.setattr(model_download, "is_model_complete", lambda *a, **k: True)
+
+    result = model_download.install_model_from_local_bundle(
+        spec.name, str(bundle), dest=str(dest))
+
+    assert result == str(dest)
+    assert (dest / "keep-me.txt").read_text(encoding="utf-8") == "a good install"
+    assert not (tmp_path / "dest.lock").exists()  # lock released
+
+
+def test_a_held_install_lock_defers_to_the_other_installer(monkeypatch, tmp_path):
+    """A lock held by another process means its install is the one to use."""
+    spec, bundle, dest = _complete_dest_fixture(monkeypatch, tmp_path)
+    lock_dir = tmp_path / "dest.lock"
+    lock_dir.mkdir()
+    monkeypatch.setattr(model_download, "is_model_complete", lambda *a, **k: True)
+    monkeypatch.setattr(model_download.time, "sleep", lambda *a, **k: None)
+
+    result = model_download.install_model_from_local_bundle(
+        spec.name, str(bundle), dest=str(dest))
+
+    assert result == str(dest)
+    assert (dest / "keep-me.txt").read_text(encoding="utf-8") == "a good install"
+    # The other process's lock is not ours to remove.
+    assert lock_dir.exists()
+
+
+def test_a_stale_install_lock_does_not_block_a_later_install(monkeypatch, tmp_path, capsys):
+    """A lock left behind by a killed installer must not be permanent.
+
+    Regression guard: the wait used to end in a hard failure, so a ``.lock``
+    directory dropped by a crash blocked every later install until somebody
+    deleted it by hand. It now proceeds, because the re-check before the swap is
+    what actually protects a finished install — a lock nobody owns is not
+    evidence of anything.
+    """
+    spec, bundle, dest = _complete_dest_fixture(monkeypatch, tmp_path)
+    lock_dir = tmp_path / "dest.lock"
+    lock_dir.mkdir()
+    # The wait polls a destination that never becomes complete, so it runs out.
+    monkeypatch.setattr(model_download.time, "sleep", lambda *a, **k: None)
+
+    result = model_download.install_model_from_local_bundle(
+        spec.name, str(bundle), dest=str(dest))
+
+    assert result == str(dest)
+    assert "looks stuck; continuing" in capsys.readouterr().out
+    assert lock_dir.exists()  # still not ours to remove
 
 
 def test_ensure_model_installs_a_synthetic_spec_offline(monkeypatch, tmp_path):
