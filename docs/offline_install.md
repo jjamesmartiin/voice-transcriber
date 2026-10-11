@@ -36,6 +36,25 @@ Location, in priority order:
 
 ---
 
+## What is local after the first install
+
+The model download is the **only** network access in the application. Once it has
+happened, every stage runs on the local machine:
+
+| Stage | How it stays local |
+| :--- | :--- |
+| **ASR** | Loads the installed snapshot with `local_files_only=True`; no `huggingface.co` call, no HF token. |
+| **Diarization** | `sherpa-onnx` reads the local ONNX graphs; VAD is energy-based, not a model. |
+| **Post-processing** | Local regex/rule engine (retractions, fillers, numbers, dates, casing, custom dictionary). The optional LLM polish and formatter talk only to `127.0.0.1`. |
+| **Control API** | `AF_UNIX` socket, or a token-authenticated `127.0.0.1` TCP socket on native Windows — never a network listener. |
+| **Settings / stats / logs / dictionaries** | Written under the per-user data dir, never into the read-only app bundle. |
+
+There is **no telemetry, analytics, crash reporting, phone-home or update
+check**. GitHub Releases is contacted only when you let it acquire the weights
+(and never at all once `VT_AUTO_DOWNLOAD_MODEL=0`).
+
+---
+
 ## Airgapped deployment
 
 ### 1. Produce the model bundle (once, on a connected machine)

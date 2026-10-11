@@ -278,8 +278,11 @@ or is typed as usual. Read it from `last_transcription` on `status`/`wait`.
 
 ### Settings
 
-Every one of these persists to `config/config.yaml`, exactly as a change made in
-the settings modal would.
+Every one of these persists to the active config file — `config/config.yaml` in
+a git checkout, or `audio_device_config.json` in the per-user data dir for a
+packaged install (Nix/AppImage/`.exe`) — exactly as a change made in the
+settings modal would. See
+[Where Your Files Live](../README.md#where-your-files-live-user-editable-assets).
 
 | Verb | Value | Accepted values |
 | :--- | :--- | :--- |

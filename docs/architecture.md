@@ -173,3 +173,27 @@ $$\text{Lowercased}(w_i) \iff \Big( \text{is\_upper\_start}(w_i) \land w_{i-1} \
 4. User Home Fallback     : ~/.local/share/vt/audio_device_config.json
 5. Hardcoded Defaults     : is_muted=True, auto_type=False
 ```
+
+---
+
+## 6. User-Editable Assets by Install Mode
+
+Where the app was installed decides whether it has a repository to write into.
+A git checkout has one; the Nix store, an AppImage and a PyInstaller `.exe` do
+not (`model_download.find_repo_root()` returns `None` because there is no `.git`
+marker). In the second case every mutable asset resolves under the per-user data
+directory instead, so a read-only install never needs write access to itself:
+
+| Asset | Git checkout | Read-only install (Nix / AppImage / `.exe`) |
+| :--- | :--- | :--- |
+| Model weights | `<repo>/models/<name>/` | `<data-dir>/models/<name>/` (`$VT_MODEL_DIR` wins) |
+| Settings | `<repo>/config/config.yaml` | `<data-dir>/audio_device_config.json` |
+| Common dictionary | `<repo>/config/dictionary.yaml` | `<data-dir>/config/dictionary.yaml` |
+| Personal dictionary | `<repo>/config/dictionary.local.yaml` | `<data-dir>/config/dictionary.local.yaml` |
+
+`<data-dir>` is `$XDG_DATA_HOME/vt` / `~/.local/share/vt` (Linux/macOS) or
+`%APPDATA%\vt` / `%LOCALAPPDATA%\vt` (Windows). The dictionary CLI and the
+runtime loader share `dictionary.get_common_dictionary_path()` /
+`get_local_dictionary_path()`, so the file the CLI writes is exactly the file the
+engine loads (`post_processor.load_merged_dictionaries()`). See the README
+section [Where Your Files Live](../README.md#where-your-files-live-user-editable-assets).

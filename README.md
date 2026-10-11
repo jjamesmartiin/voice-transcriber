@@ -21,12 +21,18 @@
 
 ## ⚡ 30-Second Quickstart
 
-| Platform | Quick Start Command | Artifact / Details |
-| :--- | :--- | :--- |
-| **Linux (AppImage)** | `chmod +x vt-x86_64.AppImage && ./vt-x86_64.AppImage` | [Download AppImage](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) (Standalone bundle, no setup) |
-| **Linux / macOS (Nix)** | `nix run github:jjamesmartiin/voice-transcriber` | Builds & runs in one command via Nix Flakes |
-| **Windows (Standalone ZIP)** | Download `VoiceTranscriber-windows-x86_64.zip` → Run `VoiceTranscriber.exe` | [Download Windows ZIP](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) (Self-contained Python runtime) |
-| **macOS / Source (Git)** | `git clone https://github.com/jjamesmartiin/voice-transcriber.git && cd voice-transcriber`<br>`./scripts/setup.sh && ./scripts/run.sh` | Sets up venv, installs dependencies & downloads weights |
+**Nix is the primary tier.** One command builds and runs the whole stack —
+Python, PyTorch, PortAudio, the clipboard/typing tools, and the Rust `vt-tui`
+frontend — with nothing else to install. Native **Windows** is the second tier,
+shipped as a self-contained PyInstaller `.exe`. The AppImage and venv
+`setup.sh`/`run.sh` paths are convenience alternatives.
+
+| Tier | Platform | Quick Start Command | Artifact / Details |
+| :--- | :--- | :--- | :--- |
+| **1. Primary — Nix** | Linux, macOS, WSL2 | `nix run github:jjamesmartiin/voice-transcriber` | Reproducible build + launch in one command. From a checkout: `nix run .`; dev shell: `nix develop` |
+| **2. Windows (native)** | Windows 10/11 | Download `VoiceTranscriber-windows-x86_64.zip` → run `VoiceTranscriber.exe` | [Download Windows ZIP](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) — PyInstaller bundle with its own Python + PyTorch, no setup |
+| **Alternative** | Linux | `chmod +x vt-x86_64.AppImage && ./vt-x86_64.AppImage` | [Download AppImage](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) — standalone, no Nix or Python |
+| **Alternative** | macOS / any OS | `git clone https://github.com/jjamesmartiin/voice-transcriber.git && cd voice-transcriber`<br>`./scripts/setup.sh && ./scripts/run.sh` | venv + dependencies + weights; under Nix use `nix run`/`nix develop` instead |
 
 ---
 
@@ -190,7 +196,20 @@ for the platform you are targeting.
 
 #### 🐧 Linux (Wayland / X11)
 
-**End users: download the AppImage — no Nix, no Python, no setup.** Grab
+**Recommended: Nix.** With flakes enabled, one command builds and runs
+everything (Python, PyTorch, PortAudio, `wl-clipboard`, `evdev`/`uinput`, and the
+Rust `vt-tui` frontend) — nothing else to install:
+
+```bash
+nix run .                 # launch (or: nix run github:jjamesmartiin/voice-transcriber)
+nix run .#setup           # acquire the model
+nix develop               # dev shell: python -m pytest tests/shared
+```
+
+On NixOS this is the only path with working ALSA out of the box (the AppImage's
+bundled ALSA has no `/usr/share/alsa/alsa.conf`).
+
+**Alternative: the AppImage — no Nix, no Python, no setup.** Grab
 `vt-x86_64.AppImage` from the [releases page](https://github.com/jjamesmartiin/voice-transcriber/releases),
 `chmod +x` it, and run it. It bundles Python, PyTorch and the clipboard tools,
 so it works on any glibc **x86_64** distro. The weights are **not** bundled: it
@@ -577,7 +596,7 @@ is the goal the implementation is tuned for.
 
 ## Model Weights & Offline Operation
 
-The only backend is **Cohere Transcribe**
+The only ASR backend is **Cohere Transcribe**
 (`CohereLabs/cohere-transcribe-03-2026`, Apache-2.0, ~4 GB on disk / ~2.8 GB
 download). Acquisition order:
 
@@ -586,9 +605,6 @@ download). Acquisition order:
    `~/.local/share/vt/models/cohere` elsewhere, or `$XDG_DATA_HOME/vt`).
 3. **Auto-download of the Apache-2.0 GitHub release asset** — no Hugging Face
    account or token required.
-
-Once the weights are on disk the app runs **fully offline** with no network
-access.
 
 Two optional models are registered bundles:
 
@@ -608,6 +624,29 @@ published, place the weights under the model directory (`VT_MODEL_DIR`, or the
 per-user install dir). The app degrades to unformatted text / a single speaker
 rather than failing when they are absent. Every install writes a `SOURCE.json`
 next to the weights recording the upstream repo, revision and sha256.
+
+### Offline by design
+
+The weights are the *only* thing the app ever fetches, and it fetches them once,
+from a **GitHub release asset** (not the Hugging Face Hub), verifying every byte
+by SHA-256. After that first install, the whole pipeline is local:
+
+* **ASR** loads the snapshot from disk with `local_files_only=True` — no runtime
+  `huggingface.co` call and no HF token.
+* **Diarization** loads its `sherpa-onnx` ONNX graphs from the local model dir.
+  (VAD is energy-based, not a downloaded model.)
+* **Post-processing** — retraction parsing, filler/stutter cleanup, numbers,
+  dates, casing, the custom dictionary — is a local rule engine (tens of
+  microseconds). The optional LLM polish pass is off by default and, like the
+  optional formatter, talks only to `127.0.0.1`.
+* **Control API** is an `AF_UNIX` socket (Linux/macOS) or a token-authenticated
+  `127.0.0.1` TCP socket (native Windows) — never a network service.
+* **No telemetry, analytics, crash reporting, phone-home or update check** of any
+  kind. Nothing leaves the machine unless you enable a model download.
+
+Set `VT_AUTO_DOWNLOAD_MODEL=0` to forbid even that first download, and point
+`VT_MODEL_SOURCE_DIR` at a local bundle for a fully offline install. See
+[`docs/offline_install.md`](docs/offline_install.md).
 
 ### Language Support & Disclaimer
 
@@ -713,11 +752,20 @@ model) and needs no Python install on the target machine. See
 
 ## Configuration
 
-Settings live in `config/config.yaml`. To customize startup defaults, copy the
-template:
-```bash
-cp config/example-config/config.yaml.example config/config.yaml
-```
+Settings live in one of two places, depending on how the app was installed:
+
+* **From a git checkout** — `<repo>/config/config.yaml`. There is no config file
+  until the settings modal writes one (the settings modal is the only
+  configuration entry point); start from the annotated template:
+  ```bash
+  cp config/example-config/config.yaml.example config/config.yaml
+  ```
+* **From a packaged install** (Nix, AppImage, Windows `.exe`) — there is no repo
+  to write to, so the app uses `audio_device_config.json` in the per-user data
+  directory (same keys, JSON) instead. See
+  [Where Your Files Live](#where-your-files-live-user-editable-assets).
+
+Both formats carry the same keys and the same `VT_*` per-session overrides.
 
 Supported options:
 - `is_muted`: `true` or `false`.
@@ -763,6 +811,55 @@ key, including the ones not listed above (`primary_device_name`,
 
 Options can also be changed live from the settings modal (`s`/`S`/`,` in the
 terminal), or programmatically via the [Control API](#control-api).
+
+---
+
+## Where Your Files Live (User-Editable Assets)
+
+**Nothing is ever written into a read-only location** — not the Nix store, not an
+AppImage mount, not the PyInstaller bundle interior. Models, settings,
+dictionaries, stats and meeting transcripts all resolve to a **user-writable
+directory** you can edit, back up or delete. Which directory depends only on how
+the app was installed:
+
+| Asset | Git checkout | Packaged install (Nix, AppImage, Windows `.exe`) |
+| :--- | :--- | :--- |
+| **Model weights** | `<repo>/models/<name>/` | `~/.local/share/vt/models/<name>/` (Linux/macOS), `%APPDATA%\vt\models\<name>\` (Windows), or `<exe-dir>\models\<name>\` beside a portable EXE |
+| **Settings** | `<repo>/config/config.yaml` | `audio_device_config.json` in the per-user data dir |
+| **Common dictionary** | `<repo>/config/dictionary.yaml` (tracked in git) | `<data-dir>/config/dictionary.yaml` |
+| **Personal dictionary** (gitignored) | `<repo>/config/dictionary.local.yaml` | `<data-dir>/config/dictionary.local.yaml` |
+| **All-time stats** | `<data-dir>/stats.json` | `<data-dir>/stats.json` |
+| **Meeting transcripts** | `<repo>/meetings/` | `<data-dir>/meetings/` |
+| **Log** | `<data-dir>/vt.log` | `<data-dir>/vt.log` |
+
+`<data-dir>` is `$XDG_DATA_HOME/vt` or `~/.local/share/vt` on Linux/macOS. On
+Windows the app uses two roots: `%APPDATA%\vt\` for models and dictionaries, and
+`%LOCALAPPDATA%\vt\` for settings, stats and the log.
+
+The dictionary CLI and the runtime loader resolve the **same** paths, so the
+`config/dictionary*.yaml` files under `<data-dir>/` are exactly what the engine
+loads — a packaged (read-only) install included. From a checkout,
+`python src/dictionary.py path` prints the active files and
+`python src/dictionary.py add …` writes them.
+
+Every location has an override, so you are never stuck with the default:
+
+| Asset | Override |
+| :--- | :--- |
+| Model weights (all) | `VT_MODEL_DIR` |
+| Diarization / Parakeet weights | `VT_DIARIZATION_MODELS`, `VT_PARAKEET_MODELS` |
+| Offline model bundle | `VT_MODEL_SOURCE_DIR` |
+| Meeting transcripts | `VT_MEETING_OUTPUT_DIR` |
+| Stats file | `VT_STATS_FILE` |
+| Log file | `VT_LOG_FILE` |
+| External dictionary | `dictionary_file` in the config |
+| Any single setting | its `VT_*` variable (e.g. `VT_OUTPUT_MODE`, `VT_UI_THEME`) |
+
+> **Read-only installs never need write access to themselves.** A Nix store
+> path, an AppImage and an extracted `.exe` folder can all sit on a read-only
+> filesystem: on first run the app creates whatever it needs under the per-user
+> data dir (or the folder next to a portable EXE) and keeps using it from then
+> on.
 
 ---
 
