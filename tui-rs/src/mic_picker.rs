@@ -103,8 +103,8 @@ impl MicPickerState {
 
         match key.code {
             KeyCode::Esc => MicPickerAction::Cancel,
-            KeyCode::F(5) => return MicPickerAction::Rescan,
-            KeyCode::Char('r') if self.query.is_empty() => return MicPickerAction::Rescan,
+            KeyCode::F(5) => MicPickerAction::Rescan,
+            KeyCode::Char('r') if self.query.is_empty() => MicPickerAction::Rescan,
             KeyCode::Enter => {
                 if let Some(&idx) = self.filtered_indices.get(self.selected_index) {
                     MicPickerAction::Select(idx)
