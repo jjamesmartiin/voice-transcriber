@@ -2415,10 +2415,33 @@ def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
     Loads and merges all configured dictionary layers in order of precedence:
     1. Common / shared dictionary (config/dictionary.yaml)
     2. Config-level dictionary (config/config.yaml or inline dictionary_file)
-    3. Personal / local dictionary (config/dictionary.local.yaml or ~/.local/share/vt/dictionary.yaml)
+    3. Personal / local dictionary (config/dictionary.local.yaml)
+
+    The per-user paths are the ones the dictionary CLI writes
+    (``dictionary.get_common_dictionary_path`` /
+    ``dictionary.get_local_dictionary_path``), so a read-only install (Nix store,
+    AppImage, PyInstaller ``.exe``) reads exactly the files the CLI created.
     """
     global _DICT_TRACKED_PATHS_MTIMES
-    repo_root = Path(__file__).resolve().parents[2]
+    # The checkout root, found the same way the CLI finds it. A Nix store,
+    # AppImage or PyInstaller tree has no repository marker, so this is None
+    # there and the checkout-relative candidates below are skipped.
+    try:
+        from voice_transcriber import model_download
+        _repo = model_download.find_repo_root()
+    except Exception:
+        _repo = None
+    repo_root = Path(_repo) if _repo else None
+
+    # The canonical per-user dictionary paths, shared with the CLI so the two
+    # cannot drift apart.
+    try:
+        import dictionary as _dictionary
+        per_user_common = _dictionary.get_common_dictionary_path()
+        per_user_local = _dictionary.get_local_dictionary_path()
+    except Exception:
+        per_user_common = per_user_local = None
+
     merged_map: dict[str, str] = {}
     merged_rules: list[dict[str, Any]] = []
     new_mtimes: dict[Path, float] = {}
@@ -2474,10 +2497,15 @@ def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
         Path("config/dictionary.json"),
         Path("dictionary.yaml"),
         Path("dictionary.json"),
-        repo_root / "config" / "dictionary.yaml",
-        repo_root / "config" / "dictionary.yml",
-        repo_root / "config" / "dictionary.json",
     ]
+    if repo_root:
+        common_candidates += [
+            repo_root / "config" / "dictionary.yaml",
+            repo_root / "config" / "dictionary.yml",
+            repo_root / "config" / "dictionary.json",
+        ]
+    if per_user_common:
+        common_candidates.append(per_user_common)
     for c in common_candidates:
         if c.exists():
             f_map, f_rules = _parse_file(c)
@@ -2489,8 +2517,9 @@ def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
         Path("config/config.yaml"),
         Path("config/config.yml"),
         Path("config.yaml"),
-        repo_root / "config" / "config.yaml",
     ]
+    if repo_root:
+        config_candidates.append(repo_root / "config" / "config.yaml")
     for c in config_candidates:
         if c.exists():
             try:
@@ -2524,10 +2553,17 @@ def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
         Path("config/dictionary.user.json"),
         Path("dictionary.user.yaml"),
         Path("dictionary.user.json"),
-        repo_root / "config" / "dictionary.local.yaml",
-        repo_root / "config" / "dictionary.user.yaml",
-        Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "vt" / "dictionary.yaml",
     ]
+    if repo_root:
+        local_candidates += [
+            repo_root / "config" / "dictionary.local.yaml",
+            repo_root / "config" / "dictionary.user.yaml",
+        ]
+    local_candidates.append(
+        Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "vt" / "dictionary.yaml"
+    )
+    if per_user_local:
+        local_candidates.append(per_user_local)
     for c in local_candidates:
         if c.exists():
             f_map, f_rules = _parse_file(c)

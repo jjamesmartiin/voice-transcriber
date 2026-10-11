@@ -394,6 +394,37 @@ dictionary:
     assert res == "I deployed Kubernetes on home-jamesm5 and MyCustomServer."
 
 
+def test_packaged_install_applies_a_cli_added_dictionary(tmp_path, monkeypatch):
+    """A read-only install must apply the per-user dictionary the CLI writes.
+
+    Regression: on Nix / AppImage / PyInstaller there is no repository marker,
+    so ``post_processor.load_merged_dictionaries`` fell back to a legacy
+    ``<data-dir>/dictionary.yaml`` that ``dictionary.py add`` never writes.
+    The result was a dictionary written to a user-editable path but silently
+    ignored at runtime. It must now resolve the same
+    ``<data-dir>/config/dictionary.local.yaml`` the CLI reports as active.
+    """
+    import dictionary
+    from voice_transcriber import model_download
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(model_download, "find_repo_root", lambda: None)
+    monkeypatch.chdir(tmp_path)
+
+    # The CLI's own write path, exactly as a packaged user would invoke it.
+    assert dictionary.add_entry("cube ctl", "kubectl", local=True)
+
+    local_file = tmp_path / "vt" / "config" / "dictionary.local.yaml"
+    assert local_file.exists()
+    assert dictionary.get_local_dictionary_path() == local_file.resolve()
+
+    merged_map, _ = post_processor.load_merged_dictionaries()
+    assert merged_map.get("cube ctl") == "kubectl"
+    assert "kubectl" in post_processor.clean_speech_transcription(
+        "run cube ctl get pods"
+    )
+
+
 def test_vram_and_gpu_model_repairs():
     """Verify common hardware dictionary repairs ERAM -> VRAM and 130.90 -> one 3090."""
     repo_root = Path(__file__).resolve().parents[2]
