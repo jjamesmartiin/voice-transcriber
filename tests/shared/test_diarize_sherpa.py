@@ -233,6 +233,19 @@ def test_results_become_sorted_turns(monkeypatch, tmp_path):
     assert all(isinstance(t, diarize.Turn) for t in turns)
 
 
+def test_overlap_detection_flags_concurrent_speakers(monkeypatch, tmp_path):
+    fake, _ = make_fake_sherpa(result=[
+        _item(0.0, 3.0, 0),
+        _item(2.5, 5.0, 1),
+        _item(6.0, 8.0, 0),
+    ])
+    _install(monkeypatch, fake, tmp_path)
+    turns = so.diarize([0.0] * 16000 * 8, 16000)
+    assert turns[0].overlap is True
+    assert turns[1].overlap is True
+    assert turns[2].overlap is False
+
+
 # ---------------------------------------------------------------------------
 # Progress: handed to the library, adapted only for its int return
 # ---------------------------------------------------------------------------

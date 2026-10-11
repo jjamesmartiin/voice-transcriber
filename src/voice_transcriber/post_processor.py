@@ -2618,6 +2618,51 @@ _SPOKEN_QUOTE_PATTERN = re.compile(
 )
 
 
+_SPOKEN_DASH_REGEX = re.compile(
+    r"\b([A-Za-z0-9_-]+)\s+(?:dash|hyphen)\s+([A-Za-z0-9_-]+)\b",
+    re.IGNORECASE
+)
+
+_COMMON_WORDS_NOT_CODES = frozenset({
+    "a", "an", "the", "i", "we", "he", "she", "it", "they", "you",
+    "of", "to", "for", "in", "on", "at", "by", "from", "with",
+})
+
+
+def _is_model_or_code_token(tok: str) -> bool:
+    if any(c.isdigit() for c in tok):
+        return True
+    if tok.isupper() and len(tok) >= 2:
+        return True
+    if len(tok) == 1 and tok.isalpha():
+        return True
+    if tok.lower() in ("home", "host", "server", "node", "vm", "box"):
+        return True
+    return False
+
+
+def process_spoken_dashes(text: str) -> str:
+    """Convert spoken 'dash' / 'hyphen' between code, model or hostname tokens to '-'."""
+    if not text or ("dash" not in text.lower() and "hyphen" not in text.lower()):
+        return text
+
+    def _repl(m: re.Match) -> str:
+        t1, t2 = m.group(1), m.group(2)
+        if _is_model_or_code_token(t1) or _is_model_or_code_token(t2):
+            if t1.lower() in _COMMON_WORDS_NOT_CODES or t2.lower() in _COMMON_WORDS_NOT_CODES:
+                return m.group(0)
+            return f"{t1}-{t2}"
+        return m.group(0)
+
+    res = text
+    for _ in range(4):
+        new_res = _SPOKEN_DASH_REGEX.sub(_repl, res)
+        if new_res == res:
+            break
+        res = new_res
+    return res
+
+
 def process_spoken_quotes(text: str) -> str:
     """Wrap speech dictated with spoken quotation marks in real quotes.
 
@@ -3403,6 +3448,10 @@ def clean_speech_transcription(
 
     # 13h. Process serial numbers, model codes, and NATO phonetic strings ("X K 9 4 J" -> "XK94J")
     cleaned = process_serial_numbers(cleaned)
+
+    # 13h2. Process spoken dashes in model codes and hostnames ("LAP dash V" -> "LAP-V")
+    if "dash" in cleaned_lower or "hyphen" in cleaned_lower:
+        cleaned = process_spoken_dashes(cleaned)
 
     # 13i. Convert spoken quotation marks ("he said quote hello unquote" -> 'he said "hello"')
     cleaned = process_spoken_quotes(cleaned)

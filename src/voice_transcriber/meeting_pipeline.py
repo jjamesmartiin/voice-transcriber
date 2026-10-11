@@ -596,10 +596,11 @@ class MeetingPipeline:
         lines: list[str] = []
         for turn in turns:
             text = (turn.text or "").strip()
+            overlap_tag = " (overlap)" if getattr(turn, "overlap", False) else ""
             if labelled:
-                lines.append(f"[{cls.speaker_label(turn.speaker, names)}] {text}".rstrip())
+                lines.append(f"[{cls.speaker_label(turn.speaker, names)}]{overlap_tag} {text}".rstrip())
             else:
-                lines.append(text)
+                lines.append(f"{text}{overlap_tag}".strip())
         return "\n".join(lines)
 
     def _render(
@@ -642,12 +643,13 @@ class MeetingPipeline:
         ]
         for turn in turns:
             text = (turn.text or "").strip()
+            overlap_tag = " *(overlap)*" if getattr(turn, "overlap", False) else ""
             if labelled:
                 lines.append(
-                    f"**{cls.speaker_label(turn.speaker, names)}:** {text}".rstrip()
+                    f"**{cls.speaker_label(turn.speaker, names)}:**{overlap_tag} {text}".rstrip()
                 )
             else:
-                lines.append(text)
+                lines.append(f"{text}{overlap_tag}".strip())
         return "\n".join(lines) + "\n"
 
     @classmethod

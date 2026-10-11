@@ -630,6 +630,19 @@ def test_period_no_space_normalized_to_spaced_sentence():
     assert pp.clean_speech_transcription("visit example.com today", skip_slm=True) == "visit example.com today."
 
 
+def test_spoken_dashes_in_model_codes_and_hostnames():
+    """Spoken 'dash' or 'hyphen' between code/model/hostname tokens format as '-'."""
+    assert pp.process_spoken_dashes("LAP dash V") == "LAP-V"
+    assert pp.process_spoken_dashes("RTX 4090 dash TI") == "RTX 4090-TI"
+    assert pp.process_spoken_dashes("home dash james m5") == "home-james m5"
+    assert pp.process_spoken_dashes("model X dash 100") == "model X-100"
+    # Ordinary English prose with 'dash' is preserved
+    assert pp.process_spoken_dashes("add a dash of salt") == "add a dash of salt"
+    assert pp.process_spoken_dashes("dash to the store") == "dash to the store"
+    assert pp.process_spoken_dashes("a 100 meter dash") == "a 100 meter dash"
+
+
+
 
 def test_serial_collapse_setting_controls_spacing(serial_settings):
     pp.set_serial_collapse(True)

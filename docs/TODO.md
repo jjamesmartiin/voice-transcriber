@@ -7,6 +7,9 @@ said: ...
 got: ...
 -->
 
+# Other things to fix 
+- So I set the word per minute for myself to 120 word per minute, and now it's not showing like my time saved kind of thing. 
+
 
 
 # Known limitations and verification log

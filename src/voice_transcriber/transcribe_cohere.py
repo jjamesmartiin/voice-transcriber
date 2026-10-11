@@ -292,7 +292,7 @@ def _maybe_quantize_dynamic(model, device):
     """
     if device != "cpu":
         return model
-    if os.environ.get("VT_INT8_DYNAMIC", "0").strip().lower() in ("0", "false", "no", "off"):
+    if os.environ.get("VT_INT8_DYNAMIC", "1").strip().lower() in ("0", "false", "no", "off"):
         return model
     try:
         start = time.time()

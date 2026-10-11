@@ -96,8 +96,15 @@ def models_dir() -> str:
 def model_paths() -> tuple[str, str]:
     """``(segmentation, embedding)`` absolute graph paths."""
     directory = models_dir()
+    seg_name = SEGMENTATION_FILENAME
+    if os.environ.get("VT_INT8_DYNAMIC", "1") != "0":
+        int8_name = os.path.join(
+            "sherpa-onnx-pyannote-segmentation-3-0", "model.int8.onnx"
+        )
+        if os.path.isfile(os.path.join(directory, int8_name)):
+            seg_name = int8_name
     return (
-        os.path.join(directory, SEGMENTATION_FILENAME),
+        os.path.join(directory, seg_name),
         os.path.join(directory, EMBEDDING_FILENAME),
     )
 
@@ -330,12 +337,30 @@ def diarize(
     if callable(sort):
         result = sort()
 
-    turns: list[Turn] = []
+    raw_turns: list[Turn] = []
     for item in result:
-        turns.append(Turn(
+        raw_turns.append(Turn(
             start=float(item.start),
             end=float(item.end),
             speaker=int(item.speaker),
             overlap=bool(getattr(item, "overlap", False)),
         ))
-    return turns
+
+    # Algorithmic overlap detection: detect concurrent speech across distinct speakers
+    n = len(raw_turns)
+    if n > 1:
+        overlap_flags = [t.overlap for t in raw_turns]
+        for i in range(n):
+            for j in range(i + 1, n):
+                if raw_turns[j].start >= raw_turns[i].end - 0.15:
+                    break
+                if raw_turns[i].speaker != raw_turns[j].speaker:
+                    dur = min(raw_turns[i].end, raw_turns[j].end) - max(raw_turns[i].start, raw_turns[j].start)
+                    if dur >= 0.15:
+                        overlap_flags[i] = True
+                        overlap_flags[j] = True
+        return [
+            Turn(start=t.start, end=t.end, speaker=t.speaker, overlap=overlap_flags[idx])
+            for idx, t in enumerate(raw_turns)
+        ]
+    return raw_turns
