@@ -32,7 +32,6 @@ Importing this module starts nothing and imports no ``llama_cpp``.
 
 from __future__ import annotations
 
-import http.client
 import json
 import logging
 import os
@@ -394,18 +393,26 @@ def _build_command(binary: str, model: str, host: str, port: int) -> list[str]:
 def _health_ok(url: str, timeout: float = 1.0) -> bool:
     try:
         parsed = urllib.parse.urlparse(url)
-        conn = http.client.HTTPConnection(
-            parsed.hostname or "127.0.0.1", parsed.port, timeout=timeout
-        )
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 80
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
         try:
-            conn.request("GET", "/health")
-            resp = conn.getresponse()
-            if resp.status != 200:
+            sock.connect((host, port))
+            sock.sendall(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+            data = b""
+            while b"\r\n\r\n" not in data and len(data) < 4096:
+                chunk = sock.recv(1024)
+                if not chunk:
+                    break
+                data += chunk
+            if not data.startswith(b"HTTP/1.0 200") and not data.startswith(b"HTTP/1.1 200"):
                 return False
-            body = json.loads(resp.read().decode("utf-8") or "{}")
-            return body.get("status") in ("ok", "no slot available")
+            body = data.split(b"\r\n\r\n", 1)[1] if b"\r\n\r\n" in data else b"{}"
+            payload = json.loads(body.decode("utf-8") or "{}")
+            return payload.get("status") in ("ok", "no slot available")
         finally:
-            conn.close()
+            sock.close()
     except Exception:
         return False
 
@@ -551,31 +558,43 @@ def _strip_thinking(text: str) -> str:
 
 def _post_chat(url: str, payload: dict, timeout_s: float) -> dict:
     parsed = urllib.parse.urlparse(url)
-    conn = http.client.HTTPConnection(
-        parsed.hostname or "127.0.0.1", parsed.port, timeout=timeout_s
-    )
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 80
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout_s)
     try:
-        conn.request(
-            "POST",
-            "/v1/chat/completions",
-            body=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        resp = conn.getresponse()
-        raw = resp.read().decode("utf-8")
-        if resp.status >= 400:
+        sock.connect((host, port))
+        body = json.dumps(payload).encode("utf-8")
+        req = (
+            f"POST /v1/chat/completions HTTP/1.0\r\n"
+            f"Host: {host}\r\n"
+            f"Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n\r\n"
+        ).encode("utf-8") + body
+        sock.sendall(req)
+        resp_data = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            resp_data += chunk
+        parts = resp_data.split(b"\r\n\r\n", 1)
+        headers = parts[0].decode("utf-8", "replace")
+        raw_body = parts[1].decode("utf-8", "replace") if len(parts) > 1 else "{}"
+        status_line = headers.split("\r\n", 1)[0]
+        status_code = int(status_line.split()[1]) if len(status_line.split()) > 1 else 500
+        if status_code >= 400:
             detail = ""
             try:
-                err = json.loads(raw)
+                err = json.loads(raw_body)
                 err_val = err.get("error", "")
                 detail = err_val if isinstance(err_val, str) else err_val.get("message", "")
             except Exception:
                 pass
-            msg = f"formatter HTTP {resp.status}" + (f": {detail}" if detail else "")
-            raise BackendUnavailable(msg)
-        return json.loads(raw)
+            raise BackendUnavailable(f"formatter HTTP {status_code}" + (f": {detail}" if detail else ""))
+        return json.loads(raw_body)
     finally:
-        conn.close()
+        sock.close()
 
 
 def format_text(

@@ -14,6 +14,8 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-10-11
+
 ### Added
 
 - **The on-device formatter's first-use prompt states the model size before it
@@ -341,7 +343,8 @@ First tagged release: offline Cohere ASR, global `Alt+Shift` push-to-talk with a
 hands-free latch, streaming VAD, the English post-processor, and text injection
 on Linux.
 
-[Unreleased]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.2.0...v1.2.1
