@@ -65,7 +65,7 @@ four things are per-OS:
 | Concern | Linux | Windows | WSL2 | macOS |
 | :--- | :--- | :--- | :--- | :--- |
 | **Global hotkeys** | `evdev` | `pynput` | PowerShell bridge | `pynput` |
-| **Clipboard / typing** | `wl-copy`, `ydotool`/`xdotool` | Win32 `SendInput` | host-side paste | `pbcopy` + Quartz |
+| **Clipboard / typing** | `wl-copy`, `ydotool`/`xdotool` | Win32 `SendInput` | host-side paste | `pbcopy` + AppleScript (`osascript`) / `pynput` |
 | **Audio cues** | `mpg123` | `winsound` | WSLg | `afplay` |
 | **Notifications** | `libnotify` / tkinter | tkinter | tkinter | `osascript` |
 

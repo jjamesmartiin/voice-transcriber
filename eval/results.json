@@ -21,9 +21,9 @@
     "git_rev": "db9bec7e7ee3d16893555488c047a78cf2eab12b",
     "git_dirty": false,
     "config_source": {
-      "path": "/home/jamesm/gitprojects/voice-transcriber-eval/config/config.yaml",
+      "path": "config/config.yaml",
       "loaded": false,
-      "error": "[Errno 2] No such file or directory: '/home/jamesm/gitprojects/voice-transcriber-eval/config/config.yaml'"
+      "error": "[Errno 2] No such file or directory: 'config/config.yaml'"
     },
     "manifest": "eval/manifest.jsonl",
     "invocation": [
@@ -39,11 +39,11 @@
       "eval/results.json"
     ],
     "env": {
-      "PYTHONPATH": "/home/jamesm/gitprojects/voice-transcriber-eval/src",
+      "PYTHONPATH": "src",
       "VT_INT8_DYNAMIC": "1",
-      "VT_MODEL_DIR": "/home/jamesm/gitprojects/voice-transcriber/models/cohere"
+      "VT_MODEL_DIR": "models/cohere"
     },
-    "reproduce": "PYTHONPATH=/home/jamesm/gitprojects/voice-transcriber-eval/src VT_INT8_DYNAMIC=1 VT_MODEL_DIR=/home/jamesm/gitprojects/voice-transcriber/models/cohere python eval/score.py --backend cohere --int8 --no-number-digits --blocks-ms 100 --json eval/results.json",
+    "reproduce": "PYTHONPATH=src VT_INT8_DYNAMIC=1 VT_MODEL_DIR=models/cohere python eval/score.py --backend cohere --int8 --no-number-digits --blocks-ms 100 --json eval/results.json",
     "overall_wer": 0.03566176470588235,
     "overall_clean_wer": 0.03246034673552195,
     "overall_cer": 0.014283285155585785,

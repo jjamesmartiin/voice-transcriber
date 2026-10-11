@@ -51,9 +51,9 @@
       "eval/score_diarization.py"
     ],
     "env": {
-      "PYTHONPATH": "/home/jamesm/gitprojects/voice-transcriber/src"
+      "PYTHONPATH": "src"
     },
-    "reproduce": "PYTHONPATH=/home/jamesm/gitprojects/voice-transcriber/src python eval/score_diarization.py"
+    "reproduce": "PYTHONPATH=src python eval/score_diarization.py"
   },
   "results": [
     {
