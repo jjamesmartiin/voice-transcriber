@@ -50,6 +50,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIR = os.path.join(REPO_ROOT, "src")
@@ -422,6 +423,198 @@ def eprint(*args, **kwargs) -> None:
     print(*args, file=sys.stderr, flush=True)
 
 
+def _run_manifest(
+    args, diarize_mod, default_num_speakers, threshold,
+    version, version_source, rev, dirty
+) -> int:
+    import numpy as np
+    import soundfile as sf
+
+    manifest_path = os.path.abspath(args.manifest)
+    if not os.path.isfile(manifest_path):
+        eprint(f"[diarization] manifest not found: {manifest_path}")
+        return 2
+
+    records = []
+    with open(manifest_path, encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                records.append(json.loads(line))
+            except Exception as e:
+                eprint(f"[diarization] invalid JSON on line {line_no} of {manifest_path}: {e}")
+                return 2
+
+    if args.limit:
+        records = records[:args.limit]
+
+    if not records:
+        eprint(f"[diarization] no clips found in manifest {manifest_path}")
+        return 2
+
+    print("=" * 80)
+    print("Voice Transcriber multi-clip diarization benchmark")
+    print("=" * 80)
+    print(f"manifest        : {os.path.relpath(manifest_path, REPO_ROOT)} ({len(records)} clips)")
+    print(f"backend         : sherpa-onnx {version or '<unknown>'} ({version_source or 'unknown'})")
+    print(f"collar          : {args.collar} s")
+    print(f"speakers default: {args.speakers} -> num_speakers={default_num_speakers}")
+    print(f"threshold       : {threshold}")
+    print("-" * 80)
+    print(f"{'CLIP ID':<20} | {'AUDIO':>7} | {'LATENCY':>7} | {'RTF':>7} | {'DER':>7} | {'MISSED':>7} | {'FA':>7} | {'CONF':>7} | {'TURNS':>5}")
+    print("-" * 80)
+
+    manifest_dir = os.path.dirname(manifest_path)
+    results = []
+
+    for item in records:
+        clip_id = str(item.get("id") or item.get("name") or len(results) + 1)
+        raw_audio = item.get("audio") or item.get("path")
+        if not raw_audio:
+            eprint(f"[diarization] clip {clip_id} missing 'audio' or 'path'")
+            continue
+
+        audio_path = raw_audio if os.path.isabs(raw_audio) else os.path.join(REPO_ROOT, raw_audio)
+        if not os.path.isfile(audio_path):
+            audio_path = os.path.join(manifest_dir, raw_audio)
+        if not os.path.isfile(audio_path):
+            eprint(f"[diarization] audio file not found for {clip_id}: {raw_audio}")
+            continue
+
+        raw_rttm = item.get("rttm")
+        if not raw_rttm:
+            eprint(f"[diarization] clip {clip_id} missing 'rttm'")
+            continue
+
+        rttm_path = raw_rttm if os.path.isabs(raw_rttm) else os.path.join(REPO_ROOT, raw_rttm)
+        if not os.path.isfile(rttm_path):
+            rttm_path = os.path.join(manifest_dir, raw_rttm)
+        if not os.path.isfile(rttm_path):
+            eprint(f"[diarization] rttm file not found for {clip_id}: {raw_rttm}")
+            continue
+
+        audio, sample_rate = sf.read(audio_path, dtype="float32", always_2d=False)
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        audio = np.ascontiguousarray(audio, dtype=np.float32)
+        duration = len(audio) / float(sample_rate)
+
+        ref_turns = load_rttm(rttm_path)
+        if not ref_turns:
+            eprint(f"[diarization] no SPEAKER lines in {rttm_path} for {clip_id}")
+            continue
+
+        item_speakers = item.get("speakers")
+        num_spk = diarize_mod.parse_speakers(item_speakers) if item_speakers is not None else default_num_speakers
+
+        t0 = time.perf_counter()
+        turns = diarize_mod.diarize(
+            audio,
+            int(sample_rate),
+            num_speakers=num_spk,
+            threshold=float(threshold),
+        )
+        latency_s = time.perf_counter() - t0
+        rtf = latency_s / max(duration, 1e-6)
+
+        sys_turns = [(t.start, t.end, str(t.speaker)) for t in turns]
+        metrics = compute_der(
+            ref_turns, sys_turns, collar=args.collar, duration=duration,
+        )
+
+        res_row = {
+            "id": clip_id,
+            "category": item.get("category", "general"),
+            "audio": os.path.relpath(audio_path, REPO_ROOT),
+            "rttm": os.path.relpath(rttm_path, REPO_ROOT),
+            "duration_s": round(duration, 3),
+            "latency_s": round(latency_s, 3),
+            "rtf": round(rtf, 4),
+            "turn_count": len(sys_turns),
+            "ref_speakers": len({t[2] for t in ref_turns}),
+            "sys_speakers": len({t[2] for t in sys_turns}),
+            "der": metrics["der"],
+            "missed": metrics["missed"],
+            "false_alarm": metrics["false_alarm"],
+            "speaker_confusion": metrics["speaker_confusion"],
+            "ref_speech_s": metrics["ref_speech_s"],
+            "missed_s": metrics["missed_s"],
+            "false_alarm_s": metrics["false_alarm_s"],
+            "speaker_confusion_s": metrics["speaker_confusion_s"],
+            "mapping": metrics["mapping"],
+        }
+        results.append(res_row)
+
+        print(
+            f"{clip_id:<20} | {duration:6.2f}s | {latency_s:6.2f}s | {rtf:6.4f}  | "
+            f"{metrics['der']*100:6.2f}% | {metrics['missed']*100:6.2f}% | "
+            f"{metrics['false_alarm']*100:6.2f}% | {metrics['speaker_confusion']*100:6.2f}% | {len(sys_turns):5d}"
+        )
+
+    if not results:
+        eprint("[diarization] no clips successfully scored")
+        return 1
+
+    total_audio_s = sum(r["duration_s"] for r in results)
+    total_latency_s = sum(r["latency_s"] for r in results)
+    total_ref_s = sum(r["ref_speech_s"] for r in results)
+    total_missed_s = sum(r["missed_s"] for r in results)
+    total_fa_s = sum(r["false_alarm_s"] for r in results)
+    total_conf_s = sum(r["speaker_confusion_s"] for r in results)
+
+    denom = max(total_ref_s, 1e-6)
+    duration_weighted_der = (total_missed_s + total_fa_s + total_conf_s) / denom
+    duration_weighted_missed = total_missed_s / denom
+    duration_weighted_fa = total_fa_s / denom
+    duration_weighted_conf = total_conf_s / denom
+    macro_der = sum(r["der"] for r in results) / len(results)
+    aggregate_rtf = total_latency_s / max(total_audio_s, 1e-6)
+
+    print("-" * 80)
+    print(f"CORPUS TOTALS ({len(results)} clips, {total_audio_s:.1f}s audio, {total_latency_s:.1f}s compute):")
+    print(f"  Duration-weighted DER : {duration_weighted_der*100:.2f}%")
+    print(f"    Missed speech       : {duration_weighted_missed*100:.2f}% ({total_missed_s:.2f} s)")
+    print(f"    False alarm         : {duration_weighted_fa*100:.2f}% ({total_fa_s:.2f} s)")
+    print(f"    Speaker confusion   : {duration_weighted_conf*100:.2f}% ({total_conf_s:.2f} s)")
+    print(f"  Macro-averaged DER    : {macro_der*100:.2f}%")
+    print(f"  Throughput RTF        : {aggregate_rtf:.4f} ({1.0/max(aggregate_rtf, 1e-6):.1f}x real-time speed)")
+    print("=" * 80)
+
+    if args.json_out:
+        payload = {
+            "meta": {
+                "kind": "diarization_manifest",
+                "manifest": os.path.relpath(manifest_path, REPO_ROOT),
+                "n_clips": len(results),
+                "backend": "sherpa-onnx",
+                "sherpa_onnx_version": version,
+                "sherpa_onnx_version_source": version_source,
+                "collar": args.collar,
+                "threshold": float(threshold),
+                "duration_weighted_der": duration_weighted_der,
+                "duration_weighted_missed": duration_weighted_missed,
+                "duration_weighted_false_alarm": duration_weighted_fa,
+                "duration_weighted_speaker_confusion": duration_weighted_conf,
+                "macro_der": macro_der,
+                "aggregate_rtf": aggregate_rtf,
+                "total_audio_s": total_audio_s,
+                "total_latency_s": total_latency_s,
+                "total_ref_speech_s": total_ref_s,
+                "git_rev": rev,
+                "git_dirty": dirty,
+                "invocation": ["python", os.path.relpath(__file__, REPO_ROOT)] + sys.argv[1:],
+            },
+            "results": results,
+        }
+        with open(args.json_out, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+        eprint(f"[diarization] wrote {args.json_out}")
+
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -433,6 +626,10 @@ def main() -> int:
     )
     parser.add_argument("--fixture", default=DEFAULT_FIXTURE, help="16 kHz mono WAV")
     parser.add_argument("--rttm", default=DEFAULT_RTTM, help="reference RTTM")
+    parser.add_argument("--manifest", default=None,
+                        help="path to manifest.jsonl for multi-clip benchmark")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="limit to first N clips from manifest")
     parser.add_argument("--json", dest="json_out", default=DEFAULT_JSON,
                         help="write the results JSON here")
     parser.add_argument("--collar", type=float, default=COLLAR_S,
@@ -461,6 +658,15 @@ def main() -> int:
     threshold = (
         diarize_mod.DEFAULT_THRESHOLD if args.threshold is None else args.threshold
     )
+
+    version, version_source = sherpa_onnx_version()
+    rev, dirty = _git_revision()
+
+    if args.manifest:
+        return _run_manifest(
+            args, diarize_mod, num_speakers, threshold,
+            version, version_source, rev, dirty
+        )
 
     import numpy as np  # noqa: E402
     import soundfile as sf  # noqa: E402

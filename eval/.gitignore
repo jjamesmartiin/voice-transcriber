@@ -1,3 +1,8 @@
 # Derived from results.json + manifest.jsonl; regenerate with
 #   nix develop --command python eval/review_report.py
 review.json
+
+# External multi-clip benchmark audio and datasets (e.g. VoxConverse, AMI SDM)
+diarization/data/
+/diarization_data/
+

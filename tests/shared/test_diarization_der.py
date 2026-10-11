@@ -215,3 +215,55 @@ def test_relabel_sequence_reports_none_for_unmapped_speakers():
     sys = [(0.0, 1.0, "9"), (2.0, 3.0, "8")]
     _ref_order, sys_order = sd.relabel_sequence(ref, sys, {"A": "9"})
     assert sys_order == ["A", None]
+
+
+def test_run_manifest_scores_and_aggregates_records(tmp_path, monkeypatch):
+    import argparse
+    import json
+    from collections import namedtuple
+
+    # Generate a dummy WAV using soundfile
+    import soundfile as sf
+    import numpy as np
+
+    wav_path = tmp_path / "test.wav"
+    sf.write(str(wav_path), np.zeros(16000 * 2, dtype=np.float32), 16000)
+
+    rttm_path = tmp_path / "test.rttm"
+    rttm_path.write_text("SPEAKER test 1 0.00 2.00 <NA> <NA> A <NA> <NA>\n")
+
+    manifest_file = tmp_path / "manifest.jsonl"
+    manifest_file.write_text(
+        json.dumps({"id": "clip1", "audio": str(wav_path), "rttm": str(rttm_path), "speakers": 1}) + "\n"
+    )
+
+    json_out = tmp_path / "out.json"
+
+    args = argparse.Namespace(
+        manifest=str(manifest_file),
+        limit=None,
+        collar=0.0,
+        speakers="1",
+        json_out=str(json_out),
+    )
+
+    DummyTurn = namedtuple("DummyTurn", ["start", "end", "speaker"])
+
+    class FakeDiarizer:
+        @staticmethod
+        def parse_speakers(s):
+            return 1
+        @staticmethod
+        def diarize(audio, sr, num_speakers=None, threshold=0.5):
+            return [DummyTurn(0.0, 2.0, 0)]
+
+    code = sd._run_manifest(
+        args, FakeDiarizer, 1, 0.5, "1.13.3", "test", "rev1", False
+    )
+    assert code == 0
+    assert json_out.exists()
+    data = json.loads(json_out.read_text())
+    assert data["meta"]["n_clips"] == 1
+    assert data["results"][0]["id"] == "clip1"
+    assert data["results"][0]["der"] == pytest.approx(0.0)
+
