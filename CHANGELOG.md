@@ -22,10 +22,9 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
   path the ASR uses, on a background thread, so dictation is never blocked. The
   prompt names the model exactly as its licence requires - **"S1-mini" by
   "Superwhisper"** (Apache-2.0 plus an additional naming term; the full text and
-  provenance are in `config/licenses/`). Meeting-mode diarization's ~40 MB
-  pyannote/3D-Speaker graphs are declared in the same model registry and packaged
-  by the same scripts. **No bundle has been published yet**, so until one is, the
-  weights must be placed under the model directory.
+  provenance are in `config/licenses/`). Both the formatter (`model-formatter-34add00a48a2`)
+  and meeting-mode diarization (`model-diarization-24615ee884c8`, with the VoxCeleb
+  English ERes2Net embedding) are published as verified GitHub Release bundles.
 - **List formatting (`structure_mode`).** Spoken enumerations become real
   lists: "I can list them like: Thing one. Thing two. Thing three." now comes out
   as a bulleted list, and spoken "new line" / "new paragraph" / "bullet point"

@@ -69,7 +69,10 @@ _health_calls = 0
 
 
 class Handler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
+    protocol_version = "HTTP/1.0"
+
+    def address_string(self):
+        return self.client_address[0]
 
     def log_message(self, *args):
         pass
@@ -79,6 +82,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -402,13 +406,15 @@ def test_verbose_server_output_does_not_deadlock(tmp_path, monkeypatch):
         "    sys.stderr.write('llama_model_load: chatty line of log output\\n')\n"
         "sys.stderr.flush()\n"
         "class H(BaseHTTPRequestHandler):\n"
-        "    protocol_version = 'HTTP/1.1'\n"
+        "    protocol_version = 'HTTP/1.0'\n"
+        "    def address_string(self): return self.client_address[0]\n"
         "    def log_message(self, *a): pass\n"
         "    def _send(self, code, payload):\n"
         "        body = json.dumps(payload).encode()\n"
         "        self.send_response(code)\n"
         "        self.send_header('Content-Type', 'application/json')\n"
         "        self.send_header('Content-Length', str(len(body)))\n"
+        "        self.send_header('Connection', 'close')\n"
         "        self.end_headers()\n"
         "        self.wfile.write(body)\n"
         "    def do_GET(self): self._send(200, {'status': 'ok'})\n"
