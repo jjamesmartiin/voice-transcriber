@@ -106,6 +106,18 @@ _REPO_URL = f"https://github.com/{REPO_SLUG}"
 # change.
 _COHERE_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 _COHERE_SHA256 = "987bd3e141c7bfdb5a78f5db11397ee7737308357e6cc0a3f36a4979b158137a"
+_COHERE_CONFIGURATION_SHA256 = (
+    "2a33be079910efb6ea3c40d5d34cda69a8ffbbc76da93b218338fb71d30f9fef"
+)
+_COHERE_MODELING_SHA256 = (
+    "ca5a0b67a1cba76e86e54a3bfe350255a17868f27a4b2faa400c2daa520193e0"
+)
+_COHERE_PROCESSING_SHA256 = (
+    "151f965b721c068897cbf199296aa3d4d652dffaa2387d6edef7f10a9b16fb74"
+)
+_COHERE_TOKENIZATION_SHA256 = (
+    "415fff67e1226d3467c71d22144e56825fd42c8ee41f677bdabe3a86119141ec"
+)
 _COHERE_TAG = f"model-cohere-{_COHERE_REVISION[:12]}"
 
 COHERE = ModelSpec(
@@ -136,7 +148,13 @@ COHERE = ModelSpec(
         "config.json", "model.safetensors", "tokenizer.json",
         "modeling_cohere_asr.py", "processor_config.json",
     ),
-    digests={"model.safetensors": _COHERE_SHA256},
+    digests={
+        "model.safetensors": _COHERE_SHA256,
+        "configuration_cohere_asr.py": _COHERE_CONFIGURATION_SHA256,
+        "modeling_cohere_asr.py": _COHERE_MODELING_SHA256,
+        "processing_cohere_asr.py": _COHERE_PROCESSING_SHA256,
+        "tokenization_cohere_asr.py": _COHERE_TOKENIZATION_SHA256,
+    },
     license_file="config/licenses/Cohere-Apache-2.0.txt",
     license_name="Apache-2.0",
     # Pinned so the published NOTICE stays byte-identical to every release so
@@ -900,6 +918,11 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
             if hasattr(tarfile, "data_filter"):
                 tf.extractall(staging, filter="data")
             else:
+                staging_path = os.path.abspath(staging)
+                for member in tf.getmembers():
+                    target = os.path.abspath(os.path.join(staging, member.name))
+                    if not (target == staging_path or target.startswith(staging_path + os.sep)):
+                        raise RuntimeError(f"Tar path traversal detected: {member.name!r}")
                 tf.extractall(staging)
         # Verify every redistributed file against the spec's digest map. Nothing
         # assumes the artifact is called model.safetensors: a GGUF or ONNX spec

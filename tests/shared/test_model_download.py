@@ -138,6 +138,21 @@ def test_formatter_and_diarization_specs_are_registered():
                for f in diarization.required_local)
 
 
+def test_cohere_digests_contain_code_files():
+    """Remote code executed under trust_remote_code must be pinned in digests."""
+    cohere = model_download.get_spec("cohere")
+    code_digests = {
+        "configuration_cohere_asr.py": "2a33be079910efb6ea3c40d5d34cda69a8ffbbc76da93b218338fb71d30f9fef",
+        "modeling_cohere_asr.py": "ca5a0b67a1cba76e86e54a3bfe350255a17868f27a4b2faa400c2daa520193e0",
+        "processing_cohere_asr.py": "151f965b721c068897cbf199296aa3d4d652dffaa2387d6edef7f10a9b16fb74",
+        "tokenization_cohere_asr.py": "415fff67e1226d3467c71d22144e56825fd42c8ee41f677bdabe3a86119141ec",
+    }
+    for fname, expected_hash in code_digests.items():
+        assert fname in cohere.digests
+        assert cohere.digests[fname] == expected_hash
+    assert cohere.digests["model.safetensors"] == model_download.SAFETENSORS_SHA256
+
+
 def test_registry_name_for_model_maps_config_ids_to_registry_keys():
     assert model_download.registry_name_for_model("s1-mini") == "formatter"
     assert model_download.registry_name_for_model("S1-MINI") == "formatter"
@@ -474,7 +489,23 @@ def test_write_provenance(tmp_path):
     assert data["model"] == model_download.REPO_ID
     assert data["release_tag"] == "v1.1.0"
     assert data["model_safetensors_sha256"] == model_download.SAFETENSORS_SHA256
-    # A single-safetensors spec keeps the Cohere-era key set exactly.
+    # Cohere spec includes code file digests alongside safetensors.
+    assert data["digests"] == dict(model_download.COHERE.digests)
+
+
+def test_write_provenance_single_safetensors_omits_digests_map(tmp_path):
+    """A spec containing only model.safetensors keeps the legacy key set without redundant digests map."""
+    spec = dataclasses.replace(
+        model_download.COHERE,
+        digests={"model.safetensors": model_download.SAFETENSORS_SHA256},
+    )
+    model_download._write_provenance(
+        spec,
+        str(tmp_path),
+        base_url="https://github.com/jjamesmartiin/voice-transcriber/releases/download/v1.1.0",
+    )
+    data = json.loads((tmp_path / "SOURCE.json").read_text(encoding="utf-8"))
+    assert data["model_safetensors_sha256"] == model_download.SAFETENSORS_SHA256
     assert "digests" not in data
 
 
@@ -1258,6 +1289,82 @@ def test_extract_bundle_archive_rejects_zip_slip(tmp_path):
     dest.mkdir()
     with pytest.raises(RuntimeError, match="Zip slip path traversal detected"):
         model_download._extract_bundle_archive(str(bad_zip), str(dest))
+    assert not (tmp_path / "evil.txt").exists()
+
+
+def test_extract_bundle_archive_rejects_tar_slip(monkeypatch, tmp_path):
+    """Tar archives with '../' traversing outside dest must be rejected."""
+    bad_tar = tmp_path / "bad.tar"
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        ti = tarfile.TarInfo(name="../../evil.txt")
+        content = b"pwned"
+        ti.size = len(content)
+        tf.addfile(ti, io.BytesIO(content))
+    bad_tar.write_bytes(buf.getvalue())
+
+    dest = tmp_path / "extract_dest"
+    dest.mkdir()
+    with pytest.raises((RuntimeError, tarfile.FilterError)):
+        model_download._extract_bundle_archive(str(bad_tar), str(dest))
+    assert not (tmp_path / "evil.txt").exists()
+
+    monkeypatch.delattr(tarfile, "data_filter", raising=False)
+    with pytest.raises(RuntimeError, match="Tar path traversal detected"):
+        model_download._extract_bundle_archive(str(bad_tar), str(dest))
+    assert not (tmp_path / "evil.txt").exists()
+
+
+def test_assemble_parts_rejects_tar_slip_without_data_filter(monkeypatch, tmp_path):
+    """TarSlip guard in _assemble_parts rejects traversal when data_filter is unavailable."""
+    bad_tar_buf = io.BytesIO()
+    with tarfile.open(fileobj=bad_tar_buf, mode="w") as tf:
+        ti = tarfile.TarInfo(name="../../evil.txt")
+        content = b"pwned"
+        ti.size = len(content)
+        tf.addfile(ti, io.BytesIO(content))
+    raw_tar = bad_tar_buf.getvalue()
+    xz_blob = lzma.compress(raw_tar)
+
+    part = tmp_path / "evil.part1.xz"
+    part.write_bytes(xz_blob)
+    digest = hashlib.sha256(xz_blob).hexdigest()
+
+    manifest = {"evil.part1.xz": digest}
+    part_paths = {"evil.part1.xz": str(part)}
+    dest = tmp_path / "dest"
+    spec = model_download.COHERE
+
+    monkeypatch.delattr(tarfile, "data_filter", raising=False)
+    with pytest.raises(RuntimeError, match="Tar path traversal detected"):
+        model_download._assemble_parts(spec, part_paths, manifest, str(dest), origin="test")
+    assert not (tmp_path / "evil.txt").exists()
+
+
+def test_assemble_parts_rejects_tar_slip_with_data_filter(tmp_path):
+    """TarSlip guard in _assemble_parts rejects traversal when data_filter is available."""
+    if not hasattr(tarfile, "data_filter"):
+        pytest.skip("tarfile.data_filter not available on this Python runtime")
+    bad_tar_buf = io.BytesIO()
+    with tarfile.open(fileobj=bad_tar_buf, mode="w") as tf:
+        ti = tarfile.TarInfo(name="../../evil.txt")
+        content = b"pwned"
+        ti.size = len(content)
+        tf.addfile(ti, io.BytesIO(content))
+    raw_tar = bad_tar_buf.getvalue()
+    xz_blob = lzma.compress(raw_tar)
+
+    part = tmp_path / "evil.part1.xz"
+    part.write_bytes(xz_blob)
+    digest = hashlib.sha256(xz_blob).hexdigest()
+
+    manifest = {"evil.part1.xz": digest}
+    part_paths = {"evil.part1.xz": str(part)}
+    dest = tmp_path / "dest"
+    spec = model_download.COHERE
+
+    with pytest.raises((RuntimeError, tarfile.FilterError)):
+        model_download._assemble_parts(spec, part_paths, manifest, str(dest), origin="test")
     assert not (tmp_path / "evil.txt").exists()
 
 
