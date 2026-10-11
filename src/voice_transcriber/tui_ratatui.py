@@ -143,7 +143,15 @@ class RatatuiTui:
     # ------------------------------------------------------------------ setup
 
     def _default_socket_path(self) -> str:
-        base = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+        if runtime_dir:
+            base = runtime_dir
+        else:
+            base = os.path.join(tempfile.gettempdir(), f"vt-{os.getuid()}")
+            try:
+                os.makedirs(base, mode=0o700, exist_ok=True)
+            except OSError:
+                base = tempfile.gettempdir()
         return os.path.join(base, f"vt-tui-{os.getuid()}.sock")
 
     def start(self):
@@ -156,9 +164,15 @@ class RatatuiTui:
             os.unlink(self.socket_path)
         except FileNotFoundError:
             pass
+        except OSError as e:
+            logger.warning("Could not unlink existing socket %s: %s", self.socket_path, e)
 
         self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._server.bind(self.socket_path)
+        try:
+            os.chmod(self.socket_path, 0o600)
+        except OSError:
+            pass
         self._server.listen(1)
 
         # Hand the child the real terminal file descriptors explicitly, plus the

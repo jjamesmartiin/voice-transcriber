@@ -413,22 +413,27 @@ def _dump_toml(d: dict) -> str:
 
 def get_config_file():
     """Find local project config.yaml/config.yml/config.json/config.toml (in root or config/ dir), fallback to global data dir"""
-    candidates = [
-        Path('config.toml'),
-        Path('config/config.toml'),
-        Path('config.yaml'),
-        Path('config.yml'),
-        Path('config/config.yaml'),
-        Path('config/config.yml'),
-        Path('config.json'),
-        Path('config/config.json'),
-        Path('audio_device_config.json'),
-        Path('config/audio_device_config.json'),
-        GLOBAL_CONFIG_FILE
-    ]
-    for loc in candidates:
-        if loc.exists():
-            return loc.resolve()
+    from voice_transcriber import model_download
+
+    repo_root = model_download.find_repo_root()
+    if repo_root is not None:
+        root = Path(repo_root)
+        candidates = [
+            root / 'config.toml',
+            root / 'config/config.toml',
+            root / 'config.yaml',
+            root / 'config.yml',
+            root / 'config/config.yaml',
+            root / 'config/config.yml',
+            root / 'config.json',
+            root / 'config/config.json',
+            root / 'audio_device_config.json',
+            root / 'config/audio_device_config.json',
+            GLOBAL_CONFIG_FILE,
+        ]
+        for loc in candidates:
+            if loc.exists():
+                return loc.resolve()
     return GLOBAL_CONFIG_FILE
 
 CONFIG_FILE = get_config_file()

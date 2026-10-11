@@ -16,8 +16,9 @@ import os
 import sys
 import threading
 import subprocess
-import logging
+import html
 import importlib.util
+import logging
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
@@ -295,10 +296,11 @@ if __name__ == "__main__":
 
     def _create_zenity_notification(self, text, persistent):
         """Create a zenity-based notification."""
+        escaped_text = html.escape(str(text))
         cmd = [
             'zenity', '--info',
             f'--title={self.app_name}',
-            f'--text=<span font="12">{text}</span>',  # Smaller font, removed bold
+            f'--text=<span font="12">{escaped_text}</span>',  # Smaller font, removed bold
             '--width=300', '--height=80'  # Smaller dimensions
         ]
         if not persistent:

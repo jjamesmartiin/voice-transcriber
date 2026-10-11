@@ -15,6 +15,7 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 import console_text
+from voice_transcriber import model_download
 
 COMMON_CANDIDATE_PATHS = [
     Path("config/dictionary.yaml"),
@@ -40,32 +41,27 @@ LOCAL_CANDIDATE_PATHS = [
 
 def find_repo_root() -> Optional[Path]:
     """Find the root repository directory if running from a git checkout."""
-    d = Path(__file__).resolve().parent
-    for _ in range(8):
-        if (d / ".git").is_dir():
-            return d
-        parent = d.parent
-        if parent == d:
-            break
-        d = parent
-    return None
+    root = model_download.find_repo_root()
+    return Path(root) if root else None
 
 
 def get_common_dictionary_path() -> Path:
     """Return the path to the tracked common dictionary file."""
     repo_root = find_repo_root()
-    for c in COMMON_CANDIDATE_PATHS:
-        if c.exists():
-            return c.resolve()
-
     if repo_root:
         for c in COMMON_CANDIDATE_PATHS:
             p = repo_root / c
             if p.exists():
                 return p.resolve()
+        base = repo_root / "config"
+    else:
+        base = Path(model_download.get_data_dir()) / "config"
+        for c in COMMON_CANDIDATE_PATHS:
+            p = base / c.name
+            if p.exists():
+                return p.resolve()
 
-    base = repo_root if repo_root else Path.cwd()
-    dest = base / "config" / "dictionary.yaml"
+    dest = base / "dictionary.yaml"
     dest.parent.mkdir(parents=True, exist_ok=True)
     return dest
 
@@ -73,18 +69,20 @@ def get_common_dictionary_path() -> Path:
 def get_local_dictionary_path(create: bool = False) -> Path:
     """Return the path to the gitignored personal/local dictionary file."""
     repo_root = find_repo_root()
-    for c in LOCAL_CANDIDATE_PATHS:
-        if c.exists():
-            return c.resolve()
-
     if repo_root:
         for c in LOCAL_CANDIDATE_PATHS:
             p = repo_root / c
             if p.exists():
                 return p.resolve()
+        base = repo_root / "config"
+    else:
+        base = Path(model_download.get_data_dir()) / "config"
+        for c in LOCAL_CANDIDATE_PATHS:
+            p = base / c.name
+            if p.exists():
+                return p.resolve()
 
-    base = repo_root if repo_root else Path.cwd()
-    dest = base / "config" / "dictionary.local.yaml"
+    dest = base / "dictionary.local.yaml"
     if create:
         dest.parent.mkdir(parents=True, exist_ok=True)
     return dest

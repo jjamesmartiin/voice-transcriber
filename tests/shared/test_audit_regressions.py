@@ -233,3 +233,237 @@ class TestOverlayProcessListIsGuarded:
         notifier = overlay.VisualNotification(app_name="App", enable_logging=False)
         notifier._cleanup_overlays()
         assert notifier.overlay_processes == []
+
+
+# ---------------------------------------------------------------------------
+# 4. TUI ratatui socket security & permissions
+# ---------------------------------------------------------------------------
+class TestTuiSocketSecurity:
+    """Socket must use isolated directory (mode 0700) when XDG_RUNTIME_DIR is unset
+    and socket file itself must be chmod 0600."""
+
+    def test_default_socket_path_with_xdg(self, monkeypatch, tmp_path):
+        import tui_ratatui
+
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        tui_obj = tui_ratatui.RatatuiTui(binary="dummy")
+        assert tui_obj.socket_path == os.path.join(str(tmp_path), f"vt-tui-{os.getuid()}.sock")
+
+    def test_default_socket_path_without_xdg_creates_isolated_dir(self, monkeypatch, tmp_path):
+        import tempfile
+        import tui_ratatui
+
+        monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+
+        tui_obj = tui_ratatui.RatatuiTui(binary="dummy")
+        expected_dir = os.path.join(str(tmp_path), f"vt-{os.getuid()}")
+        assert tui_obj.socket_path == os.path.join(expected_dir, f"vt-tui-{os.getuid()}.sock")
+        assert os.path.isdir(expected_dir)
+        mode = os.stat(expected_dir).st_mode & 0o777
+        assert mode == 0o700
+
+    def test_socket_permissions_chmod_0600(self, monkeypatch, tmp_path):
+        import socket
+        import subprocess
+        import tui_ratatui
+
+        sock_path = str(tmp_path / "test.sock")
+        tui_obj = tui_ratatui.RatatuiTui(binary="dummy", socket_path=sock_path)
+        tui_obj.ui_theme = "cyan"
+
+        real_popen = subprocess.Popen
+
+        def fake_popen(*args, **kwargs):
+            if args and args[0] and args[0][0] == "dummy":
+                client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                client.connect(sock_path)
+                fake_popen._client = client
+
+                class DummyProc:
+                    def poll(self):
+                        return None
+
+                    def kill(self):
+                        pass
+
+                    def wait(self, timeout=None):
+                        pass
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *a):
+                        pass
+
+                return DummyProc()
+            return real_popen(*args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+        try:
+            tui_obj.start()
+            mode = os.stat(sock_path).st_mode & 0o777
+            assert mode == 0o600
+        finally:
+            tui_obj.stop()
+            if hasattr(fake_popen, "_client"):
+                fake_popen._client.close()
+
+    def test_start_unlinking_handles_oserror_gracefully(self, monkeypatch, tmp_path):
+        import socket
+        import subprocess
+        import tui_ratatui
+
+        sock_path = str(tmp_path / "test_oserror.sock")
+        tui_obj = tui_ratatui.RatatuiTui(binary="dummy", socket_path=sock_path)
+        tui_obj.ui_theme = "cyan"
+
+        real_unlink = os.unlink
+
+        def mock_unlink(path):
+            if path == sock_path:
+                raise OSError("Simulated unlink failure")
+            real_unlink(path)
+
+        monkeypatch.setattr(os, "unlink", mock_unlink)
+
+        real_popen = subprocess.Popen
+
+        def fake_popen(*args, **kwargs):
+            if args and args[0] and args[0][0] == "dummy":
+                client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                client.connect(sock_path)
+                fake_popen._client = client
+
+                class DummyProc:
+                    def poll(self):
+                        return None
+
+                    def kill(self):
+                        pass
+
+                    def wait(self, timeout=None):
+                        pass
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *a):
+                        pass
+
+                return DummyProc()
+            return real_popen(*args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+        try:
+            # Should not raise OSError
+            tui_obj.start()
+        finally:
+            # Restore unlink before stop() cleans up
+            monkeypatch.undo()
+            tui_obj.stop()
+            if hasattr(fake_popen, "_client"):
+                fake_popen._client.close()
+
+
+# ---------------------------------------------------------------------------
+# 5. Config resolution must not hijack files from CWD when outside repo
+# ---------------------------------------------------------------------------
+class TestConfigResolutionIsolation:
+    """Installed builds outside a repo checkout must not hijack arbitrary CWD files."""
+
+    def test_get_config_file_ignores_cwd_when_repo_root_is_none(self, monkeypatch, tmp_path):
+        import t2
+        from voice_transcriber import model_download
+
+        foreign_dir = tmp_path / "foreign"
+        foreign_dir.mkdir()
+        dummy_json = foreign_dir / "config.json"
+        dummy_json.write_text('{"hijacked": true}')
+
+        dummy_yaml = foreign_dir / "config.yaml"
+        dummy_yaml.write_text("hijacked: true")
+
+        monkeypatch.chdir(foreign_dir)
+        monkeypatch.setattr(model_download, "find_repo_root", lambda: None)
+
+        config_path = t2.get_config_file()
+        assert config_path != dummy_json.resolve()
+        assert config_path != dummy_yaml.resolve()
+        assert config_path == t2.GLOBAL_CONFIG_FILE
+
+    def test_get_config_file_anchors_to_repo_root(self, monkeypatch, tmp_path):
+        import t2
+        from voice_transcriber import model_download
+
+        repo_dir = tmp_path / "fake_repo"
+        repo_config_dir = repo_dir / "config"
+        repo_config_dir.mkdir(parents=True)
+        repo_yaml = repo_config_dir / "config.yaml"
+        repo_yaml.write_text("language: en")
+
+        other_dir = tmp_path / "other"
+        other_dir.mkdir()
+        other_yaml = other_dir / "config.yaml"
+        other_yaml.write_text("language: es")
+
+        monkeypatch.chdir(other_dir)
+        monkeypatch.setattr(model_download, "find_repo_root", lambda: str(repo_dir))
+
+        config_path = t2.get_config_file()
+        assert config_path == repo_yaml.resolve()
+        assert config_path != other_yaml.resolve()
+
+    def test_dictionary_does_not_pollute_cwd_when_repo_root_is_none(self, monkeypatch, tmp_path):
+        from voice_transcriber import dictionary, model_download
+
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+        monkeypatch.chdir(work_dir)
+        monkeypatch.setattr(model_download, "find_repo_root", lambda: None)
+        monkeypatch.setattr(model_download, "get_data_dir", lambda: str(tmp_path / "data"))
+
+        common = dictionary.get_common_dictionary_path()
+        local = dictionary.get_local_dictionary_path(create=True)
+
+        assert not (work_dir / "config").exists(), "CWD config directory should not be created"
+        assert str(common).startswith(str(tmp_path / "data" / "config"))
+        assert str(local).startswith(str(tmp_path / "data" / "config"))
+
+
+# ---------------------------------------------------------------------------
+# 6. Zenity notifications must escape XML/Pango characters
+# ---------------------------------------------------------------------------
+class TestZenityNotificationEscaping:
+    """Zenity Pango markup requires <>& to be escaped to prevent syntax errors."""
+
+    def test_zenity_escapes_xml_characters(self, monkeypatch):
+        import notifications
+
+        monkeypatch.setattr(
+            notifications.VisualNotification, "_detect_display_environment", lambda self: "none"
+        )
+        monkeypatch.setattr(
+            notifications.VisualNotification, "_detect_available_tools", lambda self: []
+        )
+
+        commands = []
+
+        def fake_popen(cmd, **kwargs):
+            commands.append(cmd)
+
+            class DummyProcess:
+                pass
+
+            return DummyProcess()
+
+        monkeypatch.setattr(notifications.subprocess, "Popen", fake_popen)
+        notifier = notifications.VisualNotification(app_name="TestApp", enable_logging=False)
+        notifier._create_zenity_notification('Error: <50% & "High"> alert!', persistent=False)
+
+        assert len(commands) == 1
+        cmd = commands[0]
+        text_arg = next(arg for arg in cmd if arg.startswith("--text="))
+        assert '<span font="12">Error: &lt;50% &amp; &quot;High&quot;&gt; alert!</span>' in text_arg
+        assert "<50%" not in text_arg
+        assert "& " not in text_arg
