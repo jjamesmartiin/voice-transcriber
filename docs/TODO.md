@@ -27,7 +27,7 @@ different from one that is broken, and you deserve to be able to tell which you
 are looking at before you file an issue.
 
 `- [x]` items are kept for the record of *how* something was validated, not as a
-changelog; see [`CHANGELOG.md`](CHANGELOG.md) for what shipped in each release.
+changelog; see [`CHANGELOG.md`](../CHANGELOG.md) for what shipped in each release.
 
 > **Looking for the feature-parity work (formatter, diarization, ASR bake-off)?** That has its
 own resumable task list: [`TODO-parity.md`](TODO-parity.md). This file stays what it is — the
