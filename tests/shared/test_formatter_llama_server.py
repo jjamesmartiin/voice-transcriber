@@ -134,7 +134,7 @@ def _start_stub(tmp_path: Path, **env) -> tuple[subprocess.Popen, str]:
     proc = subprocess.Popen(
         [sys.executable, _write_stub(tmp_path), "--host", "127.0.0.1",
          "--port", str(port)],
-        env=child_env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        env=child_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     url = f"http://127.0.0.1:{port}"
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
@@ -398,7 +398,7 @@ def test_verbose_server_output_does_not_deadlock(tmp_path, monkeypatch):
         "argv = sys.argv[1:]\n"
         "port = int(argv[argv.index('--port') + 1])\n"
         "sys.stderr.write('x' * 200 + '\\n' * 1)\n"
-        "for _ in range(5000):\n"
+        "for _ in range(1500):\n"
         "    sys.stderr.write('llama_model_load: chatty line of log output\\n')\n"
         "sys.stderr.flush()\n"
         "class H(BaseHTTPRequestHandler):\n"

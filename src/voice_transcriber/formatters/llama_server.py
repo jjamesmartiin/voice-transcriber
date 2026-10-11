@@ -32,6 +32,7 @@ Importing this module starts nothing and imports no ``llama_cpp``.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
@@ -42,7 +43,7 @@ import sys
 import threading
 import time
 import urllib.error
-import urllib.request
+import urllib.parse
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -50,9 +51,6 @@ from typing import Any
 from voice_transcriber import formatter
 
 logger = logging.getLogger(__name__)
-
-# Loopback HTTP: bypass environment and system proxy handlers (e.g. macOS _scproxy)
-_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -395,11 +393,19 @@ def _build_command(binary: str, model: str, host: str, port: int) -> list[str]:
 
 def _health_ok(url: str, timeout: float = 1.0) -> bool:
     try:
-        with _opener.open(f"{url}/health", timeout=timeout) as response:
-            if response.status != 200:
+        parsed = urllib.parse.urlparse(url)
+        conn = http.client.HTTPConnection(
+            parsed.hostname or "127.0.0.1", parsed.port, timeout=timeout
+        )
+        try:
+            conn.request("GET", "/health")
+            resp = conn.getresponse()
+            if resp.status != 200:
                 return False
-            body = json.loads(response.read().decode("utf-8") or "{}")
+            body = json.loads(resp.read().decode("utf-8") or "{}")
             return body.get("status") in ("ok", "no slot available")
+        finally:
+            conn.close()
     except Exception:
         return False
 
@@ -544,14 +550,32 @@ def _strip_thinking(text: str) -> str:
 
 
 def _post_chat(url: str, payload: dict, timeout_s: float) -> dict:
-    request = urllib.request.Request(
-        f"{url}/v1/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    parsed = urllib.parse.urlparse(url)
+    conn = http.client.HTTPConnection(
+        parsed.hostname or "127.0.0.1", parsed.port, timeout=timeout_s
     )
-    with _opener.open(request, timeout=timeout_s) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        conn.request(
+            "POST",
+            "/v1/chat/completions",
+            body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        raw = resp.read().decode("utf-8")
+        if resp.status >= 400:
+            detail = ""
+            try:
+                err = json.loads(raw)
+                err_val = err.get("error", "")
+                detail = err_val if isinstance(err_val, str) else err_val.get("message", "")
+            except Exception:
+                pass
+            msg = f"formatter HTTP {resp.status}" + (f": {detail}" if detail else "")
+            raise BackendUnavailable(msg)
+        return json.loads(raw)
+    finally:
+        conn.close()
 
 
 def format_text(
