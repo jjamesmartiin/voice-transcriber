@@ -216,9 +216,9 @@ _DIARIZATION_TARBALL_SHA256 = (
 _DIARIZATION_SEGMENTATION_SHA256 = (
     "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079"
 )
-#: 3D-Speaker eres2net embedding graph.
+#: 3D-Speaker eres2net embedding graph (VoxCeleb English-trained).
 _DIARIZATION_EMBEDDING_SHA256 = (
-    "1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b"
+    "c59158379255ad66e161679cca6af8d52d51e389e3224ab7d7a7baae295c2db5"
 )
 _DIARIZATION_REVISION = _DIARIZATION_TARBALL_SHA256
 _DIARIZATION_TAG = f"model-diarization-{_DIARIZATION_REVISION[:12]}"
@@ -227,7 +227,7 @@ _DIARIZATION_SEGMENTATION_PATH = (
     "sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
 )
 _DIARIZATION_EMBEDDING_PATH = (
-    "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+    "3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx"
 )
 
 DIARIZATION = ModelSpec(

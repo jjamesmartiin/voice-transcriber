@@ -12,11 +12,11 @@ Segmentation - pyannote segmentation 3.0, converted to ONNX by k2-fsa
   sha256   : 220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079
   Licence  : MIT (below)
 
-Speaker embedding - 3D-Speaker eres2net
-  Source   : https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
+Speaker embedding - 3D-Speaker eres2net (VoxCeleb English-trained)
+  Source   : https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx
   Upstream : 3D-Speaker, Alibaba Group
-  Installed: 3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
-  sha256   : 1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b
+  Installed: 3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx
+  sha256   : c59158379255ad66e161679cca6af8d52d51e389e3224ab7d7a7baae295c2db5
   Licence  : Apache License, Version 2.0 (below)
 
 ------------------------------------------------------------------------------

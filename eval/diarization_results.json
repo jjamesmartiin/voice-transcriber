@@ -8,7 +8,7 @@
     "sherpa_onnx_version_source": "nix-store-path",
     "num_speakers": 2,
     "speakers_setting": "2",
-    "threshold": 0.5,
+    "threshold": 0.7,
     "collar": 0.25,
     "der": 0.01929746304916963,
     "missed": 0.01929746304916963,
@@ -44,16 +44,20 @@
     "component_gate": 0.025,
     "passed": true,
     "progress_calls": 24,
-    "git_rev": "5a6feef80470aac6049b786e6d9901bed9ed3053",
+    "git_rev": "0f8296265cee2fd62fee9365f9359f652038b484",
     "git_dirty": true,
     "invocation": [
       "python",
-      "eval/score_diarization.py"
+      "eval/score_diarization.py",
+      "--threshold",
+      "0.70",
+      "--json",
+      "eval/diarization_results.json"
     ],
     "env": {
       "PYTHONPATH": "src"
     },
-    "reproduce": "PYTHONPATH=src python eval/score_diarization.py"
+    "reproduce": "PYTHONPATH=src python eval/score_diarization.py --threshold 0.70 --json eval/diarization_results.json"
   },
   "results": [
     {

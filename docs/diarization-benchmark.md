@@ -93,7 +93,7 @@ This is the desired off-behaviour for a monologue.
 
 Model graphs were already installed at
 `~/.local/share/vt/models/diarization/` (segmentation extracted from
-`sherpa-onnx-pyannote-segmentation-3-0.tar.bz2`; `3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`).
+`sherpa-onnx-pyannote-segmentation-3-0.tar.bz2`; `3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx`).
 
 ```bash
 # 1. Generate the fixture (espeak-ng is not on the devshell PATH; build it once).

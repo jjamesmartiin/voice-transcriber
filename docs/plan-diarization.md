@@ -115,7 +115,7 @@ worse than a visible marker.
 | Component | File | Size | Licence |
 | --- | --- | --- | --- |
 | Segmentation | `sherpa-onnx-pyannote-segmentation-3-0/model.onnx` | **6.96 MB** | MIT (k2-fsa conversion of `pyannote/segmentation-3.0`) |
-| Speaker embedding | `3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx` | **~40 MB** | Apache-2.0 (3D-Speaker) |
+| Speaker embedding | `3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx` | **~25 MB** | Apache-2.0 (3D-Speaker) |
 | Clustering | library code | 0 | Apache-2.0 |
 | Optional VAD front-end | Silero VAD | **~2 MB** | MIT |
 
@@ -142,7 +142,7 @@ Model release tags (copy these URLs **literally** — the embedding tag really i
 
 ```
 https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2
-https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
+https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx
 ```
 
 The segmentation tarball extracts to `sherpa-onnx-pyannote-segmentation-3-0/model.onnx`.

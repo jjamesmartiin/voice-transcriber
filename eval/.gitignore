@@ -5,4 +5,10 @@ review.json
 # External multi-clip benchmark audio and datasets (e.g. VoxConverse, AMI SDM)
 diarization/data/
 /diarization_data/
+diarization/models/
+diarization_benchmark*.json
+diarization_manifest_results*.json
+
+
+
 

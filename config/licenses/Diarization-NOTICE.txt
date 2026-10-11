@@ -7,7 +7,7 @@ pyannote segmentation 3.0 (MIT)
 
 3D-Speaker eres2net speaker embedding (Apache License, Version 2.0)
   Alibaba Group
-  https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx
 
 The weights are mirrored byte-for-byte from the published release assets and
 verified by sha256 through the model registry. Full licence texts and

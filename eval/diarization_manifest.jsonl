@@ -1,1 +1,4 @@
 {"id": "synthetic-fixture", "audio": "eval/diarization/fixture.wav", "rttm": "eval/diarization/fixture.rttm", "speakers": 2, "category": "synthetic"}
+{"id": "voxconverse-abjxc", "audio": "eval/diarization/data/abjxc.wav", "rttm": "eval/diarization/data/abjxc.rttm", "speakers": "auto", "category": "voxconverse"}
+{"id": "voxconverse-afjiv", "audio": "eval/diarization/data/afjiv.wav", "rttm": "eval/diarization/data/afjiv.rttm", "speakers": "auto", "category": "voxconverse"}
+{"id": "voxconverse-azisu", "audio": "eval/diarization/data/azisu.wav", "rttm": "eval/diarization/data/azisu.rttm", "speakers": "auto", "category": "voxconverse"}
