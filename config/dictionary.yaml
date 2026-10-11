@@ -76,6 +76,12 @@ dictionary:
   g p i o: GPIO
   modbus: Modbus
   pololu: Pololu
+  levoit: Levoit
+  lap-v102s-wus: LAP-V102S-WUS
+  lap dash v ten 2s dash wus: LAP-V102S-WUS
+  pura: Pura
+  pura diffuser: Pura diffuser
+  pyrrha diffuser: Pura diffuser
   gpu: GPU
   cpu: CPU
   tpu: TPU
@@ -183,6 +189,10 @@ dictionary:
   0x dead beef: "0xDEADBEEF"
   0xdeadbeef: "0xDEADBEEF"
   3735928559: "0xDEADBEEF"
+
+  # Fast Speech ASR Subword Glue Repairs
+  maybepour: maybe pour
+
 
 # ---------------------------------------------------------------------------
 # Contextual Disambiguation Rules
@@ -311,4 +321,24 @@ contextual_rules:
       - "class"
       - "museum"
       - "gallery"
+
+  - target: Pura
+    spoken:
+      - "pyrrha"
+      - "pure a"
+    triggers_after:
+      - "diffuser"
+      - "diffusers"
+      - "fragrance"
+      - "fragrances"
+      - "smart diffuser"
+      - "refill"
+      - "refills"
+      - "scent"
+      - "scents"
+    guards:
+      - "greek"
+      - "myth"
+      - "deucalion"
+
 

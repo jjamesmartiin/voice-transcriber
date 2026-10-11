@@ -46,6 +46,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         self.virtual_keyboard = None
         self.evdev = None
         self.uinput = None
+        self._typing_lock = threading.Lock()
 
         self.ALT_KEYS = [56, 100]  # KEY_LEFTALT, KEY_RIGHTALT
         self.SHIFT_KEYS = [42, 54]  # KEY_LEFTSHIFT, KEY_RIGHTSHIFT
@@ -146,6 +147,10 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             logger.warning("Virtual keyboard not available for typing")
             return False
 
+        with self._typing_lock:
+            return self._type_text_locked(text, fast=fast)
+
+    def _type_text_locked(self, text, fast: bool = False):
         try:
             uinput = self.uinput
 
@@ -262,6 +267,10 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             logger.warning("Virtual keyboard not available for paste")
             return False
 
+        with self._typing_lock:
+            return self._paste_text_locked(terminal=terminal)
+
+    def _paste_text_locked(self, terminal: bool = False) -> bool:
         try:
             uinput = self.uinput
             ctrl = uinput.KEY_LEFTCTRL

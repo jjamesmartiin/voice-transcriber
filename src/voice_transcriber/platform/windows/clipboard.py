@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 
 from ..base import BaseClipboardSink
 
@@ -140,6 +141,7 @@ class WindowsClipboardSink(BaseClipboardSink):
     """Windows clipboard (pyperclip) and ``keybd_event`` typing sink."""
 
     platform = "windows"
+    _typing_lock = threading.Lock()
 
     def copy_text(self, text: str) -> bool:
         try:
@@ -154,6 +156,10 @@ class WindowsClipboardSink(BaseClipboardSink):
     def type_text(self, text: str, fast: bool = False) -> bool:
         if not text:
             return True
+        with self._typing_lock:
+            return self._type_text_locked(text, fast=fast)
+
+    def _type_text_locked(self, text: str, fast: bool = False) -> bool:
         text = text.replace("\r\n", "\n")
         try:
             import ctypes

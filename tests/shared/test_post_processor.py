@@ -485,6 +485,13 @@ def test_nato_phonetic_collapse(serial_settings, text, expected):
     "three a day",
     "we need 5 an hour",
     "paid 170 a month",
+    # Contractions ending in 's followed by 'a' must not collapse to 'SA (e.g. "It's a" -> "It'SA").
+    "It's a dog",
+    "That's a good idea",
+    "There's a way",
+    "He's a doctor",
+    "What's a diffuser",
+    "It's a levoit LAP dash V ten 2S dash WUS",
 ])
 def test_serial_detection_ignores_natural_english(serial_settings, text):
     assert pp.process_serial_numbers(text) == text
@@ -599,6 +606,29 @@ def test_quantity_plus_article_survives_full_pipeline(serial_settings):
 
     assert pp.process_serial_numbers("code F 1 5 0") == "code F150"
     assert pp.process_serial_numbers("X K 9 4 J") == "XK94J"
+
+
+def test_contractions_with_article_survive_full_pipeline(serial_settings):
+    """Contractions ending in 's followed by 'a' must not become 'SA."""
+    assert "It's a" in pp.clean_speech_transcription("It's a test", skip_slm=True)
+    assert "It'SA" not in pp.clean_speech_transcription("It's a test", skip_slm=True)
+    assert "That's a" in pp.clean_speech_transcription("That's a great idea", skip_slm=True)
+    assert "What's a" in pp.clean_speech_transcription("What's a diffuser", skip_slm=True)
+    res = pp.clean_speech_transcription("It's a levoit LAP dash V ten 2S dash WUS", skip_slm=True)
+    assert "It's a" in res
+    assert "It'SA" not in res
+
+
+def test_period_no_space_normalized_to_spaced_sentence():
+    """Periods followed by letters without space must be formatted as sentence boundaries."""
+    raw = "that one's currently unavailable.are there others that are like good and more aesthetic looking?"
+    res = pp.clean_speech_transcription(raw, skip_slm=True)
+    assert "unavailable. Are there others" in res
+    assert "unavailable.are" not in res
+    # Extensions and domain names must be preserved
+    assert pp.clean_speech_transcription("check file.py now", skip_slm=True) == "check file.py now."
+    assert pp.clean_speech_transcription("visit example.com today", skip_slm=True) == "visit example.com today."
+
 
 
 def test_serial_collapse_setting_controls_spacing(serial_settings):

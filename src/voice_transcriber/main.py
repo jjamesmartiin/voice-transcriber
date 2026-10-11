@@ -92,6 +92,9 @@ def copy_to_clipboard_crossplatform(text, sink=None):
         return False
 
 class SimpleVoiceTranscriber:
+    _process_lock = threading.Lock()
+    _clipboard_lock = threading.Lock()
+
     def __init__(self):
         self.recording = False
         self.record_thread = None
@@ -101,6 +104,8 @@ class SimpleVoiceTranscriber:
         self.audio_frames = []
         self.copy_to_clipboard = False
         self.start_time = 0
+        self._process_lock = threading.Lock()
+        self._clipboard_lock = threading.Lock()
 
         # Meeting mode is a second, non-injecting capture lifecycle (see
         # docs/meeting_mode.md). Constructed here so `status` can report it from
@@ -1306,12 +1311,24 @@ class SimpleVoiceTranscriber:
         self.copy_to_clipboard = copy_to_clipboard
         stop_recording.set()
 
+        active_batcher = getattr(self, 'micro_batcher', None)
+        active_record_thread = self.record_thread
+        active_copy_clipboard = self.copy_to_clipboard
+        active_start_time = getattr(self, 'start_time', self.release_time)
+        active_release_time = self.release_time
+
         # Start processing in a separate thread, joining the recording thread
         # there so the hotkey monitoring loop is never blocked.
         def _process_worker():
-            if self.record_thread:
-                self.record_thread.join()
-            self.process_recording()
+            if active_record_thread:
+                active_record_thread.join()
+            with self._process_lock:
+                self.process_recording(
+                    micro_batcher=active_batcher,
+                    copy_to_clipboard=active_copy_clipboard,
+                    start_time=active_start_time,
+                    release_time=active_release_time,
+                )
 
         self.process_thread = threading.Thread(target=_process_worker)
         self.process_thread.daemon = True
@@ -1326,10 +1343,19 @@ class SimpleVoiceTranscriber:
             logger.error(f"Recording error: {e}")
             self.recording = False
 
-    def process_recording(self):
+    def process_recording(self, micro_batcher=None, copy_to_clipboard=None, start_time=None, release_time=None):
         """Process the recorded audio frames"""
-        rec_duration = time.time() - getattr(self, 'start_time', time.time())
-        audio_rec_duration = max(0.0, getattr(self, 'release_time', time.time()) - getattr(self, 'start_time', time.time()))
+        if start_time is None:
+            start_time = getattr(self, 'start_time', time.time())
+        if release_time is None:
+            release_time = getattr(self, 'release_time', time.time())
+        if copy_to_clipboard is None:
+            copy_to_clipboard = getattr(self, 'copy_to_clipboard', False)
+        if micro_batcher is None:
+            micro_batcher = getattr(self, 'micro_batcher', None)
+
+        rec_duration = time.time() - start_time
+        audio_rec_duration = max(0.0, release_time - start_time)
         time_since_last = time.time() - getattr(self, 'last_finish_time', 0.0)
         last_text = getattr(self, 'last_transcription', "").strip()
 
@@ -1358,14 +1384,15 @@ class SimpleVoiceTranscriber:
                     pass
 
                 def finalize_slm():
-                    # Blocks if Wayland strict focus is active (e.g. GNOME top bar)
-                    if copy_to_clipboard_crossplatform(polished, self.clipboard_sink):
-                        self.visual_notification.show_completed(
-                            sub_text=polished,
-                            elapsed_sec=(slm_elapsed / 1000.0),
-                            rec_duration=audio_rec_duration,
-                            proc_time=(slm_elapsed / 1000.0)
-                        )
+                    with self._clipboard_lock:
+                        # Blocks if Wayland strict focus is active (e.g. GNOME top bar)
+                        if copy_to_clipboard_crossplatform(polished, self.clipboard_sink):
+                            self.visual_notification.show_completed(
+                                sub_text=polished,
+                                elapsed_sec=(slm_elapsed / 1000.0),
+                                rec_duration=audio_rec_duration,
+                                proc_time=(slm_elapsed / 1000.0)
+                            )
 
                 # Spawn background thread to queue up clipboard copy and notification
                 threading.Thread(target=finalize_slm, daemon=True).start()
@@ -1410,8 +1437,8 @@ class SimpleVoiceTranscriber:
 
             t0_proc = time.time()
             # Retrieve text from micro-batcher or fallback (skip_slm=True for instant ASR dictation)
-            if hasattr(self, 'micro_batcher') and self.micro_batcher:
-                transcription = self.micro_batcher.finish_and_get_text(skip_slm=True).strip()
+            if micro_batcher:
+                transcription = micro_batcher.finish_and_get_text(skip_slm=True).strip()
             else:
                 result, transcribe_time = process_audio_stream(self.audio_frames)
                 from post_processor import clean_speech_transcription
@@ -1426,7 +1453,7 @@ class SimpleVoiceTranscriber:
                 import t2
                 effective_mode = getattr(t2, 'OUTPUT_MODE', 'clipboard')
                 # If Ctrl was held during push-to-talk activation, override to clipboard only
-                if self.copy_to_clipboard:
+                if copy_to_clipboard:
                     effective_mode = "clipboard"
 
                 if effective_mode in ("type", "type_fast"):
@@ -1482,8 +1509,9 @@ class SimpleVoiceTranscriber:
                     logger.warning(f"Visual notification error: {e}")
 
                 def finalize_transcription():
-                    # This blocking call queues up the copy until GNOME shell releases focus
-                    copy_success = copy_to_clipboard_crossplatform(transcription, self.clipboard_sink)
+                    with self._clipboard_lock:
+                        # This blocking call queues up the copy until GNOME shell releases focus
+                        copy_success = copy_to_clipboard_crossplatform(transcription, self.clipboard_sink)
 
                     if copy_success:
                         logger.info("Copied transcription to clipboard (%d chars)", len(transcription))

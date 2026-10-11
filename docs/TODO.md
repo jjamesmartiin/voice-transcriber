@@ -1,25 +1,11 @@
-# Fix this:
+# Fix this (Dictation Scratchpad)
 
-### case 1
-I said:
-
-"It's a levoit LAP-V102S-WUS" with my current settings and got this instead..
-
-"It'SA levoit LAP dash V ten 2S dash WUS."
-
-what's wrong how can we fix this??
-
-### case 2 
-
-I said 
-
- "Okay, for the pura diffuser, let's research that and let's see if there's anything like cheaper online that we can find. It doesn't need to have the fragrance because we can go in person to get those at Target."
-
- and got
-
- "Okay, for the pyrrha diffuser, let's research that and let's see if there's anything like cheaper online that we can find. It doesn't need to have the fragrance because we can go in person to get those at Target."
-
-
+<!-- Paste new unstructured issues, transcription bugs, or dictation examples here. -->
+<!-- E.g.:
+### case:
+said: ...
+got: ...
+-->
 
 
 

@@ -1829,9 +1829,11 @@ _SERIAL_TRIGGER_WORDS = (
     r"tracking(?:\s+number)?"
 )
 
-_SERIAL_UNIT = rf"(?:\b[a-zA-Z]\b|\b\d+\b|\b(?:{_NATO_ALT})\b|\b(?:{_DIGIT_WORD_ALT})\b)"
+_SERIAL_LETTER = r"(?<![\w'’])[a-zA-Z](?![\w'’])"
+_SERIAL_DIGITS = r"(?<![\w'’])\d+(?![\w'’])"
+_SERIAL_UNIT = rf"(?:{_SERIAL_LETTER}|{_SERIAL_DIGITS}|\b(?:{_NATO_ALT})\b|\b(?:{_DIGIT_WORD_ALT})\b)"
 
-_SPELL_TOKEN = rf"(?:\b[a-zA-Z]\b|\b\d+\b|\b(?:{_NATO_ALT})\b|\b(?:{_DIGIT_WORD_ALT})\b)"
+_SPELL_TOKEN = rf"(?:{_SERIAL_LETTER}|{_SERIAL_DIGITS}|\b(?:{_NATO_ALT})\b|\b(?:{_DIGIT_WORD_ALT})\b)"
 
 _SPELL_CMD_REGEX = re.compile(
     rf"(^|(?<=[.?!,;:–—]\s))(?:please\s+)?(?:spell|spelled)(?:\s+out)?\s+({_SPELL_TOKEN}(?:[\s-]+{_SPELL_TOKEN})*)\b",
@@ -1844,12 +1846,12 @@ _MID_SPELLED_REGEX = re.compile(
 )
 
 _TRIGGERED_SERIAL_REGEX = re.compile(
-    rf"\b({_SERIAL_TRIGGER_WORDS})\s+({_SERIAL_UNIT}(?:[\s-]+{_SERIAL_UNIT})*)\b",
+    rf"\b({_SERIAL_TRIGGER_WORDS})\s+({_SERIAL_UNIT}(?:[\s-]+{_SERIAL_UNIT})*)(?![\w'’])",
     re.IGNORECASE
 )
 
 _UNTRIGGERED_SERIAL_REGEX = re.compile(
-    rf"\b({_SERIAL_UNIT}(?:[\s-]+{_SERIAL_UNIT})+)\b",
+    rf"(?<![\w'’])({_SERIAL_UNIT}(?:[\s-]+{_SERIAL_UNIT})+)(?![\w'’])",
     re.IGNORECASE
 )
 
@@ -2576,6 +2578,26 @@ MULTI_SPACE_REGEX = re.compile(r"\s{2,}")
 STANDALONE_I_REGEX = re.compile(r"\bi\b")
 CONTRACTION_I_REGEX = re.compile(r"\bi('[a-z]+)\b")
 
+_COMMON_FILE_OR_DOMAIN_EXTENSIONS = frozenset({
+    "py", "rs", "go", "c", "h", "cpp", "js", "ts", "jsx", "tsx", "html", "css",
+    "json", "yaml", "yml", "toml", "xml", "csv", "tsv", "txt", "md", "pdf",
+    "png", "jpg", "jpeg", "gif", "svg", "zip", "tar", "gz", "xz", "nix", "conf",
+    "cfg", "ini", "env", "lock", "exe", "dll", "so", "dylib", "deb", "rpm", "apk",
+    "iso", "img", "bin", "sql", "db", "log", "com", "org", "net", "io", "dev",
+    "app", "ai", "co", "us", "uk", "ca", "de", "eu", "me", "info", "biz", "edu", "gov"
+})
+PERIOD_NO_SPACE_REGEX = re.compile(r"([.?!])([a-zA-Z]+)")
+
+
+def _normalize_period_no_space(m: re.Match) -> str:
+    punct = m.group(1)
+    word = m.group(2)
+    if word.lower() in _COMMON_FILE_OR_DOMAIN_EXTENSIONS:
+        return m.group(0)
+    new_word = word[0].upper() + word[1:] if word.islower() else word
+    return f"{punct} {new_word}"
+
+
 _HALLUCINATION_KEYWORDS = ("watching", "subtitles", "subscribe")
 _MUTTERING_KEYWORDS = ("oop", "whoop", "never")
 _FILLER_KEYWORDS = ("um", "uh", "er", "ah")
@@ -3278,6 +3300,9 @@ def clean_speech_transcription(
         cleaned = PREPOSITION_COMPOUND_STUTTER_REGEX.sub(lambda m: "into" if "into" in m.group(0).lower() else "onto", cleaned)
 
     # 4-9. Sentence boundary & clause linking fixes
+    if any(p in cleaned for p in ".?!"):
+        cleaned = PERIOD_NO_SPACE_REGEX.sub(_normalize_period_no_space, cleaned)
+
     if MID_SENTENCE_BOUNDARY_REGEX.search(cleaned):
         has_period = "." in cleaned
 
