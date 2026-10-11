@@ -292,6 +292,11 @@ pub fn status_lines_for(
         }
         RunState::Processing => {
             let spinner = SPINNER[app.spinner % SPINNER.len()];
+            let is_loading = {
+                let lower = sub_state.to_ascii_lowercase();
+                lower.contains("load") || lower.contains("download")
+            };
+            let label = if is_loading { "LOADING MODEL" } else { "PROCESSING AUDIO" };
             let msg = if sub_state.is_empty() {
                 format!(
                     "Transcribing stream with {}...",
@@ -303,7 +308,7 @@ pub fn status_lines_for(
             vec![Line::from(vec![
                 Span::styled("❯ ", bold(c)),
                 Span::styled(
-                    format!("{spinner} PROCESSING AUDIO [{:04.1}s] ", app.elapsed_secs()),
+                    format!("{spinner} {label} [{:04.1}s] ", app.elapsed_secs()),
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("│ ", dim()),

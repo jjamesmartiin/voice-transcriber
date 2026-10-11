@@ -471,7 +471,9 @@ class VoiceTranscriberTUI:
             prompt.append("long capture — nothing is typed", style="dim white")
 
         elif self.state == "PROCESSING":
-            prompt.append(f"{spinner} PROCESSING AUDIO [{self.elapsed_time:04.1f}s] ", style="bold yellow")
+            is_loading = any(w in (self.sub_state_text or "").lower() for w in ("load", "download"))
+            label = "LOADING MODEL" if is_loading else "PROCESSING AUDIO"
+            prompt.append(f"{spinner} {label} [{self.elapsed_time:04.1f}s] ", style="bold yellow")
             prompt.append("│ ", style="dim white")
             if self.sub_state_text:
                 prompt.append(f"{self.sub_state_text}", style="white")

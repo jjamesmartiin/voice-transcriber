@@ -19,6 +19,7 @@ count:
 """
 
 import os
+import socket
 import sys
 
 import pytest
@@ -238,6 +239,10 @@ class TestOverlayProcessListIsGuarded:
 # ---------------------------------------------------------------------------
 # 4. TUI ratatui socket security & permissions
 # ---------------------------------------------------------------------------
+@pytest.mark.skipif(
+    sys.platform == "win32" or not hasattr(socket, "AF_UNIX") or not hasattr(os, "getuid"),
+    reason="Ratatui socket is Unix-only",
+)
 class TestTuiSocketSecurity:
     """Socket must use isolated directory (mode 0700) when XDG_RUNTIME_DIR is unset
     and socket file itself must be chmod 0600."""
@@ -263,12 +268,15 @@ class TestTuiSocketSecurity:
         mode = os.stat(expected_dir).st_mode & 0o777
         assert mode == 0o700
 
-    def test_socket_permissions_chmod_0600(self, monkeypatch, tmp_path):
+    def test_socket_permissions_chmod_0600(self, monkeypatch):
+        import shutil
         import socket
         import subprocess
+        import tempfile
         import tui_ratatui
 
-        sock_path = str(tmp_path / "test.sock")
+        d = tempfile.mkdtemp(prefix="vtsock-")
+        sock_path = os.path.join(d, "test.sock")
         tui_obj = tui_ratatui.RatatuiTui(binary="dummy", socket_path=sock_path)
         tui_obj.ui_theme = "cyan"
 
@@ -308,13 +316,17 @@ class TestTuiSocketSecurity:
             tui_obj.stop()
             if hasattr(fake_popen, "_client"):
                 fake_popen._client.close()
+            shutil.rmtree(d, ignore_errors=True)
 
-    def test_start_unlinking_handles_oserror_gracefully(self, monkeypatch, tmp_path):
+    def test_start_unlinking_handles_oserror_gracefully(self, monkeypatch):
+        import shutil
         import socket
         import subprocess
+        import tempfile
         import tui_ratatui
 
-        sock_path = str(tmp_path / "test_oserror.sock")
+        d = tempfile.mkdtemp(prefix="vtsock-")
+        sock_path = os.path.join(d, "test_oserror.sock")
         tui_obj = tui_ratatui.RatatuiTui(binary="dummy", socket_path=sock_path)
         tui_obj.ui_theme = "cyan"
 
@@ -364,6 +376,7 @@ class TestTuiSocketSecurity:
             tui_obj.stop()
             if hasattr(fake_popen, "_client"):
                 fake_popen._client.close()
+            shutil.rmtree(d, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

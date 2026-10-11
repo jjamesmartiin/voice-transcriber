@@ -114,7 +114,7 @@ ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 
 def _write_stub(tmp_path: Path) -> str:
-    path = tmp_path / "stub-llama-server"
+    path = tmp_path / "stub-llama-server.py"
     path.write_text(STUB_SOURCE.format(python=sys.executable))
     path.chmod(0o755)
     return str(path)
@@ -293,7 +293,7 @@ def test_describe_reports_configured_and_effective_state(stub_env):
     assert described["backend"] == "llama-server"
     assert described["mode"] == "spawn"
     assert described["running"] is False
-    assert described["binary"].endswith("stub-llama-server")
+    assert described["binary"].endswith(("stub-llama-server", "stub-llama-server.py"))
     assert described["model"].endswith(".gguf")
     assert isinstance(described["threads"], int)
 
@@ -390,7 +390,7 @@ def test_verbose_server_output_does_not_deadlock(tmp_path, monkeypatch):
     so the drain thread is pinned by making the stub write far more than a pipe
     buffer's worth before answering.
     """
-    stub = tmp_path / "chatty-llama-server"
+    stub = tmp_path / "chatty-llama-server.py"
     stub.write_text(
         f"#!{sys.executable}\n"
         "import sys, json\n"
@@ -683,6 +683,8 @@ def test_binary_resolves_frozen_or_bundled_executable(tmp_path, monkeypatch):
 
 
 def test_build_command_gpu_layers_darwin_and_env(monkeypatch):
+    monkeypatch.delenv("VT_FORMATTER_GPU_LAYERS", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
     cmd = llama_server._build_command("/bin/llama-server", "/m.gguf", "127.0.0.1", 1234)
     # Default on Linux: no -ngl
     assert "-ngl" not in cmd

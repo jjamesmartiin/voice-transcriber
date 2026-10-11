@@ -804,7 +804,7 @@ def test_packager_tars_nested_files_and_ships_a_verbatim_notice(tmp_path):
     """
     notice_text = 'S1-mini-GGUF\nCopyright 2026 Superwhisper\n'
     notice_path = tmp_path / "NOTICE.upstream"
-    notice_path.write_text(notice_text, encoding="utf-8")
+    notice_path.write_bytes(notice_text.encode("utf-8"))
     files = {"seg/model.onnx": b"ONNX-weights", "embed.onnx": b"EMB"}
     spec = _synthetic_spec(files=files, notice_file=str(notice_path))
     model_dir = tmp_path / "model"
@@ -821,7 +821,7 @@ def test_packager_tars_nested_files_and_ships_a_verbatim_notice(tmp_path):
         names = tf.getnames()
         assert "seg/model.onnx" in names, names
         assert "embed.onnx" in names, names
-        assert tf.extractfile("NOTICE").read().decode() == notice_text
+        assert tf.extractfile("NOTICE").read().decode().replace("\r\n", "\n") == notice_text
 
 
 def test_packager_falls_back_to_the_registry_install_dir(monkeypatch, tmp_path):

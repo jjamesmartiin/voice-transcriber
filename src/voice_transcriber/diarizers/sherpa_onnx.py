@@ -55,14 +55,9 @@ SEGMENTATION_FILENAME = os.path.join(
 
 #: Speaker-embedding graph, relative to the ``diarization`` model directory.
 #: Uses the VoxCeleb English-trained ERes2Net architecture for superior English
-#: speaker clustering and minimal speaker confusion compared to the zh-cn base.
+#: speaker clustering and minimal speaker confusion.
 EMBEDDING_FILENAME = (
     "3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx"
-)
-
-#: Legacy Chinese embedding graph, supported as a fallback for existing local installs.
-LEGACY_EMBEDDING_FILENAME = (
-    "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
 )
 
 #: Explicit model-directory override, matching ``VT_MODEL_DIR`` for the ASR.
@@ -111,10 +106,6 @@ def model_paths() -> tuple[str, str]:
         if os.path.isfile(os.path.join(directory, int8_name)):
             seg_name = int8_name
     emb_name = EMBEDDING_FILENAME
-    if not os.path.isfile(os.path.join(directory, emb_name)):
-        legacy_path = os.path.join(directory, LEGACY_EMBEDDING_FILENAME)
-        if os.path.isfile(legacy_path):
-            emb_name = LEGACY_EMBEDDING_FILENAME
     return (
         os.path.join(directory, seg_name),
         os.path.join(directory, emb_name),

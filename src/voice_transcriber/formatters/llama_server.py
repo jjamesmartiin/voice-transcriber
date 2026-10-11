@@ -51,6 +51,9 @@ from voice_transcriber import formatter
 
 logger = logging.getLogger(__name__)
 
+# Loopback HTTP: bypass environment and system proxy handlers (e.g. macOS _scproxy)
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -392,7 +395,7 @@ def _build_command(binary: str, model: str, host: str, port: int) -> list[str]:
 
 def _health_ok(url: str, timeout: float = 1.0) -> bool:
     try:
-        with urllib.request.urlopen(f"{url}/health", timeout=timeout) as response:
+        with _opener.open(f"{url}/health", timeout=timeout) as response:
             if response.status != 200:
                 return False
             body = json.loads(response.read().decode("utf-8") or "{}")
@@ -462,6 +465,8 @@ def _ensure_server(model: str | None = None) -> str:
         port = _free_port()
         url = f"http://{DEFAULT_HOST}:{port}"
         command = _build_command(binary, model_path, DEFAULT_HOST, port)
+        if binary.endswith(".py"):
+            command = [sys.executable] + command
         logger.info("starting llama-server on port %d", port)
         try:
             proc = subprocess.Popen(  # noqa: S603 - argv list, no shell
@@ -545,7 +550,7 @@ def _post_chat(url: str, payload: dict, timeout_s: float) -> dict:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=timeout_s) as response:
+    with _opener.open(request, timeout=timeout_s) as response:
         return json.loads(response.read().decode("utf-8"))
 
 

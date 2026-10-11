@@ -410,12 +410,19 @@ def _git_revision() -> tuple[str, bool]:
         return "", False
 
 
+def _safe_relpath(path, start=REPO_ROOT) -> str:
+    try:
+        return os.path.relpath(path, start)
+    except (ValueError, TypeError):
+        return str(path)
+
+
 def _reproduce_command() -> str:
     env_prefix = " ".join(
         f"{key}={shlex.quote(os.environ[key])}"
         for key in _RECORDED_ENV_VARS if key in os.environ
     )
-    argv = ["python", os.path.relpath(__file__, REPO_ROOT)] + sys.argv[1:]
+    argv = ["python", _safe_relpath(__file__, REPO_ROOT)] + sys.argv[1:]
     return f"{env_prefix} {' '.join(shlex.quote(a) for a in argv)}".strip()
 
 
@@ -457,7 +464,7 @@ def _run_manifest(
     print("=" * 80)
     print("Voice Transcriber multi-clip diarization benchmark")
     print("=" * 80)
-    print(f"manifest        : {os.path.relpath(manifest_path, REPO_ROOT)} ({len(records)} clips)")
+    print(f"manifest        : {_safe_relpath(manifest_path, REPO_ROOT)} ({len(records)} clips)")
     print(f"backend         : sherpa-onnx {version or '<unknown>'} ({version_source or 'unknown'})")
     print(f"collar          : {args.collar} s")
     print(f"speakers default: {args.speakers} -> num_speakers={default_num_speakers}")
@@ -527,8 +534,8 @@ def _run_manifest(
         res_row = {
             "id": clip_id,
             "category": item.get("category", "general"),
-            "audio": os.path.relpath(audio_path, REPO_ROOT),
-            "rttm": os.path.relpath(rttm_path, REPO_ROOT),
+            "audio": _safe_relpath(audio_path, REPO_ROOT),
+            "rttm": _safe_relpath(rttm_path, REPO_ROOT),
             "duration_s": round(duration, 3),
             "latency_s": round(latency_s, 3),
             "rtf": round(rtf, 4),
@@ -586,7 +593,7 @@ def _run_manifest(
         payload = {
             "meta": {
                 "kind": "diarization_manifest",
-                "manifest": os.path.relpath(manifest_path, REPO_ROOT),
+                "manifest": _safe_relpath(manifest_path, REPO_ROOT),
                 "n_clips": len(results),
                 "backend": "sherpa-onnx",
                 "sherpa_onnx_version": version,
@@ -604,7 +611,7 @@ def _run_manifest(
                 "total_ref_speech_s": total_ref_s,
                 "git_rev": rev,
                 "git_dirty": dirty,
-                "invocation": ["python", os.path.relpath(__file__, REPO_ROOT)] + sys.argv[1:],
+                "invocation": ["python", _safe_relpath(__file__, REPO_ROOT)] + sys.argv[1:],
             },
             "results": results,
         }
@@ -724,9 +731,9 @@ def main() -> int:
     print("=" * 72)
     print("Voice Transcriber diarization eval (synthetic regression smoke gate)")
     print("=" * 72)
-    print(f"fixture        : {os.path.relpath(args.fixture, REPO_ROOT)} "
+    print(f"fixture        : {_safe_relpath(args.fixture, REPO_ROOT)} "
           f"({duration:.3f} s, {sample_rate} Hz)")
-    print(f"reference      : {os.path.relpath(args.rttm, REPO_ROOT)} "
+    print(f"reference      : {_safe_relpath(args.rttm, REPO_ROOT)} "
           f"({len(ref_turns)} turns)")
     print(f"backend        : sherpa-onnx {version or '<unknown>'} "
           f"({version_source or 'unknown source'})")
@@ -784,8 +791,8 @@ def main() -> int:
         payload = {
             "meta": {
                 "kind": "diarization",
-                "fixture": os.path.relpath(args.fixture, REPO_ROOT),
-                "rttm": os.path.relpath(args.rttm, REPO_ROOT),
+                "fixture": _safe_relpath(args.fixture, REPO_ROOT),
+                "rttm": _safe_relpath(args.rttm, REPO_ROOT),
                 "backend": "sherpa-onnx",
                 "sherpa_onnx_version": version,
                 "sherpa_onnx_version_source": version_source,
@@ -816,7 +823,7 @@ def main() -> int:
                 "progress_calls": progress_calls[0],
                 "git_rev": rev,
                 "git_dirty": dirty,
-                "invocation": ["python", os.path.relpath(__file__, REPO_ROOT)]
+                "invocation": ["python", _safe_relpath(__file__, REPO_ROOT)]
                               + sys.argv[1:],
                 "env": {k: os.environ[k] for k in _RECORDED_ENV_VARS if k in os.environ},
                 "reproduce": _reproduce_command(),

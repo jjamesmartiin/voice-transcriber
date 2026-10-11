@@ -117,6 +117,8 @@ nix develop --command env PYTHONPATH=$PWD/src python eval/score_diarization.py -
 |---|---|
 | `--fixture PATH` | WAV to score (default `eval/diarization/fixture.wav`) |
 | `--rttm PATH` | reference RTTM (default `eval/diarization/fixture.rttm`) |
+| `--manifest PATH` | path to `manifest.jsonl` for multi-clip benchmark |
+| `--limit N` | limit scoring to first N clips from manifest |
 | `--json OUT` | results JSON (default `eval/diarization_results.json`) |
 | `--collar S` | no-score collar around reference boundaries (default `0.25`) |
 | `--speakers N\|auto` | known speaker count or auto-clustering (default `2`) |

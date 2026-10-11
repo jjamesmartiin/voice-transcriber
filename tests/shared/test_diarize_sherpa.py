@@ -221,6 +221,12 @@ def test_both_model_paths_reach_the_library(monkeypatch, tmp_path):
     assert records["embedding_model"].endswith("emb.onnx")
 
 
+def test_model_paths_defaults_to_english_voxceleb(monkeypatch, tmp_path):
+    monkeypatch.setattr(so, "models_dir", lambda: str(tmp_path))
+    _, emb = so.model_paths()
+    assert Path(emb).name == "3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx"
+
+
 # ---------------------------------------------------------------------------
 # Result mapping
 # ---------------------------------------------------------------------------

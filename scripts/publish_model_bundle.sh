@@ -132,8 +132,8 @@ if ! "${GH[@]}" release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
     else
         echo "Creating weights release $TAG ..."
         "${GH[@]}" release create "$TAG" --repo "$REPO" --prerelease \
-            --title "Model bundle ${REV:0:12}" \
-            --notes "${DISPLAY} weights for revision \`${REV}\`.
+            --title "Model ${MODEL} ${REV:0:12}" \
+            --notes "Fine-tuned open source ${MODEL} weights (revision \`${REV}\`).
 
 Not an app release: this tag exists only to host the model assets, so app
 releases never have to re-upload them. See docs/releasing.md."

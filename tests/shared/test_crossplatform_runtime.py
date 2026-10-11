@@ -370,3 +370,12 @@ class TestDataDirSelection:
         assert stats.stats_path() == target
         stats.record_session_start()
         assert target.exists()
+
+
+class TestQuantizeDynamicDefaults:
+    def test_default_is_off_on_cpu(self, monkeypatch):
+        tc = _import_tc()
+        monkeypatch.delenv("VT_INT8_DYNAMIC", raising=False)
+        fake_model = object()
+        assert tc._maybe_quantize_dynamic(fake_model, device="cpu") is fake_model
+
