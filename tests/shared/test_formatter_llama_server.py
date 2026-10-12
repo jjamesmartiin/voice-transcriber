@@ -153,6 +153,28 @@ def _write_fake_gguf(tmp_path: Path) -> str:
     return str(path)
 
 
+def _probe_raw(port: int, timeout: float = 2.0) -> str:
+    """What a raw GET /health on ``port`` actually returns, for failure reports.
+
+    Distinguishes "nothing is listening" from "something answered and our reader
+    misread it" - the difference between a stub that never started and a bug in
+    the transport, which a bare timeout message cannot tell you. Added after two
+    CI rounds of an unreadable `never became healthy` on macOS.
+    """
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout) as sock:
+            sock.sendall(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+            data = b""
+            while len(data) < 512:
+                chunk = sock.recv(512)
+                if not chunk:
+                    break
+                data += chunk
+        return data.decode("utf-8", "replace")[:200]
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
+
+
 def _start_stub(tmp_path: Path, **env) -> tuple[subprocess.Popen, str]:
     """Run the stub directly, for attach-mode tests. Caller must terminate."""
     port = llama_server._free_port()
@@ -181,7 +203,8 @@ def _start_stub(tmp_path: Path, **env) -> tuple[subprocess.Popen, str]:
     proc.kill()
     raise RuntimeError(
         f"stub server never became healthy on port {port}; "
-        f"its stderr was {log.read_text(errors='replace')[-400:]!r}")
+        f"alive={proc.poll() is None}, raw GET said {_probe_raw(port)!r}, "
+        f"its stderr was {log.read_text(errors='replace')[-300:]!r}")
 
 
 #: The real implementation, captured before the autouse `_isolate` fixture stubs
@@ -1054,6 +1077,18 @@ def test_a_port_someone_else_holds_is_skipped(monkeypatch):
         held.close()
 
 
+#: Winsock's SO_REUSEADDR lets a second socket bind an address another socket is
+#: already listening on - the very thing SO_EXCLUSIVEADDRUSE exists to prevent -
+#: and both `http.server` and cpp-httplib set it. So on Windows the premise below
+#: (a squatter that cannot coexist) is simply false: the child binds alongside it,
+#: stays alive, and the settle check has nothing to detect. See docs/TODO.md.
+NO_UNSHAREABLE_SQUATTER = sys.platform == "win32"
+
+
+@pytest.mark.skipif(
+    NO_UNSHAREABLE_SQUATTER,
+    reason="SO_REUSEADDR on Windows lets the child share a squatted port",
+)
 def test_a_squatter_that_cannot_share_the_port_is_not_trusted(stub_env, monkeypatch):
     """The settle check, and the *only* squatter it defeats.
 

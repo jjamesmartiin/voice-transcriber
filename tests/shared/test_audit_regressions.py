@@ -451,6 +451,11 @@ class TestConfigResolutionIsolation:
         ``modeling_*.py`` dropped next to the directory the user launches from was
         executed as that user - remote code with no trust boundary at all.
         """
+        # `tests/shared` also runs in the pip-based Windows and macOS CI jobs,
+        # which are deliberately model-free - no torch. Skip rather than fail the
+        # whole file: the CWD-trust fix still gets checked on Linux, and this is
+        # the same guard style `test_devshell_toolchain_pins` uses.
+        pytest.importorskip("torch")
         from voice_transcriber import transcribe_cohere
 
         work_dir = tmp_path / "foreign"

@@ -754,8 +754,13 @@ def _ensure_server(model: str | None = None) -> str:
         _terminate()
         proc.kill()
         _state["spawn_failed_at"] = time.monotonic()
+        # Include what the child last said. This message is the *only* evidence on
+        # a platform we cannot run (it cost two CI rounds on macOS to learn that
+        # nothing was being reported here).
+        tail = "\n".join(_stderr_tail)[-400:]
         raise BackendUnavailable(
-            f"llama-server did not become healthy within {SPAWN_TIMEOUT_S:.0f}s")
+            f"llama-server did not become healthy within {SPAWN_TIMEOUT_S:.0f}s; "
+            f"its last output was {tail!r}")
 
 
 def warm() -> None:
