@@ -10,12 +10,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 from pathlib import Path
 import sys
+import tempfile
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import console_text
 from voice_transcriber import model_download
+
+logger = logging.getLogger(__name__)
 
 COMMON_CANDIDATE_PATHS = [
     Path("config/dictionary.yaml"),
@@ -62,7 +68,7 @@ def get_common_dictionary_path() -> Path:
                 return p.resolve()
 
     dest = base / "dictionary.yaml"
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     return dest
 
 
@@ -84,7 +90,7 @@ def get_local_dictionary_path(create: bool = False) -> Path:
 
     dest = base / "dictionary.local.yaml"
     if create:
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     return dest
 
 
@@ -92,7 +98,7 @@ def get_dictionary_path(target_path: Optional[str | Path] = None, local: bool = 
     """Return the active dictionary file path, creating parent dirs if needed."""
     if target_path:
         p = Path(target_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
+        p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         return p
 
     if local:
@@ -107,28 +113,97 @@ def get_dictionary_path(target_path: Optional[str | Path] = None, local: bool = 
     return get_common_dictionary_path()
 
 
+def _backup_corrupt_dictionary(path: Path, problem: str) -> None:
+    """Move an unparseable dictionary aside and report where it went.
+
+    The runtime post-processor silently ignores a dictionary it cannot parse, so
+    without this a corrupt personal dictionary makes every CLI ``add``/``remove``
+    raise while the app looks healthy. The original bytes are kept for repair.
+    """
+    backup = path.with_name(f"{path.name}.corrupt-{int(time.time())}")
+    try:
+        os.replace(path, backup)
+    except OSError as e:
+        logger.error("⚠️  %s is unreadable (%s) and could not be moved aside: %s", path, problem, e)
+        return
+    logger.error(
+        "⚠️  %s is unreadable (%s); it was preserved at %s and this operation "
+        "starts from an empty dictionary.",
+        path, problem, backup,
+    )
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    """Write *text* to *path* atomically and owner-only.
+
+    Same-directory temp + ``os.replace`` (the ``stats.py`` pattern) so a crash or
+    a concurrent reader never sees a half-written dictionary, and ``fsync``
+    before the rename so the bytes are on disk rather than only in page cache.
+    ``mkstemp`` creates the temp 0600; the destination directory is created 0700.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f"{path.name}.tmp{os.getpid()}.")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def _load_raw_file(path: Optional[str | Path] = None) -> Dict[str, Any]:
-    """Load the raw dictionary file as a parsed dictionary."""
+    """Load the raw dictionary file as a parsed dictionary.
+
+    A file that cannot be parsed is moved to ``<name>.corrupt-<ts>`` and read as
+    empty, so one bad file cannot make every later :func:`add_entry` /
+    :func:`remove_entry` raise, and the user's bytes are never silently lost.
+    """
     dict_path = get_dictionary_path(path)
     if not dict_path.exists():
         return {}
 
-    content = dict_path.read_text(encoding="utf-8")
+    try:
+        content = dict_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        _backup_corrupt_dictionary(dict_path, f"{type(e).__name__}: {e}")
+        return {}
     if not content.strip():
         return {}
 
-    data = None
     if dict_path.suffix in (".yaml", ".yml"):
         try:
             import yaml
-            data = yaml.safe_load(content)
         except ImportError:
-            pass
+            yaml = None
+        if yaml is not None:
+            try:
+                data = yaml.safe_load(content)
+            except Exception as e:
+                _backup_corrupt_dictionary(dict_path, f"{type(e).__name__}: {e}")
+                return {}
+            return data if isinstance(data, dict) else {}
 
-    if data is None:
+    try:
+        data = json.loads(content)
+    except Exception as json_error:
+        # The writer emits YAML whatever the extension (`_format_yaml` is used for
+        # `.json` paths too), so a `.json` dictionary in the wild holds YAML. Try
+        # that before declaring the file corrupt — otherwise every save/read cycle
+        # moves it aside as damaged and the dictionary never loads at all.
+        data = None
         try:
-            data = json.loads(content)
-        except Exception:
+            import yaml
+            data = yaml.safe_load(content)
+        except Exception as yaml_error:
+            _backup_corrupt_dictionary(
+                dict_path, f"not JSON ({json_error}); not YAML ({yaml_error})")
             return {}
 
     return data if isinstance(data, dict) else {}
@@ -263,11 +338,10 @@ def save_dictionary(mapping: Dict[str, str], path: Optional[str | Path] = None, 
     else:
         dict_path = get_dictionary_path()
 
-    dict_path.parent.mkdir(parents=True, exist_ok=True)
     rules = load_contextual_rules(dict_path)
     is_local = "local" in dict_path.name or "user" in dict_path.name
     yaml_text = _format_yaml(mapping, rules, is_local=is_local)
-    dict_path.write_text(yaml_text, encoding="utf-8")
+    _write_text_atomic(dict_path, yaml_text)
 
     try:
         # ``src/`` — the shim directory — rather than this package's own
@@ -294,11 +368,10 @@ def save_contextual_rules(rules: List[Dict[str, Any]], path: Optional[str | Path
     else:
         dict_path = get_dictionary_path()
 
-    dict_path.parent.mkdir(parents=True, exist_ok=True)
     mapping = load_dictionary(dict_path)
     is_local = "local" in dict_path.name or "user" in dict_path.name
     yaml_text = _format_yaml(mapping, rules, is_local=is_local)
-    dict_path.write_text(yaml_text, encoding="utf-8")
+    _write_text_atomic(dict_path, yaml_text)
 
     try:
         # ``src/`` — the shim directory — rather than this package's own

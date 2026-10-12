@@ -85,6 +85,16 @@ EXPECTED_ORDER = ["A", "B", "A", "B"]
 
 _RECORDED_ENV_VARS = ("PYTHONPATH", "VT_DIARIZATION_MODELS", "VT_MODEL_DIR")
 
+#: Path values are redacted to their basenames before being recorded, so a
+#: scoring run cannot reintroduce the contributor's ``/home/<user>/...`` layout
+#: into the committed JSON.
+_PATH_LIKE_ENV_VARS = ("PYTHONPATH", "VT_DIARIZATION_MODELS", "VT_MODEL_DIR")
+
+#: Stand-in used when a path cannot be made relative to the repository. Windows
+#: ``os.path.relpath`` raises across drives, and returning the absolute path
+#: there would silently defeat the redaction (the exact case this fixes).
+_REDACTED_PATH = "<redacted-path>"
+
 
 # ---------------------------------------------------------------------------
 # Pure-Python DER primitives (no numpy / sherpa / network at import time)
@@ -414,13 +424,30 @@ def _safe_relpath(path, start=REPO_ROOT) -> str:
     try:
         return os.path.relpath(path, start)
     except (ValueError, TypeError):
-        return str(path)
+        # relpath raises on Windows when ``path`` is on another drive; an
+        # absolute fallback would leak the machine layout, so redact instead.
+        return _REDACTED_PATH
+
+
+def _redact_env_value(value: str) -> str:
+    """Reduce a path-like env value to basenames, keeping the separator."""
+    return os.pathsep.join(
+        os.path.basename(part) or part for part in value.split(os.pathsep)
+    )
+
+
+def recorded_env() -> dict:
+    """The recorded env vars, with path-like values reduced to basenames."""
+    return {
+        key: _redact_env_value(os.environ[key]) if key in _PATH_LIKE_ENV_VARS
+        else os.environ[key]
+        for key in _RECORDED_ENV_VARS if key in os.environ
+    }
 
 
 def _reproduce_command() -> str:
     env_prefix = " ".join(
-        f"{key}={shlex.quote(os.environ[key])}"
-        for key in _RECORDED_ENV_VARS if key in os.environ
+        f"{key}={shlex.quote(value)}" for key, value in recorded_env().items()
     )
     argv = ["python", _safe_relpath(__file__, REPO_ROOT)] + sys.argv[1:]
     return f"{env_prefix} {' '.join(shlex.quote(a) for a in argv)}".strip()
@@ -825,7 +852,7 @@ def main() -> int:
                 "git_dirty": dirty,
                 "invocation": ["python", _safe_relpath(__file__, REPO_ROOT)]
                               + sys.argv[1:],
-                "env": {k: os.environ[k] for k in _RECORDED_ENV_VARS if k in os.environ},
+                "env": recorded_env(),
                 "reproduce": _reproduce_command(),
             },
             "results": results,

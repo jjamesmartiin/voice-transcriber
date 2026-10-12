@@ -260,6 +260,27 @@ replying, so `stop` reports `PROCESSING`/`READY` rather than a stale `RECORDING`
 Transcript text is never returned by `stop` itself — output goes to the clipboard
 or is typed as usual. Read it from `last_transcription` on `status`/`wait`.
 
+### Meeting capture
+
+| Verb | Value | Notes |
+| :--- | :--- | :--- |
+| `meeting` | `on`, `off` (omit to toggle) | Enables long, non-injecting meeting capture |
+| `meeting-start` | — | Starts a capture; requires meeting mode on, and does not inject text. Returns `meeting_state`, `meeting_elapsed_s`, `meeting_progress` |
+| `meeting-stop` | — | Stops the capture and reads its audio back for the batch pipeline |
+| `meeting-spill` | `minutes` (1–240) | In-memory spill threshold |
+| `meeting-format` | `text`, `json`, `markdown` (omit to cycle) | Transcript form |
+| `meeting-output` | `folder` | Where transcripts are written |
+
+`meeting-start` is deliberately unbounded by default — a multi-hour workshop is
+what the mode is for, and a default ceiling would silently truncate exactly that
+case. Set `VT_MEETING_MAX_SECONDS` (seconds, ≥60) to have a control-API-started
+capture stopped at a deadline; the reason is logged, the timer is cancelled by
+`meeting-stop`, and it can never stop a later meeting. Unset is unchanged: no
+timer, no log line. The ceiling covers control-API starts only, not the TUI's own.
+
+`speakers` and `hotkey` values are capped at 4096 characters. An over-long value
+is rejected with the limit in the message — never truncated.
+
 ### Devices
 
 | Verb | Value | Notes |

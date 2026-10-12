@@ -9,6 +9,7 @@ local split bundle on disk (`model-bundle/` next to the exe, or
 ``VT_MODEL_SOURCE_DIR``), which is the airgapped-friendly build.
 """
 import argparse
+import hashlib
 import os
 import platform as _stdlib_platform
 import sys
@@ -62,6 +63,80 @@ MODELS_DIR = BUILD_DIR / "models"
 
 # Local model location (installed from the GitHub release assets on first run)
 LOCAL_COHERE = PROJECT_ROOT / "models" / "cohere"
+
+# --- Pinned llama-server.exe resolution (build-time only) ---------------------
+#
+# The bundled formatter binary must come from an explicit, pinned source. The
+# *runtime* may legitimately fall back to PATH
+# (``formatters/llama_server.py::_binary``); the build must not, because whatever
+# the build machine's PATH -- and on Windows an empty or ``.`` PATH component
+# means the CWD -- answers would then be shipped inside the release. See
+# docs/audit-2026-10-11.md 3.5 and docs/TODO.md (uncontrolled search path,
+# CWE-427).
+ENV_LLAMA_SERVER_EXE = "VT_LLAMA_SERVER_EXE"
+ENV_LLAMA_SERVER_SHA256 = "VT_LLAMA_SERVER_SHA256"
+PINNED_LLAMA_SERVER = PROJECT_ROOT / "llama-server.exe"
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def resolve_llama_server():
+    """Return the pinned ``llama-server.exe`` to bundle, or ``None`` if absent.
+
+    NEVER consults ``PATH``. An explicit ``VT_LLAMA_SERVER_EXE`` that is set but
+    unusable (missing, not a regular file, not executable) is a hard error: a
+    wrong instruction, not an absence. When neither the override nor the fixed
+    repository path exists, warn loudly and bundle nothing.
+    """
+    override = (os.environ.get(ENV_LLAMA_SERVER_EXE) or "").strip()
+    if override:
+        candidate = Path(override)
+        if not candidate.is_file():
+            raise SystemExit(
+                f"ERROR: {ENV_LLAMA_SERVER_EXE}={override!r} is set but is not a "
+                f"regular file. Point it at a real llama-server.exe or unset it.")
+        if not os.access(candidate, os.X_OK):
+            raise SystemExit(
+                f"ERROR: {ENV_LLAMA_SERVER_EXE}={override!r} is not executable.")
+        return candidate
+
+    if PINNED_LLAMA_SERVER.is_file():
+        return PINNED_LLAMA_SERVER
+
+    message = (
+        f"WARNING: no pinned llama-server.exe to bundle. Checked "
+        f"{ENV_LLAMA_SERVER_EXE} (unset) and {PINNED_LLAMA_SERVER} (missing). "
+        f"The Windows bundle will ship without llama-server.exe; set "
+        f"{ENV_LLAMA_SERVER_EXE} to bundle one.")
+    print(message)
+    if os.environ.get("GITHUB_ACTIONS"):
+        print(f"::warning::{message}")
+    return None
+
+
+def verify_llama_server_sha256(path):
+    """Verify the pinned server against ``VT_LLAMA_SERVER_SHA256`` when supplied.
+
+    The release workflow publishes no digest for the bundled server today, so
+    nothing is pinned by default; a supplied digest that does not match is a
+    hard build failure rather than a silent overwrite.
+    """
+    expected = (os.environ.get(ENV_LLAMA_SERVER_SHA256) or "").strip()
+    if not expected:
+        return
+    actual = _sha256(path)
+    if actual.lower() != expected.lower():
+        raise SystemExit(
+            f"ERROR: SHA-256 mismatch for {path}: expected {expected}, got "
+            f"{actual}. Refusing to bundle an unverified binary.")
+    print(f"llama-server.exe SHA-256 verified: {actual}")
+
 
 def ensure_cached_models():
     """Ensure the Cohere model is present locally before building"""
@@ -237,9 +312,9 @@ def build_exe():
         print("BUILD SUCCESSFUL!")
         print("=" * 60)
         dist_dir = DIST_DIR / "VoiceTranscriber"
-        llama_exe = shutil.which("llama-server.exe") or (PROJECT_ROOT / "llama-server.exe")
-        if isinstance(llama_exe, Path) and not llama_exe.exists():
-            llama_exe = None
+        llama_exe = resolve_llama_server()
+        if llama_exe:
+            verify_llama_server_sha256(llama_exe)
         if llama_exe and dist_dir.exists():
             dest_llama = dist_dir / "llama-server.exe"
             print(f"Bundling llama-server.exe: {llama_exe} -> {dest_llama}")

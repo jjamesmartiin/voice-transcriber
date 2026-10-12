@@ -51,6 +51,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import secrets
 import socket
@@ -96,6 +97,24 @@ MAX_CONCURRENT_CONNECTIONS = 32
 #: transcription (a 90-minute meeting finishes well inside it) while still
 #: bounding a hostile or fat-fingered request.
 MAX_WAIT_SECONDS = 3600.0
+
+#: Verbs whose ``value`` is stored or parsed verbatim: the speakers map and the
+#: hotkey command. Bounded so a same-user client cannot make the engine handle
+#: an arbitrarily large string. Well above any real speaker list or key chord,
+#: so legitimate use never meets it; over-long input is rejected loudly, never
+#: truncated. The 1 MiB ``MAX_REQUEST_BYTES`` cap already bounds the read.
+MAX_VALUE_CHARS = 4096
+_VERBATIM_VALUE_VERBS = frozenset({"speakers", "hotkey"})
+
+#: Opt-in ceiling on a meeting capture, in seconds. UNSET by default, which is
+#: today's behaviour exactly (no timer, no log line): a multi-hour workshop is
+#: exactly what meeting mode exists for, so a default cap would harm the
+#: legitimate case more than the accident it prevents. When set, the control API
+#: stops the capture at the deadline and says in the log why. See docs/TODO.md.
+ENV_MEETING_MAX_SECONDS = "VT_MEETING_MAX_SECONDS"
+
+#: The smallest ceiling that is not obviously a typo.
+MIN_MEETING_MAX_SECONDS = 60.0
 
 #: Counting-down slots, one per live connection thread (see ``_serve``).
 _CONNECTION_SLOTS = threading.Semaphore(MAX_CONCURRENT_CONNECTIONS)
@@ -557,6 +576,32 @@ def _bound_wait(request: dict) -> dict:
     return request
 
 
+def _meeting_max_seconds() -> float | None:
+    """The opt-in meeting ceiling in seconds, or ``None`` when it is unset.
+
+    Raises :class:`ValueError` for a set-but-unusable value so ``meeting-start``
+    is refused loudly instead of silently running without the cap the user asked
+    for. ``nan``/``inf`` are rejected too: a non-finite timer would blow up when
+    scheduled, which is not a limit anyone meant to set.
+    """
+    raw = (os.environ.get(ENV_MEETING_MAX_SECONDS) or "").strip()
+    if not raw:
+        return None
+    try:
+        seconds = float(raw)
+    except ValueError:
+        raise ValueError(
+            f"{ENV_MEETING_MAX_SECONDS} must be a number of seconds "
+            f"(at least {MIN_MEETING_MAX_SECONDS:.0f}); got {raw!r}"
+        ) from None
+    if not math.isfinite(seconds) or seconds < MIN_MEETING_MAX_SECONDS:
+        raise ValueError(
+            f"{ENV_MEETING_MAX_SECONDS} must be at least "
+            f"{MIN_MEETING_MAX_SECONDS:.0f} seconds; got {raw!r}"
+        )
+    return seconds
+
+
 class ControlServer:
     """Serve control requests by handing them to ``target.handle_control``.
 
@@ -592,6 +637,10 @@ class ControlServer:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._started = False
+        #: Opt-in meeting ceiling state (see ``VT_MEETING_MAX_SECONDS``).
+        self._meeting_timer: threading.Timer | None = None
+        self._meeting_generation = 0
+        self._meeting_limit: float | None = None
 
     @property
     def address(self) -> str:
@@ -700,6 +749,7 @@ class ControlServer:
     def stop(self) -> None:
         """Stop serving and remove the socket."""
         self._stop.set()
+        self._cancel_meeting_watchdog()
         self._started = False
         if self._server is not None:
             try:
@@ -718,6 +768,65 @@ class ControlServer:
         if self.transport == TCP:
             _remove_endpoint_file(self.endpoint_file)
             self.port = None
+
+    # -- the opt-in meeting ceiling ---------------------------------------
+    def _arm_meeting_watchdog(self) -> None:
+        """Start the ``VT_MEETING_MAX_SECONDS`` timer for a fresh meeting.
+
+        Unset means nothing happens here at all, so the shipped behaviour is
+        unchanged. The generation counter is what keeps a timer belonging to a
+        previous meeting - cancelled, or merely slow to be scheduled - from
+        stopping the next one.
+        """
+        try:
+            seconds = _meeting_max_seconds()
+        except ValueError:
+            # ``dispatch`` already refused the request before the handler ran.
+            return
+        if seconds is None:
+            return
+        # A second successful start (the engine normally rejects one) must not
+        # leave the previous timer running unwatched.
+        self._cancel_meeting_watchdog()
+        self._meeting_generation += 1
+        self._meeting_limit = seconds
+        timer = threading.Timer(
+            seconds, self._meeting_timeout, args=(self._meeting_generation,)
+        )
+        timer.daemon = True
+        self._meeting_timer = timer
+        timer.start()
+
+    def _cancel_meeting_watchdog(self) -> None:
+        """Cancel a pending ceiling timer. Safe to call when there is none."""
+        timer = self._meeting_timer
+        self._meeting_timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def _meeting_timeout(self, generation: int) -> None:
+        """Stop a meeting that outran the opt-in ceiling.
+
+        Refuses to touch a later meeting: a ``generation`` that is no longer
+        current means this timer belonged to one that already ended, so it stays
+        out of the way. Says in the log why it acted, so the stop is never
+        silent.
+        """
+        if generation != self._meeting_generation:
+            return
+        self._meeting_timer = None
+        logger.warning(
+            "meeting capture reached the %s cap (%s seconds); stopping it so a "
+            "forgotten capture cannot fill the disk. Raise or unset %s to remove "
+            "the cap.",
+            ENV_MEETING_MAX_SECONDS, self._meeting_limit, ENV_MEETING_MAX_SECONDS,
+        )
+        try:
+            self.target.handle_control("meeting-stop", {"cmd": "meeting-stop"})
+        except Exception:
+            logger.warning(
+                "could not stop the over-long meeting capture", exc_info=True
+            )
 
     # -- serving -----------------------------------------------------------
     def _serve(self) -> None:
@@ -811,17 +920,46 @@ class ControlServer:
         if not cmd:
             return {"ok": False, "error": "missing 'cmd'"}
 
-        if normalize_verb(cmd) == "wait":
+        verb = normalize_verb(cmd)
+        if verb == "wait":
             request = _bound_wait(request)
+        elif verb in _VERBATIM_VALUE_VERBS:
+            raw = request.get("value")
+            length = len(str(raw)) if raw is not None else 0
+            if length > MAX_VALUE_CHARS:
+                return {
+                    "ok": False,
+                    "cmd": cmd,
+                    "error": (
+                        f"{verb} value is {length} characters, over the "
+                        f"{MAX_VALUE_CHARS}-character control-API limit"
+                    ),
+                }
+        elif verb == "meeting-start":
+            # Refuse a ceiling we cannot honour before starting the capture, so a
+            # typo does not silently run unbounded (or unguarded).
+            try:
+                _meeting_max_seconds()
+            except ValueError as exc:
+                return {"ok": False, "cmd": cmd, "error": str(exc)}
 
         handler = getattr(self.target, "handle_control", None)
         if not callable(handler):
             return {"ok": False, "error": "engine exposes no control handler"}
 
         try:
-            return handler(cmd, request)
+            reply = handler(cmd, request)
         except Exception as exc:
             return {"ok": False, "cmd": cmd, "error": f"{type(exc).__name__}: {exc}"}
+
+        # Move the ceiling only around a *successful* lifecycle change, so a
+        # rejected request never shifts the watchdog's aim at the next meeting.
+        if isinstance(reply, dict) and reply.get("ok"):
+            if verb == "meeting-start":
+                self._arm_meeting_watchdog()
+            elif verb == "meeting-stop":
+                self._cancel_meeting_watchdog()
+        return reply
 
 
 def send_command(

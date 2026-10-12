@@ -62,6 +62,40 @@ _CONFIG_SOURCE = {"path": "", "loaded": False, "error": ""}
 # from the semantic keys.
 _RECORDED_ENV_VARS = ("PYTHONPATH", "VT_INT8_DYNAMIC", "VT_MODEL_DIR", "VT_PLATFORM")
 
+#: Path values are redacted to their basenames before being recorded, so a
+#: scoring run cannot reintroduce the contributor's ``/home/<user>/...`` layout
+#: into the committed JSON. ``3ee6f84`` sanitized the artifacts by hand, which
+#: was the bug: the generator itself was left leaking absolute paths.
+_PATH_LIKE_ENV_VARS = ("PYTHONPATH", "VT_MODEL_DIR")
+
+#: Stand-in used when a path cannot be made relative to the repository. Windows
+#: ``os.path.relpath`` raises across drives, and returning the absolute path
+#: there would silently defeat the redaction.
+_REDACTED_PATH = "<redacted-path>"
+
+
+def _safe_relpath(path, start=REPO_ROOT):
+    try:
+        return os.path.relpath(path, start)
+    except (ValueError, TypeError):
+        return _REDACTED_PATH
+
+
+def _redact_env_value(value):
+    """Reduce a path-like env value to basenames, keeping the separator."""
+    return os.pathsep.join(
+        os.path.basename(part) or part for part in value.split(os.pathsep)
+    )
+
+
+def recorded_env():
+    """The recorded env vars, with path-like values reduced to basenames."""
+    return {
+        key: _redact_env_value(os.environ[key]) if key in _PATH_LIKE_ENV_VARS
+        else os.environ[key]
+        for key in _RECORDED_ENV_VARS if key in os.environ
+    }
+
 
 def _git_revision():
     """Return (rev, dirty) for the source tree under test, or ("", False)."""
@@ -82,9 +116,9 @@ def _git_revision():
 def _reproduce_command() -> str:
     """A single shell line that reruns this exact invocation, env included."""
     env_prefix = " ".join(
-        f"{k}={shlex.quote(os.environ[k])}" for k in _RECORDED_ENV_VARS if k in os.environ
+        f"{k}={shlex.quote(v)}" for k, v in recorded_env().items()
     )
-    argv = ["python", os.path.relpath(__file__, REPO_ROOT)] + sys.argv[1:]
+    argv = ["python", _safe_relpath(__file__, REPO_ROOT)] + sys.argv[1:]
     cmd = " ".join(shlex.quote(a) for a in argv)
     return f"{env_prefix} {cmd}".strip()
 
@@ -204,7 +238,7 @@ def char_edits(ref: str, hyp: str, normalize_numbers: bool = True) -> tuple[int,
 # ---------------------------------------------------------------------------
 def load_app_config() -> dict:
     path = os.path.join(REPO_ROOT, "config", "config.yaml")
-    _CONFIG_SOURCE.update(path=path, loaded=False, error="")
+    _CONFIG_SOURCE.update(path=_safe_relpath(path), loaded=False, error="")
     try:
         import yaml
         with open(path) as f:
@@ -212,7 +246,9 @@ def load_app_config() -> dict:
         _CONFIG_SOURCE["loaded"] = True
         return cfg
     except Exception as e:
-        _CONFIG_SOURCE["error"] = str(e)
+        # The exception text embeds the absolute path; redact it too, not just
+        # the ``path`` field, or the recorded error re-leaks the layout.
+        _CONFIG_SOURCE["error"] = str(e).replace(path, _safe_relpath(path))
         eprint(f"[score] could not read {path}: {e}")
         eprint("[score] falling back to built-in defaults; record the flags you passed")
         return {}
@@ -478,9 +514,9 @@ def main():
                 "git_rev": _rev,
                 "git_dirty": _dirty,
                 "config_source": dict(_CONFIG_SOURCE),
-                "manifest": os.path.relpath(args.manifest, REPO_ROOT),
-                "invocation": ["python", os.path.relpath(__file__, REPO_ROOT)] + sys.argv[1:],
-                "env": {k: os.environ[k] for k in _RECORDED_ENV_VARS if k in os.environ},
+                "manifest": _safe_relpath(args.manifest, REPO_ROOT),
+                "invocation": ["python", _safe_relpath(__file__, REPO_ROOT)] + sys.argv[1:],
+                "env": recorded_env(),
                 "reproduce": _reproduce_command(),
                 "overall_wer": overall_wer,
                 "overall_clean_wer": overall_clean_wer,

@@ -10,12 +10,14 @@ type`` and so on. These tests pin the parts that must not drift:
 * that every documented verb is either handled or explicitly rejected.
 """
 import json
+import logging
 import os
 import shutil
 import socket
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -145,6 +147,108 @@ class TestDispatch:
         _router(engine).dispatch(json.dumps({"cmd": "wait", "value": "1000000"}))
         _, request = engine.calls[0]
         assert float(request["value"]) <= control.MAX_WAIT_SECONDS
+
+    def test_an_overlong_speakers_value_is_rejected_not_truncated(self):
+        """The speakers map is stored verbatim; cap it at the control layer."""
+        engine = _FakeEngine()
+        reply = _router(engine).dispatch(
+            json.dumps({"cmd": "speakers", "value": "x" * 100_000})
+        )
+        assert reply["ok"] is False
+        assert "limit" in reply["error"].lower()
+        assert engine.calls == [], "an over-long value must not reach the engine"
+
+    def test_an_overlong_hotkey_value_is_rejected(self):
+        engine = _FakeEngine()
+        reply = _router(engine).dispatch(
+            json.dumps({"cmd": "hotkey", "value": "add " + "x" * 100_000})
+        )
+        assert reply["ok"] is False
+        assert engine.calls == []
+
+    def test_a_normal_speakers_value_still_reaches_the_handler(self):
+        """The new cap must not touch an ordinary speaker list."""
+        engine = _FakeEngine()
+        _router(engine).dispatch(
+            json.dumps({"cmd": "speakers", "value": "Priya, Sam"})
+        )
+        assert engine.calls[0][1]["value"] == "Priya, Sam"
+
+
+# ---------------------------------------------------------------------------
+# The opt-in meeting ceiling (VT_MEETING_MAX_SECONDS)
+# ---------------------------------------------------------------------------
+# Unset is the shipped behaviour: no timer, no log line, a meeting runs until
+# stopped. Set, it bounds a forgotten capture without changing the default.
+def _wait_for(predicate, timeout: float = 2.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+class TestMeetingCeiling:
+    def test_the_ceiling_stops_an_overlong_meeting(self, monkeypatch, caplog):
+        monkeypatch.setattr(control, "MIN_MEETING_MAX_SECONDS", 0.0, raising=False)
+        monkeypatch.setenv("VT_MEETING_MAX_SECONDS", "0.05")
+        engine = _FakeEngine()
+        with caplog.at_level(logging.WARNING):
+            _router(engine).dispatch("meeting-start")
+            stopped = _wait_for(
+                lambda: any(c[0] == "meeting-stop" for c in engine.calls)
+            )
+        assert stopped, engine.calls
+        assert "VT_MEETING_MAX_SECONDS" in caplog.text
+
+    def test_a_stale_timer_cannot_stop_a_later_meeting(self, monkeypatch):
+        """start -> stop -> start: the first meeting's deadline must not touch
+        the second. This is why the timer carries a generation, not just a
+        cancel.
+        """
+        monkeypatch.setattr(control, "MIN_MEETING_MAX_SECONDS", 0.0, raising=False)
+        monkeypatch.setenv("VT_MEETING_MAX_SECONDS", "3600")
+        engine = _FakeEngine()
+        server = _router(engine)
+        server.dispatch("meeting-start")     # generation 1, timer armed
+        server.dispatch("meeting-stop")      # timer cancelled
+        server.dispatch("meeting-start")     # generation 2
+        engine.calls.clear()
+        # The cancelled timer can still win the race; run its callback with the
+        # generation it was armed for, as if the deadline had passed.
+        server._meeting_timeout(1)
+        assert all(cmd != "meeting-stop" for cmd, _ in engine.calls), engine.calls
+        server._cancel_meeting_watchdog()
+
+    @pytest.mark.parametrize("bad", ["nonsense", "30", "-5", "nan", "inf"])
+    def test_a_nonsense_ceiling_is_rejected_loudly(self, monkeypatch, bad):
+        monkeypatch.setenv("VT_MEETING_MAX_SECONDS", bad)
+        engine = _FakeEngine()
+        reply = _router(engine).dispatch("meeting-start")
+        assert reply["ok"] is False
+        assert "VT_MEETING_MAX_SECONDS" in reply["error"]
+        assert engine.calls == []
+
+    def test_unset_changes_nothing(self, monkeypatch, caplog):
+        """Unset must be inert: no timer armed, no new log output."""
+        monkeypatch.delenv("VT_MEETING_MAX_SECONDS", raising=False)
+        engine = _FakeEngine()
+        server = _router(engine)
+        with caplog.at_level(logging.WARNING):
+            server.dispatch("meeting-start")
+            assert server._meeting_timer is None
+        assert "VT_MEETING_MAX_SECONDS" not in caplog.text
+
+    def test_a_sane_ceiling_accepts_the_start(self, monkeypatch):
+        monkeypatch.setenv("VT_MEETING_MAX_SECONDS", "3600")
+        engine = _FakeEngine()
+        server = _router(engine)
+        try:
+            assert server.dispatch("meeting-start")["ok"] is True
+            assert server._meeting_timer is not None
+        finally:
+            server._cancel_meeting_watchdog()
 
 
 # ---------------------------------------------------------------------------

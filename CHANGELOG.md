@@ -14,8 +14,36 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- **A meeting capture can be given an opt-in ceiling, `VT_MEETING_MAX_SECONDS`**
+  (seconds, ≥60). Unset is unchanged: no timer, no log line. When set, a
+  control-API-started meeting is stopped at the deadline with the reason logged,
+  cancelled by a normal `meeting-stop`, and generation-guarded so a timer from one
+  meeting can never stop the next.
+- **`speakers` and `hotkey` values are capped at 4096 characters** by the control
+  API, rejected with the limit in the message rather than truncated, so a same-user
+  client cannot make the engine store or parse a ~1 MiB string.
+
 ### Fixed
 
+- **Config and dictionary writes are atomic, durable, backed up and owner-only.**
+  Both writers use a same-directory `mkstemp` temp (0600, pid+random), `fsync`
+  before `os.replace`, and create their directories 0700 — so a crash or a second
+  engine instance can no longer truncate the user's config or race the old fixed
+  `config.yaml.tmp`. An unparseable dictionary is preserved as `.corrupt-*` and
+  reported instead of making every later CLI `add`/`remove` raise, and a zero-byte
+  config is treated as damaged rather than silently overwritten with defaults.
+- **The Windows build no longer takes `llama-server.exe` from `PATH`.** The
+  artifact was decided by the build machine's environment — and on Windows an
+  empty or `.` `PATH` entry means the current directory — so it is now resolved
+  only from `VT_LLAMA_SERVER_EXE` or a fixed path, with `VT_LLAMA_SERVER_SHA256`
+  verified when supplied, a hard failure on a set-but-unusable override, and a
+  loud warning instead of a silent skip when nothing is pinned.
+- **The eval scorers redact machine paths in the generator**, rather than the
+  committed JSON/HTML being hand-edited, and `_safe_relpath`'s fallback is a
+  placeholder instead of the absolute path it used to return — which was exactly
+  the Windows cross-drive case where the redaction silently failed.
 - **The first dictation after a cold start is no longer silently unformatted.**
   The elapsed-time backstop in `formatter.format_text` counted the backend's
   startup — process spawn and weights load, seconds for a 462 MiB GGUF — against
@@ -42,6 +70,16 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 > pre-existing that it missed, and what is deliberately left open — is in
 > [`docs/audit-2026-10-11.md`](docs/audit-2026-10-11.md).
 
+- **The optional LLM polish pass can no longer POST your transcript to another
+  host by default.** `VT_VLLM_URL` was used as-is, so a copied config or a typo
+  aimed at a remote box sent the dictation there over the network — in the clear
+  for `http://`. It now refuses anything that is not `http(s)://` on this machine
+  unless `VT_VLLM_ALLOW_REMOTE=1` is set, decided without a resolver, and *before*
+  any connection (the `/v1/models` discovery probe included); the refusal names the
+  flag and the pipeline still falls back to the ASR text. Loopback needs no
+  configuration. A remote `https://` endpoint is allowed, because `urllib` speaks
+  TLS — unlike the formatter's hand-rolled transport, which stays `http://` only.
+  Pinned by `tests/shared/test_slm_loopback.py`.
 - **The optional LLM polish pass can no longer hand your transcript to a proxy.**
   `urllib.request` reads `http_proxy` / `HTTPS_PROXY` / macOS `_scproxy`, none of
   which can tell `localhost:8000` from the open internet, so on a machine with a

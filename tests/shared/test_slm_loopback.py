@@ -104,6 +104,8 @@ def slm(monkeypatch):
     # The pass backs off after a failure; a previous test must not silence this one.
     monkeypatch.setattr(post_processor, "_SLM_OFFLINE_STREAK", 0)
     monkeypatch.setattr(post_processor, "_SLM_LAST_OFFLINE_CHECK", 0.0)
+    # A remote opt-in from the environment must not leak into a loopback test.
+    monkeypatch.delenv(post_processor.ENV_ALLOW_REMOTE, raising=False)
 
     yield endpoint, proxy
     endpoint.close()
@@ -158,3 +160,82 @@ def test_model_discovery_queries_the_configured_endpoint(monkeypatch):
         assert json.loads(endpoint.bodies[0])["model"] == "actual-model"
     finally:
         endpoint.close()
+
+
+# ---------------------------------------------------------------------------
+# The remote-endpoint gate
+# ---------------------------------------------------------------------------
+# `VT_VLLM_URL` used to be used as-is, so pointing it at another machine POSTed
+# every transcript there (in the clear, for http://) with no opt-in. The
+# formatter refuses a non-loopback host unless `VT_FORMATTER_ALLOW_REMOTE=1`;
+# the SLM pass now mirrors that with `VT_VLLM_ALLOW_REMOTE`.
+class _NoNetwork:
+    """An opener that records attempts and refuses to touch the network."""
+
+    def __init__(self):
+        self.calls: list = []
+
+    def open(self, *args, **kwargs):
+        self.calls.append(args)
+        raise AssertionError("the SLM pass attempted a network connection")
+
+
+def _slm_enabled(monkeypatch):
+    monkeypatch.setenv("VT_ENABLE_SLM", "1")
+    monkeypatch.setenv("VT_SLM_MODEL", "test-model")     # skip the /v1/models probe
+    monkeypatch.setenv("VT_SLM_TIMEOUT", "5")
+    monkeypatch.delenv(post_processor.ENV_ALLOW_REMOTE, raising=False)
+    monkeypatch.setattr(post_processor, "_SLM_OFFLINE_STREAK", 0)
+    monkeypatch.setattr(post_processor, "_SLM_LAST_OFFLINE_CHECK", 0.0)
+
+
+def test_a_remote_url_is_refused_and_names_the_flag(monkeypatch, capsys):
+    """Without the opt-in, a non-loopback endpoint is refused before any I/O.
+
+    Regression: the transcript was POSTed to whatever host VT_VLLM_URL named,
+    with no loopback restriction and no TLS required.
+    """
+    opener = _NoNetwork()
+    monkeypatch.setattr(post_processor, "_VLLM_OPENER", opener)
+    monkeypatch.setattr(post_processor, "VLLM_API_URL",
+                        "http://example.invalid:8000/v1/chat/completions")
+    _slm_enabled(monkeypatch)
+
+    original = "um so buy milk actually"
+    assert post_processor.process_slm_llm_rewrite(original) == original
+    out = capsys.readouterr().out
+    assert post_processor.ENV_ALLOW_REMOTE in out, out
+    assert opener.calls == [], "a refused pass must not touch the network"
+
+
+def test_the_flag_allows_a_remote_endpoint(monkeypatch):
+    """The opt-in keeps an existing remote vLLM box working."""
+    _slm_enabled(monkeypatch)
+    monkeypatch.setenv(post_processor.ENV_ALLOW_REMOTE, "1")
+    assert post_processor._slm_endpoint(
+        "http://example.com:8000/v1/chat/completions")
+
+
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1:8000/v1/chat/completions",
+    "http://localhost:8000/v1/chat/completions",
+    "http://[::1]:8000/v1/chat/completions",
+    "https://127.0.0.1:8443/v1/chat/completions",
+])
+def test_loopback_endpoints_need_no_flag(monkeypatch, url):
+    monkeypatch.delenv(post_processor.ENV_ALLOW_REMOTE, raising=False)
+    assert post_processor._slm_endpoint(url)
+
+
+@pytest.mark.parametrize("url", [
+    "http://0.0.0.0:8000/v1/chat/completions",       # 'any', not loopback
+    "http://localhost.:8000/v1/chat/completions",    # trailing dot
+    "http://10.0.0.1:8000/v1/chat/completions",
+    "http://example.com:8000/v1/chat/completions",
+    "127.0.0.1:8000/v1/chat/completions",            # scheme-less
+    "file:///etc/hosts",                             # scheme we cannot POST to
+])
+def test_non_loopback_endpoints_are_refused(monkeypatch, url):
+    monkeypatch.delenv(post_processor.ENV_ALLOW_REMOTE, raising=False)
+    with pytest.raises(post_processor.SlmRemoteRefused):
+        post_processor._slm_endpoint(url)

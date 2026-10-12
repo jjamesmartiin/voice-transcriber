@@ -473,5 +473,107 @@ def test_vram_and_gpu_model_repairs():
     assert "ERAM" not in out
 
 
+def test_dictionary_write_is_atomic_owner_only_and_leaves_no_temp(tmp_path):
+    """A saved dictionary is owner-only, its directory is 0700, and the write is
+    a temp+rename that leaves nothing behind.
+
+    Regression: the save was a truncating ``write_text`` under the process umask
+    (so world-readable, 0644) with no temp file, so a crash mid-write left the
+    user's personal dictionary truncated or gone.
+    """
+    import stat as stat_mod
+
+    import dictionary
+
+    nested = tmp_path / "vt-data" / "config"
+    path = nested / "dictionary.local.yaml"
+
+    dictionary.save_dictionary({"pr": "PR"}, path)
+
+    # File modes are a POSIX concept: CPython reports fixed 0o666/0o444 on Windows.
+    if os.name != "nt":
+        assert stat_mod.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat_mod.S_IMODE(nested.stat().st_mode) == 0o700
+    assert list(nested.glob("*.tmp*")) == []
 
 
+def test_save_contextual_rules_is_atomic_and_owner_only(tmp_path):
+    """The contextual-rule writer shares the dictionary writer's guarantees."""
+    import stat as stat_mod
+
+    import dictionary
+
+    path = tmp_path / "cfg" / "dictionary.yaml"
+    dictionary.save_contextual_rules(
+        [{"target": "Gitea", "spoken": ["get tea"]}], path
+    )
+
+    if os.name != "nt":
+        assert stat_mod.S_IMODE(path.stat().st_mode) == 0o600
+    assert list((tmp_path / "cfg").glob("*.tmp*")) == []
+    assert dictionary.load_contextual_rules(path)[0]["target"] == "Gitea"
+
+
+def test_a_corrupt_dictionary_is_backed_up_and_add_still_works(tmp_path):
+    """One unparseable personal dictionary must not break every CLI add/remove.
+
+    Regression: ``_load_raw_file`` only caught ``ImportError`` around
+    ``yaml.safe_load``, so a ``YAMLError`` escaped and every later ``add`` /
+    ``remove`` raised until the file was hand-repaired. The runtime path
+    swallowed the same error, so the app looked healthy while the CLI was dead.
+    """
+    import dictionary
+
+    path = tmp_path / "dictionary.local.yaml"
+    corrupt = "dictionary:\n  broken: [unclosed\n"
+    path.write_text(corrupt)
+
+    assert dictionary.add_entry("cube ctl", "kubectl", path=path) is True
+
+    backups = list(tmp_path.glob("dictionary.local.yaml.corrupt-*"))
+    assert len(backups) == 1, "the unreadable file must be preserved for repair"
+    assert backups[0].read_text() == corrupt
+    assert dictionary.load_dictionary(path) == {"cube ctl": "kubectl"}
+
+
+def test_a_corrupt_json_dictionary_is_also_recovered(tmp_path):
+    """The JSON reader must recover the same way the YAML reader does.
+
+    (Not round-tripped through ``save_dictionary`` here: the writer always emits
+    ``_format_yaml`` regardless of extension, which is a separate pre-existing
+    quirk. This pins that a bad JSON file is preserved and ``add`` still works.)
+    """
+    import dictionary
+
+    path = tmp_path / "dictionary.local.json"
+    corrupt = "{not json"
+    path.write_text(corrupt)
+
+    assert dictionary.load_dictionary(path) == {}
+
+    backups = list(tmp_path.glob("dictionary.local.json.corrupt-*"))
+    assert len(backups) == 1
+    assert backups[0].read_text() == corrupt
+    assert dictionary.add_entry("x", "y", path=path) is True
+
+
+
+
+
+
+def test_a_json_path_round_trips_through_save_and_load(tmp_path):
+    """The writer emits YAML whatever the extension, so a `.json` dictionary holds
+    YAML on disk. The reader must accept that, or every save/read cycle moves the
+    user's file aside as corrupt and the dictionary never loads.
+
+    Regression pinned by the reader's YAML fallback; without it this fails and a
+    `dictionary.local.json.corrupt-*` appears on the first load.
+    """
+    import dictionary
+
+    path = tmp_path / "dictionary.local.json"
+    assert dictionary.save_dictionary({"postgres": "PostgreSQL"}, path=path) == path
+    assert dictionary.load_dictionary(path) == {"postgres": "PostgreSQL"}
+    assert list(tmp_path.glob("dictionary.local.json.corrupt-*")) == []
+    assert dictionary.add_entry("wi fi", "Wi-Fi", path=path) is True
+    assert dictionary.load_dictionary(path)["wi fi"] == "Wi-Fi"

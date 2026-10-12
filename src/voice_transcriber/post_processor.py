@@ -17,6 +17,7 @@ import time
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -653,6 +654,71 @@ VLLM_API_URL = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/comp
 # tests/shared/test_slm_loopback.py.
 _VLLM_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
+#: A transcript must reach a *local* SLM unless the user deliberately opts into
+#: a remote one. The formatter has the same gate (`VT_FORMATTER_ALLOW_REMOTE=1`);
+#: this mirrors it so `VT_VLLM_URL` cannot silently post dictation to another
+#: machine. See docs/TODO.md.
+ENV_ALLOW_REMOTE = "VT_VLLM_ALLOW_REMOTE"
+
+
+class SlmRemoteRefused(ValueError):
+    """``VT_VLLM_URL`` names another machine and the opt-in flag is not set."""
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether ``host`` names this machine's own loopback.
+
+    Decided without a resolver, so a hostile DNS answer cannot steer it: a name
+    other than ``localhost`` is not accepted even if it happens to resolve to
+    ``127.0.0.1``. Deliberately a local copy of the formatter's check - a 10-line
+    duplicate is cheaper than coupling this legacy leaf module to the formatter
+    package.
+    """
+    if host.lower() == "localhost":
+        return True
+    try:
+        import ipaddress
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _slm_endpoint(url: str) -> tuple[str, int]:
+    """``(host, port)`` for the SLM URL, or raise if we must not talk to it.
+
+    Refusals, all on the grounds that the failure would otherwise be silent:
+
+    * anything that is not an ``http://`` or ``https://`` URL - a scheme-less
+      ``127.0.0.1:8000`` would be parsed as a path and POSTed nowhere useful;
+    * any host that is not this machine, unless ``VT_VLLM_ALLOW_REMOTE=1`` says
+      otherwise. A remote ``http://`` endpoint carries the transcript in the
+      clear; ``https`` is allowed (``urllib`` speaks TLS) but the honest advice
+      is still to tunnel it.
+
+    Mirrors :func:`formatters.llama_server._endpoint` without importing it. The
+    formatter refuses ``https`` only because its hand-rolled transport has no TLS;
+    here ``urllib`` does, so an encrypted remote endpoint is not refused.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+        port = parsed.port
+        host = parsed.hostname
+    except ValueError as exc:  # bad port, malformed IPv6 literal, ...
+        raise SlmRemoteRefused(f"{url!r} is not a usable SLM URL: {exc}") from exc
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise SlmRemoteRefused(f"{url!r} is not an http:// or https:// URL")
+    if not host:
+        raise SlmRemoteRefused(f"{url!r} names no host")
+    if not _is_loopback(host) and (os.environ.get(ENV_ALLOW_REMOTE) or "").strip() != "1":
+        raise SlmRemoteRefused(
+            f"VT_VLLM_URL points at {host}, which is not this machine; the SLM "
+            f"polish pass would send your transcript there in the clear. Set "
+            f"{ENV_ALLOW_REMOTE}=1 to allow that (tunnel it if the network is "
+            f"not trusted), or point VT_VLLM_URL back at 127.0.0.1."
+        )
+    return host, 80 if port is None else port
+
+
 # SLM / vLLM Model Auto-Download & Manual Download Links:
 # ------------------------------------------------------------------------------
 # 1. Automatic: vLLM systemd service automatically downloads model weights on first start.
@@ -716,6 +782,16 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
     """
     global _SLM_LAST_OFFLINE_CHECK, _SLM_OFFLINE_STREAK
     if not text or len(text.strip()) < 5 or os.environ.get("VT_ENABLE_SLM", "0") != "1":
+        return text
+
+    # Refuse a non-loopback endpoint *before* any connection (including the
+    # /v1/models probe below) is attempted, so a misconfigured VT_VLLM_URL can
+    # never leak a transcript. Loud on purpose: the message names the flag that
+    # re-enables a deliberate remote setup.
+    try:
+        _slm_endpoint(VLLM_API_URL)
+    except SlmRemoteRefused as exc:
+        print(f"⛔ [vLLM SLM Pass] Refused: {exc} Using ASR text.")
         return text
 
     # Exponential back-off once the endpoint is known to be unreachable, so a

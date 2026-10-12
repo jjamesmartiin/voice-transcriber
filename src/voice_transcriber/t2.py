@@ -92,7 +92,7 @@ def get_data_dir():
         data_dir = Path.home() / 'AppData' / 'Local' / 'vt'
 
     try:
-        data_dir.mkdir(parents=True, exist_ok=True)
+        data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     except OSError:
         pass
     return data_dir
@@ -880,11 +880,12 @@ _CONFIG_LOCK = threading.Lock()
 def _read_config_file(path):
     """Return ``(config, problem)`` for *path*.
 
-    ``problem`` is ``None`` when the file is absent, empty, or parses. A file
-    that exists but does **not** parse is not an empty file: callers must treat
-    it as a failure, or the next save would replace the user's settings with
-    defaults. The file is UTF-8, with a fallback to the platform default for a
-    config written by an older build on Windows.
+    ``problem`` is ``None`` when the file is absent or parses. A file that
+    exists but is empty, or does **not** parse, is not an empty file: callers
+    must treat it as a failure, or the next save would replace the user's
+    settings with defaults. (The app always writes keys, so a zero-byte config
+    can only come from a truncated write.) The file is UTF-8, with a fallback to
+    the platform default for a config written by an older build on Windows.
     """
     try:
         raw = path.read_bytes()
@@ -897,7 +898,7 @@ def _read_config_file(path):
     except UnicodeDecodeError:
         content = raw.decode(locale.getpreferredencoding(False), errors="replace")
     if not content.strip():
-        return {}, None
+        return {}, "empty file"
     try:
         if path.suffix == ".toml":
             import tomllib
@@ -1351,11 +1352,28 @@ def _write_audio_config():
 
         # Same-directory temp + replace, so an interrupted write cannot truncate
         # the user's config (``stats.py:_write_file`` does this for the same
-        # reason). A failed write leaves the previous file in place.
-        tmp_path = CONFIG_FILE.with_name(CONFIG_FILE.name + ".tmp")
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(out_content)
-        os.replace(tmp_path, CONFIG_FILE)
+        # reason). ``mkstemp`` gives a unique, owner-only (0600) name, so two
+        # engine instances cannot race over a fixed ``.tmp``, and the ``fsync``
+        # puts the bytes on disk before the rename makes them visible. A failed
+        # write leaves the previous file in place.
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(CONFIG_FILE.parent),
+            prefix=f"{CONFIG_FILE.name}.tmp{os.getpid()}.",
+        )
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(out_content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, CONFIG_FILE)
+        except Exception:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
         logger.debug(f"Saved audio device config to {CONFIG_FILE}")
     except Exception as e:
         logger.error(f"Could not save audio config: {e}")
