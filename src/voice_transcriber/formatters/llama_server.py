@@ -28,20 +28,35 @@ Two modes, and the attach mode matters more than it looks:
   the handle, and terminate it on timeout or at shutdown.
 
 Importing this module starts nothing and imports no ``llama_cpp``.
+
+The transport is a raw ``socket``, not ``http.client`` or ``urllib``: the loopback
+request must consult nothing - no proxy, no resolver, no macOS ``_scproxy`` - so
+the module speaks HTTP/1.0 by hand and understands only ``Content-Length`` and
+the close-to-signal-EOF rule. ``https://`` is refused rather than silently
+downgraded, because there is no TLS here to honour it with. Attach mode is
+loopback-only unless ``VT_FORMATTER_ALLOW_REMOTE=1`` says otherwise, and a host
+that is an IP literal is dialled without consulting a resolver at all.
+
+Spawn mode's TCP port is a *local trust boundary, not an authenticated one* -
+anything on the machine can share the port and answer ``/health`` for us, and the
+settle check below only defeats a squatter that cannot share it. Treat the server
+as trusted-local-only; ``docs/TODO.md`` records what is left open and why
+switching spawn mode to an AF_UNIX socket is the way to close it.
 """
 
 from __future__ import annotations
 
 import json
+import ipaddress
 import logging
 import os
 import re
+import secrets
 import socket
 import subprocess
 import sys
 import threading
 import time
-import urllib.error
 import urllib.parse
 from collections import deque
 from pathlib import Path
@@ -66,6 +81,11 @@ ENV_BINARY = "VT_FORMATTER_BINARY"
 #: Override the GGUF path. Without this the model registry supplies it.
 ENV_MODEL_PATH = "VT_FORMATTER_MODEL_PATH"
 
+#: Attach mode is loopback-only unless this is set. A formatter URL pointing at
+#: another machine sends every transcript there in the clear; that should be a
+#: deliberate act, not a typo or a copied config.
+ENV_ALLOW_REMOTE = "VT_FORMATTER_ALLOW_REMOTE"
+
 #: Thread count. Defaults to the app's usual setting, then to a sane guess.
 ENV_THREADS = "VT_FORMATTER_THREADS"
 
@@ -76,6 +96,23 @@ SPAWN_TIMEOUT_S = 60.0
 
 #: Poll interval while waiting for health.
 _HEALTH_POLL_S = 0.05
+
+#: How long our child must have been alive before a healthy ``/health`` is
+#: trusted. Anything on the machine can bind the port between ``_free_port()``
+#: releasing it and the child binding it; see ``_ensure_server``.
+_BIND_SETTLE_S = 0.2
+
+#: Loopback ports offered to llama-server, and how many candidates to try. This
+#: is IANA's dynamic range, which Linux, macOS and Windows all place their own
+#: ephemeral ports in. Random rather than the kernel's next one: see `_free_port`.
+_PORT_RANGE = (49152, 65535)
+_PORT_ATTEMPTS = 16
+
+#: Ceilings on a buffered response head and body. The contract's output is ~1000
+#: tokens, so this is orders of magnitude of headroom; it exists so that a
+#: hostile or broken server cannot be answered with unbounded memory.
+_MAX_HEAD_BYTES = 64 * 1024
+_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 #: Seconds to wait before retrying a failed spawn. Without this, a machine with
 #: no model would attempt (and fail) a process spawn on every utterance.
@@ -337,8 +374,18 @@ def available(model: str | None = None) -> bool:
     else's to manage, and probing it here would add a round trip to a path that is
     called on every utterance. In spawn mode both the executable and the weights
     must exist, because without them every call would pay for a failed spawn.
+
+    Never raises: a malformed ``VT_FORMATTER_SERVER_URL`` reports this backend as
+    unavailable rather than failing on every utterance.
     """
     if (os.environ.get(ENV_SERVER_URL) or "").strip():
+        # Validate the URL even though we do not probe the server: one we cannot
+        # speak must not be reported as available, or a typo becomes a failed
+        # request every time instead of one honest "unavailable".
+        try:
+            _endpoint((os.environ.get(ENV_SERVER_URL) or "").strip())
+        except Exception:
+            return False
         return True
     if _state.get("spawn_failed_at"):
         if time.monotonic() - _state["spawn_failed_at"] < _SPAWN_RETRY_COOLDOWN_S:
@@ -346,15 +393,46 @@ def available(model: str | None = None) -> bool:
     return _binary() is not None and _model_path(model) is not None
 
 
-def _free_port(host: str = DEFAULT_HOST) -> int:
-    """Ask the OS for an unused loopback port.
+def _family(host: str) -> int:
+    """Socket family for a literal host. IPv4 for anything that is not one.
 
-    Inherently racy - the port could be taken between the probe and the bind -
-    but the alternative is a hardcoded port, which breaks the moment two
-    instances run. llama-server fails loudly on a busy port, which is the
-    failure we want.
+    An address family, not a name service: ``getaddrinfo`` would answer this too,
+    but it consults a resolver and this transport exists to consult nothing when
+    it need not. See `_is_literal` for the check that decides whether a name
+    needs resolving at all.
     """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    try:
+        return (socket.AF_INET6 if ipaddress.ip_address(host).version == 6
+                else socket.AF_INET)
+    except ValueError:
+        return socket.AF_INET
+
+
+def _free_port(host: str = DEFAULT_HOST) -> int:
+    """Uncontended loopback port, picked so a local process cannot predict it.
+
+    Asking the kernel for port 0 hands back the *next* ephemeral port, which is
+    sequential and therefore guessable - a local process can hold the port we are
+    about to want. Random candidates cost the same, and a bind that fails is
+    itself information: it tells us someone already holds that port, which the
+    sequential form discards.
+
+    Still racy - the port is released before llama-server binds it - but the port
+    is no longer predictable and a squatter's own listener makes us skip it.
+    ``_ensure_server`` covers what remains.
+    """
+    for _ in range(_PORT_ATTEMPTS):
+        candidate = _PORT_RANGE[0] + secrets.randbelow(
+            _PORT_RANGE[1] - _PORT_RANGE[0] + 1)
+        try:
+            with socket.socket(_family(host), socket.SOCK_STREAM) as sock:
+                sock.bind((host, candidate))
+            return candidate
+        except OSError:
+            continue
+    # Every candidate was held. Start anyway on a kernel-picked port rather than
+    # refuse: the settle check in `_ensure_server` is the real guard.
+    with socket.socket(_family(host), socket.SOCK_STREAM) as sock:
         sock.bind((host, 0))
         return int(sock.getsockname()[1])
 
@@ -390,29 +468,182 @@ def _build_command(binary: str, model: str, host: str, port: int) -> list[str]:
     return cmd
 
 
-def _health_ok(url: str, timeout: float = 1.0) -> bool:
+def _is_loopback(host: str) -> bool:
+    """Whether ``host`` names this machine's own loopback.
+
+    A name other than ``localhost`` is not accepted even if it happens to
+    resolve to ``127.0.0.1``: the point of the check is to be decidable without a
+    resolver, so that it cannot be talked around by a hostile DNS answer.
+    """
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _endpoint(url: str) -> tuple[str, int]:
+    """``(host, port)`` for a server URL, or raise if we should not talk to it.
+
+    Refusals, all on the grounds that the failure would otherwise be silent:
+
+    * anything that is not an ``http://host[:port]`` URL - a bare ``http://`` or a
+      scheme-less ``127.0.0.1:8080`` used to fall back to host and port 80, so a
+      typo became a request to a port nobody named;
+    * ``https://`` - nothing here speaks TLS, so honouring the scheme would post
+      the transcript in plaintext to port 80, minus the encryption it promised;
+    * anything not on this machine - which is a deliberate act, and so needs
+      ``VT_FORMATTER_ALLOW_REMOTE=1``. Spawn mode is already loopback; this is
+      what makes "talks only to 127.0.0.1" a property of the code and not just of
+      the default configuration.
+
+    Raises :class:`BackendUnavailable` for every malformed input, never
+    ``ValueError`` from ``urlparse``: this is called from :func:`available`, which
+    is on the per-utterance path and is documented never to raise.
+    """
     try:
         parsed = urllib.parse.urlparse(url)
-        host = parsed.hostname or "127.0.0.1"
-        port = parsed.port or 80
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        port = parsed.port
+        host = parsed.hostname
+    except ValueError as exc:     # bad port, malformed IPv6 literal, ...
+        raise BackendUnavailable(f"{url!r} is not a usable server URL: {exc}") from exc
+    if parsed.scheme != "http" or not parsed.netloc:
+        raise BackendUnavailable(
+            f"{url!r} is not an http://host[:port] URL")
+    if not host:
+        raise BackendUnavailable(f"{url!r} names no host")
+    if not _is_loopback(host) and (os.environ.get(ENV_ALLOW_REMOTE) or "").strip() != "1":
+        raise BackendUnavailable(
+            f"{host} is not this machine; the formatter talks to loopback only. "
+            f"Set {ENV_ALLOW_REMOTE}=1 to send transcripts over the network "
+            f"(in the clear - tunnel it if that matters).")
+    # `port or 80` would turn an explicit `:0` into port 80.
+    return host, 80 if port is None else port
+
+
+def _host_header(host: str) -> bytes:
+    """The ``Host:`` value. An IPv6 literal has to be bracketed to be valid."""
+    return f"[{host}]".encode() if ":" in host else host.encode()
+
+
+def _is_literal(host: str) -> bool:
+    """Whether ``host`` is an IP literal, decided without a resolver."""
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _dial(host: str, port: int, timeout: float) -> socket.socket:
+    """A connected socket to ``host:port``, with ``timeout`` set.
+
+    A literal - which is every loopback case - is connected to directly, so the
+    common path touches no resolver at all; that is the reason this module does
+    not simply build on ``create_connection``. A *name* is resolved, as
+    ``connect()`` always did behind our backs, but now across both address
+    families instead of IPv4 only, so an IPv6-only host reaches too.
+    """
+    if not _is_literal(host):
+        return socket.create_connection((host, port), timeout)
+    sock = socket.socket(_family(host), socket.SOCK_STREAM)
+    try:
         sock.settimeout(timeout)
-        try:
-            sock.connect((host, port))
-            sock.sendall(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
-            data = b""
-            while b"\r\n\r\n" not in data and len(data) < 4096:
-                chunk = sock.recv(1024)
-                if not chunk:
-                    break
-                data += chunk
-            if not data.startswith(b"HTTP/1.0 200") and not data.startswith(b"HTTP/1.1 200"):
-                return False
-            body = data.split(b"\r\n\r\n", 1)[1] if b"\r\n\r\n" in data else b"{}"
-            payload = json.loads(body.decode("utf-8") or "{}")
-            return payload.get("status") in ("ok", "no slot available")
-        finally:
-            sock.close()
+        sock.connect((host, port))
+    except Exception:
+        sock.close()
+        raise
+    return sock
+
+
+def _recv(sock: socket.socket, deadline: float, want: int) -> bytes:
+    """One ``recv``, against a whole-request deadline rather than an idle gap.
+
+    ``sock.settimeout`` alone never ends a read: a peer that keeps sending resets
+    it every time, so the caller's budget is unreachable without this.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("formatter response exceeded its budget")
+    sock.settimeout(remaining)
+    return sock.recv(want)
+
+
+def _read_response(sock: socket.socket, timeout_s: float,
+                   limit: int = _MAX_RESPONSE_BYTES) -> tuple[int, bytes]:
+    """Read one HTTP response as ``(status, body)``.
+
+    Hand-rolled deliberately, like the rest of this module's transport: the whole
+    point of not using ``http.client`` is that it consults nothing - no proxy, no
+    resolver - and llama-server needs no more than ``Content-Length`` and the
+    HTTP/1.0 close-to-signal-EOF rule.
+
+    Two things a naive ``recv`` loop gets wrong and this does not: it stops at
+    EOF, so a peer that holds the connection open hangs the caller; and it treats
+    the timeout as an idle gap, so an endless stream never ends.
+    """
+    deadline = time.monotonic() + timeout_s
+    head = b""
+    while b"\r\n\r\n" not in head:
+        chunk = _recv(sock, deadline, 4096)
+        if not chunk:
+            raise BackendUnavailable("formatter server closed the connection early")
+        head += chunk
+        if len(head) > _MAX_HEAD_BYTES:
+            raise BackendUnavailable("formatter response header is too large")
+
+    raw_head, _, body = head.partition(b"\r\n\r\n")
+    lines = raw_head.split(b"\r\n")
+    tokens = lines[0].split()
+    status = int(tokens[1]) if len(tokens) > 1 and tokens[1].isdigit() else 500
+    headers: dict[bytes, bytes] = {}
+    for line in lines[1:]:
+        name, sep, value = line.partition(b":")
+        if sep:
+            headers[name.strip().lower()] = value.strip().lower()
+
+    if headers.get(b"transfer-encoding") == b"chunked":
+        # We ask for HTTP/1.0, so a compliant peer never does this. Say so
+        # plainly instead of feeding chunk framing to json.loads.
+        raise BackendUnavailable(
+            "formatter server used chunked encoding, which is not supported")
+
+    declared = headers.get(b"content-length")
+    if declared is not None and declared.isdigit():
+        if int(declared) > limit:
+            raise BackendUnavailable(f"formatter response exceeds {limit} bytes")
+        while len(body) < int(declared):
+            chunk = _recv(sock, deadline, 4096)
+            if not chunk:
+                break
+            body += chunk
+        return status, body[:int(declared)]
+
+    # No Content-Length: HTTP/1.0 ends the body by closing the connection.
+    while True:
+        chunk = _recv(sock, deadline, 4096)
+        if not chunk:
+            return status, body
+        body += chunk
+        if len(body) > limit:
+            raise BackendUnavailable(f"formatter response exceeds {limit} bytes")
+
+
+def _health_ok(url: str, timeout: float = 1.0) -> bool:
+    try:
+        host, port = _endpoint(url)
+        with _dial(host, port, timeout) as sock:
+            sock.sendall(b"GET /health HTTP/1.0\r\nHost: " + _host_header(host)
+                         + b"\r\n\r\n")
+            # The body counts: stopping at the header terminator reads an empty
+            # body whenever the two arrive in separate segments, and reports a
+            # healthy server as dead.
+            status, body = _read_response(sock, timeout, limit=_MAX_HEAD_BYTES)
+        if status != 200:
+            return False
+        payload = json.loads(body.decode("utf-8") or "{}")
+        return payload.get("status") in ("ok", "no slot available")
     except Exception:
         return False
 
@@ -454,6 +685,8 @@ def _ensure_server(model: str | None = None) -> str:
     attached = (os.environ.get(ENV_SERVER_URL) or "").strip()
     if attached:
         url = attached.rstrip("/")
+        # Refuse a scheme we cannot speak before reporting the server as usable.
+        _endpoint(url)
         with _lock:
             _state.update({"url": url, "attached": True})
         return url
@@ -494,7 +727,8 @@ def _ensure_server(model: str | None = None) -> str:
 
         _drain(proc)
 
-        deadline = time.monotonic() + SPAWN_TIMEOUT_S
+        spawned_at = time.monotonic()
+        deadline = spawned_at + SPAWN_TIMEOUT_S
         while time.monotonic() < deadline:
             if proc.poll() is not None:
                 tail = "\n".join(_stderr_tail)
@@ -502,6 +736,16 @@ def _ensure_server(model: str | None = None) -> str:
                 raise BackendUnavailable(
                     f"llama-server exited with {proc.returncode}: {tail.strip()}")
             if _health_ok(url, timeout=0.5):
+                # A local process can answer /health for us if it holds the port
+                # first, and llama.cpp binds with SO_REUSEPORT (see httplib.h), so
+                # holding the port with SO_REUSEPORT does *not* make it exit - it
+                # shares the port. This check therefore only catches a squatter
+                # that could not share it (SO_REUSEADDR alone), which llama-server
+                # exits on. It is not identity verification; docs/TODO.md records
+                # what is left open, and AF_UNIX is the fix when it matters.
+                if time.monotonic() - spawned_at < _BIND_SETTLE_S:
+                    time.sleep(_BIND_SETTLE_S - (time.monotonic() - spawned_at))
+                    continue
                 _state.update({"proc": proc, "url": url, "attached": False,
                                "spawn_failed_at": 0.0})
                 return url
@@ -557,44 +801,28 @@ def _strip_thinking(text: str) -> str:
 
 
 def _post_chat(url: str, payload: dict, timeout_s: float) -> dict:
-    parsed = urllib.parse.urlparse(url)
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or 80
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout_s)
-    try:
-        sock.connect((host, port))
+    host, port = _endpoint(url)
+    with _dial(host, port, timeout_s) as sock:
         body = json.dumps(payload).encode("utf-8")
-        req = (
-            f"POST /v1/chat/completions HTTP/1.0\r\n"
-            f"Host: {host}\r\n"
-            f"Content-Type: application/json\r\n"
-            f"Content-Length: {len(body)}\r\n\r\n"
-        ).encode("utf-8") + body
-        sock.sendall(req)
-        resp_data = b""
-        while True:
-            chunk = sock.recv(4096)
-            if not chunk:
-                break
-            resp_data += chunk
-        parts = resp_data.split(b"\r\n\r\n", 1)
-        headers = parts[0].decode("utf-8", "replace")
-        raw_body = parts[1].decode("utf-8", "replace") if len(parts) > 1 else "{}"
-        status_line = headers.split("\r\n", 1)[0]
-        status_code = int(status_line.split()[1]) if len(status_line.split()) > 1 else 500
-        if status_code >= 400:
-            detail = ""
-            try:
-                err = json.loads(raw_body)
-                err_val = err.get("error", "")
-                detail = err_val if isinstance(err_val, str) else err_val.get("message", "")
-            except Exception:
-                pass
-            raise BackendUnavailable(f"formatter HTTP {status_code}" + (f": {detail}" if detail else ""))
-        return json.loads(raw_body)
-    finally:
-        sock.close()
+        sock.sendall(
+            b"POST /v1/chat/completions HTTP/1.0\r\n"
+            + b"Host: " + _host_header(host) + b"\r\n"
+            + b"Content-Type: application/json\r\n"
+            + f"Content-Length: {len(body)}\r\n\r\n".encode("utf-8")
+            + body
+        )
+        status, raw = _read_response(sock, timeout_s)
+    if status >= 400:
+        detail = ""
+        try:
+            err = json.loads(raw.decode("utf-8", "replace"))
+            err_val = err.get("error", "")
+            detail = err_val if isinstance(err_val, str) else err_val.get("message", "")
+        except Exception:
+            pass
+        raise BackendUnavailable(
+            f"formatter HTTP {status}" + (f": {detail}" if detail else ""))
+    return json.loads(raw.decode("utf-8"))
 
 
 def format_text(
@@ -640,13 +868,6 @@ def format_text(
             if not _state.get("attached"):
                 _terminate()
         raise BackendUnavailable("formatter server timed out") from exc
-    except urllib.error.HTTPError as exc:
-        detail = ""
-        try:
-            detail = exc.read().decode("utf-8", "replace")[:300]
-        except Exception:
-            pass
-        raise BackendUnavailable(f"formatter server returned HTTP {exc.code}: {detail}") from exc
     except Exception as exc:
         raise BackendUnavailable(f"formatter request failed: {exc}") from exc
 

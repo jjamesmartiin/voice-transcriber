@@ -508,6 +508,22 @@ def format_text(
             _request_backend_model(module, model)
             return original
 
+        # Outside the clock on purpose. A cold backend pays for process spawn and
+        # weights load here - llama-server loading a 462 MiB GGUF is seconds - and
+        # Guardrail 6 below is about a *request* that ignored its budget. Charging
+        # readiness to that budget discarded a perfectly good rewrite and returned
+        # the input: the first dictation after any cold start (or after a
+        # kill-on-timeout restart) came back unformatted on every machine slower
+        # than the default 3 s spawn.
+        try:
+            module.warm()
+        except Exception:
+            pass
+        # A warm that failed arms the backend's own retry cooldown; this is the
+        # cheap way to notice, and it saves a second full spawn attempt here.
+        if not module.available(model=model):
+            return original
+
         started = time.monotonic()
         candidate = module.format_text(
             original,

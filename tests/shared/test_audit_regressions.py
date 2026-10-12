@@ -443,6 +443,25 @@ class TestConfigResolutionIsolation:
         assert str(common).startswith(str(tmp_path / "data" / "config"))
         assert str(local).startswith(str(tmp_path / "data" / "config"))
 
+    def test_the_cohere_loader_does_not_search_cwd(self, monkeypatch, tmp_path):
+        """A model directory is loaded with ``trust_remote_code=True``.
+
+        Regression: ``load_model`` searched ``<cwd>/models/cohere`` and accepted
+        any directory holding a ``model.safetensors``, so a ``config.json`` plus a
+        ``modeling_*.py`` dropped next to the directory the user launches from was
+        executed as that user - remote code with no trust boundary at all.
+        """
+        from voice_transcriber import transcribe_cohere
+
+        work_dir = tmp_path / "foreign"
+        work_dir.mkdir()
+        monkeypatch.chdir(work_dir)
+
+        dirs = transcribe_cohere._candidate_model_dirs()
+        cwd = os.path.abspath(str(work_dir))
+        assert dirs
+        assert not any(os.path.abspath(d).startswith(cwd) for d in dirs), dirs
+
 
 # ---------------------------------------------------------------------------
 # 6. Zenity notifications must escape XML/Pango characters

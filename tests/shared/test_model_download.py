@@ -139,13 +139,24 @@ def test_formatter_and_diarization_specs_are_registered():
 
 
 def test_cohere_digests_contain_code_files():
-    """Remote code executed under trust_remote_code must be pinned in digests."""
+    """Remote code executed under trust_remote_code must be pinned in digests.
+
+    The ``.py`` files are the code; the JSON files are what *name* them, and they
+    are read by ``AutoConfig``/``AutoProcessor`` while ``trust_remote_code=True``
+    is in force, so a rewritten ``config.json`` could point ``auto_map`` at any
+    module without changing a single pinned hash. Both halves are pinned.
+    """
     cohere = model_download.get_spec("cohere")
     code_digests = {
         "configuration_cohere_asr.py": "2a33be079910efb6ea3c40d5d34cda69a8ffbbc76da93b218338fb71d30f9fef",
         "modeling_cohere_asr.py": "ca5a0b67a1cba76e86e54a3bfe350255a17868f27a4b2faa400c2daa520193e0",
         "processing_cohere_asr.py": "151f965b721c068897cbf199296aa3d4d652dffaa2387d6edef7f10a9b16fb74",
         "tokenization_cohere_asr.py": "415fff67e1226d3467c71d22144e56825fd42c8ee41f677bdabe3a86119141ec",
+        # Code-selection files, verified byte-identical to the HF snapshot the
+        # pinned revision names (499888924f5f1313b48ab0686c8f3a94178a4709).
+        "config.json": "5de7e586cec6d8f51225c8d5fe17a56a3043dda9af8c42f9cb01dd545905eb18",
+        "processor_config.json": "d5eff85971bab7f42480856f8fb397d8dd966858d67049def99aa8a665aa87d5",
+        "preprocessor_config.json": "9f297d330646ecc8ebb9dc5784f48b7c35b118c913e306a1ccd0192f2c976332",
     }
     for fname, expected_hash in code_digests.items():
         assert fname in cohere.digests
@@ -1313,6 +1324,39 @@ def test_extract_bundle_archive_rejects_tar_slip(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError, match="Tar path traversal detected"):
         model_download._extract_bundle_archive(str(bad_tar), str(dest))
     assert not (tmp_path / "evil.txt").exists()
+
+
+def test_extract_bundle_archive_rejects_tar_links(monkeypatch, tmp_path):
+    """A symlink member defeats the name check, so links are refused outright.
+
+    Regression: the fallback guard only checked ``member.name``, so
+    ``escape -> .`` followed by ``escape/evil.txt`` (or a link to an absolute path
+    such as ``/home/user/.bashrc``) passed every check and ``extractall`` wrote
+    through the link, outside ``dest`` (CVE-2007-4559). Only the no-data_filter
+    path is affected, and that is exactly the path this exercises.
+    """
+    monkeypatch.delattr(tarfile, "data_filter", raising=False)
+    target = tmp_path / "victim.txt"
+    target.write_text("original")
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        link = tarfile.TarInfo(name="escape")
+        link.type = tarfile.SYMTYPE
+        link.linkname = str(target.parent)
+        tf.addfile(link)
+        evil = tarfile.TarInfo(name="escape/victim.txt")
+        content = b"pwned"
+        evil.size = len(content)
+        tf.addfile(evil, io.BytesIO(content))
+    bad_tar = tmp_path / "link.tar"
+    bad_tar.write_bytes(buf.getvalue())
+
+    dest = tmp_path / "extract_dest"
+    dest.mkdir()
+    with pytest.raises(RuntimeError, match="link or special file"):
+        model_download._extract_bundle_archive(str(bad_tar), str(dest))
+    assert target.read_text() == "original", "the symlink was written through"
 
 
 def test_assemble_parts_rejects_tar_slip_without_data_filter(monkeypatch, tmp_path):

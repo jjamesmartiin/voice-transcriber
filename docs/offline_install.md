@@ -45,7 +45,7 @@ happened, every stage runs on the local machine:
 | :--- | :--- |
 | **ASR** | Loads the installed snapshot with `local_files_only=True`; no `huggingface.co` call, no HF token. |
 | **Diarization** | `sherpa-onnx` reads the local ONNX graphs; VAD is energy-based, not a model. |
-| **Post-processing** | Local regex/rule engine (retractions, fillers, numbers, dates, casing, custom dictionary). The optional LLM polish and formatter talk only to `127.0.0.1`. |
+| **Post-processing** | Local regex/rule engine (retractions, fillers, numbers, dates, casing, custom dictionary). The optional formatter talks to `127.0.0.1` only. The optional LLM polish pass is off by default and goes wherever `VT_VLLM_URL` points — `127.0.0.1` unless you change it — so aiming that at another host is your decision rather than a guarantee. |
 | **Control API** | `AF_UNIX` socket, or a token-authenticated `127.0.0.1` TCP socket on native Windows — never a network listener. |
 | **Settings / stats / logs / dictionaries** | Written under the per-user data dir, never into the read-only app bundle. |
 

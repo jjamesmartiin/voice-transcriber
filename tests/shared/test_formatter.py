@@ -452,6 +452,53 @@ def test_guardrail_6_a_late_backend_returns_the_input(monkeypatch):
                                  timeout_s=0.01) == "buy milk"
 
 
+def test_guardrail_6_a_cold_backend_is_not_charged_for_its_own_startup(monkeypatch):
+    """A slow ``warm`` is readiness, not a late request.
+
+    Regression: the elapsed backstop counted process spawn and weights load, so a
+    backend whose startup outran ``timeout_s`` - llama-server loading the GGUF,
+    or any spawn slower than the 3 s default - had its correct rewrite thrown
+    away and the caller's original text returned. The first dictation after a
+    cold start (and every one after a kill-on-timeout restart) was silently
+    unformatted, which is how this hid: only the fail-open path was visible.
+    """
+    def fast(text, *, timeout_s=3.0, **kwargs):
+        return text.upper()
+
+    name = install_fake(monkeypatch, fast, warm=lambda **kw: time.sleep(0.05))
+    assert formatter.format_text("buy milk", backend=name,
+                                 timeout_s=0.01) == "BUY MILK"
+
+
+def test_a_failed_warm_does_not_pay_for_a_second_spawn(monkeypatch):
+    """Warming must not double a backend's failure path.
+
+    ``warm`` is outside the clock, so it has to be checked before the real call:
+    a backend that just failed to start arms its retry cooldown (llama_server
+    does), and asking it to format anyway would pay the full spawn timeout twice.
+    """
+    warmed = []
+    formatted = []
+
+    def available(model=None):
+        # False the moment the warm has run, which is how llama_server reports an
+        # armed spawn cooldown.
+        return warmed == []
+
+    def boom(text, **kwargs):
+        formatted.append(text)
+        return text.upper()
+
+    module = types.SimpleNamespace(available=available,
+                                   warm=lambda: warmed.append(1),
+                                   format_text=boom)
+    monkeypatch.setitem(formatter.BACKENDS, "fake", "voice_transcriber.formatters.fake")
+    monkeypatch.setitem(formatter._loaded, "fake", module)
+    assert formatter.format_text("buy milk", backend="fake") == "buy milk"
+    assert warmed == [1], "the backend was never warmed"
+    assert formatted == [], "the backend was asked to format after a failed warm"
+
+
 def test_guardrail_6_timeout_is_passed_through_to_the_backend(monkeypatch):
     seen = {}
 

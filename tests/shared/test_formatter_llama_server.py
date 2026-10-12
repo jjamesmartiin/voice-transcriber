@@ -17,8 +17,10 @@ that needs the 462 MiB GGUF and is milestone C2/C7.
 """
 import json
 import os
+import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -39,6 +41,7 @@ STUB_SOURCE = '''#!{python}
 """A stub llama-server: speaks just enough OpenAI API to test the backend."""
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -59,6 +62,7 @@ FINISH = os.environ.get("VT_STUB_FINISH", "stop")
 HTTP_ERROR = int(os.environ.get("VT_STUB_HTTP_ERROR") or 0)
 UNHEALTHY = int(os.environ.get("VT_STUB_UNHEALTHY") or 0)
 EXIT_NOW = os.environ.get("VT_STUB_EXIT_NOW") == "1"
+REUSE_PORT = os.environ.get("VT_STUB_REUSE_PORT") == "1"
 
 if EXIT_NOW:
     sys.stderr.write("stub: refusing to start\\n")
@@ -66,6 +70,20 @@ if EXIT_NOW:
     sys.exit(7)
 
 _health_calls = 0
+
+
+class _Server(ThreadingHTTPServer):
+    """ThreadingHTTPServer that can opt into SO_REUSEPORT, like cpp-httplib.
+
+    The real llama-server sets SO_REUSEPORT before binding (httplib.h), which is
+    the difference between a squatter being fatal and merely annoying: with it,
+    the squatter shares the port and llama-server's bind *succeeds*.
+    """
+
+    def server_bind(self):
+        if REUSE_PORT and hasattr(socket, "SO_REUSEPORT"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        super().server_bind()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -116,10 +134,15 @@ class Handler(BaseHTTPRequestHandler):
 ThreadingHTTPServer((host, port), Handler).serve_forever()
 '''
 
+#: Replaced below so the stub can serve through `_Server` (which knows about
+#: SO_REUSEPORT) rather than the stock `ThreadingHTTPServer`.
+_STUB_ENTRY = "ThreadingHTTPServer((host, port), Handler).serve_forever()"
+
 
 def _write_stub(tmp_path: Path) -> str:
     path = tmp_path / "stub-llama-server.py"
-    path.write_text(STUB_SOURCE.format(python=sys.executable))
+    path.write_text(STUB_SOURCE.format(python=sys.executable).replace(
+        _STUB_ENTRY, "_Server((host, port), Handler).serve_forever()"))
     path.chmod(0o755)
     return str(path)
 
@@ -135,20 +158,30 @@ def _start_stub(tmp_path: Path, **env) -> tuple[subprocess.Popen, str]:
     port = llama_server._free_port()
     child_env = dict(os.environ)
     child_env.update({k: str(v) for k, v in env.items()})
-    proc = subprocess.Popen(
-        [sys.executable, _write_stub(tmp_path), "--host", "127.0.0.1",
-         "--port", str(port)],
-        env=child_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    url = f"http://127.0.0.1:{port}"
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        if llama_server._health_ok(url):
-            return proc, url
-        if proc.poll() is not None:
-            raise RuntimeError("stub server died")
-        time.sleep(0.05)
+    # Keep the stub's stderr instead of discarding it. When this helper gives up,
+    # that is the only evidence of *why* the stub never answered, and a bare
+    # "never became healthy" is what hid a real health-probe regression on macOS CI
+    # for three consecutive runs.
+    log = tmp_path / "attach-stub-stderr.log"
+    with open(log, "wb") as sink:
+        proc = subprocess.Popen(
+            [sys.executable, _write_stub(tmp_path), "--host", "127.0.0.1",
+             "--port", str(port)],
+            env=child_env, stdout=subprocess.DEVNULL, stderr=sink)
+        url = f"http://127.0.0.1:{port}"
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if llama_server._health_ok(url):
+                return proc, url
+            if proc.poll() is not None:
+                raise RuntimeError(
+                    f"stub server died on port {port}: "
+                    f"{log.read_text(errors='replace')[-400:]!r}")
+            time.sleep(0.05)
     proc.kill()
-    raise RuntimeError("stub server never became healthy")
+    raise RuntimeError(
+        f"stub server never became healthy on port {port}; "
+        f"its stderr was {log.read_text(errors='replace')[-400:]!r}")
 
 
 #: The real implementation, captured before the autouse `_isolate` fixture stubs
@@ -160,7 +193,8 @@ _REAL_CANDIDATE_MODEL_DIRS = llama_server._candidate_model_dirs
 def _isolate(monkeypatch):
     llama_server.reset()
     for variable in (llama_server.ENV_SERVER_URL, llama_server.ENV_BINARY,
-                     llama_server.ENV_MODEL_PATH, llama_server.ENV_THREADS):
+                     llama_server.ENV_MODEL_PATH, llama_server.ENV_THREADS,
+                     llama_server.ENV_ALLOW_REMOTE):
         monkeypatch.delenv(variable, raising=False)
     # Neutralise the conventional install path too. Whether *this* machine happens
     # to have the weights downloaded must not change what these tests assert, or
@@ -594,8 +628,22 @@ def test_warm_swallows_an_unavailable_backend(monkeypatch):
 # Integration with the module-level entry point: the guardrails still apply
 # ---------------------------------------------------------------------------
 def test_the_module_entry_point_formats_through_the_real_backend(stub_env, monkeypatch):
+    """The registry layer must pass a real backend's answer through unchanged.
+
+    Ask the backend directly before asserting on the registry, because
+    `formatter.format_text` returns the *original* text on any failure - so a bare
+    output assertion cannot tell "the backend broke" from "the guardrails rejected
+    the rewrite". This is the one Windows/macOS failure the split-segment health
+    probe did not explain, and a silent fallback hid it for three CI runs.
+    """
     monkeypatch.setenv("VT_STUB_REPLY", "Buy milk.")
     formatter.reset_backend_cache()
+    backend = formatter.load_backend("llama-server")
+    assert backend is not None
+    # Raises BackendUnavailable *with a reason*; the assertion below never fires
+    # silently on the next platform this breaks on.
+    direct = backend.format_text("buy milk", timeout_s=30.0)
+    assert direct == "Buy milk.", (llama_server.describe(), direct)
     assert formatter.format_text("buy milk", backend="llama-server") == "Buy milk."
 
 
@@ -706,3 +754,468 @@ def test_build_command_gpu_layers_darwin_and_env(monkeypatch):
     assert "-ngl" in cmd_mac
     assert cmd_mac[cmd_mac.index("-ngl") + 1] == "99"
 
+
+
+# ---------------------------------------------------------------------------
+# Transport framing - the cases http.server cannot produce
+# ---------------------------------------------------------------------------
+class RawServer:
+    """A raw TCP peer that sends exactly the bytes a test wants, when it wants.
+
+    The stub above answers through ``http.server``, which writes a whole, well
+    framed response in one call. It therefore cannot produce the shapes the
+    hand-rolled reader has to survive: a body in a second segment, no
+    Content-Length, a stream that never ends, a squatter that answers /health.
+    """
+
+    def __init__(self, handler, host: str = "127.0.0.1", reuse_port: bool = False):
+        # getaddrinfo here, rather than the module's own literal parse, so the
+        # fixture picks its family independently of the code under test.
+        family, socktype, proto, _canon, _addr = socket.getaddrinfo(
+            host, 0, type=socket.SOCK_STREAM)[0]
+        self.host = host
+        self.sock = socket.socket(family, socktype, proto)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if reuse_port and HAS_SO_REUSEPORT:
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        self.sock.bind((host, 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        self.requests: list[bytes] = []
+        self._handler = handler
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    @property
+    def url(self) -> str:
+        host = f"[{self.host}]" if ":" in self.host else self.host
+        return f"http://{host}:{self.port}"
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+
+    def _handle(self, conn):
+        try:
+            data = b""
+            while b"\r\n\r\n" not in data:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    return
+                data += chunk
+            body = data.split(b"\r\n\r\n", 1)[1]
+            length = 0
+            for line in data.split(b"\r\n")[1:]:
+                if line.lower().startswith(b"content-length:"):
+                    length = int(line.split(b":", 1)[1].strip())
+            while len(body) < length:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                body += chunk
+            self.requests.append(data)
+            self._handler(conn, data)
+        except OSError:
+            pass
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+    def close(self):
+        self.sock.close()
+
+
+CHAT_OK = (b'HTTP/1.0 200 OK\r\nContent-Length: 74\r\n\r\n'
+           b'{"choices":[{"message":{"content":"Buy milk."},"finish_reason":"stop"}]}')
+
+
+def test_a_health_body_in_a_second_segment_is_still_healthy():
+    """The body is part of the answer.
+
+    Regression: the reader stopped at the header terminator, so a body that
+    arrived in its own TCP segment parsed as ``{}`` and a healthy server was
+    reported as dead - which in spawn mode means the formatter silently never
+    comes up. The stub cannot catch this, it writes in one call.
+    """
+    def handler(conn, _request):
+        conn.sendall(b"HTTP/1.0 200 OK\r\nContent-Length: 15\r\n\r\n")
+        time.sleep(0.08)
+        conn.sendall(b'{"status":"ok"}')
+
+    server = RawServer(handler)
+    try:
+        assert llama_server._health_ok(server.url, timeout=2.0) is True
+    finally:
+        server.close()
+
+
+def test_a_body_that_never_arrives_is_not_healthy_and_does_not_hang():
+    """A peer that sends headers and then stalls must fail fast, not block."""
+    server = RawServer(lambda conn, _r: conn.sendall(
+        b"HTTP/1.0 200 OK\r\nContent-Length: 15\r\n\r\n"))
+    try:
+        started = time.monotonic()
+        assert llama_server._health_ok(server.url, timeout=0.4) is False
+        assert time.monotonic() - started < 2.0
+    finally:
+        server.close()
+
+
+def test_a_response_without_content_length_is_read_until_close():
+    """HTTP/1.0 signals the end of the body with the close, and this negotiates
+    HTTP/1.0 - so the reader must not require Content-Length."""
+    server = RawServer(lambda conn, _r: conn.sendall(
+        b"HTTP/1.0 200 OK\r\nConnection: close\r\n\r\n" + CHAT_OK.split(b"\r\n\r\n")[1]))
+    try:
+        assert llama_server._post_chat(server.url, {"x": 1}, 2.0)["choices"]
+    finally:
+        server.close()
+
+
+def test_a_stream_that_never_ends_cannot_outlive_the_budget():
+    """`timeout_s` must be a whole-request budget.
+
+    Regression: the socket timeout is an *idle* timeout, so a peer that keeps
+    sending resets it forever, the call never returns and the buffer grows with
+    everything sent. A slow trickle is the shape that isolates the deadline from
+    the size cap - see the two tests around this one for the cap itself.
+    """
+    def handler(conn, _request):
+        conn.sendall(b"HTTP/1.0 200 OK\r\nConnection: close\r\n\r\n")
+        try:
+            while True:
+                conn.sendall(b"x" * 1024)
+                time.sleep(0.05)
+        except OSError:
+            pass
+
+    server = RawServer(handler)
+    try:
+        started = time.monotonic()
+        with pytest.raises(TimeoutError):
+            llama_server._post_chat(server.url, {"x": 1}, 0.4)
+        elapsed = time.monotonic() - started
+        assert elapsed < 3.0, f"the budget was ignored, ran {elapsed:.1f}s"
+    finally:
+        server.close()
+
+
+def test_a_response_larger_than_the_limit_is_refused():
+    """Unbounded buffering is how a broken or hostile peer becomes an OOM."""
+    server = RawServer(lambda conn, _r: conn.sendall(
+        b"HTTP/1.0 200 OK\r\nContent-Length: 99999999999\r\n\r\nspam"))
+    try:
+        with pytest.raises(llama_server.BackendUnavailable) as caught:
+            llama_server._post_chat(server.url, {"x": 1}, 2.0)
+        assert "exceeds" in str(caught.value)
+    finally:
+        server.close()
+
+
+def test_a_body_without_content_length_is_capped_too():
+    """The size cap must hold on the read-until-close path as well; there is no
+    declared length to check up front there."""
+    def handler(conn, _request):
+        conn.sendall(b"HTTP/1.0 200 OK\r\nConnection: close\r\n\r\n")
+        try:
+            while True:
+                conn.sendall(b"x" * 262144)
+        except OSError:
+            pass
+
+    server = RawServer(handler)
+    try:
+        with pytest.raises(llama_server.BackendUnavailable) as caught:
+            llama_server._post_chat(server.url, {"x": 1}, 5.0)
+        assert "exceeds" in str(caught.value)
+    finally:
+        server.close()
+
+
+def test_chunked_encoding_is_reported_plainly():
+    """We ask for HTTP/1.0 so a compliant peer never chunks. If one does, say so
+    rather than feeding chunk framing to json.loads."""
+    server = RawServer(lambda conn, _r: conn.sendall(
+        b"HTTP/1.0 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+        b"1d\r\n{\"choices\":[]}\r\n0\r\n\r\n"))
+    try:
+        with pytest.raises(llama_server.BackendUnavailable) as caught:
+            llama_server._post_chat(server.url, {"x": 1}, 2.0)
+        assert "chunked" in str(caught.value)
+    finally:
+        server.close()
+
+
+# ---------------------------------------------------------------------------
+# Attach mode - which URLs we are willing to speak
+# ---------------------------------------------------------------------------
+def test_an_https_attach_url_is_refused_not_downgraded(monkeypatch):
+    """There is no TLS here, so `https://` used to become plaintext on port 80.
+
+    Silently posting every transcript unencrypted to a port the URL never named
+    is worse than refusing.
+    """
+    monkeypatch.setenv(llama_server.ENV_SERVER_URL, "https://127.0.0.1:8443")
+    assert llama_server.available() is False
+    with pytest.raises(llama_server.BackendUnavailable) as caught:
+        llama_server.format_text("buy milk")
+    assert "http://" in str(caught.value)
+
+
+def test_plain_http_to_another_host_needs_an_explicit_opt_in(monkeypatch):
+    """Pointing the formatter at another machine should be a deliberate act.
+
+    Spawn mode only ever talks to loopback, so an attach URL that leaves this
+    machine - including one on the same LAN - is refused unless the user asks for
+    it. A copied config or a typo must not silently stream every transcript to
+    another host in the clear.
+    """
+    monkeypatch.setenv(llama_server.ENV_SERVER_URL, "http://model-box.local:8080")
+    assert llama_server.available() is False
+    with pytest.raises(llama_server.BackendUnavailable) as caught:
+        llama_server.format_text("buy milk")
+    assert llama_server.ENV_ALLOW_REMOTE in str(caught.value)
+
+    # The flag is the whole opt-in; nothing else changes.
+    monkeypatch.setenv(llama_server.ENV_ALLOW_REMOTE, "1")
+    assert llama_server.available() is True
+    assert llama_server._endpoint("http://model-box.local:8080") == ("model-box.local", 8080)
+
+
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1:99999/",        # port out of range
+    "http://127.0.0.1:abc/",          # port is not a number
+    "http://[::1]@evil.com:8080/",    # malformed IPv6 literal
+    "127.0.0.1:8080",                 # no scheme - used to mean host, port 80
+    "http://",                        # no host
+    "://nonsense",
+])
+def test_a_malformed_attach_url_reports_unavailable_and_never_raises(url, monkeypatch):
+    """`available` is a REQUIRED_FUNCTION on the per-utterance path and is
+    documented never to raise, but `urlparse` raises bare ValueError for several
+    of these - and the old fallback silently turned a scheme-less URL into a
+    request to port 80."""
+    monkeypatch.setenv(llama_server.ENV_SERVER_URL, url)
+    assert llama_server.available() is False
+    with pytest.raises(llama_server.BackendUnavailable):
+        llama_server.format_text("buy milk")
+
+
+def test_an_explicit_port_zero_is_not_silently_port_80():
+    """`parsed.port or 80` treated a deliberate `:0` as absent."""
+    assert llama_server._endpoint("http://127.0.0.1:0") == ("127.0.0.1", 0)
+
+
+def test_loopback_needs_no_opt_in(monkeypatch):
+    """Every spelling of "this machine" is allowed by default."""
+    monkeypatch.delenv(llama_server.ENV_ALLOW_REMOTE, raising=False)
+    assert llama_server._is_loopback("127.0.0.1")
+    assert llama_server._is_loopback("localhost")
+    assert llama_server._is_loopback("LOCALHOST")
+    assert llama_server._is_loopback("127.0.0.53")     # all of 127.0.0.0/8
+    assert llama_server._is_loopback("::1")
+    # A LAN address, and a name that is not localhost, are not loopback even
+    # though the latter might well resolve to 127.0.0.1 - the check must not
+    # depend on a resolver that a hostile DNS answer could steer.
+    assert not llama_server._is_loopback("192.168.1.10")
+    assert not llama_server._is_loopback("127.0.0.1.example.com")
+    assert llama_server._endpoint("http://127.0.0.1:8080") == ("127.0.0.1", 8080)
+    assert llama_server._endpoint("http://localhost:8080") == ("localhost", 8080)
+    assert llama_server._endpoint("http://[::1]:8080") == ("::1", 8080)
+
+
+# ---------------------------------------------------------------------------
+# The port a squatter can take
+# ---------------------------------------------------------------------------
+def test_the_offered_port_is_picked_from_our_own_range():
+    """Not the kernel's next ephemeral port, which is sequential and therefore
+    guessable - and so can be held in advance by a local process."""
+    low, high = llama_server._PORT_RANGE
+    for _ in range(5):
+        assert low <= llama_server._free_port() <= high
+
+
+def test_a_port_someone_else_holds_is_skipped(monkeypatch):
+    """A failed bind is information: never hand back a port we could not take."""
+    held = socket.socket()
+    held.bind(("127.0.0.1", 0))
+    held.listen(1)
+    taken = held.getsockname()[1]
+    try:
+        monkeypatch.setattr(llama_server, "_PORT_RANGE", (taken, taken + 1))
+        monkeypatch.setattr(llama_server, "_PORT_ATTEMPTS", 8)
+        assert llama_server._free_port() != taken
+    finally:
+        held.close()
+
+
+def test_a_squatter_that_cannot_share_the_port_is_not_trusted(stub_env, monkeypatch):
+    """The settle check, and the *only* squatter it defeats.
+
+    A squatter taking the port with SO_REUSEADDR alone cannot coexist with
+    llama-server (whose own SO_REUSEPORT opt-in is irrelevant unless the other
+    socket opted in too), so the child exits on bind failure - and that exit is
+    what the check detects. See the test below for the case it does not cover.
+    """
+    def handler(conn, request):
+        if request.startswith(b"GET"):
+            conn.sendall(b"HTTP/1.0 200 OK\r\nContent-Length: 15\r\n\r\n"
+                         b'{"status":"ok"}')
+        else:
+            conn.sendall(CHAT_OK)   # would hand back "Buy milk." to the user
+
+    squatter = RawServer(handler)
+    monkeypatch.setattr(llama_server, "_free_port", lambda host="127.0.0.1":
+                        squatter.port)
+    try:
+        # The squatter alone is convincing: that is exactly what makes the race
+        # worth winning.
+        assert llama_server._health_ok(squatter.url) is True
+
+        with pytest.raises(llama_server.BackendUnavailable) as caught:
+            llama_server.format_text("buy milk", timeout_s=5.0)
+
+        # Our own child could not bind, so it exited - and that is the tell.
+        assert "exited" in str(caught.value), caught.value
+        assert not any(request.startswith(b"POST") for request in squatter.requests), (
+            "the transcript was posted to a process that is not our llama-server")
+    finally:
+        squatter.close()
+
+
+#: Winsock has no SO_REUSEPORT, so the test that models a sharing squatter cannot
+#: run on Windows. The limitation it documents is Windows-relevant too, but Windows
+#: cannot be made to demonstrate it.
+HAS_SO_REUSEPORT = hasattr(socket, "SO_REUSEPORT")
+
+
+@pytest.mark.skipif(not HAS_SO_REUSEPORT,
+                    reason="Winsock has no SO_REUSEPORT to model the shared listener")
+def test_a_squatter_that_shares_the_port_is_NOT_detected(stub_env, monkeypatch):
+    """Characterisation test for a known limitation, not a fix.
+
+    llama-server binds with SO_REUSEPORT (cpp-httplib sets it before bind, guarded
+    by `#ifdef SO_REUSEPORT`), so a squatter that also opts into SO_REUSEPORT gets
+    to *share* the port: the child's bind succeeds, the child stays alive, and the
+    settle check is satisfied. The kernel then spreads connections across both
+    listeners, so the squatter receives a share of the transcripts.
+
+    This asserts the limitation rather than tolerating it silently, so that the
+    day someone closes it (AF_UNIX, or verifying the listening PID) this test
+    fails and has to be rewritten. docs/TODO.md carries the reasoning. It is not
+    a race: a process can join *after* the server is warm, and the port is
+    readable from /proc/net/tcp or `ss`.
+    """
+    hits = []
+
+    def handler(conn, request):
+        if request.startswith(b"POST"):
+            hits.append(request)
+            conn.sendall(CHAT_OK)
+        else:
+            conn.sendall(b"HTTP/1.0 200 OK\r\nContent-Length: 15\r\n\r\n"
+                         b'{"status":"ok"}')
+
+    squatter = RawServer(handler, reuse_port=True)
+    monkeypatch.setenv("VT_STUB_REUSE_PORT", "1")   # the stub opts in too
+    monkeypatch.setattr(llama_server, "_free_port", lambda host="127.0.0.1":
+                        squatter.port)
+    try:
+        llama_server.warm()
+        # The crux, and deterministic: the settle check accepted a server whose
+        # child survived sharing the port, so it detected nothing.
+        assert llama_server.server_process() is not None, (
+            "if this fails the limitation is gone and this test should be deleted")
+        for index in range(20):
+            try:
+                llama_server.format_text(f"secret transcript {index}", timeout_s=5.0)
+            except llama_server.BackendUnavailable:
+                pass
+        if not hits:
+            # Proving the impact needs the kernel to hand at least one connection
+            # to the squatter, which is hash-based and not ours to control. Skip
+            # rather than flake: the guard's failure above is already asserted.
+            pytest.skip("no connection was distributed to the squatter here")
+    finally:
+        squatter.close()
+
+
+def test_attach_mode_can_reach_an_ipv6_loopback_server():
+    """`http://[::1]:port` used to be unreachable: the transport was IPv4-only.
+
+    The address family now comes from parsing the host as a literal - no
+    resolver, which is the whole reason this module does not use
+    `socket.create_connection`.
+    """
+    def handler(conn, request):
+        if request.startswith(b"GET"):
+            conn.sendall(b"HTTP/1.0 200 OK\r\nContent-Length: 15\r\n\r\n"
+                         b'{"status":"ok"}')
+        else:
+            conn.sendall(CHAT_OK)
+
+    try:
+        server = RawServer(handler, host="::1")
+    except OSError as exc:      # pragma: no cover - only on a host with no ::1
+        pytest.skip(f"no IPv6 loopback on this host: {exc}")
+    try:
+        assert server.url.startswith("http://[::1]:"), server.url
+        assert llama_server._health_ok(server.url, timeout=2.0) is True
+        body = llama_server._post_chat(server.url, {"x": 1}, 2.0)
+        assert body["choices"][0]["message"]["content"] == "Buy milk."
+        # A Host header carrying a bare IPv6 literal is malformed HTTP.
+        assert b"Host: [::1]" in server.requests[-1]
+    finally:
+        server.close()
+
+
+def test_an_ipv4_literal_still_gets_an_unbracketed_host_header():
+    """The bracketing must be conditional, not unconditional."""
+    server = RawServer(lambda conn, _r: conn.sendall(
+        b"HTTP/1.0 200 OK\r\nContent-Length: 15\r\n\r\n" + b'{"status":"ok"}'))
+    try:
+        assert llama_server._health_ok(server.url, timeout=2.0) is True
+        assert b"Host: 127.0.0.1" in server.requests[-1]
+    finally:
+        server.close()
+
+
+def test_attach_mode_resolves_a_hostname():
+    """A name is resolved, and across both families rather than IPv4 only.
+
+    RawServer listens on 127.0.0.1; the client is handed `localhost`, which on
+    many systems resolves to `::1` first. That is the point: the address must be
+    tried, not assumed, so an IPv6-only host reaches too.
+    """
+    server = RawServer(lambda conn, _r: conn.sendall(
+        b"HTTP/1.0 200 OK\r\nContent-Length: 15\r\n\r\n" + b'{"status":"ok"}'))
+    try:
+        assert llama_server._is_literal("localhost") is False
+        assert llama_server._is_literal("127.0.0.1") is True
+        assert llama_server._is_literal("::1") is True
+        assert llama_server._health_ok(
+            f"http://localhost:{server.port}", timeout=5.0) is True
+    finally:
+        server.close()
+
+
+def test_a_literal_host_is_not_resolved(monkeypatch):
+    """The loopback path must not touch a resolver - that is why a literal gets
+    its own branch instead of going through `create_connection`."""
+    server = RawServer(lambda conn, _r: conn.sendall(
+        b"HTTP/1.0 200 OK\r\nContent-Length: 15\r\n\r\n" + b'{"status":"ok"}'))
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("resolver consulted for a literal host")
+
+    monkeypatch.setattr(llama_server.socket, "getaddrinfo", boom)
+    try:
+        assert llama_server._health_ok(server.url, timeout=2.0) is True
+        assert llama_server._post_chat(server.url, {"x": 1}, 2.0)
+    finally:
+        server.close()

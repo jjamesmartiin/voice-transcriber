@@ -473,20 +473,34 @@ def default_endpoint_file() -> str:
 
 
 def _write_endpoint_file(path: str, host: str, port: int, token: str) -> None:
-    """Publish the TCP endpoint, owner-only."""
+    """Publish the TCP endpoint, owner-only.
+
+    Written to a private temp file and renamed into place instead of opened with
+    ``O_TRUNC``: the endpoint lives in the shared temp dir, where another local
+    user can pre-create it as a symlink (so a direct open corrupts an arbitrary
+    file) or as a world-readable file (so the token is readable until the
+    ``chmod``). ``os.replace`` swaps the *name*, so nothing is ever written
+    through whatever was there.
+    """
     payload = json.dumps(
         {"transport": TCP, "host": host, "port": int(port), "token": token}
-    )
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    fd = os.open(path, flags, 0o600)
+    ).encode("utf-8")
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".",
+                               prefix=".vt-control-")
     try:
-        os.write(fd, payload.encode("utf-8"))
-    finally:
-        os.close(fd)
-    try:
-        os.chmod(path, 0o600)
-    except OSError:  # pragma: no cover - Windows ACLs are not POSIX modes
-        pass
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:  # pragma: no cover - Windows ACLs are not POSIX modes
+            pass
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def read_endpoint_file(path: str | None = None) -> dict | None:
@@ -502,7 +516,11 @@ def read_endpoint_file(path: str | None = None) -> dict | None:
     if not isinstance(data, dict):
         return None
     port = data.get("port")
-    if not isinstance(port, int) or not 0 < port < 65536:
+    # ``isinstance(True, int)`` is True, so a JSON ``true`` port must be excluded
+    # explicitly; the host is used to build a connection, so it must be a name.
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
+        return None
+    if not isinstance(data.get("host"), str) or not data["host"]:
         return None
     return data
 

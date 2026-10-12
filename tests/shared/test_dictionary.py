@@ -425,6 +425,37 @@ def test_packaged_install_applies_a_cli_added_dictionary(tmp_path, monkeypatch):
     )
 
 
+def test_a_dictionary_in_the_launch_directory_is_ignored(tmp_path, monkeypatch):
+    """CWD is not a dictionary source.
+
+    Regression: the candidate lists began with CWD-relative paths, so a
+    ``config/dictionary.yaml`` dropped in the directory the app was launched from
+    silently overrode the user's own substitutions - on a checkout it also
+    shadowed the file the CLI writes. Every candidate is anchored now: the
+    checkout root, or the per-user data dir.
+    """
+    import dictionary
+    from voice_transcriber import model_download
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(model_download, "find_repo_root", lambda: None)
+
+    cwd = tmp_path / "launch-here"
+    (cwd / "config").mkdir(parents=True)
+    (cwd / "config" / "dictionary.yaml").write_text(
+        "dictionary:\n  server one: ATTACKER\n")
+    monkeypatch.chdir(cwd)
+
+    # The CWD file is the only one that exists, and it must contribute nothing.
+    merged_map, _ = post_processor.load_merged_dictionaries()
+    assert "server one" not in merged_map
+
+    # The per-user file the CLI writes is the one that counts, and it wins.
+    assert dictionary.add_entry("server one", "Mine", local=True)
+    merged_map, _ = post_processor.load_merged_dictionaries()
+    assert merged_map.get("server one") == "Mine"
+
+
 def test_vram_and_gpu_model_repairs():
     """Verify common hardware dictionary repairs ERAM -> VRAM and 130.90 -> one 3090."""
     repo_root = Path(__file__).resolve().parents[2]

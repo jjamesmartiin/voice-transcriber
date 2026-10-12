@@ -645,6 +645,14 @@ def _sanitize_slm_output(input_text: str, output_text: str) -> str:
 
 VLLM_API_URL = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/completions")
 
+# A transcript must reach the local SLM and nothing else. `urlopen` honours
+# `http_proxy` / `HTTPS_PROXY` / macOS `_scproxy`, and none of those can tell
+# "localhost:8000" from the open internet, so a machine with a proxy configured
+# would ship dictation to it. An empty ProxyHandler opts out of all of them; this
+# is what makes README's "talks only to 127.0.0.1" true. Pinned by
+# tests/shared/test_slm_loopback.py.
+_VLLM_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 # SLM / vLLM Model Auto-Download & Manual Download Links:
 # ------------------------------------------------------------------------------
 # 1. Automatic: vLLM systemd service automatically downloads model weights on first start.
@@ -724,8 +732,13 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
     model_name = os.environ.get("VT_SLM_MODEL", "")
     if not model_name:
         try:
-            req_mod = urllib.request.Request("http://localhost:8000/v1/models")
-            with urllib.request.urlopen(req_mod, timeout=0.5) as resp_mod:
+            # Derived from the chat URL so that it follows VT_VLLM_URL. It used
+            # to be hardcoded to port 8000, so discovery silently only ever worked
+            # for the default endpoint and every other setup fell back to the name
+            # below. OpenAI-compatible servers put /models beside /chat/completions.
+            models_url = VLLM_API_URL.rsplit("/chat/completions", 1)[0] + "/models"
+            req_mod = urllib.request.Request(models_url)
+            with _VLLM_OPENER.open(req_mod, timeout=0.5) as resp_mod:
                 mod_data = json.loads(resp_mod.read().decode('utf-8'))
                 if mod_data.get("data"):
                     model_name = mod_data["data"][0]["id"]
@@ -767,7 +780,7 @@ def process_slm_llm_rewrite(text: str, timeout_sec: float = None) -> str:
             data=json.dumps(payload).encode('utf-8'),
             headers={'Content-Type': 'application/json'}
         )
-        with urllib.request.urlopen(req, timeout=timeout_sec) as response:
+        with _VLLM_OPENER.open(req, timeout=timeout_sec) as response:
             res_data = json.loads(response.read().decode('utf-8'))
             _SLM_OFFLINE_STREAK = 0
             clean_output = _sanitize_slm_output(text, res_data['choices'][0]['message']['content'])
@@ -2421,6 +2434,13 @@ def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
     (``dictionary.get_common_dictionary_path`` /
     ``dictionary.get_local_dictionary_path``), so a read-only install (Nix store,
     AppImage, PyInstaller ``.exe``) reads exactly the files the CLI created.
+
+    Every candidate is anchored - to the checkout root or the per-user data dir -
+    and none is CWD-relative. A ``config/dictionary.yaml`` or ``dictionary.yaml``
+    in the directory the app happens to be launched from used to win outright,
+    which meant any process able to drop a file there silently rewrote the word
+    substitutions applied to the user's dictation. That is the same CWD trust
+    ``t2.get_config_file`` and the dictionary CLI paths already dropped.
     """
     global _DICT_TRACKED_PATHS_MTIMES
     # The checkout root, found the same way the CLI finds it. A Nix store,
@@ -2491,13 +2511,7 @@ def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
                     existing_targets[t] = len(merged_rules) - 1
 
     # 1. Common / tracked dictionary candidates
-    common_candidates = [
-        Path("config/dictionary.yaml"),
-        Path("config/dictionary.yml"),
-        Path("config/dictionary.json"),
-        Path("dictionary.yaml"),
-        Path("dictionary.json"),
-    ]
+    common_candidates = []
     if repo_root:
         common_candidates += [
             repo_root / "config" / "dictionary.yaml",
@@ -2512,12 +2526,11 @@ def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
             _merge_in(f_map, f_rules)
             break
 
-    # 2. Config file candidates (config.yaml)
-    config_candidates = [
-        Path("config/config.yaml"),
-        Path("config/config.yml"),
-        Path("config.yaml"),
-    ]
+    # 2. Config file candidates (config.yaml): the checkout's config only. The
+    #    per-user config is not read here because the app's own config loader
+    #    (`t2`) is the single owner of that, and reading the same key twice was
+    #    never the intended contract.
+    config_candidates = []
     if repo_root:
         config_candidates.append(repo_root / "config" / "config.yaml")
     for c in config_candidates:
@@ -2542,18 +2555,7 @@ def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
             break
 
     # 3. Personal / local (gitignored) dictionary candidates
-    local_candidates = [
-        Path("config/dictionary.local.yaml"),
-        Path("config/dictionary.local.yml"),
-        Path("config/dictionary.local.json"),
-        Path("dictionary.local.yaml"),
-        Path("dictionary.local.json"),
-        Path("config/dictionary.user.yaml"),
-        Path("config/dictionary.user.yml"),
-        Path("config/dictionary.user.json"),
-        Path("dictionary.user.yaml"),
-        Path("dictionary.user.json"),
-    ]
+    local_candidates = []
     if repo_root:
         local_candidates += [
             repo_root / "config" / "dictionary.local.yaml",

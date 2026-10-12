@@ -407,6 +407,34 @@ class TestTcpTransport:
         mode = stat.S_IMODE(os.stat(endpoint_file).st_mode)
         assert mode == 0o600, f"Expected 0600, got {oct(mode)}"
 
+    def test_a_planted_endpoint_path_is_replaced_not_written_through(
+            self, endpoint_file, tmp_path):
+        """The endpoint lives in the shared temp dir, so a pre-existing path is
+        attacker-controlled.
+
+        Regression: ``os.open(path, O_CREAT | O_TRUNC)`` follows a symlink, so
+        another local user could point the name at any file this user can write
+        and have it truncated and overwritten with the endpoint JSON. Writing a
+        private temp file and renaming it into place swaps the *name* instead.
+        """
+        victim = tmp_path / "victim.txt"
+        victim.write_text("do not touch")
+        if os.name == "posix":
+            endpoint_file.symlink_to(victim)
+        else:
+            endpoint_file.write_text("do not touch")
+
+        server = control.ControlServer(
+            _FakeEngine(), transport=control.TCP, endpoint_file=str(endpoint_file)
+        )
+        assert server.start() is True
+        try:
+            assert victim.read_text() == "do not touch"
+            published = json.loads(endpoint_file.read_text())
+            assert published["token"] == server.token
+        finally:
+            server.stop()
+
     def test_the_endpoint_is_removed_on_stop(self, endpoint_file):
         server = control.ControlServer(
             _FakeEngine(), transport=control.TCP, endpoint_file=str(endpoint_file)
@@ -459,6 +487,13 @@ class TestTcpTransport:
         response = control.send_command("status")
         assert response["ok"] is False
         assert "no running Voice Transcriber" in response["error"]
+
+        # ``isinstance(True, int)`` is True, so a JSON ``true`` port is rejected
+        # explicitly, and the host must be a name ``connect`` can use.
+        endpoint_file.write_text('{"port": true, "host": "127.0.0.1", "token": "x"}')
+        assert control.read_endpoint_file(str(endpoint_file)) is None
+        endpoint_file.write_text('{"port": 1234, "host": ["a"], "token": "x"}')
+        assert control.read_endpoint_file(str(endpoint_file)) is None
 
     def test_the_token_never_reaches_the_engine(self, endpoint_file):
         """The token is transport plumbing, not part of the verb surface."""

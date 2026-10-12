@@ -637,12 +637,22 @@ by SHA-256. After that first install, the whole pipeline is local:
   (VAD is energy-based, not a downloaded model.)
 * **Post-processing** — retraction parsing, filler/stutter cleanup, numbers,
   dates, casing, the custom dictionary — is a local rule engine (tens of
-  microseconds). The optional LLM polish pass is off by default and, like the
-  optional formatter, talks only to `127.0.0.1`.
+  microseconds). The optional LLM polish pass is off by default and posts to
+  whatever `VT_VLLM_URL` names — `127.0.0.1` unless you change it — so pointing it
+  at another host is your decision rather than a guarantee; the optional
+  formatter is the one that refuses to leave `127.0.0.1`.
 * **Control API** is an `AF_UNIX` socket (Linux/macOS) or a token-authenticated
   `127.0.0.1` TCP socket (native Windows) — never a network service.
 * **No telemetry, analytics, crash reporting, phone-home or update check** of any
   kind. Nothing leaves the machine unless you enable a model download.
+
+> The optional formatter talks to `127.0.0.1` and nothing else. Pointing
+> `VT_FORMATTER_SERVER_URL` at another machine is supported only with
+> `VT_FORMATTER_ALLOW_REMOTE=1` — deliberately opt-in, because that path is plain
+> `http://` and carries no encryption (an `https://` URL is refused rather than
+> quietly sent in the clear, and `[::1]` is treated as local). If it has to cross
+> a network, tunnel it (`ssh -L`, `stunnel`). See [`docs/TODO.md`](docs/TODO.md)
+> for the trust boundary this creates on a shared machine.
 
 Set `VT_AUTO_DOWNLOAD_MODEL=0` to forbid even that first download, and point
 `VT_MODEL_SOURCE_DIR` at a local bundle for a fully offline install. See

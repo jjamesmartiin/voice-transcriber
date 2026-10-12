@@ -334,21 +334,18 @@ def _load_model_once(target_id, dtype, local_files_only, device):
     model, processor = _optimize_cohere_runtime(model, processor)
     return model, processor
 
-def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
-    """Load the Cohere model from a local copy.
+def _candidate_model_dirs() -> list[str]:
+    """Directories searched for an installed Cohere snapshot, most specific first.
 
-    The weights are distributed as Apache-2.0 GitHub-release assets (see
-    ``model_download``) and installed locally on first run, so no Hugging Face
-    account or token is required. ``model_id``/``revision`` are kept for
-    signature compatibility and provenance only.
+    Anchored where an installer or the app itself puts a copy: a frozen bundle,
+    the checkout, the per-user data dir (``cohere_models_dir``). Deliberately no
+    CWD entry - a local snapshot is loaded with ``trust_remote_code=True``, so a
+    ``models/cohere/`` dropped next to the directory the user launches from would
+    be executed as that user. That is the same CWD trust the config loader dropped.
     """
-    dtype = _resolve_dtype(device)
-
-    # Search local candidate directories first
     search_dirs = [
         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "cohere"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "cohere"),
-        os.path.join(os.getcwd(), "models", "cohere"),
     ]
     if getattr(sys, "frozen", False):
         exe_dir = os.path.dirname(sys.executable)
@@ -360,11 +357,22 @@ def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
             search_dirs.insert(0, os.path.join(sys._MEIPASS, "models", "cohere"))
             search_dirs.insert(0, os.path.join(sys._MEIPASS, "models"))
             search_dirs.insert(0, sys._MEIPASS)
-    # Install target of the GitHub-release auto-installer: <repo>/models/cohere
-    # when running from a git checkout, else the per-user dir (read-only Nix
-    # store / AppImage installs).
     if cohere_models_dir is not None:
         search_dirs.insert(0, cohere_models_dir())
+    return search_dirs
+
+
+def load_model(model_id=MODEL_ID, revision=MODEL_REVISION, device="cpu"):
+    """Load the Cohere model from a local copy.
+
+    The weights are distributed as Apache-2.0 GitHub-release assets (see
+    ``model_download``) and installed locally on first run, so no Hugging Face
+    account or token is required. ``model_id``/``revision`` are kept for
+    signature compatibility and provenance only.
+    """
+    dtype = _resolve_dtype(device)
+
+    search_dirs = _candidate_model_dirs()
 
     local_path = None
     for candidate in search_dirs:

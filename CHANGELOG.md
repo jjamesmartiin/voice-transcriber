@@ -14,6 +14,96 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The first dictation after a cold start is no longer silently unformatted.**
+  The elapsed-time backstop in `formatter.format_text` counted the backend's
+  startup — process spawn and weights load, seconds for a 462 MiB GGUF — against
+  the 3 s request budget, so it threw away a correct rewrite and returned the
+  original text. It now warms the backend *outside* that clock and re-checks
+  availability first, so a warm that failed cannot cost a second full spawn
+  attempt. Pinned by
+  `tests/shared/test_formatter.py::test_guardrail_6_a_cold_backend_is_not_charged_for_its_own_startup`,
+  which failed against the previous code.
+- **The formatter no longer calls a healthy server dead when the response body
+  arrives in its own TCP segment** — the reader stopped at the end of the
+  headers, so `/health` looked unhealthy and the formatter silently never came
+  up. `timeout_s` is also a whole-request budget now instead of an idle timeout
+  (a peer that kept sending reset it forever), responses are capped at 4 MiB, and
+  a chunked response says so instead of surfacing as a JSON parse error.
+- **IPv6 works in attach mode.** `http://[::1]:port` was unreachable — the
+  transport was IPv4-only and the `Host:` header unbracketed. An IP literal is
+  still dialled without a resolver; a *name* now resolves across both families
+  instead of IPv4 only.
+
+### Security
+
+> A full audit of the 2026-10-10/11 security work — what was verified, what was
+> pre-existing that it missed, and what is deliberately left open — is in
+> [`docs/audit-2026-10-11.md`](docs/audit-2026-10-11.md).
+
+- **The optional LLM polish pass can no longer hand your transcript to a proxy.**
+  `urllib.request` reads `http_proxy` / `HTTPS_PROXY` / macOS `_scproxy`, none of
+  which can tell `localhost:8000` from the open internet, so on a machine with a
+  proxy configured the dictation was forwarded to it — while the app went on
+  reporting that it talks only to `127.0.0.1`. It now uses a proxy-free opener.
+  Pinned by `tests/shared/test_slm_loopback.py`, which stands up both a local
+  endpoint and a proxy and asserts only the endpoint is used. Its model-name
+  discovery also queried a hardcoded port 8000, so it silently ignored
+  `VT_VLLM_URL`; it now derives the models URL from it.
+- **Attaching to an `https://` formatter URL is refused rather than silently
+  posted in cleartext to port 80** — there is no TLS in this transport, and
+  `urlparse` leaves the port unset for `https`. `available()` reports such a URL
+  as unavailable too.
+- **The formatter now talks to loopback and nothing else.** A
+  `VT_FORMATTER_SERVER_URL` naming another machine is refused unless
+  `VT_FORMATTER_ALLOW_REMOTE=1` is set, so a copied config or a typo cannot
+  stream your transcripts to another host in the clear. Turning it on is plain
+  `http://`, so tunnel it.
+- **A local process that takes the formatter's port is caught, *if* it takes it
+  exclusively.** The port is now picked at random instead of sequentially, and a
+  healthy answer is not trusted until the child has had time to attempt its own
+  bind and is still running — which catches a squatter whose bind made
+  `llama-server` exit. It does **not** catch one that sets `SO_REUSEPORT` and
+  shares the port: cpp-httplib sets that option itself, so the child's bind
+  succeeds and the child stays alive. This is a local trust boundary rather than
+  authentication, and a process on the same machine can intercept the
+  transcript; [`docs/TODO.md`](docs/TODO.md) records the verified extent of it
+  and the AF_UNIX fix.
+- **The ASR model loader no longer searches the launch directory.** `load_model`
+  accepted `<cwd>/models/cohere` as a local snapshot on the strength of a
+  `model.safetensors` alone and then loaded it with `trust_remote_code=True`, so a
+  `config.json` plus a `modeling_*.py` dropped next to wherever the app was
+  started from executed as the user. The search is anchored to the frozen bundle,
+  the checkout and the per-user data dir now; `transcribe_cohere._candidate_model_dirs()`
+  is pinned by `tests/shared/test_audit_regressions.py`.
+- **The Cohere `config.json` and processor configs are in the digest map.** The
+  four `.py` modules were pinned but the JSON that *names* them was not, and
+  `config.json` carries the `auto_map` that `trust_remote_code=True` resolves — a
+  rewritten `config.json` could point at any module without changing a pinned
+  hash. All three are now pinned, verified byte-identical to the HF snapshot the
+  pinned revision names.
+- **Model-bundle tar extraction refuses symlink and hardlink members.** The
+  no-`data_filter` fallback (Python 3.10.0–3.11.3) validated only `member.name`,
+  so a symlink member pointing outside the destination followed by a regular
+  member written through it escaped the guard entirely (CVE-2007-4559). Only
+  plain files and directories are extracted now; the same check covers both the
+  local-bundle and the split-part installers.
+- **The dictionary loader no longer reads dictionary files from the working
+  directory.** `post_processor.load_merged_dictionaries` began its candidate
+  lists with CWD-relative paths, so a `config/dictionary.yaml` in the directory
+  the app was launched from silently overrode the user's substitutions — and, in a
+  checkout, shadowed the file the dictionary CLI writes. Every candidate is
+  anchored to the checkout root or the per-user data dir, matching what
+  `t2.get_config_file` already did.
+- **The control API's TCP endpoint file is written by rename, not truncation.**
+  It lives in the shared temp dir, so `os.open(..., O_CREAT | O_TRUNC)` followed
+  whatever a local attacker had put at that name: a symlink meant an arbitrary
+  victim file was truncated and overwritten, and a pre-created world-readable
+  file exposed the 256-bit token until the `chmod`. A private `mkstemp` plus
+  `os.replace` swaps the name instead. The reader also rejects a JSON `true` port
+  and a non-string host.
+
 ## [1.4.0] — 2026-10-11
 
 ### Added

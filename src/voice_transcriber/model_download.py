@@ -118,6 +118,19 @@ _COHERE_PROCESSING_SHA256 = (
 _COHERE_TOKENIZATION_SHA256 = (
     "415fff67e1226d3467c71d22144e56825fd42c8ee41f677bdabe3a86119141ec"
 )
+# The JSON files that *choose* code, not just weights: `config.json` carries the
+# `auto_map` that names the remote module, and the processor configs carry the
+# same for `AutoProcessor`. Pinning the four `.py` files without these left the
+# pointer to them unpinned, so a rewritten `config.json` could name any module.
+_COHERE_CONFIG_JSON_SHA256 = (
+    "5de7e586cec6d8f51225c8d5fe17a56a3043dda9af8c42f9cb01dd545905eb18"
+)
+_COHERE_PROCESSOR_CONFIG_SHA256 = (
+    "d5eff85971bab7f42480856f8fb397d8dd966858d67049def99aa8a665aa87d5"
+)
+_COHERE_PREPROCESSOR_CONFIG_SHA256 = (
+    "9f297d330646ecc8ebb9dc5784f48b7c35b118c913e306a1ccd0192f2c976332"
+)
 _COHERE_TAG = f"model-cohere-{_COHERE_REVISION[:12]}"
 
 COHERE = ModelSpec(
@@ -150,6 +163,9 @@ COHERE = ModelSpec(
     ),
     digests={
         "model.safetensors": _COHERE_SHA256,
+        "config.json": _COHERE_CONFIG_JSON_SHA256,
+        "processor_config.json": _COHERE_PROCESSOR_CONFIG_SHA256,
+        "preprocessor_config.json": _COHERE_PREPROCESSOR_CONFIG_SHA256,
         "configuration_cohere_asr.py": _COHERE_CONFIGURATION_SHA256,
         "modeling_cohere_asr.py": _COHERE_MODELING_SHA256,
         "processing_cohere_asr.py": _COHERE_PROCESSING_SHA256,
@@ -785,6 +801,27 @@ def _read_local_manifest(bundle_dir, prefix):
     return {}
 
 
+def _check_tar_members(tf, dest_path):
+    """Refuse tar members that could escape ``dest_path``.
+
+    A name check alone is not enough: a symlink member pointing outside the
+    destination, followed by a regular member written *through* that link, passes
+    every name check and ``extractall`` then writes outside the tree
+    (CVE-2007-4559). Only plain files and directories are ever extracted from a
+    model bundle, so links and special members are refused outright.
+
+    Only the no-``data_filter`` path needs this; a Python new enough to have
+    ``tarfile.data_filter`` gets the stdlib's own check instead.
+    """
+    for member in tf.getmembers():
+        target = os.path.abspath(os.path.join(dest_path, member.name))
+        if not (target == dest_path or target.startswith(dest_path + os.sep)):
+            raise RuntimeError(f"Tar path traversal detected: {member.name!r}")
+        if not (member.isfile() or member.isdir()):
+            raise RuntimeError(
+                f"Tar member {member.name!r} is a link or special file; refused")
+
+
 def _extract_bundle_archive(path, dest):
     """Extract a .zip / .tar[.*] bundle into ``dest`` with path-traversal guards."""
     dest_path = os.path.abspath(dest)
@@ -803,10 +840,7 @@ def _extract_bundle_archive(path, dest):
             if hasattr(tarfile, "data_filter"):
                 tf.extractall(dest, filter="data")
             else:
-                for member in tf.getmembers():
-                    target = os.path.abspath(os.path.join(dest, member.name))
-                    if not (target == dest_path or target.startswith(dest_path + os.sep)):
-                        raise RuntimeError(f"Tar path traversal detected: {member.name!r}")
+                _check_tar_members(tf, dest_path)
                 tf.extractall(dest)
         return
     raise RuntimeError(
@@ -918,11 +952,7 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
             if hasattr(tarfile, "data_filter"):
                 tf.extractall(staging, filter="data")
             else:
-                staging_path = os.path.abspath(staging)
-                for member in tf.getmembers():
-                    target = os.path.abspath(os.path.join(staging, member.name))
-                    if not (target == staging_path or target.startswith(staging_path + os.sep)):
-                        raise RuntimeError(f"Tar path traversal detected: {member.name!r}")
+                _check_tar_members(tf, os.path.abspath(staging))
                 tf.extractall(staging)
         # Verify every redistributed file against the spec's digest map. Nothing
         # assumes the artifact is called model.safetensors: a GGUF or ONNX spec
