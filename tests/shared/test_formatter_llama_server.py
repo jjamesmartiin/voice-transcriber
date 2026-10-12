@@ -245,6 +245,11 @@ def _isolate(monkeypatch):
         monkeypatch.setattr(
             llama_server, "binary_install_dir",
             lambda: os.path.join("/no-such-vt-formatter-install", "formatter"))
+    # The pinned archive is Windows x64 only, and this suite runs everywhere.
+    # Force the fetch machinery "applicable" so the download/digest tests exercise
+    # it on any host; the platform-gate tests flip this false explicitly.
+    if hasattr(llama_server, "pinned_build_applies"):
+        monkeypatch.setattr(llama_server, "pinned_build_applies", lambda: True)
     # Download consent/progress state is process-global; reset it between tests.
     try:
         import model_download
@@ -935,6 +940,90 @@ def test_the_runtime_fetches_our_release_not_upstream():
     assert pin.UPSTREAM_REPO not in url
     # No runtime report field may surface the publisher's source either.
     assert llama_server.resolve_binary()["download_url"] == url
+
+
+def test_the_pinned_build_is_not_fetched_off_windows(tmp_path, monkeypatch):
+    """Windows DLLs on Linux/macOS are 18.5 MiB of nothing, and a resolved
+    ``.exe`` that cannot exec. Refuse *before* any download."""
+    from voice_transcriber import llama_server_bundle as pin
+    from voice_transcriber import model_download
+
+    monkeypatch.setattr(llama_server, "pinned_build_applies", lambda: False)
+    calls = []
+    monkeypatch.setattr(llama_server, "_fetch_archive",
+                        lambda *args, **kwargs: calls.append(args))
+
+    with pytest.raises(llama_server.BackendUnavailable) as caught:
+        llama_server.ensure_binary(dest=str(tmp_path / "install"))
+
+    message = str(caught.value)
+    assert pin.bundle_url(model_download.REPO_SLUG) not in message
+    assert llama_server.ENV_BINARY in message
+    assert "pkgs.llama-cpp" in message
+    assert calls == [], "a Windows archive was fetched on a non-Windows host"
+    assert not (tmp_path / "install").exists()
+
+
+def test_the_posix_dead_end_does_not_advertise_the_windows_download(
+        tmp_path, monkeypatch):
+    from voice_transcriber import llama_server_bundle as pin
+    from voice_transcriber import model_download
+
+    monkeypatch.setattr(llama_server, "pinned_build_applies", lambda: False)
+    monkeypatch.setattr(llama_server, "binary_install_dir",
+                        lambda: str(tmp_path / "install"))
+    monkeypatch.delenv(llama_server.ENV_BINARY, raising=False)
+    monkeypatch.setenv("PATH", "/nonexistent")
+
+    message = llama_server.binary_error_message()
+
+    assert "formatter-download" not in message
+    assert pin.bundle_url(model_download.REPO_SLUG) not in message
+    assert llama_server.ENV_BINARY in message
+    assert "pkgs.llama-cpp" in message
+    assert llama_server.resolve_binary()["download_url"] is None
+    assert llama_server.describe()["download_url"] is None
+
+
+def test_request_model_does_not_fetch_the_windows_backend_off_windows(monkeypatch):
+    monkeypatch.setattr(llama_server, "pinned_build_applies", lambda: False)
+    monkeypatch.setattr(llama_server, "_binary", lambda: None)
+    backend_calls = []
+    monkeypatch.setattr(llama_server, "ensure_binary_async",
+                        lambda **kwargs: backend_calls.append(kwargs) or True)
+
+    assert llama_server.request_model("s1-mini", consented=True) is False
+    assert backend_calls == []
+
+
+def test_request_model_still_fetches_weights_for_a_user_binary_off_windows(
+        monkeypatch):
+    """The gate is on the *backend* only; the weights half keeps working."""
+    import model_download
+
+    monkeypatch.setattr(llama_server, "pinned_build_applies", lambda: False)
+    monkeypatch.setattr(llama_server, "_binary", lambda: "/usr/bin/llama-server")
+    monkeypatch.setattr(llama_server, "_model_path", lambda model=None: None)
+    calls = []
+    monkeypatch.setattr(model_download, "ensure_model_async",
+                        lambda name, **kwargs: calls.append((name, kwargs)) or True)
+
+    assert llama_server.request_model("s1-mini") is True
+    assert calls == [("formatter", {"consented": False})]
+
+
+def test_ensure_binary_async_does_not_start_off_windows(monkeypatch):
+    import model_download
+
+    monkeypatch.setattr(llama_server, "pinned_build_applies", lambda: False)
+    monkeypatch.setattr(llama_server, "_binary", lambda: None)
+    monkeypatch.setattr(model_download, "_status_handler", lambda *args: None)
+    started = []
+    monkeypatch.setattr(llama_server, "ensure_binary",
+                        lambda dest=None: started.append(dest) or "/x")
+
+    assert llama_server.ensure_binary_async(consented=True) is False
+    assert started == []
 
 
 def test_ensure_binary_downloads_verifies_and_unpacks(tmp_path, monkeypatch):

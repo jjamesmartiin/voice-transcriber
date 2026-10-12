@@ -205,6 +205,29 @@ def server_process() -> subprocess.Popen | None:
 DEFAULT_BINARY_SUBDIR = "formatter"
 
 
+def pinned_build_applies() -> bool:
+    """Whether the pinned archive is usable on this host.
+
+    The only artifact we redistribute is Windows x64 (``ASSET_NAME`` ends in
+    ``-win-cpu-x64.zip``), so on Linux/macOS fetching it would install ~18.5 MiB
+    of unusable DLLs and an ``.exe`` that cannot exec. The member-set check is
+    also Windows-shaped, so a POSIX user could even get a "resolved" backend
+    that then fails to run. Gating the *fetch* here keeps one trust path on the
+    platform it was built for; a POSIX user installs llama.cpp from their package
+    manager or points ``VT_FORMATTER_BINARY`` at a build they already have.
+    """
+    return sys.platform.startswith("win")
+
+
+def _pinned_refusal() -> str:
+    """Why the pinned archive is not fetched here, and the real POSIX routes."""
+    return (
+        f"The pinned llama-server build is Windows x64 only and cannot run on "
+        f"this platform ({sys.platform}). Install llama.cpp from your package "
+        f"manager (Nix: `pkgs.llama-cpp`, which provides `llama-server`), or set "
+        f"{ENV_BINARY} to an existing build.")
+
+
 def binary_install_dir() -> str:
     """Where the pinned backend bundle belongs, without creating anything.
 
@@ -359,7 +382,9 @@ def _binary_report(found, source, searched, missing, *, override) -> dict[str, A
         "missing": list(missing),
         "override": override,
         "install_dir": binary_install_dir(),
-        "download_url": _bundle_url(),
+        # Not applicable on POSIX: report ``None`` rather than a Windows URL
+        # nobody there should ever fetch.
+        "download_url": _bundle_url() if pinned_build_applies() else None,
         "asset_bytes": BUNDLE.ASSET_BYTES,
         "asset_sha256": BUNDLE.ASSET_SHA256,
         "bundle_tag": BUNDLE.BUNDLE_TAG,
@@ -422,16 +447,22 @@ def binary_error_message() -> str:
         if report["searched"]:
             parts.append("Searched: " + ", ".join(report["searched"]) + ".")
     parts.append(
-        f"Put a complete llama-server -- the executable *and* its DLLs -- next "
-        f"to the app, in {install}, or set {ENV_BINARY} to an existing llama.cpp "
-        f"build.")
-    parts.append(
-        f"Run the \"formatter-download\" command to fetch the pinned build, or "
-        f"download {_bundle_url()} ({format_size(BUNDLE.ASSET_BYTES)}) and "
-        f"unpack it into {install}.")
-    parts.append(
         f"To attach to a server that is already running, set {ENV_SERVER_URL}.")
-    parts.append(_runtime_prerequisite_note())
+    if pinned_build_applies():
+        parts.append(
+            f"Put a complete llama-server -- the executable *and* its DLLs -- "
+            f"next to the app, in {install}, or set {ENV_BINARY} to an existing "
+            f"llama.cpp build.")
+        parts.append(
+            f"Run the \"formatter-download\" command to fetch the pinned build, "
+            f"or download {_bundle_url()} ({format_size(BUNDLE.ASSET_BYTES)}) and "
+            f"unpack it into {install}.")
+        parts.append(_runtime_prerequisite_note())
+    else:
+        parts.append(
+            f"Put a llama-server executable in {install}, or set {ENV_BINARY} to "
+            f"an existing llama.cpp build.")
+        parts.append(_pinned_refusal())
     return " ".join(parts)
 
 
@@ -508,6 +539,9 @@ def ensure_binary(dest: str | None = None) -> str:
     Synchronous on purpose; callers use :func:`ensure_binary_async` to keep it
     off the hotkey/UI threads.
     """
+    if not pinned_build_applies():
+        raise BackendUnavailable(_pinned_refusal())
+
     target = os.path.abspath(dest or binary_install_dir())
     existing = _exe_in_dir(target)
     if existing is not None and not _missing_members(existing):
@@ -565,6 +599,11 @@ def ensure_binary_async(consented: bool = False, *, then=None) -> bool:
     if (os.environ.get(ENV_SERVER_URL) or "").strip():
         return False
     if _binary() is not None:
+        return False
+    if not pinned_build_applies():
+        # Surface the refusal the way every other async failure does, without
+        # starting a thread that could only fetch a Windows archive.
+        print(f"llama-server backend unavailable. {_pinned_refusal()}", flush=True)
         return False
 
     from voice_transcriber import model_download
@@ -757,6 +796,10 @@ def request_model(model: str | None = None, *, consented: bool = False) -> bool:
     if (os.environ.get(ENV_SERVER_URL) or "").strip():
         return False
     if _binary() is None:
+        if not pinned_build_applies():
+            # Never fetch the Windows archive here. The weights path below is
+            # unchanged for a user who supplies their own ``VT_FORMATTER_BINARY``.
+            return False
         # Weights are useless without the runtime, so fetch it first; a completed
         # backend install then chains the weights with the same consent.
         return ensure_binary_async(
@@ -1196,6 +1239,7 @@ def describe() -> dict[str, Any]:
         "binary": resolved["path"],
         "binary_source": resolved["source"],
         "install_dir": resolved["install_dir"],
+        "download_url": resolved["download_url"],
         "missing_members": resolved["missing"],
         "model": _model_path(),
         "threads": _threads(),
