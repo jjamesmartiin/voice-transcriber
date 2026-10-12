@@ -42,6 +42,7 @@ STUB_SOURCE = '''#!{python}
 import json
 import os
 import socket
+import socketserver
 import sys
 import threading
 import time
@@ -73,17 +74,28 @@ _health_calls = 0
 
 
 class _Server(ThreadingHTTPServer):
-    """ThreadingHTTPServer that can opt into SO_REUSEPORT, like cpp-httplib.
+    """ThreadingHTTPServer that binds without a reverse-DNS lookup, and can opt
+    into SO_REUSEPORT the way cpp-httplib does.
 
-    The real llama-server sets SO_REUSEPORT before binding (httplib.h), which is
-    the difference between a squatter being fatal and merely annoying: with it,
-    the squatter shares the port and llama-server's bind *succeeds*.
+    Two separate reasons this subclass exists:
+
+    * ``HTTPServer.server_bind`` calls ``socket.getfqdn(host)`` *after* bind() and
+      *before* listen(). Where that lookup blocks - macOS, via mDNSResponder - the
+      child sits holding the port, refusing connections, printing nothing at all.
+      That is the macOS CI failure this class was extended to fix; the other
+      getfqdn site (``BaseHTTPRequestHandler.address_string``) was fixed earlier.
+    * ``SO_REUSEPORT`` is what lets a squatter *share* the port instead of being
+      excluded by it, which is the difference between the squatter being fatal
+      and merely annoying: llama-server sets it, so we must be able to.
     """
 
     def server_bind(self):
         if REUSE_PORT and hasattr(socket, "SO_REUSEPORT"):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        super().server_bind()
+        # Deliberately TCPServer's, not HTTPServer's: the latter adds the
+        # `socket.getfqdn(host)` described above.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -462,6 +474,10 @@ def test_verbose_server_output_does_not_deadlock(tmp_path, monkeypatch):
         "for _ in range(1500):\n"
         "    sys.stderr.write('llama_model_load: chatty line of log output\\n')\n"
         "sys.stderr.flush()\n"
+        "# HTTPServer.server_bind calls socket.getfqdn(host) between bind() and\n"
+        "# listen(), which blocks on macOS and leaves the port refusing connections.\n"
+        "import http.server, socketserver\n"
+        "http.server.HTTPServer.server_bind = socketserver.TCPServer.server_bind\n"
         "class H(BaseHTTPRequestHandler):\n"
         "    protocol_version = 'HTTP/1.0'\n"
         "    def address_string(self): return self.client_address[0]\n"

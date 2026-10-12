@@ -14,6 +14,7 @@ proxy untouched, by standing up both and pointing the environment at the proxy.
 
 import json
 import os
+import socketserver
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,8 +38,11 @@ class _Recorder:
             protocol_version = "HTTP/1.0"
 
             def address_string(self):
-                # BaseHTTPRequestHandler does a reverse-DNS lookup here by
-                # default, which hangs on hosts with a slow resolver.
+                # One of two reverse-DNS lookups in http.server. This one runs per
+                # request; the other (server_bind's socket.getfqdn) runs between
+                # bind() and listen(), so it leaves the port refusing connections.
+                # Both hang on a host with a slow resolver, which is why they are
+                # both overridden here.
                 return self.client_address[0]
 
             def log_message(self, *args):
@@ -62,7 +66,16 @@ class _Recorder:
                 recorder.bodies.append(self.rfile.read(length))
                 self._send(reply)
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        class Server(ThreadingHTTPServer):
+            """Skips `socket.getfqdn(host)`, which HTTPServer.server_bind does after
+            bind() and before listen() - on macOS that goes through mDNSResponder
+            and blocks, holding the port while refusing connections."""
+
+            def server_bind(self):
+                socketserver.TCPServer.server_bind(self)
+                self.server_name, self.server_port = self.server_address[:2]
+
+        self.server = Server(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
