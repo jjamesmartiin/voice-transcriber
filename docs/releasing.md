@@ -332,14 +332,24 @@ set copied.
 nix develop --command gh release view v1.2.0
 ```
 
-Expect exactly **one** asset:
+Expect exactly **two** assets, one per built platform:
 
 | Asset | ~Size |
 | :--- | :--- |
-| `vt-x86_64.AppImage` | ~1.18 GB |
+| `vt-x86_64.AppImage` | ~1.14 GB |
+| `VoiceTranscriber-windows-x86_64.zip` | ~392 MB |
 
-Only `x86_64-linux` is built today (see TODO.md). The asset name carries the
-architecture so a future aarch64 build can attach to the same release.
+`release.yml` builds the AppImage on `ubuntu-latest` and the Windows ZIP on
+`windows-latest`, each with `fail_on_unmatched_files: true`, so a build that
+produces nothing fails the job instead of publishing a release with no asset.
+Only `x86_64` is built — `aarch64-linux` and macOS packaging are open (see
+TODO.md); the asset names carry the architecture so a future arm build can attach
+to the same release.
+
+The Windows ZIP deliberately ships **no** `llama-server`: the pinned backend is
+fetched on demand at runtime (see "The pinned llama-server bundle"), so its
+absence is expected — and the build prints a `::warning::` saying exactly that,
+which is not a failure.
 
 An app release carrying weight assets means someone hand-uploaded them; they are
 dead weight, because the client resolves weights from the bundle tag, never from
