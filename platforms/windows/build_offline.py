@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 import threading
 import time
+import zipfile
 
 def copy_with_progress(src, dst, desc="Copying"):
     """Copy file/directory with progress feedback for large files"""
@@ -61,10 +62,16 @@ BUILD_DIR = PROJECT_ROOT / "build"
 DIST_DIR = PROJECT_ROOT / "dist"
 MODELS_DIR = BUILD_DIR / "models"
 
+# The pin's single declaration home, imported rather than restated so the build
+# cannot disagree with the publisher or the runtime about the asset name, the
+# digest, or which files must travel together.
+sys.path.insert(0, str(SRC_DIR))
+from voice_transcriber import llama_server_bundle as pin  # noqa: E402
+
 # Local model location (installed from the GitHub release assets on first run)
 LOCAL_COHERE = PROJECT_ROOT / "models" / "cohere"
 
-# --- Pinned llama-server.exe resolution (build-time only) ---------------------
+# --- Pinned llama-server file set resolution (build-time only) ----------------
 #
 # The bundled formatter binary must come from an explicit, pinned source. The
 # *runtime* may legitimately fall back to PATH
@@ -73,9 +80,15 @@ LOCAL_COHERE = PROJECT_ROOT / "models" / "cohere"
 # means the CWD -- answers would then be shipped inside the release. See
 # docs/audit-2026-10-11.md 3.5 and docs/TODO.md (uncontrolled search path,
 # CWE-427).
-ENV_LLAMA_SERVER_EXE = "VT_LLAMA_SERVER_EXE"
+#
+# The artifact is a *file set*, not a file: ``llama-server.exe`` is a ~9 KB stub
+# whose only local import is ``llama-server-impl.dll``, so copying the executable
+# alone produces a bundle that resolves and then fails to start. The override
+# and the fixed repository path therefore name either the unpacked directory
+# holding the set or the upstream ZIP, which is extracted and verified first.
+ENV_LLAMA_SERVER_ASSET = "VT_LLAMA_SERVER_ASSET"
 ENV_LLAMA_SERVER_SHA256 = "VT_LLAMA_SERVER_SHA256"
-PINNED_LLAMA_SERVER = PROJECT_ROOT / "llama-server.exe"
+PINNED_LLAMA_SERVER = PROJECT_ROOT / pin.ASSET_NAME
 
 
 def _sha256(path):
@@ -86,56 +99,148 @@ def _sha256(path):
     return digest.hexdigest()
 
 
-def resolve_llama_server():
-    """Return the pinned ``llama-server.exe`` to bundle, or ``None`` if absent.
+def _missing_members(root):
+    """The required files absent from ``root``, in declaration order."""
+    return [name for name in pin.REQUIRED_MEMBERS if not (root / name).is_file()]
 
-    NEVER consults ``PATH``. An explicit ``VT_LLAMA_SERVER_EXE`` that is set but
-    unusable (missing, not a regular file, not executable) is a hard error: a
-    wrong instruction, not an absence. When neither the override nor the fixed
-    repository path exists, warn loudly and bundle nothing.
+
+def _member_root(root):
+    """The directory at or immediately under ``root`` holding every required member.
+
+    The upstream archive may or may not wrap its files in a top-level directory,
+    so the complete set is located rather than assumed to be ``root`` itself.
+    The search stops one level down deliberately: a deep walk of a caller-supplied
+    tree is unbounded work, and the pinned archive never nests deeper than that.
+    ``None`` means no directory at either level holds the whole set.
     """
-    override = (os.environ.get(ENV_LLAMA_SERVER_EXE) or "").strip()
+    candidates = [root, *(p for p in sorted(root.iterdir()) if p.is_dir())]
+    for candidate in candidates:
+        if not _missing_members(candidate):
+            return candidate
+    return None
+
+
+def _require_complete_set(root):
+    """Return the complete-set directory, or hard-fail naming what is missing.
+
+    The set is validated *before anything is copied*: the executable without its
+    DLLs is the silent breakage this check exists to prevent.
+    """
+    found = _member_root(root)
+    if found is not None:
+        return found
+    missing = ", ".join(_missing_members(root))
+    raise SystemExit(
+        f"ERROR: the llama-server set at {root} is incomplete; missing: "
+        f"{missing}. llama-server.exe is a ~9 KB stub that will not start "
+        f"without the rest of the pinned file set, so bundling a partial set "
+        f"is refused.")
+
+
+def _extract_archive(archive):
+    """Extract the pinned ZIP to a scratch directory under ``build/``.
+
+    Entries that would escape the destination are refused: the override can name
+    an archive this build did not produce, and a path-traversing member is never
+    something a legitimate llama.cpp asset contains.
+    """
+    dest = BUILD_DIR / "llama-server"
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    resolved_dest = dest.resolve()
+    with zipfile.ZipFile(archive) as archive_file:
+        for name in archive_file.namelist():
+            if not (dest / name).resolve().is_relative_to(resolved_dest):
+                raise SystemExit(
+                    f"ERROR: refusing to extract {name!r} from {archive}: it "
+                    f"escapes the destination directory.")
+        archive_file.extractall(dest)
+    return dest
+
+
+def verify_llama_server_sha256(path):
+    """Verify an archive against ``VT_LLAMA_SERVER_SHA256`` or the pinned digest.
+
+    The digest is of the *archive*, not of ``llama-server.exe``: a digest of the
+    stub alone would bless exactly the bundle that fails to start. A caller-
+    supplied ``VT_LLAMA_SERVER_SHA256`` still wins, so a deliberately different
+    archive can be pinned; otherwise the digest declared by the pin module is
+    required. A mismatch is a hard build failure, never a silent overwrite.
+    """
+    expected = (os.environ.get(ENV_LLAMA_SERVER_SHA256) or "").strip() or pin.ASSET_SHA256
+    actual = _sha256(path)
+    if actual.lower() != expected.lower():
+        raise SystemExit(
+            f"ERROR: SHA-256 mismatch for {path}: expected {expected}, got "
+            f"{actual}. Refusing to bundle an unverified archive.")
+    print(f"llama-server archive SHA-256 verified: {actual}")
+
+
+def _resolve_source(source):
+    """Resolve a directory-or-ZIP into the complete file-set directory."""
+    if source.is_dir():
+        if (os.environ.get(ENV_LLAMA_SERVER_SHA256) or "").strip():
+            raise SystemExit(
+                f"ERROR: {ENV_LLAMA_SERVER_SHA256} verifies an archive, but "
+                f"{source} is a directory. Point {ENV_LLAMA_SERVER_ASSET} at the "
+                f"upstream ZIP, or unset the digest to bundle an unpacked set.")
+        return _require_complete_set(source)
+    if source.is_file() and source.suffix.lower() == ".zip":
+        verify_llama_server_sha256(source)
+        return _require_complete_set(_extract_archive(source))
+    raise SystemExit(
+        f"ERROR: {source} is neither a directory nor a .zip. The pinned "
+        f"llama-server artifact is a file set (llama-server.exe alone is a ~9 KB "
+        f"stub); point the override at the unpacked directory or the upstream "
+        f"archive, not at a single file.")
+
+
+def resolve_llama_server():
+    """Return the pinned llama-server file set to bundle, or ``None`` if absent.
+
+    NEVER consults ``PATH``. An explicit ``VT_LLAMA_SERVER_ASSET`` that is set but
+    unusable (missing, or a lone executable without its DLLs) is a hard error: a
+    wrong instruction, not an absence. When neither the override nor the fixed
+    pinned archive exists, warn loudly and bundle nothing.
+    """
+    override = (os.environ.get(ENV_LLAMA_SERVER_ASSET) or "").strip()
     if override:
         candidate = Path(override)
-        if not candidate.is_file():
+        if not candidate.exists():
             raise SystemExit(
-                f"ERROR: {ENV_LLAMA_SERVER_EXE}={override!r} is set but is not a "
-                f"regular file. Point it at a real llama-server.exe or unset it.")
-        if not os.access(candidate, os.X_OK):
-            raise SystemExit(
-                f"ERROR: {ENV_LLAMA_SERVER_EXE}={override!r} is not executable.")
-        return candidate
+                f"ERROR: {ENV_LLAMA_SERVER_ASSET}={override!r} is set but does not "
+                f"exist. Point it at the unpacked llama-server directory or the "
+                f"upstream ZIP, or unset it.")
+        return _resolve_source(candidate)
 
-    if PINNED_LLAMA_SERVER.is_file():
-        return PINNED_LLAMA_SERVER
+    if PINNED_LLAMA_SERVER.exists():
+        return _resolve_source(PINNED_LLAMA_SERVER)
 
     message = (
-        f"WARNING: no pinned llama-server.exe to bundle. Checked "
-        f"{ENV_LLAMA_SERVER_EXE} (unset) and {PINNED_LLAMA_SERVER} (missing). "
-        f"The Windows bundle will ship without llama-server.exe; set "
-        f"{ENV_LLAMA_SERVER_EXE} to bundle one.")
+        f"WARNING: no pinned llama-server set to bundle. Checked "
+        f"{ENV_LLAMA_SERVER_ASSET} (unset) and {PINNED_LLAMA_SERVER} (missing). "
+        f"The Windows bundle will ship without llama-server; set "
+        f"{ENV_LLAMA_SERVER_ASSET} to the unpacked set or the upstream ZIP.")
     print(message)
     if os.environ.get("GITHUB_ACTIONS"):
         print(f"::warning::{message}")
     return None
 
 
-def verify_llama_server_sha256(path):
-    """Verify the pinned server against ``VT_LLAMA_SERVER_SHA256`` when supplied.
+def bundle_llama_server(source_dir, dist_dir):
+    """Copy the complete pinned set beside ``VoiceTranscriber.exe``.
 
-    The release workflow publishes no digest for the bundled server today, so
-    nothing is pinned by default; a supplied digest that does not match is a
-    hard build failure rather than a silent overwrite.
+    The whole set lands in one directory because ``llama-server.exe`` resolves
+    its DLLs from its own directory: a member copied anywhere else is a member
+    the server cannot load. The Microsoft VC++ runtime is reported, never copied
+    -- it is not in the archive and is not ours to redistribute.
     """
-    expected = (os.environ.get(ENV_LLAMA_SERVER_SHA256) or "").strip()
-    if not expected:
-        return
-    actual = _sha256(path)
-    if actual.lower() != expected.lower():
-        raise SystemExit(
-            f"ERROR: SHA-256 mismatch for {path}: expected {expected}, got "
-            f"{actual}. Refusing to bundle an unverified binary.")
-    print(f"llama-server.exe SHA-256 verified: {actual}")
+    print(f"Bundling llama-server set: {source_dir} -> {dist_dir}")
+    copy_with_progress(source_dir, dist_dir, "Copying llama-server")
+    print("llama-server runtime prerequisite (NOT bundled): install the Microsoft "
+          "Visual C++ Redistributable providing " +
+          ", ".join(pin.RUNTIME_PREREQUISITES))
 
 
 def ensure_cached_models():
@@ -312,13 +417,9 @@ def build_exe():
         print("BUILD SUCCESSFUL!")
         print("=" * 60)
         dist_dir = DIST_DIR / "VoiceTranscriber"
-        llama_exe = resolve_llama_server()
-        if llama_exe:
-            verify_llama_server_sha256(llama_exe)
-        if llama_exe and dist_dir.exists():
-            dest_llama = dist_dir / "llama-server.exe"
-            print(f"Bundling llama-server.exe: {llama_exe} -> {dest_llama}")
-            shutil.copy2(str(llama_exe), str(dest_llama))
+        llama_dir = resolve_llama_server()
+        if llama_dir and dist_dir.exists():
+            bundle_llama_server(llama_dir, dist_dir)
         exe_path = dist_dir / "VoiceTranscriber.exe"
         if exe_path.exists():
             size_mb = exe_path.stat().st_size / (1024 * 1024)

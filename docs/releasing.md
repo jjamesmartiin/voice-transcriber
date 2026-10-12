@@ -33,9 +33,10 @@ git push github main --tags        # remote 'github' == git@github.com:jjamesmar
 #    attaches vt-x86_64.AppImage and VoiceTranscriber-windows-x86_64.zip). Watch it, or poll the release object:
 nix develop --command gh release view v1.3.1
 
-# 5. NOTHING TO DO FOR THE WEIGHTS. They live in a revision-keyed model
-#    bundle and are re-published only when REVISION changes — see
-#    "Where the weights live".
+# 5. NOTHING TO DO FOR THE WEIGHTS OR THE llama-server BUNDLE. Each lives in
+#    its own keyed bundle (model revision, upstream pin) and is re-published
+#    only when that key changes — see "Where the weights live" and
+#    "The pinned llama-server bundle".
 
 # 6. Verify the release carries the release assets (see "Verifying a release").
 ```
@@ -245,6 +246,85 @@ Practical notes:
   resolves from `flake.lock` and is unaffected.
 
 ---
+
+## The pinned llama-server bundle
+
+The Windows formatter backend runs a pinned, redistributable `llama-server`
+build. Its single declaration home is
+`src/voice_transcriber/llama_server_bundle.py`; the publisher reads every
+constant back out of it, so the two cannot drift.
+
+| | |
+| :--- | :--- |
+| Upstream | `ggml-org/llama.cpp` nightly `b11429` |
+| Commit | `d81235049384534c167caea52b85a694f6103d14` |
+| Asset | `llama-b11429-bin-win-cpu-x64.zip` — 19,398,918 bytes (~18.5 MiB), 51 files, ~47.2 MiB unpacked |
+| SHA-256 | `1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe` |
+| Our tag | `tool-llama-server-b11429`, a **pre-release** |
+| Attestation | <https://github.com/ggml-org/llama.cpp/attestations/52904614> |
+
+**Why a nightly.** Upstream publishes no binary on its stable tags: the `v0.6.0`
+release object carries exactly one asset, `nightly-tag.txt`, whose content is the
+`b`-tag pointing at the *same commit*. Upstream's `docs/release.md` says
+releases are not published to GitHub Releases, only nightly/development builds.
+`b11429` is therefore the only coherent prebuilt pin, and it is the one matching
+a tagged stable release rather than an arbitrary point on `master`. The binary
+reports `0.6.0-dev` because nightlies are built with `LLAMA_BUILD_IS_DEV=ON` —
+do not parse that as a version, and do not expect it to equal the tag.
+
+**Cross-checking the download.** The pinned digest is recomputed locally and
+agrees with the GitHub API's per-asset `digest` field; upstream also publishes
+SLSA build provenance, which is an independent confirmation of the same value:
+
+```bash
+gh attestation verify --owner ggml-org llama-b11429-bin-win-cpu-x64.zip
+```
+
+**Publishing it** (`scripts/publish_llama_server_bundle.sh`) fetches
+`UPSTREAM_URL`, verifies `ASSET_SHA256` **before touching GitHub**, creates
+`tool-llama-server-b11429` as a pre-release, and uploads the archive first and
+`SHA256SUMS` last — the same "SHA256SUMS makes a bundle discoverable" rule as
+the model weights. A digest mismatch, or a failed archive upload, aborts
+**without** publishing the manifest. Re-running is idempotent (remote digests are
+compared), `--dry-run` prints the plan and changes nothing, and the download is
+cached under `dist/llama-server/`.
+
+**This bundle is re-published only when the pin changes** — never per app
+release. Bumping `PIN_TAG` / `PIN_COMMIT` / `ASSET_*` in
+`llama_server_bundle.py` renames `BUNDLE_TAG`, which is what forces a fresh
+publish; every app release in between resolves the same tag.
+
+**Licence notices.** Redistributing the archive creates four obligations, all
+recorded in `config/licenses/LlamaServer-LICENSES.txt` and summarised in
+`LlamaServer-NOTICE.txt`: llama.cpp/ggml (MIT), cpp-httplib (MIT, statically
+compiled), BoringSSL (Apache-2.0, statically linked; fetched from its pinned tag
+because it is not in the llama.cpp repo) and the LLVM OpenMP runtime
+(Apache-2.0 WITH LLVM-exception). Only `LICENSE-LLVM-OpenMP` travels inside the
+archive; the other three are ours to supply. The archive also omits the
+Microsoft VC++ runtime, which is a machine prerequisite rather than something we
+may copy.
+
+---
+
+### Release ordering, and what the release job should do
+
+The bundle must be published **before** a release that fetches it: the runtime URL
+(`pin.bundle_url(model_download.REPO_SLUG)`) 404s until
+`scripts/publish_llama_server_bundle.sh` has run. There is intentionally no
+upstream fallback.
+
+The Windows release job currently supplies nothing, so it warns and bundles no
+server (see `docs/TODO.md`, the Windows-build entry). To ship one, the job should:
+
+1. fetch `pin.UPSTREAM_URL`, verifying `pin.ASSET_SHA256`;
+2. pass the archive as `VT_LLAMA_SERVER_ASSET` (a digest is then checked by
+   default — `VT_LLAMA_SERVER_SHA256` only overrides it for a deliberate alternate);
+3. leave `PATH` alone — the build must never resolve the server from it (CWE-427).
+
+`build_offline.py` also reports the Microsoft VC++ runtime as a **prerequisite**:
+the upstream archive does not contain `MSVCP140.dll`/`VCRUNTIME140*.dll`, so a
+machine without the redistributable cannot start the server even with the whole
+set copied.
 
 ## Verifying a release
 

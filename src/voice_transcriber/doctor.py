@@ -371,6 +371,66 @@ def check_model_weights() -> Dict[str, Any]:
         }
 
 
+def check_formatter_backend() -> Dict[str, Any]:
+    """Report whether the optional on-device formatter resolves. No network.
+
+    The formatter is off by default and this check never fails the run: a user
+    who does not use it should not see a red cross. What it does is turn the
+    resolve-or-dead-end into a named answer - found or not, from where, which
+    members are missing beside a partial Windows bundle, and how to fix it. It
+    deliberately does not download: fetching is ``formatter-download``.
+    """
+    try:
+        from voice_transcriber.formatters import llama_server
+    except Exception as exc:
+        return {
+            "ok": True,
+            "checked": False,
+            "resolved": False,
+            "missing": [],
+            "detail": f"formatter backend module unavailable: {exc}",
+            "fix": None,
+        }
+
+    resolved = llama_server.resolve_binary()
+    install_dir = resolved["install_dir"]
+    common = {
+        "ok": True,
+        "checked": True,
+        "install_dir": install_dir,
+        "missing": list(resolved["missing"]),
+        "runtime_prerequisites": ", ".join(resolved["runtime_prerequisites"]),
+    }
+    if resolved["path"]:
+        return {
+            **common,
+            "resolved": True,
+            "path": resolved["path"],
+            "source": resolved["source"],
+            "detail": (f"llama-server resolves ({resolved['source']}): "
+                       f"{resolved['path']}"),
+            "fix": None,
+        }
+    if resolved["missing"]:
+        detail = ("llama-server is incomplete: missing beside the executable: "
+                  + ", ".join(resolved["missing"]))
+        fix = (f"re-copy the whole bundle (executable plus DLLs) into "
+               f"{install_dir}, or run \"formatter-download\"")
+    else:
+        searched = ", ".join(resolved["searched"]) or "nothing"
+        detail = f"llama-server not found; searched {searched}"
+        fix = (f"run \"formatter-download\", or place the bundle (executable "
+               f"plus DLLs) in {install_dir}, or set {llama_server.ENV_BINARY}")
+    return {
+        **common,
+        "resolved": False,
+        "path": None,
+        "source": None,
+        "detail": detail,
+        "fix": fix,
+    }
+
+
 def check_daemon() -> Dict[str, Any]:
     try:
         import control
@@ -404,6 +464,7 @@ def run_doctor(json_format: bool = False, stream=None, fix: bool = False) -> Dic
     hotkey_info = check_hotkeys_and_permissions(plat)
     clip_info = check_clipboard_and_typing(plat)
     model_info = check_model_weights()
+    formatter_info = check_formatter_backend()
     daemon_info = check_daemon()
 
     all_ok = (
@@ -425,6 +486,7 @@ def run_doctor(json_format: bool = False, stream=None, fix: bool = False) -> Dic
         "hotkeys": hotkey_info,
         "clipboard_and_typing": clip_info,
         "model_weights": model_info,
+        "formatter_backend": formatter_info,
         "daemon": daemon_info,
     }
 
@@ -496,6 +558,15 @@ def run_doctor(json_format: bool = False, stream=None, fix: bool = False) -> Dic
         print(f"[✓] Model Weights: Cached at {model_info['path']} ({model_info['size_mb']} MB)", file=out)
     else:
         print(f"[!] Model Weights: {model_info['message']}", file=out)
+
+    # 6b. Optional on-device formatter backend (advisory, never fails the run)
+    if formatter_info["checked"]:
+        if formatter_info["resolved"]:
+            print(f"[✓] Formatter Backend: {formatter_info['detail']}", file=out)
+        else:
+            print(f"[i] Formatter Backend: {formatter_info['detail']}", file=out)
+            if formatter_info.get("fix"):
+                print(f"    To enable: {formatter_info['fix']}", file=out)
 
     # 7. Engine Daemon Status
     if daemon_info["running"]:

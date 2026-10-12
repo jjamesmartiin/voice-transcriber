@@ -16,6 +16,17 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ### Added
 
+- **The formatter backend can be fetched on demand instead of dead-ending.** With
+  the formatter enabled and no `llama-server` present, the app previously had
+  nothing to offer. The first-use prompt and the `formatter-download` verb now
+  install a pinned, SHA-256-verified build from our own pre-release
+  (`tool-llama-server-b11429`) into the app's data directory, stating the size
+  (18.5 MiB) before anything downloads. `VT_FORMATTER_BINARY` remains the
+  bring-your-own escape hatch and is still searched first; `PATH` is still last.
+  A build is accepted only as a *set* — the executable plus the DLLs it imports —
+  because the upstream Windows `llama-server.exe` is a ~9 KB stub that resolves
+  without its siblings and then fails to start. `doctor` reports what resolved,
+  from where, and which members are missing; so does the error message.
 - **A meeting capture can be given an opt-in ceiling, `VT_MEETING_MAX_SECONDS`**
   (seconds, ≥60). Unset is unchanged: no timer, no log line. When set, a
   control-API-started meeting is stopped at the deadline with the reason logged,
@@ -37,7 +48,7 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 - **The Windows build no longer takes `llama-server.exe` from `PATH`.** The
   artifact was decided by the build machine's environment — and on Windows an
   empty or `.` `PATH` entry means the current directory — so it is now resolved
-  only from `VT_LLAMA_SERVER_EXE` or a fixed path, with `VT_LLAMA_SERVER_SHA256`
+  only from `VT_LLAMA_SERVER_ASSET` or a fixed path, with `VT_LLAMA_SERVER_SHA256`
   verified when supplied, a hard failure on a set-but-unusable override, and a
   loud warning instead of a silent skip when nothing is pinned.
 - **The eval scorers redact machine paths in the generator**, rather than the

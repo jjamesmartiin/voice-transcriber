@@ -237,6 +237,21 @@ def _isolate(monkeypatch):
     # test. `stub_env` sets ENV_MODEL_PATH, which is consulted first, so it still
     # works with this in place.
     monkeypatch.setattr(llama_server, "_candidate_model_dirs", lambda: [])
+    # The same for the binary install location: a fetched backend in this user's
+    # data dir must not make a "no binary" assertion pass or fail by accident.
+    # Guarded so this fixture can also run while the install-location search is
+    # itself under development.
+    if hasattr(llama_server, "binary_install_dir"):
+        monkeypatch.setattr(
+            llama_server, "binary_install_dir",
+            lambda: os.path.join("/no-such-vt-formatter-install", "formatter"))
+    # Download consent/progress state is process-global; reset it between tests.
+    try:
+        import model_download
+        monkeypatch.setattr(model_download, "_status_handler", None)
+        monkeypatch.setattr(model_download, "_prompt_allowed", None)
+    except Exception:
+        pass
     formatter.reset_backend_cache()
     yield
     llama_server.reset()
@@ -773,6 +788,266 @@ def test_binary_resolves_frozen_or_bundled_executable(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "executable", str(tmp_path / "app"))
     monkeypatch.setenv(llama_server.ENV_BINARY, "")
     assert llama_server._binary() == str(bin_file)
+
+
+# ---------------------------------------------------------------------------
+# The backend is a SET, not a file -- and it can be fetched on demand
+# ---------------------------------------------------------------------------
+def _write_windows_bundle(directory: Path, members) -> Path:
+    """Write an executable plus exactly ``members`` into ``directory``."""
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in members:
+        (directory / name).write_bytes(b"binary")
+    exe = directory / "llama-server.exe"
+    exe.chmod(0o755)
+    return exe
+
+
+def _zip_payload(names) -> bytes:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name in names:
+            archive.writestr(name, b"content")
+    return buffer.getvalue()
+
+
+def _fake_pin(monkeypatch, *, payload: bytes, members, digest=None):
+    """A tiny local pin so no test ever touches the network."""
+    import hashlib
+    import types
+
+    pin = types.SimpleNamespace(
+        ASSET_NAME="payload.zip",
+        bundle_url=lambda slug: f"http://example.invalid/{slug}/payload.zip",
+        ASSET_SHA256=(hashlib.sha256(payload).hexdigest()
+                      if digest is None else digest),
+        ASSET_BYTES=len(payload),
+        BUNDLE_TAG="tool-llama-server-test",
+        UPSTREAM_REPO="ggml-org/llama.cpp",
+        REQUIRED_MEMBERS=tuple(members),
+        RUNTIME_PREREQUISITES=("MSVCP140.dll", "VCRUNTIME140.dll"),
+    )
+    monkeypatch.setattr(llama_server, "BUNDLE", pin)
+    return pin
+
+
+def test_a_stub_without_its_dlls_is_not_usable(tmp_path, monkeypatch):
+    """`llama-server.exe` is a ~9 KB stub: it resolves, then fails to start.
+
+    Pre-fix `_binary()` returned this path and the app spawned a process that
+    died, never saying why.
+    """
+    exe = tmp_path / "llama-server.exe"
+    exe.write_bytes(b"stub")
+    exe.chmod(0o755)
+    monkeypatch.setenv(llama_server.ENV_BINARY, str(exe))
+
+    assert llama_server._binary() is None
+    assert "llama-server-impl.dll" in llama_server.resolve_binary()["missing"]
+
+
+def test_a_complete_windows_bundle_resolves(tmp_path, monkeypatch):
+    from voice_transcriber.llama_server_bundle import REQUIRED_MEMBERS
+
+    exe = _write_windows_bundle(tmp_path, REQUIRED_MEMBERS)
+    monkeypatch.setenv(llama_server.ENV_BINARY, str(exe))
+
+    assert llama_server._binary() == str(exe)
+    assert llama_server.resolve_binary()["missing"] == []
+
+
+def test_a_posix_binary_is_not_required_to_have_dlls(tmp_path, monkeypatch):
+    """The set check is Windows-shaped; a Nix/POSIX build is self-contained."""
+    binary = tmp_path / "llama-server"
+    binary.write_bytes(b"#!/bin/sh\n")
+    binary.chmod(0o755)
+    monkeypatch.setenv(llama_server.ENV_BINARY, str(binary))
+
+    assert llama_server._binary() == str(binary)
+    assert llama_server.resolve_binary()["missing"] == []
+
+
+def test_the_install_location_is_searched_next_to_the_app(tmp_path, monkeypatch):
+    """A fetched or hand-unpacked bundle in the app's data dir must resolve."""
+    from voice_transcriber.llama_server_bundle import REQUIRED_MEMBERS
+
+    install = tmp_path / "data" / "formatter"
+    exe = _write_windows_bundle(install, REQUIRED_MEMBERS)
+    monkeypatch.setattr(llama_server, "binary_install_dir", lambda: str(install))
+    monkeypatch.delenv(llama_server.ENV_BINARY, raising=False)
+    monkeypatch.setenv("PATH", "/nonexistent")
+
+    assert llama_server._binary() == str(exe)
+    assert llama_server.resolve_binary()["source"] == "bundle"
+
+
+def test_the_missing_binary_message_names_where_to_put_one(tmp_path, monkeypatch):
+    """The old message never said where a binary goes or where to get one."""
+    install = tmp_path / "data" / "formatter"
+    monkeypatch.setattr(llama_server, "binary_install_dir", lambda: str(install))
+    monkeypatch.delenv(llama_server.ENV_BINARY, raising=False)
+    monkeypatch.setenv("PATH", "/nonexistent")
+
+    with pytest.raises(llama_server.BackendUnavailable) as caught:
+        llama_server.format_text("buy milk")
+
+    message = str(caught.value)
+    assert str(install) in message, message
+    assert "formatter-download" in message, message
+    assert "DLL" in message, message
+
+
+def test_the_incomplete_bundle_message_names_the_missing_members(tmp_path, monkeypatch):
+    exe = tmp_path / "bundle" / "llama-server.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"stub")
+    exe.chmod(0o755)
+    monkeypatch.setenv(llama_server.ENV_BINARY, str(exe))
+
+    with pytest.raises(llama_server.BackendUnavailable) as caught:
+        llama_server.format_text("buy milk")
+
+    message = str(caught.value)
+    assert "llama-server-impl.dll" in message, message
+    assert "llama.dll" in message, message
+
+
+def test_the_runtime_fetches_our_release_not_upstream():
+    """Users pull the copy we redistribute, not a third party's nightly URL.
+
+    Fetching upstream would bypass our ``SHA256SUMS`` and leave the four licence
+    notices in ``config/licenses/`` -- which attach to the copy *we* publish --
+    with no copy to attach to. The slug is taken from ``model_download`` because
+    that is the single declaration of which repo hosts our releases.
+    """
+    from voice_transcriber import llama_server_bundle as pin
+    from voice_transcriber import model_download
+
+    url = llama_server._bundle_url()
+
+    assert url == pin.bundle_url(model_download.REPO_SLUG)
+    assert pin.BUNDLE_TAG in url
+    assert model_download.REPO_SLUG in url
+    assert pin.UPSTREAM_URL not in url
+    assert pin.UPSTREAM_REPO not in url
+    # No runtime report field may surface the publisher's source either.
+    assert llama_server.resolve_binary()["download_url"] == url
+
+
+def test_ensure_binary_downloads_verifies_and_unpacks(tmp_path, monkeypatch):
+    """A digest-verified fetch installs the whole member set, executable first."""
+    dest = tmp_path / "install"
+    members = ("llama-server.exe", "llama-server-impl.dll", "llama.dll")
+    payload = _zip_payload(members)
+    pin = _fake_pin(monkeypatch, payload=payload, members=members)
+    monkeypatch.setattr(llama_server, "_fetch_archive",
+                        lambda url, target, descr: Path(target).write_bytes(payload))
+
+    installed = llama_server.ensure_binary(dest=str(dest))
+
+    assert installed == str(dest / "llama-server.exe")
+    for name in members:
+        assert (dest / name).is_file(), name
+    assert pin.ASSET_SHA256  # the pin was actually consulted
+
+
+def test_ensure_binary_refuses_a_digest_mismatch(tmp_path, monkeypatch):
+    """A tampered archive must never be unpacked. Nothing is installed."""
+    dest = tmp_path / "install"
+    members = ("llama-server.exe", "llama-server-impl.dll")
+    payload = _zip_payload(members)
+    _fake_pin(monkeypatch, payload=payload, members=members, digest="0" * 64)
+    monkeypatch.setattr(llama_server, "_fetch_archive",
+                        lambda url, target, descr: Path(target).write_bytes(payload))
+
+    with pytest.raises(llama_server.BackendUnavailable) as caught:
+        llama_server.ensure_binary(dest=str(dest))
+
+    assert "SHA-256" in str(caught.value), caught.value
+    assert not (dest / "llama-server.exe").exists()
+
+
+def test_request_model_fetches_the_backend_first_when_it_is_missing(monkeypatch):
+    """The old dead end: no binary meant `request_model` gave up entirely."""
+    monkeypatch.setattr(llama_server, "_binary", lambda: None)
+    calls = []
+    monkeypatch.setattr(
+        llama_server, "ensure_binary_async",
+        lambda consented=False, then=None: calls.append(consented) or True)
+
+    assert llama_server.request_model("s1-mini", consented=True) is True
+    assert calls == [True]
+
+
+def test_request_model_states_the_binary_size_before_fetching(monkeypatch):
+    import model_download
+
+    monkeypatch.setattr(llama_server, "_binary", lambda: None)
+    monkeypatch.setattr(model_download, "_can_prompt", lambda: False)
+    monkeypatch.setattr(model_download, "_auto_download_enabled", lambda: False)
+    messages = []
+    monkeypatch.setattr(model_download, "_status_handler",
+                        lambda stage, pct, text: messages.append(text))
+
+    assert llama_server.request_model("s1-mini", consented=False) is False
+
+    assert messages, "no size/consent notice was reported"
+    assert "formatter-download" in messages[0], messages[0]
+    assert llama_server.format_size(llama_server.BUNDLE.ASSET_BYTES) in messages[0]
+
+
+def test_ensure_binary_async_does_not_block_the_caller(monkeypatch):
+    """A long download must not block the hotkey/UI thread that started it."""
+    import model_download
+
+    monkeypatch.setattr(model_download, "_status_handler", lambda *a: None)
+    monkeypatch.setattr(model_download, "_can_prompt", lambda: False)
+    monkeypatch.setattr(model_download, "_auto_download_enabled", lambda: True)
+    release = threading.Event()
+    monkeypatch.setattr(llama_server, "_binary", lambda: None)
+    monkeypatch.setattr(llama_server, "ensure_binary",
+                        lambda dest=None: release.wait(timeout=5))
+
+    started = time.monotonic()
+    assert llama_server.ensure_binary_async(consented=True) is True
+    assert time.monotonic() - started < 1.0
+    release.set()
+
+
+def test_doctor_reports_an_incomplete_formatter_bundle(tmp_path, monkeypatch):
+    import doctor
+
+    install = tmp_path / "data" / "formatter"
+    _write_windows_bundle(install, ("llama-server.exe", "llama-server-impl.dll"))
+    monkeypatch.setattr(llama_server, "binary_install_dir", lambda: str(install))
+    monkeypatch.delenv(llama_server.ENV_BINARY, raising=False)
+    monkeypatch.setenv("PATH", "/nonexistent")
+
+    info = doctor.check_formatter_backend()
+
+    assert info["resolved"] is False
+    assert "llama.dll" in info["missing"]
+    assert str(install) in (info["detail"] + (info.get("fix") or ""))
+
+
+def test_doctor_reports_a_resolved_formatter_backend(tmp_path, monkeypatch):
+    import doctor
+    from voice_transcriber.llama_server_bundle import REQUIRED_MEMBERS
+
+    install = tmp_path / "data" / "formatter"
+    exe = _write_windows_bundle(install, REQUIRED_MEMBERS)
+    monkeypatch.setattr(llama_server, "binary_install_dir", lambda: str(install))
+    monkeypatch.delenv(llama_server.ENV_BINARY, raising=False)
+    monkeypatch.setenv("PATH", "/nonexistent")
+
+    info = doctor.check_formatter_backend()
+
+    assert info["resolved"] is True
+    assert info["source"] == "bundle"
+    assert info["path"] == str(exe)
 
 
 def test_build_command_gpu_layers_darwin_and_env(monkeypatch):

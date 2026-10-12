@@ -1830,15 +1830,17 @@ class SimpleVoiceTranscriber:
         self._stop_meeting_live_batcher()
 
     def _control_formatter_download(self) -> bool:
-        """Explicit consent to fetch the optional formatter weights.
+        """Explicit consent to fetch the optional formatter backend and weights.
 
         The first-use path reports the size and stops under a TUI, because there
         is no safe way to prompt on stdin from a background thread. This is the
         deliberate way to proceed; the fetch runs on a daemon thread and its
         progress goes through the same status handler as every other download.
+        The pinned ``llama-server`` build is fetched first when missing, then the
+        weights (``llama_server.request_model`` chains them).
 
-        Returns whether an install was started (False when the weights are
-        already present, or the backend cannot run without them).
+        Returns whether an install was started (False when everything is already
+        present).
         """
         try:
             from voice_transcriber.formatters import llama_server

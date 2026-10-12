@@ -52,17 +52,21 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
+import zipfile
 from collections import deque
 from pathlib import Path
 from typing import Any
 
 from voice_transcriber import formatter
+from voice_transcriber import llama_server_bundle as BUNDLE
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +79,9 @@ logger = logging.getLogger(__name__)
 ENV_SERVER_URL = "VT_FORMATTER_SERVER_URL"
 
 #: Override the ``llama-server`` executable (a Nix store path, a dev build, or
-#: the Windows prebuilt ``llama-server.exe``).
+#: the Windows prebuilt ``llama-server.exe``). This stays the bring-your-own
+#: escape hatch for someone running their own llama.cpp: an explicit value is
+#: authoritative and is consulted ahead of the fetched bundle and ``PATH``.
 ENV_BINARY = "VT_FORMATTER_BINARY"
 
 #: Override the GGUF path. Without this the model registry supplies it.
@@ -193,26 +199,418 @@ def server_process() -> subprocess.Popen | None:
     return _state.get("proc")
 
 
-def _binary() -> str | None:
-    """Locate ``llama-server``: explicit override, bundled executable, then ``PATH``."""
+#: Subdirectory under the app's data dir where a fetched -- or hand-unpacked --
+#: ``llama-server`` bundle lives. ``VT_FORMATTER_BINARY`` still wins, so a user
+#: running their own llama.cpp build is unaffected.
+DEFAULT_BINARY_SUBDIR = "formatter"
+
+
+def binary_install_dir() -> str:
+    """Where the pinned backend bundle belongs, without creating anything.
+
+    Consulted while resolving on the per-utterance path, so it must stay
+    side-effect free apart from the data dir ``get_data_dir`` already creates.
+    """
+    try:
+        from voice_transcriber import model_download
+        return os.path.join(str(model_download.get_data_dir()),
+                            DEFAULT_BINARY_SUBDIR)
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), ".local", "share", "vt",
+                            DEFAULT_BINARY_SUBDIR)
+
+
+def _is_executable(path: str) -> bool:
+    if not path or not os.path.isfile(path):
+        return False
+    # Windows has no executable bit: an ``.exe`` is executable by extension, and
+    # a zip-extracted one on a POSIX host would otherwise need an X bit it never
+    # gets. The member-set check, not the mode, decides usability there.
+    if path.lower().endswith(".exe"):
+        return True
+    return os.access(path, os.X_OK)
+
+
+def _member_names(path: str) -> tuple[str, ...]:
+    """Siblings a resolved executable needs to start.
+
+    Empty for anything that is not a Windows ``.exe``: a POSIX or Nix
+    ``llama-server`` is a self-contained executable, and demanding Windows DLLs
+    beside it would break every existing Linux/macOS setup. The pinned Windows
+    artifact is a stub plus DLLs, so its members are why this is a check at all.
+    """
+    if not path.lower().endswith(".exe"):
+        return ()
+    base = os.path.basename(path).lower()
+    return tuple(member for member in BUNDLE.REQUIRED_MEMBERS
+                 if member.lower() != base)
+
+
+def _missing_members(path: str) -> list[str]:
+    """Which required siblings are absent beside ``path`` (empty when usable)."""
+    directory = os.path.dirname(os.path.abspath(path))
+    return [member for member in _member_names(path)
+            if not os.path.isfile(os.path.join(directory, member))]
+
+
+def _candidate_binary_dirs() -> list[tuple[str, str]]:
+    """``(directory, source)`` pairs to search, most specific first.
+
+    The install location sits between the frozen bundle and ``PATH``: a fetched
+    build resolves without an env var, but an executable shipped beside a frozen
+    app still wins.
+    """
+    dirs: list[tuple[str, str]] = []
+    if getattr(sys, "frozen", False):
+        dirs.append((str(Path(sys.executable).parent), "bundled"))
+    if hasattr(sys, "_MEIPASS"):
+        dirs.append((str(Path(sys._MEIPASS)), "bundled"))
+    try:
+        dirs.append((binary_install_dir(), "bundle"))
+    except Exception:
+        pass
+    return dirs
+
+
+def _exe_in_dir(directory: str) -> str | None:
+    for name in ("llama-server", "llama-server.exe"):
+        candidate = os.path.join(directory, name)
+        if _is_executable(candidate):
+            return candidate
+    return None
+
+
+def resolve_binary() -> dict[str, Any]:
+    """Resolve the executable *set* without starting, fetching or raising.
+
+    Returns the path or ``None``, where it came from, every directory searched,
+    and the members missing beside a found Windows stub. :func:`_binary` is the
+    path-only view; ``doctor`` and the unavailable message use the detail.
+
+    An explicit ``VT_FORMATTER_BINARY`` is authoritative: when it does not
+    resolve we do not fall through to another binary, because silently running a
+    different one than the user pointed at is not what they asked for.
+    """
+    searched: list[str] = []
+    missing: list[str] = []
+    found: str | None = None
+    source: str | None = None
+
+    def consider(path: str) -> bool:
+        nonlocal found, missing
+        if not _is_executable(path):
+            return False
+        absent = _missing_members(path)
+        if absent:
+            # First incomplete candidate wins the report: it is the one the user
+            # is most likely to have just placed there.
+            missing = missing or absent
+            return False
+        found = path
+        return True
+
     override = (os.environ.get(ENV_BINARY) or "").strip()
     if override:
-        return override if os.path.exists(override) else None
+        searched.append(override)
+        if consider(override):
+            source = "override"
+        return _binary_report(found, source, searched, missing, override=True)
 
-    # Check next to executable (frozen PyInstaller bundle or virtualenv bin)
-    candidates: list[Path] = []
-    if getattr(sys, "frozen", False):
-        exe_dir = Path(sys.executable).parent
-        candidates.extend([exe_dir / "llama-server", exe_dir / "llama-server.exe"])
-    if hasattr(sys, "_MEIPASS"):
-        base = Path(sys._MEIPASS)
-        candidates.extend([base / "llama-server", base / "llama-server.exe"])
-    for cand in candidates:
-        if cand.is_file() and os.access(cand, os.X_OK):
-            return str(cand)
+    for directory, label in _candidate_binary_dirs():
+        searched.append(directory)
+        candidate = _exe_in_dir(directory)
+        if candidate is not None and consider(candidate):
+            source = label
+            break
 
-    from shutil import which
-    return which("llama-server")
+    if found is None:
+        from shutil import which
+        on_path = which("llama-server") or which("llama-server.exe")
+        if on_path:
+            searched.append(on_path)
+            if consider(on_path):
+                source = "path"
+
+    return _binary_report(found, source, searched, missing, override=False)
+
+
+def _bundle_url() -> str:
+    """The runtime fetch URL: *our* pre-release, never upstream's copy.
+
+    The slug comes from ``model_download.REPO_SLUG``, the single declaration of
+    which repo hosts our releases; the pin module deliberately declines to
+    declare a second one. A publisher's ``pin.UPSTREAM_URL`` must not reach this
+    path: redistribution is what makes the hosted copy, its ``SHA256SUMS`` and
+    the ``config/licenses/`` notices ours.
+    """
+    try:
+        from voice_transcriber import model_download
+        return BUNDLE.bundle_url(model_download.REPO_SLUG)
+    except Exception:
+        return ""
+
+
+def _binary_report(found, source, searched, missing, *, override) -> dict[str, Any]:
+    return {
+        "path": found,
+        "source": source,
+        "directory": os.path.dirname(os.path.abspath(found)) if found else None,
+        "searched": list(searched),
+        "missing": list(missing),
+        "override": override,
+        "install_dir": binary_install_dir(),
+        "download_url": _bundle_url(),
+        "asset_bytes": BUNDLE.ASSET_BYTES,
+        "asset_sha256": BUNDLE.ASSET_SHA256,
+        "bundle_tag": BUNDLE.BUNDLE_TAG,
+        "runtime_prerequisites": list(BUNDLE.RUNTIME_PREREQUISITES),
+    }
+
+
+def _binary() -> str | None:
+    """Locate a *usable* ``llama-server``: override, bundle dir, then ``PATH``.
+
+    A bare ``llama-server.exe`` is not usable on its own -- see
+    :func:`resolve_binary` -- so the returned path always has its required
+    siblings beside it.
+    """
+    return resolve_binary()["path"]
+
+
+def format_size(n: int) -> str:
+    """Human-readable download size (binary units, one decimal)."""
+    value = float(n)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024 or unit == "TiB":
+            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TiB"
+
+
+def _runtime_prerequisite_note() -> str:
+    names = ", ".join(BUNDLE.RUNTIME_PREREQUISITES)
+    return (
+        f"The pinned build is Windows x64 and also needs the Microsoft VC++ "
+        f"runtime ({names}), which the archive does not contain: install the "
+        f"\"Microsoft Visual C++ Redistributable\" if the server will not start."
+    )
+
+
+def binary_error_message() -> str:
+    """The actionable ``llama-server`` dead end: where it goes and how to get it.
+
+    Names the directories actually searched, says a Windows bundle is the
+    executable *plus its DLLs*, points at the fetch command, and records the
+    VC++ runtime as a prerequisite rather than a file to copy.
+    """
+    report = resolve_binary()
+    install = report["install_dir"]
+    parts: list[str] = []
+    if report["override"]:
+        override = (os.environ.get(ENV_BINARY) or "").strip()
+        parts.append(
+            f"{ENV_BINARY} points at {override!r}, which is not a usable "
+            f"llama-server.")
+        if report["missing"]:
+            parts.append("Missing beside it: " + ", ".join(report["missing"]) + ".")
+    else:
+        parts.append("llama-server not found.")
+        if report["missing"]:
+            parts.append(
+                "A llama-server was found but is incomplete: missing "
+                + ", ".join(report["missing"]) + " beside it.")
+        if report["searched"]:
+            parts.append("Searched: " + ", ".join(report["searched"]) + ".")
+    parts.append(
+        f"Put a complete llama-server -- the executable *and* its DLLs -- next "
+        f"to the app, in {install}, or set {ENV_BINARY} to an existing llama.cpp "
+        f"build.")
+    parts.append(
+        f"Run the \"formatter-download\" command to fetch the pinned build, or "
+        f"download {_bundle_url()} ({format_size(BUNDLE.ASSET_BYTES)}) and "
+        f"unpack it into {install}.")
+    parts.append(
+        f"To attach to a server that is already running, set {ENV_SERVER_URL}.")
+    parts.append(_runtime_prerequisite_note())
+    return " ".join(parts)
+
+
+#: In-flight/notified guards for the backend fetch, mirroring the model
+#: installer's: a second utterance while a download runs must not start a
+#: duplicate or re-report the size on every dictation.
+_binary_inflight: set[str] = set()
+_binary_consent_notified: set[str] = set()
+_binary_async_lock = threading.Lock()
+_BINARY_KEY = "llama-server"
+
+
+def _fetch_archive(url: str, dest: str, descr: str) -> None:
+    """Stream ``url`` to ``dest``. Indirection keeps tests off the network."""
+    from voice_transcriber import model_download
+    model_download._http_get(url, dest, descr)
+
+
+def _sha256_file(path: str) -> str:
+    from voice_transcriber import model_download
+    return model_download._sha256_file(path)
+
+
+def _check_archive_member(name: str) -> None:
+    normalized = name.replace("\\", "/")
+    parts = [part for part in normalized.split("/") if part not in ("", ".")]
+    if os.path.isabs(normalized) or ".." in parts:
+        raise BackendUnavailable(f"refusing unsafe path in the archive: {name!r}")
+
+
+def _extract_archive(archive: str, dest: str) -> None:
+    lower = archive.lower()
+    if lower.endswith(".zip"):
+        with zipfile.ZipFile(archive) as handle:
+            for name in handle.namelist():
+                _check_archive_member(name)
+            handle.extractall(dest)  # noqa: S202 - members validated above
+        return
+    if lower.endswith((".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz")):
+        import tarfile
+        with tarfile.open(archive) as handle:
+            for member in handle.getmembers():
+                _check_archive_member(member.name)
+            handle.extractall(dest)  # noqa: S202 - members validated above
+        return
+    raise BackendUnavailable(f"unsupported llama-server archive: {archive}")
+
+
+def _find_exe_dir(root: str) -> str | None:
+    for directory, _subdirs, files in os.walk(root):
+        if "llama-server.exe" in files or "llama-server" in files:
+            return directory
+    return None
+
+
+def _install_tree(source: str, target: str) -> None:
+    for entry in os.listdir(source):
+        src = os.path.join(source, entry)
+        dst = os.path.join(target, entry)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
+
+
+def ensure_binary(dest: str | None = None) -> str:
+    """Fetch, digest-verify and unpack the pinned build; return the executable.
+
+    The archive is checked against ``ASSET_SHA256`` *before* anything is
+    unpacked, so a tampered or truncated download installs nothing. Refuses with
+    :class:`BackendUnavailable` rather than returning a partial bundle: a stub
+    without its DLLs is worse than no binary at all.
+
+    Synchronous on purpose; callers use :func:`ensure_binary_async` to keep it
+    off the hotkey/UI threads.
+    """
+    target = os.path.abspath(dest or binary_install_dir())
+    existing = _exe_in_dir(target)
+    if existing is not None and not _missing_members(existing):
+        return existing
+
+    url = _bundle_url()
+    if not url:
+        raise BackendUnavailable(
+            f"the {BUNDLE.BUNDLE_TAG} release URL could not be resolved; set "
+            f"{ENV_BINARY} or unpack the archive into {target} by hand.")
+
+    os.makedirs(target, exist_ok=True)
+    work = tempfile.mkdtemp(prefix="vt-llama-server-dl-", dir=target)
+    try:
+        archive = os.path.join(work, BUNDLE.ASSET_NAME)
+        print(f"Downloading llama-server backend ({format_size(BUNDLE.ASSET_BYTES)}) "
+              f"from {url}", flush=True)
+        _fetch_archive(url, archive, BUNDLE.ASSET_NAME)
+        digest = _sha256_file(archive)
+        if digest != BUNDLE.ASSET_SHA256:
+            raise BackendUnavailable(
+                f"llama-server download failed its SHA-256 check (expected "
+                f"{BUNDLE.ASSET_SHA256}, got {digest}); refusing to install it.")
+        unpacked = os.path.join(work, "unpacked")
+        os.makedirs(unpacked, exist_ok=True)
+        _extract_archive(archive, unpacked)
+        source = _find_exe_dir(unpacked)
+        if source is None:
+            raise BackendUnavailable(
+                "the llama-server archive did not contain llama-server.exe")
+        _install_tree(source, target)
+        installed = _exe_in_dir(target)
+        absent = (list(BUNDLE.REQUIRED_MEMBERS) if installed is None
+                  else _missing_members(installed))
+        if installed is None or absent:
+            raise BackendUnavailable(
+                "the llama-server bundle is incomplete after unpacking; missing "
+                + ", ".join(absent))
+        return installed
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def ensure_binary_async(consented: bool = False, *, then=None) -> bool:
+    """Start the backend fetch on a daemon thread; never blocks the caller.
+
+    Consent mirrors the formatter *model* installer for the same reason: a
+    background thread under a full-screen TUI has nowhere to ask. ``consented``
+    is the explicit ``formatter-download`` verb; without it (and without a
+    promptable stdin or ``VT_AUTO_DOWNLOAD_MODEL``) this reports the size and
+    stops. ``then`` runs after a successful install (used to chain the weights).
+
+    Returns whether an install was started (or is already running).
+    """
+    if (os.environ.get(ENV_SERVER_URL) or "").strip():
+        return False
+    if _binary() is not None:
+        return False
+
+    from voice_transcriber import model_download
+    if model_download._status_handler is None:
+        return False
+
+    with _binary_async_lock:
+        if _BINARY_KEY in _binary_inflight:
+            return True
+        needs_consent = (not consented and not model_download._can_prompt()
+                         and not model_download._auto_download_enabled())
+        if needs_consent:
+            first_notice = _BINARY_KEY not in _binary_consent_notified
+            _binary_consent_notified.add(_BINARY_KEY)
+        else:
+            _binary_inflight.add(_BINARY_KEY)
+            first_notice = False
+
+    if needs_consent:
+        if first_notice:
+            model_download._notify(
+                "Formatter backend", 0,
+                f"llama-server backend not installed "
+                f"({format_size(BUNDLE.ASSET_BYTES)}); run \"formatter-download\" "
+                f"to install it.")
+        return False
+
+    def _install() -> None:
+        installed = None
+        try:
+            installed = ensure_binary()
+        except Exception as exc:  # never raise into a daemon thread
+            print(f"Background install of llama-server failed: {exc}", flush=True)
+        finally:
+            with _binary_async_lock:
+                _binary_inflight.discard(_BINARY_KEY)
+                _binary_consent_notified.discard(_BINARY_KEY)
+        if installed is not None and then is not None:
+            try:
+                then()
+            except Exception:
+                logger.debug("post-install hook failed", exc_info=True)
+
+    threading.Thread(target=_install, name="vt-llama-server-install",
+                     daemon=True).start()
+    return True
 
 
 #: Model id -> the GGUF the release bundle installs for it. The model registry is
@@ -323,16 +721,31 @@ def _model_path(model: str | None = None) -> str | None:
     return None
 
 
+def _start_model_install(model: str | None, *, consented: bool) -> bool:
+    """Ask the registry installer for the formatter weights, if it owns them."""
+    try:
+        from voice_transcriber import model_download
+        registry_name = model_download.registry_name_for_model(
+            str(model or DEFAULT_MODEL_ID).strip().lower())
+        if not registry_name:
+            return False
+        return bool(model_download.ensure_model_async(
+            registry_name, consented=consented))
+    except Exception:
+        return False
+
+
 def request_model(model: str | None = None, *, consented: bool = False) -> bool:
-    """Start a non-blocking install of the formatter weights, if it is needed.
+    """Start a non-blocking install of the formatter backend and weights.
 
-    Called when the formatter is enabled and in use but the GGUF is absent.
-    Returns ``True`` when an install was started, ``False`` when there is nothing
-    to do. Every guard is deliberate:
+    Called when the formatter is enabled and in use but cannot run. Returns
+    ``True`` when an install was started, ``False`` when there is nothing to do.
+    Every guard is deliberate:
 
-    * attach mode: the server is not ours and does not need our weights;
-    * no ``llama-server`` binary: the runtime is missing, so fetching weights
-      would not make the formatter work anyway;
+    * attach mode: the server is not ours and needs nothing;
+    * no usable ``llama-server``: fetch the pinned backend first (size stated
+      before anything downloads), then the weights, rather than giving up -- the
+      old behaviour here was a dead end;
     * a model already resolves: nothing to fetch;
     * the model id is not a redistributable registry entry: not ours to fetch.
 
@@ -344,19 +757,14 @@ def request_model(model: str | None = None, *, consented: bool = False) -> bool:
     if (os.environ.get(ENV_SERVER_URL) or "").strip():
         return False
     if _binary() is None:
-        return False
+        # Weights are useless without the runtime, so fetch it first; a completed
+        # backend install then chains the weights with the same consent.
+        return ensure_binary_async(
+            consented=consented,
+            then=lambda: _start_model_install(model, consented=True))
     if _model_path(model) is not None:
         return False
-    try:
-        from voice_transcriber import model_download
-        registry_name = model_download.registry_name_for_model(
-            str(model or DEFAULT_MODEL_ID).strip().lower())
-        if not registry_name:
-            return False
-        return bool(model_download.ensure_model_async(
-            registry_name, consented=consented))
-    except Exception:
-        return False
+    return _start_model_install(model, consented=consented)
 
 
 def _threads() -> int:
@@ -699,9 +1107,7 @@ def _ensure_server(model: str | None = None) -> str:
         binary = _binary()
         model_path = _model_path(model)
         if binary is None:
-            raise BackendUnavailable(
-                f"llama-server not found. Set {ENV_BINARY}, or use "
-                f"{ENV_SERVER_URL} to attach to a running server.")
+            raise BackendUnavailable(binary_error_message())
         if model_path is None:
             raise BackendUnavailable(
                 f"no formatter model found for {model or DEFAULT_MODEL_ID!r}. Set "
@@ -782,11 +1188,15 @@ def describe() -> dict[str, Any]:
     """Configured-vs-effective state, for ``status``. Model-free and side-effect free."""
     attached = bool((os.environ.get(ENV_SERVER_URL) or "").strip())
     proc = _state.get("proc")
+    resolved = resolve_binary()
     return {
         "backend": "llama-server",
         "mode": "attach" if attached else "spawn",
         "server_url": _state.get("url"),
-        "binary": _binary(),
+        "binary": resolved["path"],
+        "binary_source": resolved["source"],
+        "install_dir": resolved["install_dir"],
+        "missing_members": resolved["missing"],
         "model": _model_path(),
         "threads": _threads(),
         "running": proc is not None and proc.poll() is None,

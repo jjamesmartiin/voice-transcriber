@@ -1,0 +1,21 @@
+llama-server redistributable bundle
+
+Pinned upstream : ggml-org/llama.cpp, nightly tag b11429
+                  commit d81235049384534c167caea52b85a694f6103d14
+                  (the commit the stable tag v0.6.0 points at; upstream publishes
+                  binaries only on nightly tags, never on a stable release)
+Archive         : llama-b11429-bin-win-cpu-x64.zip
+sha256          : 1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe
+Published at    : tool-llama-server-b11429 (GitHub pre-release)
+
+This archive is a third-party build redistributed unmodified; it is not an app
+release. Redistribution carries the following licence obligations:
+
+  llama.cpp and ggml (MIT)
+  cpp-httplib (MIT, statically compiled)
+  BoringSSL (Apache-2.0, statically linked)
+  LLVM OpenMP runtime (Apache-2.0 WITH LLVM-exception)
+
+Full licence texts and provenance: LlamaServer-LICENSES.txt in this directory.
+The LLVM OpenMP notice is the one already present in the archive itself, as
+LICENSE-LLVM-OpenMP alongside the DLLs; the other three are supplied here.

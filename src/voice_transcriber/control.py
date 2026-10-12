@@ -307,8 +307,9 @@ VERBS: dict[str, dict] = {
         "returns": ["formatter_context"],
     },
     "formatter-download": {
-        "summary": ("Download the formatter model now (explicit consent; the "
-                    "first-use path will not prompt under a TUI)"),
+        "summary": ("Download the formatter backend (llama-server) and model now "
+                    "(explicit consent; the first-use path will not prompt under "
+                    "a TUI)"),
         "returns": ["formatter_download"],
     },
     "trailing-space": {
