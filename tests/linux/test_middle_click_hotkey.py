@@ -510,6 +510,69 @@ def test_t2_middle_click_config_sync(tmp_path, monkeypatch):
     assert t2.MIDDLE_CLICK_ENABLED is True
 
 
+def test_linux_mouse_grabbing_is_the_default_with_an_opt_out(monkeypatch):
+    """Grabbing is what swallows the dictation hold's middle click.
+
+    Without EVIOCGRAB the hold also reaches the focused app, which on Linux means
+    a primary-selection paste and, over a link, a new tab. Grabbing routes raw
+    relative motion through this process though, so a high-polling-rate pointer
+    can stutter while the GIL is contended: ``VT_GRAB_MOUSE=0`` prefers the smooth
+    cursor and accepts the leaked click.
+    """
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
+    manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    mouse = FakeDevice("Optical Mouse", [272, 273, 274])
+    try:
+        monkeypatch.delenv("VT_GRAB_MOUSE", raising=False)
+        assert manager._can_grab_mouse(mouse) is True
+
+        for spelled in ("1", "true", "yes"):
+            monkeypatch.setenv("VT_GRAB_MOUSE", spelled)
+            assert manager._can_grab_mouse(mouse) is True, spelled
+
+        # Truthiness reads every one of these as "yes, grab".
+        for spelled in ("0", "false", "no", "off", "FALSE"):
+            monkeypatch.setenv("VT_GRAB_MOUSE", spelled)
+            assert manager._can_grab_mouse(mouse) is False, spelled
+
+        # A remapper/bridge output is never grabbed - opting out or not - and an
+        # absolute pointer is not either, since mirroring one drops its gestures.
+        monkeypatch.delenv("VT_GRAB_MOUSE", raising=False)
+        assert manager._can_grab_mouse(FakeDevice("kanata virtual mouse", [272])) is False
+    finally:
+        manager.cleanup()
+
+
+def test_linux_sync_actually_grabs_a_mouse_by_default(monkeypatch):
+    """The predicate is not the contract: this pins the wiring.
+
+    Asserting only ``_can_grab_mouse`` would still pass if nothing consulted it,
+    which is how the middle-click suppression could have gone missing unnoticed.
+    """
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
+    manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    if manager.evdev is None:
+        pytest.skip("evdev is unavailable, so device identification cannot run")
+    manager.set_middle_click_enabled(True)
+    mouse = FakeDevice("Optical Mouse", [272, 273, 274])
+    manager.devices = [mouse]
+    grabbed = []
+    monkeypatch.setattr(manager, "_grab_mouse",
+                        lambda device: grabbed.append(device) or True)
+    try:
+        monkeypatch.delenv("VT_GRAB_MOUSE", raising=False)
+        manager._sync_mouse_grabs()
+        assert grabbed == [mouse], "a monitored mouse must be grabbed by default"
+
+        grabbed.clear()
+        monkeypatch.setenv("VT_GRAB_MOUSE", "0")
+        manager._sync_mouse_grabs()
+        assert grabbed == [], "VT_GRAB_MOUSE=0 must leave the pointer alone"
+    finally:
+        manager.cleanup()
+
+
+
 
 
 

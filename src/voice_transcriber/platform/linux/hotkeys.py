@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import glob
 import logging
+import os
 import select
 import threading
 import time
@@ -17,6 +18,17 @@ from voice_transcriber import keybinds
 from ..base import BaseHotkeyManager
 
 logger = logging.getLogger(__name__)
+
+
+def _grab_opted_out() -> bool:
+    """Whether ``VT_GRAB_MOUSE`` explicitly asks us not to grab the pointer.
+
+    Parsed, not truth-tested: ``VT_GRAB_MOUSE=0`` is a non-empty string, so the
+    obvious ``if not os.environ.get(...)`` would read it as "yes, grab" - the
+    opposite of what someone typing ``=0`` means.
+    """
+    return (os.environ.get("VT_GRAB_MOUSE") or "").strip().lower() in (
+        "0", "false", "no", "off")
 
 
 class LinuxHotkeyManager(BaseHotkeyManager):
@@ -667,7 +679,22 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             return None
 
     def _can_grab_mouse(self, device):
-        """Only grab real relative pointers; never virtual remapper outputs."""
+        """Only grab real relative pointers, and only unless asked not to.
+
+        Grabbing is what makes middle-click push-to-talk safe to use while typing:
+        it routes the pointer's events through this process, so a dictation *hold*
+        can be swallowed rather than also pasting the primary selection. The cost is
+        that raw relative motion (``EV_REL``) then travels through a Python loop and
+        a uinput virtual mouse, so a high-polling-rate pointer can stutter while the
+        GIL is contended (model inference, audio capture, GC).
+
+        Mice are only monitored at all while mouse mode is on (see
+        :meth:`_is_monitored_device`), so that trade is confined to middle-click
+        push-to-talk - which is off by default. ``VT_GRAB_MOUSE=0`` prefers the
+        smooth cursor and accepts the leaked click.
+        """
+        if _grab_opted_out():
+            return False
         try:
             name = getattr(device, "name", "").lower()
             if any(
