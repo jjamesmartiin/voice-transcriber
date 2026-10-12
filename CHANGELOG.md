@@ -14,6 +14,8 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-10-11
+
 ### Added
 
 - **The formatter backend can be fetched on demand instead of dead-ending.** With
@@ -27,6 +29,9 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
   because the upstream Windows `llama-server.exe` is a ~9 KB stub that resolves
   without its siblings and then fails to start. `doctor` reports what resolved,
   from where, and which members are missing; so does the error message.
+  This fetch is **Windows x64 only**, matching the pinned artifact: on Linux and
+  macOS nothing is downloaded, and the message and `doctor` point at the package
+  manager (`pkgs.llama-cpp`) or `VT_FORMATTER_BINARY` instead.
 - **A meeting capture can be given an opt-in ceiling, `VT_MEETING_MAX_SECONDS`**
   (seconds, ≥60). Unset is unchanged: no timer, no log line. When set, a
   control-API-started meeting is stopped at the deadline with the reason logged,

@@ -613,6 +613,10 @@ Two optional models are registered bundles:
   formatter states that size and asks before anything downloads, and the backend
   itself is fetched the same way: `formatter-download` (or the first-use prompt)
   installs the pinned, SHA-256-verified `llama-server` into the app's data dir.
+  That fetch is **Windows x64 only**, matching the artifact: on Linux and macOS
+  install `llama-server` from your package manager (the Nix dev shell provides
+  `pkgs.llama-cpp`) or point `VT_FORMATTER_BINARY` at an existing build — the app
+  never downloads the Windows archive there.
   Bring your own build with `VT_FORMATTER_BINARY`, or attach to a server that is
   already running with `VT_FORMATTER_SERVER_URL`. Licensed Apache-2.0 **plus an
   additional naming term**; see
