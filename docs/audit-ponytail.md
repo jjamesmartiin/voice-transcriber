@@ -61,9 +61,11 @@ a stale backend default slipped through once already.
 failed on its first run: the module-level dictionary auto-load reached `model_download` — and
 `urllib.request` with it — through `load_merged_dictionaries`, so `post_processor` was still not
 clean after the SLM split. It now loads on first use, from the entry points its own docstring
-always claimed. The same class of leak remains in `t2`: `import t2` pulls `model_download`
-through `get_config_file()` at module scope, recorded in [`TODO.md`](TODO.md) rather than fixed
-here.
+always claimed. The same class of leak in `t2` was then fixed too, which the audit never named:
+the pure path helpers (`find_repo_root`, `get_data_dir`) were living in the downloader, so any
+module needing a path imported an HTTP client. They moved to `voice_transcriber/paths.py` and
+`import t2`, `import dictionary` and `import post_processor` now all leave no `urllib.request` or
+`http.client` in `sys.modules`.
 
 **§4 is closed except one item.** Deleted: the `_on_tui_toggle_autotype` alias, the 14 `_dispatch`
 aliases (already gone by then), `ignore_overlap`/`_is_reference_overlap`. Wired in:

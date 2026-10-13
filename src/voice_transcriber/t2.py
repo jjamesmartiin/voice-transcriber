@@ -119,7 +119,10 @@ def silence_stderr():
 # Get appropriate directories for file storage
 def get_data_dir():
     """Get appropriate data directory for config and temporary files"""
-    if 'XDG_DATA_HOME' in os.environ:
+    # An *empty* XDG_DATA_HOME means "not set" (the XDG basedir spec), so this
+    # must not be read as a value: `Path("") / "vt"` is relative, which put the
+    # data dir under whatever directory the app was launched from.
+    if os.environ.get('XDG_DATA_HOME'):
         data_dir = Path(os.environ['XDG_DATA_HOME']) / 'vt'
     elif os.name == 'posix':
         data_dir = Path.home() / '.local' / 'share' / 'vt'

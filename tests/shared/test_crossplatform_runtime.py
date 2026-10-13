@@ -351,6 +351,24 @@ class TestDataDirSelection:
             self._pretend_platform(monkeypatch, platform_name)
             assert t2.get_data_dir() == tmp_path / "xdg" / "vt"
 
+    def test_an_empty_xdg_data_home_means_unset(self, monkeypatch, tmp_path):
+        """The XDG basedir spec: an *empty* ``XDG_DATA_HOME`` means "not set".
+
+        It used to be read as set, which resolved ``Path("") / "vt"`` - a
+        relative path - so the data dir followed the current working directory
+        and settings, stats and transcripts landed wherever the app happened to
+        be launched from. ``voice_transcriber.paths`` (which serves the model
+        installer and the dictionary) already treated it as unset.
+        """
+        import t2
+
+        home = self._isolate_home(monkeypatch, tmp_path)
+        monkeypatch.setenv("XDG_DATA_HOME", "")
+        self._pretend_platform(monkeypatch, "posix")
+        data_dir = t2.get_data_dir()
+        assert data_dir.is_absolute(), f"relative data dir: {data_dir!r}"
+        assert data_dir == home / ".local" / "share" / "vt"
+
     def test_first_launch_creates_stats_in_the_windows_data_dir(self, monkeypatch, tmp_path):
         """End-to-end: Windows path resolution + automatic file creation."""
         import stats
