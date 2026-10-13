@@ -69,6 +69,26 @@ def test_a_concrete_theme_ignores_the_chain(monkeypatch):
     assert accent.resolve("Cyan ") == "cyan"
 
 
+@pytest.mark.parametrize("value", [5, 3.5, ["cyan"]])
+def test_non_string_configured_theme_does_not_raise(value):
+    """A non-string ui_theme from config must not crash resolve()."""
+    result = accent.resolve(value)
+    assert result in accent.COLOR_PALETTES
+
+
+def test_effective_ui_theme_with_non_string_config(monkeypatch, tmp_path):
+    import t2
+
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("ui_theme: 5\n", encoding="utf-8")
+    monkeypatch.setattr(t2, "get_config_file", lambda: cfg_file)
+    t2.load_audio_config(str(cfg_file))
+    theme = t2.effective_ui_theme()
+    assert theme in accent.COLOR_PALETTES
+
+
+
+
 def test_vt_ui_theme_wins_over_the_desktop_accent(monkeypatch):
     """The documented per-session override outranks detection."""
     _desktop_accent_is(monkeypatch, "red")

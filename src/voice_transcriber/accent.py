@@ -80,7 +80,7 @@ def _explicit(var: str) -> str | None:
 
 def resolve(configured: str | None) -> str:
     """The concrete colour to paint with, for a configured theme name."""
-    theme = (configured or "auto").strip().lower()
+    theme = str(configured or "auto").strip().lower()
     if theme in COLOR_PALETTES and theme != "auto":
         return theme
 
