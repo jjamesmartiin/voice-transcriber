@@ -590,7 +590,10 @@ def _write_provenance(spec, dest, base_url, resolved_url=None, source_kind="remo
 
 
 def _release_base(spec):
-    return os.environ.get("VT_MODEL_RELEASE_BASE", spec.release_base).rstrip("/")
+    base = os.environ.get("VT_MODEL_RELEASE_BASE", spec.release_base).rstrip("/")
+    if not base.startswith("https://"):
+        raise ValueError(f"Model release base must use https://, got {base!r}")
+    return base
 
 
 def _release_candidates(primary, canonical=None):
@@ -606,9 +609,23 @@ def _release_candidates(primary, canonical=None):
     out = []
     for cand in (primary, fallback):
         c = (cand or "").rstrip("/")
-        if c and c not in out:
-            out.append(c)
+        if c:
+            if not c.startswith("https://"):
+                raise ValueError(f"Model release base must use https://, got {c!r}")
+            if c not in out:
+                out.append(c)
     return out
+
+
+_ORIGINAL_URLOPEN = urllib.request.urlopen
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _urlopen(req, timeout=120):
+    """Open a URL without environment proxies, respecting test monkeypatching."""
+    if urllib.request.urlopen is not _ORIGINAL_URLOPEN:
+        return urllib.request.urlopen(req, timeout=timeout)
+    return _OPENER.open(req, timeout=timeout)
 
 
 def _asset_exists(url):
@@ -622,7 +639,7 @@ def _asset_exists(url):
         url, method="HEAD", headers={"User-Agent": "vt-model-installer/1.0"})
     for attempt in (1, 2):
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with _urlopen(req, timeout=30) as resp:
                 return 200 <= getattr(resp, "status", 200) < 300
         except urllib.error.HTTPError as e:
             # Some CDNs refuse HEAD outright; only a definite 404/410 means "absent".
@@ -683,13 +700,15 @@ def is_local_model_complete(directory=None):
 
 def _http_get(url, dest, descr):
     """Stream `url` into `dest` with retries, returning bytes downloaded."""
+    if not url.startswith("https://"):
+        raise ValueError(f"Model download URL must use https://, got {url!r}")
     socket.setdefaulttimeout(60)
     last_err = None
     last_pct = -1
     for attempt in range(1, 4):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "vt-model-installer/1.0"})
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with _urlopen(req, timeout=120) as resp:
                 total = int(resp.headers.get("Content-Length") or 0)
                 done = 0
                 with open(dest, "wb") as f:
@@ -758,6 +777,8 @@ def _fetch_part_manifest(base_url, prefix):
     *.partN.xz entries and resolved_url is the final URL after redirects (used
     to record the concrete release tag in SOURCE.json).
     """
+    if not base_url.startswith("https://"):
+        raise ValueError(f"Model release base must use https://, got {base_url!r}")
     sums_url = f"{base_url}/{prefix}.SHA256SUMS"
     data = None
     resolved_url = None
@@ -765,7 +786,7 @@ def _fetch_part_manifest(base_url, prefix):
     for attempt in range(1, 4):
         try:
             req = urllib.request.Request(sums_url, headers={"User-Agent": "vt-model-installer/1.0"})
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with _urlopen(req, timeout=120) as resp:
                 resolved_url = resp.geturl()
                 data = resp.read()
             break

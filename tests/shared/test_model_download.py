@@ -118,6 +118,24 @@ def test_cohere_spec_package_files_have_complete_digests():
     assert set(spec.package_files) <= set(spec.digests)
 
 
+def test_release_base_refuses_http(monkeypatch):
+    """An insecure http:// release base URL must be rejected."""
+    monkeypatch.setenv("VT_MODEL_RELEASE_BASE", "http://insecure.example.com/releases")
+    with pytest.raises(ValueError, match="Model release base must use https://"):
+        model_download._release_base(model_download.COHERE)
+
+
+def test_download_uses_proxy_free_opener(monkeypatch):
+    """The weight downloader must not consult environment proxies."""
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:9999")
+    opener = model_download._OPENER
+    assert not any(
+        isinstance(h, urllib.request.ProxyHandler)
+        for h in opener.handle_open.get("https", [])
+    ), "Opener must not route https requests through ProxyHandler"
+
+
+
 def test_formatter_and_diarization_specs_are_registered():
     """The two redistributable non-ASR models resolve and carry their own data.
 
