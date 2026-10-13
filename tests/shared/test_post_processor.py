@@ -503,6 +503,13 @@ def test_serial_detection_ignores_natural_english(serial_settings, text):
     assert pp.process_serial_numbers(text) == text
 
 
+def test_ordinal_before_one_protects_pronoun():
+    """An ordinal like '2nd' or 'third' before 'one' must not turn 'one' into '1'."""
+    pp.set_number_digits_mode("digits")
+    assert pp.clean_speech_transcription("the 2nd one", skip_slm=True) == "the 2nd one."
+    assert pp.clean_speech_transcription("the second one", skip_slm=True) == "the second one."
+
+
 def test_article_before_single_letter_does_not_collapse_to_serial():
     """An article ('a', 'an') before a single letter code ('a B plan', 'a D student') must not collapse."""
     assert pp.clean_speech_transcription("we need a B plan", skip_slm=True) == "we need a B plan."

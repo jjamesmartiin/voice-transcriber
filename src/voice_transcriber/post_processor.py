@@ -1247,7 +1247,12 @@ def _convert_number_phrase(m):
     if len(lower_tokens) == 1 and lower_tokens[0] == "one":
         before = m.string[:m.start()].rstrip().rsplit(None, 1)[-1].lower() if m.start() > 0 else ""
         after = m.string[m.end():].lstrip().split(None, 1)[0].lower() if m.end() < len(m.string) else ""
-        if before in _ONE_BEFORE_PROTECT or after in _ONE_AFTER_PROTECT:
+        if (
+            before in _ONE_BEFORE_PROTECT
+            or before in _ORDINAL_TO_CARDINAL
+            or bool(re.fullmatch(r"\d+(?:st|nd|rd|th)", before))
+            or after in _ONE_AFTER_PROTECT
+        ):
             return m.group(0)
         return "1"
 
