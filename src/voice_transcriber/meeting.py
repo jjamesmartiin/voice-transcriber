@@ -398,10 +398,27 @@ def capture_microphone(
 
     import sounddevice as sd
 
-    audio_queue: "queue.Queue[np.ndarray]" = queue.Queue()
+    MAX_CAPTURE_QUEUE_SIZE = 1000  # ~64s of 1024-sample blocks at 16kHz
+    audio_queue: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=MAX_CAPTURE_QUEUE_SIZE)
+    dropped_logged = False
 
     def callback(indata, frames, time_info, status) -> None:  # noqa: ARG001
-        audio_queue.put(np.array(indata, dtype=np.float32, copy=True))
+        nonlocal dropped_logged
+        data = np.array(indata, dtype=np.float32, copy=True)
+        try:
+            audio_queue.put_nowait(data)
+        except queue.Full:
+            try:
+                audio_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                audio_queue.put_nowait(data)
+            except queue.Full:
+                pass
+            if not dropped_logged:
+                logger.warning("Meeting capture queue full; dropping oldest audio frames")
+                dropped_logged = True
 
     stream = sd.InputStream(
         samplerate=int(sample_rate),

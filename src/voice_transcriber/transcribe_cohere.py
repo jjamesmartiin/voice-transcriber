@@ -164,6 +164,8 @@ def _optimize_cohere_runtime(model, processor):
         def cached_build_prompt(language: str, punctuation: bool = True) -> str:
             key = (language, punctuation)
             if key not in prompt_cache:
+                if len(prompt_cache) >= 128:
+                    prompt_cache.pop(next(iter(prompt_cache)))
                 prompt_cache[key] = orig_build_prompt(language, punctuation)
             return prompt_cache[key]
         model.build_prompt = cached_build_prompt
@@ -202,6 +204,8 @@ def _optimize_cohere_runtime(model, processor):
                     if "attention_mask" in text_inputs:
                         result["attention_mask"] = text_inputs["attention_mask"]
                     if cache_key is not None:
+                        if len(token_cache) >= 256:
+                            token_cache.pop(next(iter(token_cache)))
                         token_cache[cache_key] = {
                             "input_ids": text_inputs["input_ids"].clone(),
                             "attention_mask": text_inputs["attention_mask"].clone() if "attention_mask" in text_inputs else None,
