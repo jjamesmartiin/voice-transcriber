@@ -14,6 +14,49 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
+## [1.4.2] — 2026-10-12
+
+### Added
+
+- **Windows gets a single-file installer.** Every release now attaches
+  `VoiceTranscriber-windows-x86_64-setup.exe` next to the portable zip: one file
+  to download and run, installing per-user into `%LOCALAPPDATA%\VoiceTranscriber`
+  with a Start Menu shortcut, no UAC prompt and no admin rights. It wraps the same
+  PyInstaller bundle the zip carries, so the two behave identically once running.
+  Uninstalling removes the program only — the downloaded weights (~4 GB) and your
+  settings under `%APPDATA%\vt` are left alone, as is a `models\` directory you
+  placed in the install folder by hand. It is unsigned, so SmartScreen shows
+  "unknown publisher" until *More info → Run anyway*.
+- **Every app release states what it needs.** A generated `REQUIREMENTS.txt`
+  names the exact bundles that build resolves — each model bundle's tag, base URL,
+  `SHA256SUMS` manifest, revision and per-file digest, plus the pinned
+  `llama-server` — so mirroring a release or installing it airgapped no longer
+  means reading the source to find out which tags to fetch. It is rendered from
+  the same declarations the client fetches with, so it cannot disagree with them.
+
+### Changed
+
+- **The releases page now carries one row per app version plus the bundle tags.**
+  App releases are the disposable ones and the pre-releases hosting weights and
+  the formatter backend are not: a bundle tag *is* the runtime download URL for
+  every shipped app, so deleting one breaks first-run installation on installs
+  already out there. Superseded app releases (`v1.2.1`, `v1.3.0`, `v1.3.1`) were
+  pruned under that rule, with their git tags kept so this file's compare links
+  still resolve. `docs/releasing.md` records the rule and the digests of what was
+  removed.
+- **The Windows release job fails loudly if the installer cannot be built**,
+  rather than publishing a release whose primary Windows download is missing.
+
+### Fixed
+
+- **The `[1.4.1]` link in this file was never defined**, so that section rendered
+  as a broken reference.
+- **A stale `docs/releasing.md` claim about `v1.1.0` is corrected.** It stated
+  that the `v1.1.0` weight assets were still published and must not be deleted;
+  `v1.1.0`, `v1.1.1` and `v1.2.0` have in fact been gone for some time, so any
+  surviving install of those versions can no longer fetch weights and has to be
+  pointed at `model-cohere-499888924f5f` or given the files via `VT_MODEL_DIR`.
+
 ## [1.4.1] — 2026-10-11
 
 ### Added
@@ -487,7 +530,9 @@ First tagged release: offline Cohere ASR, global `Alt+Shift` push-to-talk with a
 hands-free latch, streaming VAD, the English post-processor, and text injection
 on Linux.
 
-[Unreleased]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.4.1...v1.4.2
+[1.4.1]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.2.1...v1.3.0

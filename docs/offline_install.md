@@ -16,6 +16,11 @@ Everything the installer needs (`urllib`, `lzma`, `tarfile`, `zipfile`) ships
 inside the app bundle, so an airgapped host needs **no extra tooling** — no
 Python install, no `xz`, no `7z`, no `unzip`.
 
+Every app release carries a `REQUIREMENTS.txt` naming the exact bundle tags that
+build resolves (tag, base URL, manifest name, revision, per-file SHA-256) — for
+the model bundles *and* the pinned `llama-server`. That file is the complete list
+of what to mirror for a release.
+
 ---
 
 ## Normal first run (online)

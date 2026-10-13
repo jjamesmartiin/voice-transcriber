@@ -30,7 +30,8 @@ git tag v1.3.1
 git push github main --tags        # remote 'github' == git@github.com:jjamesmartiin/voice-transcriber.git
 
 # 4. Wait for the `release` workflow to finish (it creates the Release and
-#    attaches vt-x86_64.AppImage and VoiceTranscriber-windows-x86_64.zip). Watch it, or poll the release object:
+#    attaches vt-x86_64.AppImage, VoiceTranscriber-windows-x86_64.zip and
+#    REQUIREMENTS.txt). Watch it, or poll the release object:
 nix develop --command gh release view v1.3.1
 
 # 5. NOTHING TO DO FOR THE WEIGHTS OR THE llama-server BUNDLE. Each lives in
@@ -76,9 +77,15 @@ python -m pytest tests/shared/test_version_consistency.py
 
 `.github/workflows/release.yml` triggers on any pushed tag matching `v*`:
 
-1. **Linux AppImage job (`ubuntu-latest`)**: installs Nix, runs `nix bundle --bundler github:ralismark/nix-appimage .#default` → `vt-x86_64.AppImage`.
-2. **Windows Standalone ZIP job (`windows-latest`)**: installs dependencies, executes `platforms/windows/build_offline.py --no-model`, and zips `dist/VoiceTranscriber` → `VoiceTranscriber-windows-x86_64.zip`.
+1. **Linux AppImage job (`ubuntu-latest`)**: installs Nix, runs `nix bundle --bundler github:ralismark/nix-appimage .#default` → `vt-x86_64.AppImage`, then generates `REQUIREMENTS.txt` and attaches both.
+2. **Windows Standalone ZIP job (`windows-latest`)**: installs dependencies, executes `platforms/windows/build_offline.py --no-model`, zips `dist/VoiceTranscriber` → `VoiceTranscriber-windows-x86_64.zip`, then compiles `platforms/windows/installer.iss` with the preinstalled `ISCC.exe` → `VoiceTranscriber-windows-x86_64-setup.exe` (the same bundle, as one downloadable file; see the installer notes below).
 3. `softprops/action-gh-release@v3` attaches the assets to the GitHub Release with `fail_on_unmatched_files: true`.
+
+A release carries the **app runtime only** — no weights, no config, no source
+archive: GitHub attaches `Source code (zip)`/`(tar.gz)` to every tag by itself, so
+building another one would be a duplicate. `REQUIREMENTS.txt` (see below) names
+the bundles a build resolves. There is deliberately **no macOS artifact yet** —
+see `docs/TODO.md`.
 
 It uses no secrets. Its header comment states the weights are deliberately not
 fetched in CI.
@@ -107,6 +114,22 @@ matrix. It does not publish anything.
   machine does. (Widening the glob without also providing the files would make
   the release job fail on `fail_on_unmatched_files: true`.)
 - **Windows standalone ZIP** is built in CI on `windows-latest`. When building locally on Linux/POSIX, PyInstaller cannot cross-compile Windows EXEs, so local Windows builds must run on a Windows host via `scripts\build.bat`.
+- **The single-file installer** (`platforms/windows/installer.iss`, compiled by
+  `ISCC.exe` in the Windows job) is a wrapper around that same bundle. Inno Setup
+  6.3+ is preinstalled on the `windows-latest` runner, so nothing is installed in
+  CI; the asset name is unversioned, so the app version is passed in as
+  `/DAppVersion=` and the script refuses to build without it
+  (`#ifndef AppVersion` → `#error`). The script has no `[UninstallDelete]`
+  **by design**: weights, config and logs live under `%APPDATA%\vt`, and a
+  hand-placed `models\` directory can live inside `{app}` — deleting either on
+  uninstall would throw away ~4 GB that the next install re-downloads.
+  `tests/windows/test_windows_installer.py` pins all of that structurally,
+  because neither this repo nor the Linux CI can compile an `.iss`.
+- **It is deliberately not `PyInstaller --onefile`.** A true single-file exe
+  unpacks the entire ~1.1 GB payload into a fresh `%TEMP%\_MEIxxxxxx` on every
+  launch (nothing is cached between runs) and would also force the pinned
+  `llama-server` set into the archive instead of beside the exe. An installer
+  extracts once and the app then starts fast. See `platforms/windows/README.md`.
 
 ---
 
@@ -329,15 +352,44 @@ set copied.
 ## Verifying a release
 
 ```bash
-nix develop --command gh release view v1.2.0
+gh release view v1.4.1
 ```
 
-Expect exactly **two** assets, one per built platform:
+Expect exactly **four** assets:
 
 | Asset | ~Size |
 | :--- | :--- |
 | `vt-x86_64.AppImage` | ~1.14 GB |
-| `VoiceTranscriber-windows-x86_64.zip` | ~392 MB |
+| `VoiceTranscriber-windows-x86_64.zip` | ~373 MiB |
+| `VoiceTranscriber-windows-x86_64-setup.exe` | ~373 MiB |
+| `REQUIREMENTS.txt` | <2 KB |
+
+plus GitHub's own `Source code (zip)` / `Source code (tar.gz)`, which every tag
+gets automatically and CI does not build. Releases predating `REQUIREMENTS.txt`
+legitimately have **two** assets and no manifest — `v1.4.1` and `v1.4.0` do.
+The Windows zip and the installer are the same PyInstaller bundle: the installer
+is the primary download (one file, per-user install, Start Menu entry), the zip
+is the portable fallback. Both asset names are unversioned on purpose, so
+`releases/latest/download/<name>` is a stable link; the version lives inside the
+installer (`/DAppVersion=`, read from `voice_transcriber.__version__`, never the
+tag) and in the app itself.
+
+`REQUIREMENTS.txt` is the manifest of what this build resolves at run time: one
+block per registered model bundle (tag, base URL, `SHA256SUMS` name, revision,
+per-file digests) and one for the pinned `llama-server`. It is **generated** by
+`scripts/write_release_requirements.py`, which reads the values out of
+`model_download.MODELS` and `llama_server_bundle` — the same declarations the
+client uses — so it cannot drift and must never be hand-edited or hand-uploaded.
+Regenerate locally with:
+
+```bash
+nix develop --command python scripts/write_release_requirements.py \
+  --tag v1.4.2 --out REQUIREMENTS.txt
+```
+
+Every bundle it names has to be published **before** the release that names it,
+which is why publishing a bundle precedes a release that fetches it ("Release
+ordering" below).
 
 `release.yml` builds the AppImage on `ubuntu-latest` and the Windows ZIP on
 `windows-latest`, each with `fail_on_unmatched_files: true`, so a build that
@@ -419,14 +471,44 @@ parts first, manifest last — and refuses to publish a manifest for missing
 parts.
 
 `LEGACY_RELEASE_BASE` (a hard-coded `v1.1.0` fallback) was removed once
-`model-cohere-499888924f5f` was published. The `v1.1.0` assets themselves stay:
-already-shipped clients (`v1.1.1`, `v1.2.0`) still resolve weights through that
-tag, so do not delete them.
+`model-cohere-499888924f5f` was published.
 
-History: `v1.1.1` shipped AppImage-only and serves weights from the `v1.1.0`
-tag. `v1.2.0` (cut just before the revision-keyed scheme) tries
-`/releases/latest` and then falls back to `v1.1.0`. From the revision-keyed
+History: `v1.1.1` shipped AppImage-only and served weights from the `v1.1.0`
+tag. `v1.2.0` (cut just before the revision-keyed scheme) tried
+`/releases/latest` and then fell back to `v1.1.0`. From the revision-keyed
 bundle onward, no app release carries weights at all.
+
+### Which releases are disposable, and which are not
+
+**Never delete a `model-*` or `tool-*` bundle release.** Its tag *is* the
+runtime download URL for every shipped app: the client resolves
+`.../releases/download/<bundle tag>/<manifest>` at first run and on demand. The
+bundle is also invisible to `/releases/latest` (it is a pre-release), so it never
+competes with an app download.
+
+**App releases are the disposable ones.** No current client resolves anything
+through an app tag, so deleting an old `vX.Y.Z` release costs only the
+bookmarked download URL and any third-party catalogue entry that pinned it.
+Delete the release, not the git tag: `gh release delete <tag>` keeps the tag
+unless you add `--cleanup-tag`, and the tag is what `CHANGELOG.md`'s compare
+links need.
+
+**Known drift (checked against the API 2026-10-12):** the `v1.1.0`, `v1.1.1` and
+`v1.2.0` releases **no longer exist** — the API 404s them. Any surviving
+`v1.1.1`/`v1.2.0` install therefore can no longer fetch weights, and has to be
+pointed at `model-cohere-499888924f5f` or given the files via `VT_MODEL_DIR`.
+Nothing current is affected, because today's client reads only the
+revision-derived tag. An earlier revision of this document claimed those assets
+*were* still there and must be kept — that was already false when it was read.
+
+**Pruned 2026-10-12:** `v1.2.1`, `v1.3.0` and `v1.3.1` were deleted under that
+rule — release objects and assets removed, git tags kept, so `CHANGELOG.md`'s
+compare links still resolve. Nothing a shipped client fetches was deleted. Their
+assets were (all `vt-x86_64.AppImage` + `VoiceTranscriber-windows-x86_64.zip`):
+`v1.2.1` sha256 `d31080ed…`/`2c75f331…`, `v1.3.0` `01c8ef85…`/`4d2c2193…`,
+`v1.3.1` `7d890099…`/`a8413b74…`. Re-uploading a deleted asset is not possible
+from here: the old bundles are gone from the build host too, so re-building the
+same tag is the only way back.
 
 ---
 

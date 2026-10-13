@@ -76,7 +76,7 @@ def _format_optional_duration(value):
 
 
 class VoiceTranscriberTUI:
-    def __init__(self, app_version="1.4.1", ui_theme="auto"):
+    def __init__(self, app_version="1.4.2", ui_theme="auto"):
         self.app_version = app_version
         # Wrapped so a stream that cannot encode our glyphs (legacy codepage,
         # LANG=C, PYTHONIOENCODING=ascii) gets ASCII stand-ins instead of Rich

@@ -30,7 +30,7 @@ shipped as a self-contained PyInstaller `.exe`. The AppImage and venv
 | Tier | Platform | Quick Start Command | Artifact / Details |
 | :--- | :--- | :--- | :--- |
 | **1. Primary — Nix** | Linux, macOS, WSL2 | `nix run github:jjamesmartiin/voice-transcriber` | Reproducible build + launch in one command. From a checkout: `nix run .`; dev shell: `nix develop` |
-| **2. Windows (native)** | Windows 10/11 | Download `VoiceTranscriber-windows-x86_64.zip` → run `VoiceTranscriber.exe` | [Download Windows ZIP](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) — PyInstaller bundle with its own Python + PyTorch, no setup |
+| **2. Windows (native)** | Windows 10/11 | Download `VoiceTranscriber-windows-x86_64-setup.exe` and run it | [Download Windows installer](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) — single file, installs per-user (no admin), Start Menu entry, own Python + PyTorch. Prefer no installer? The `.zip` is still attached for a portable extract-anywhere install |
 | **Alternative** | Linux | `chmod +x vt-x86_64.AppImage && ./vt-x86_64.AppImage` | [Download AppImage](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) — standalone, no Nix or Python |
 | **Alternative** | macOS / any OS | `git clone https://github.com/jjamesmartiin/voice-transcriber.git && cd voice-transcriber`<br>`./scripts/setup.sh && ./scripts/run.sh` | venv + dependencies + weights; under Nix use `nix run`/`nix develop` instead |
 

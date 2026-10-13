@@ -196,12 +196,44 @@ powershell -ExecutionPolicy Bypass -File .\platforms\windows\test.ps1
 
 ## Standalone Windows Binary & Packaging
 
-### Prebuilt Standalone Windows ZIP (No Python Required)
-Every GitHub release attaches a prebuilt **`VoiceTranscriber-windows-x86_64.zip`**:
+### Prebuilt Windows Installer (Single File, No Python Required)
+Every GitHub release attaches **`VoiceTranscriber-windows-x86_64-setup.exe`** — one
+file to download and run:
+
+1. Download `VoiceTranscriber-windows-x86_64-setup.exe` from [Releases](https://github.com/jjamesmartiin/voice-transcriber/releases/latest).
+2. Run it. It installs **per-user**, into `%LOCALAPPDATA%\VoiceTranscriber`, so there is no UAC prompt and no admin rights needed.
+3. Launch from the Start Menu shortcut (or the optional desktop shortcut).
+4. On first launch, it will ask to automatically download the Cohere model weights (~2.8 GB).
+
+It is unsigned, so Windows SmartScreen shows "unknown publisher" until you choose
+*More info → Run anyway*. Uninstalling removes the program only: model weights
+(`%APPDATA%\vt`), settings and logs are left alone.
+
+### Prebuilt Standalone Windows ZIP (Portable)
+Every GitHub release also attaches **`VoiceTranscriber-windows-x86_64.zip`**, for a
+portable install with no installer and no registry entries:
 1. Download `VoiceTranscriber-windows-x86_64.zip` from [Releases](https://github.com/jjamesmartiin/voice-transcriber/releases/latest).
 2. Extract the archive to any folder (e.g. `C:\VoiceTranscriber`).
 3. Run `VoiceTranscriber.exe`.
 4. On first launch, it will ask to automatically download the Cohere model weights (~2.8 GB). Alternatively, drop the model files into `models\cohere\` next to `VoiceTranscriber.exe`.
+
+Both artifacts come from the same PyInstaller bundle, so they behave identically
+once running.
+
+#### Building the installer from source
+
+`platforms\windows\installer.iss` wraps that same `dist\VoiceTranscriber` bundle in
+one Setup.exe with [Inno Setup](https://jrsoftware.org/isinfo.php) 6.3+:
+
+```powershell
+python platforms\windows\build_offline.py --no-model
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=1.4.1 platforms\windows\installer.iss
+# -> dist\installer\VoiceTranscriber-windows-x86_64-setup.exe
+```
+
+It is deliberately *not* `PyInstaller --onefile`: that repacks the whole ~1.1 GB
+payload into a fresh `%TEMP%\_MEIxxxxxx` on every launch, which is unusable for a
+push-to-talk app. This extracts once, at install time.
 
 ### Building a Standalone Offline EXE from Source
 
