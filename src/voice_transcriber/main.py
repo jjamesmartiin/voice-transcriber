@@ -1800,11 +1800,11 @@ class SimpleVoiceTranscriber:
 
         if action not in ("", "list", "ls", "show"):
             t2.set_hotkey_binds(current)
-            # ``t2`` propagates through the ``hotkeys`` shim's
-            # ``_current_hotkey_instance``, which is only set by
-            # ``create_global_hotkeys`` -- the engine builds its manager
-            # straight from the HAL, so push at it directly too (this is what
-            # the middle-click handler has always done).
+            # ``t2`` propagates through the ``hotkeys`` shim, which reaches this
+            # manager because ``init_hotkeys`` registers it. The direct push is
+            # kept deliberately: it also covers a manager swapped in without
+            # going through ``init_hotkeys`` (and is idempotent), so a rebind can
+            # never be silently dropped.
             if self.hotkey_system and hasattr(self.hotkey_system, "set_binds"):
                 self.hotkey_system.set_binds(t2.HOTKEY_BINDS)
             t2.save_audio_config()

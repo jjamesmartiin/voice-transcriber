@@ -14,6 +14,33 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A hotkey rebind from the control API (or the settings modal) no longer reaches
+  nothing on a running engine.** `t2.set_hotkey_binds` — and the middle-click and
+  sound-theme setters — propagate through the `hotkeys` shim's registered
+  manager, but only `hotkeys.create_global_hotkeys` ever registered one. The
+  engine builds its manager straight from the HAL, so the registration stayed
+  empty and every one of those setters silently did nothing on that path.
+  `hotkeys.register_manager()` / `release_manager()` are now the one named home
+  for that, called by `init_hotkeys()` and teardown, and the release is
+  identity-scoped — an older manager's teardown can no longer clear the live
+  one's registration (which is how restarting hotkeys disabled propagation for
+  the rest of the session).
+- **Turning mouse mode off now stops monitoring the mice, not just the grab.**
+  The pointing devices stayed in the watch list, so their events kept flowing
+  through the mouse path with the feature disabled.
+- **A replayed middle click no longer stalls every other device for 25 ms.** The
+  gap between the press and release halves of a replayed click — some toolkits
+  ignore a click whose halves land in the same millisecond — was a
+  `time.sleep()` on the reader thread, which is the thread that reads every other
+  device *and* detects `Alt+Shift` and middle-click. Each replayed click delayed
+  all of them. The release half is now deferred to a deadline the event loop
+  already wakes for, on the same thread, so forwards stay ordered (a press that
+  would overtake a pending release flushes it first) and nothing blocks.
+- **The left+right chord's swallow is now tracked per device.** One pointer's
+  button release cleared a flag another pointer was still relying on.
+
 ## [1.4.2] — 2026-10-12
 
 ### Added

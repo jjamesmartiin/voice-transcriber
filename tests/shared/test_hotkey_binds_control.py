@@ -159,9 +159,10 @@ class TestHotkeyVerb:
     def test_a_rebind_reaches_the_live_manager(self, engine):
         """A running engine must re-arm immediately, not at next launch.
 
-        ``t2.set_hotkey_binds`` reaches a manager built by
-        ``hotkeys.create_global_hotkeys`` through the shim; this engine builds
-        its own straight from the HAL, so the push has to be explicit.
+        ``t2.set_hotkey_binds`` reaches a *registered* manager through the shim,
+        which ``init_hotkeys`` arranges. This covers one swapped in without that
+        route, which is why the verb also calls ``set_binds`` directly: a rebind
+        must never be silently dropped.
         """
 
         engine.hotkey_system = MagicMock()
