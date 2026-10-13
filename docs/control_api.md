@@ -68,6 +68,13 @@ as "not a control verb" so future flags stay safe.
 | **Request limit** | 1 MiB, then the connection is dropped |
 | **Timeouts** | 5 s read/write per connection |
 
+### Concurrency: one engine per user
+
+Only one engine instance should run per user session. The per-user control socket,
+audio capture devices, hotkey hooks, and configuration file are shared resources owned
+by a single active engine. Running multiple instances concurrently can race on configuration
+persistence.
+
 The engine prefers `AF_UNIX`: the socket is addressed by a path, so filesystem
 permissions (`0600`) are the whole access-control story and nothing is exposed
 over the network stack.
