@@ -189,6 +189,7 @@ class RatatuiTui:
         self._server.settimeout(10.0)
         try:
             self._conn, _ = self._server.accept()
+            self._conn.settimeout(5.0)
         except socket.timeout:
             raise RuntimeError("vt-tui did not connect within 10s") from None
         finally:
@@ -271,8 +272,16 @@ class RatatuiTui:
 
     def _read_loop(self):
         try:
+            self._conn.settimeout(1.0)
             buf = self._conn.makefile("r", encoding="utf-8", errors="replace")
-            for line in buf:
+            MAX_LINE = 65536
+            while not self._closed:
+                try:
+                    line = buf.readline(MAX_LINE)
+                except (socket.timeout, TimeoutError):
+                    continue
+                if not line:
+                    break
                 line = line.strip()
                 if not line:
                     continue

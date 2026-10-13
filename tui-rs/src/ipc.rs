@@ -247,28 +247,100 @@ pub enum IpcEvent {
     Closed,
 }
 
+pub const MAX_LINE_BYTES: usize = 65536;
+
+fn parse_cfg_tolerant(map: serde_json::Map<String, serde_json::Value>) -> Wire {
+    Wire::Cfg {
+        mic: map.get("mic").and_then(|v| v.as_str().map(String::from)),
+        secondary: map.get("secondary").and_then(|v| v.as_str().map(String::from)),
+        backend: map.get("backend").and_then(|v| v.as_str().map(String::from)),
+        muted: map.get("muted").and_then(|v| v.as_bool()),
+        auto_type: map.get("auto_type").and_then(|v| v.as_bool()),
+        output_mode: map.get("output_mode").and_then(|v| v.as_str().map(String::from)),
+        sound_theme: map.get("sound_theme").and_then(|v| v.as_str().map(String::from)),
+        ui_theme: map.get("ui_theme").and_then(|v| v.as_str().map(String::from)),
+        punctuation_mode: map.get("punctuation_mode").and_then(|v| v.as_str().map(String::from)),
+        structure_mode: map.get("structure_mode").and_then(|v| v.as_str().map(String::from)),
+        formatter: map.get("formatter").and_then(|v| v.as_str().map(String::from)),
+        formatter_model: map.get("formatter_model").and_then(|v| v.as_str().map(String::from)),
+        formatter_style: map.get("formatter_style").and_then(|v| v.as_str().map(String::from)),
+        formatter_context: map.get("formatter_context").and_then(|v| v.as_str().map(String::from)),
+        cleanup_mode: map.get("cleanup_mode").and_then(|v| v.as_str().map(String::from)),
+        meeting_mode: map.get("meeting_mode").and_then(|v| v.as_str().map(String::from)),
+        meeting_spill_minutes: map.get("meeting_spill_minutes").and_then(|v| v.as_u64().map(|n| n as u32)),
+        diarization: map.get("diarization").and_then(|v| v.as_str().map(String::from)),
+        diarization_speakers: map.get("diarization_speakers").and_then(|v| {
+            v.as_str()
+                .map(|s| SpeakerCount::Auto(s.to_string()))
+                .or_else(|| v.as_u64().map(|n| SpeakerCount::Count(n as u32)))
+        }),
+        diarization_model: map.get("diarization_model").and_then(|v| v.as_str().map(String::from)),
+        meeting_output_dir: map.get("meeting_output_dir").and_then(|v| v.as_str().map(String::from)),
+        meeting_output_format: map.get("meeting_output_format").and_then(|v| v.as_str().map(String::from)),
+        speakers: map.get("speakers").and_then(|v| {
+            v.as_array().map(|arr| {
+                arr.iter().filter_map(|item| item.as_str().map(String::from)).collect()
+            })
+        }),
+        trailing_space: map.get("trailing_space").and_then(|v| v.as_bool()),
+        auto_punctuate: map.get("auto_punctuate").and_then(|v| v.as_bool()),
+        number_digits: map.get("number_digits").and_then(|v| v.as_bool()),
+        number_mode: map.get("number_mode").and_then(|v| v.as_str().map(String::from)),
+        serial_collapse: map.get("serial_collapse").and_then(|v| v.as_bool()),
+        spell_command: map.get("spell_command").and_then(|v| v.as_bool()),
+        middle_click_enabled: map.get("middle_click_enabled").and_then(|v| v.as_bool()),
+        typing_wpm: map.get("typing_wpm").and_then(|v| v.as_u64().map(|n| n as u32)),
+        hotkeys: map.get("hotkeys").and_then(|v| {
+            v.as_array().map(|arr| {
+                arr.iter().filter_map(|item| item.as_str().map(String::from)).collect()
+            })
+        }),
+    }
+}
+
+pub fn parse_wire(text: &str) -> Result<Wire, String> {
+    match serde_json::from_str::<Wire>(text) {
+        Ok(w) => Ok(w),
+        Err(e) => {
+            if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(text) {
+                if map.get("t").and_then(|v| v.as_str()) == Some("cfg") {
+                    return Ok(parse_cfg_tolerant(map));
+                }
+            }
+            Err(e.to_string())
+        }
+    }
+}
+
 /// Connect and spawn a reader thread. Returns the receiver plus a writer handle
 /// (a clone of the socket) for sending commands back to Python.
 pub fn connect(path: &str) -> std::io::Result<(mpsc::Receiver<IpcEvent>, UnixStream)> {
     let stream = UnixStream::connect(path)?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
     let reader = stream.try_clone()?;
+    reader.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let mut buf = BufReader::new(reader);
-        let mut line = String::new();
+        let mut line_bytes = Vec::new();
         loop {
-            line.clear();
-            match buf.read_line(&mut line) {
+            line_bytes.clear();
+            match buf.read_until(b'\n', &mut line_bytes) {
                 Ok(0) => {
                     let _ = tx.send(IpcEvent::Closed);
                     break;
                 }
                 Ok(_) => {
+                    if line_bytes.len() > MAX_LINE_BYTES {
+                        eprintln!("vt-tui: line exceeded MAX_LINE_BYTES, skipping");
+                        continue;
+                    }
+                    let line = String::from_utf8_lossy(&line_bytes);
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
                         continue;
                     }
-                    match serde_json::from_str::<Wire>(trimmed) {
+                    match parse_wire(trimmed) {
                         Ok(w) => {
                             if tx.send(IpcEvent::Wire(Box::new(w))).is_err() {
                                 break;
@@ -278,6 +350,9 @@ pub fn connect(path: &str) -> std::io::Result<(mpsc::Receiver<IpcEvent>, UnixStr
                             eprintln!("vt-tui: bad IPC message: {e}: {trimmed}");
                         }
                     }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::WouldBlock => {
+                    continue;
                 }
                 Err(_) => {
                     let _ = tx.send(IpcEvent::Closed);
@@ -554,5 +629,26 @@ mod tests {
             }
             other => panic!("expected Tx, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn bad_field_type_in_cfg_does_not_drop_other_fields() {
+        let bad = r#"{"t":"cfg","mic":"Yeti","muted":true,"diarization_speakers":2.5}"#;
+        match parse_wire(bad).expect("tolerant cfg parser must succeed") {
+            Wire::Cfg { mic, muted, diarization_speakers, .. } => {
+                assert_eq!(mic, Some("Yeti".to_string()));
+                assert_eq!(muted, Some(true));
+                assert_eq!(diarization_speakers, None);
+            }
+            other => panic!("expected Cfg, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_utf8_byte_lossy_decoding() {
+        let bytes = b"{\"t\":\"cfg\",\"mic\":\"test\xffmic\"}\n";
+        let line = String::from_utf8_lossy(bytes);
+        let parsed = parse_wire(line.trim());
+        assert!(parsed.is_ok());
     }
 }
