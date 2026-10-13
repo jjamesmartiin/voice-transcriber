@@ -207,7 +207,7 @@ def header_line(mic):
     return [
         ("vt ", ACCENT, True, False, None),
         ("❯ ", ACCENT, True, False, None),
-        ("voice transcriber v1.4.2 active ", WHITE_BOLD, True, False, None),
+        ("voice transcriber v1.4.3 active ", WHITE_BOLD, True, False, None),
         (f"(model: COHERE │ mic: {mic})", DIM, False, False, None),
     ]
 

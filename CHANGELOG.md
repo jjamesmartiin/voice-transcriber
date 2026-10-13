@@ -14,6 +14,8 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
+## [1.4.3] — 2026-10-12
+
 ### Fixed
 
 - **A hotkey rebind from the control API (or the settings modal) no longer reaches
@@ -557,7 +559,8 @@ First tagged release: offline Cohere ASR, global `Alt+Shift` push-to-talk with a
 hands-free latch, streaming VAD, the English post-processor, and text injection
 on Linux.
 
-[Unreleased]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.4.2...HEAD
+[Unreleased]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.4.3...HEAD
+[1.4.3]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/jjamesmartiin/voice-transcriber/compare/v1.3.1...v1.4.0
