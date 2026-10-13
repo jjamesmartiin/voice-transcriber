@@ -19,10 +19,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src"))
 
-from post_processor import (
-    clean_speech_transcription,
-    process_slm_llm_rewrite,
-)
+from post_processor import clean_speech_transcription
+from slm_client import process_slm_llm_rewrite
 
 
 class TestLiveVllmSlmIntegration(unittest.TestCase):

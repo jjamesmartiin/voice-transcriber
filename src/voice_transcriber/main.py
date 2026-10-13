@@ -1383,7 +1383,8 @@ class SimpleVoiceTranscriber:
         if slm_enabled and rec_duration < 0.35 and time_since_last < 15.0 and last_text and (self.audio_frames is None or len(self.audio_frames) == 0):
             logger.info("🤖 Quick-Tap SLM On-Demand retro-polish triggered!")
             self.visual_notification.show_processing()
-            from post_processor import process_slm_llm_rewrite, clean_speech_transcription
+            from slm_client import process_slm_llm_rewrite
+            from post_processor import clean_speech_transcription
             t0_slm = time.time()
             polished = process_slm_llm_rewrite(last_text, timeout_sec=3.0).strip()
             # Final safety pass: strip any punctuation/quote artifacts the SLM may have added

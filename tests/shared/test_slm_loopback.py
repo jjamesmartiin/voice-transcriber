@@ -23,7 +23,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-import post_processor
+import slm_client
 
 
 class _Recorder:
@@ -90,7 +90,7 @@ def slm(monkeypatch):
     endpoint = _Recorder({"choices": [{"message": {"content": "buy milk"}}]})
     proxy = _Recorder({"choices": [{"message": {"content": "proxied"}}]})
 
-    monkeypatch.setattr(post_processor, "VLLM_API_URL",
+    monkeypatch.setattr(slm_client, "VLLM_API_URL",
                         f"http://127.0.0.1:{endpoint.port}/v1/chat/completions")
     monkeypatch.setenv("VT_ENABLE_SLM", "1")
     monkeypatch.setenv("VT_SLM_MODEL", "test-model")     # skip the /v1/models probe
@@ -102,10 +102,10 @@ def slm(monkeypatch):
     monkeypatch.delenv("no_proxy", raising=False)
     monkeypatch.delenv("NO_PROXY", raising=False)
     # The pass backs off after a failure; a previous test must not silence this one.
-    monkeypatch.setattr(post_processor, "_SLM_OFFLINE_STREAK", 0)
-    monkeypatch.setattr(post_processor, "_SLM_LAST_OFFLINE_CHECK", 0.0)
+    monkeypatch.setattr(slm_client, "_SLM_OFFLINE_STREAK", 0)
+    monkeypatch.setattr(slm_client, "_SLM_LAST_OFFLINE_CHECK", 0.0)
     # A remote opt-in from the environment must not leak into a loopback test.
-    monkeypatch.delenv(post_processor.ENV_ALLOW_REMOTE, raising=False)
+    monkeypatch.delenv(slm_client.ENV_ALLOW_REMOTE, raising=False)
 
     yield endpoint, proxy
     endpoint.close()
@@ -114,7 +114,7 @@ def slm(monkeypatch):
 
 def test_the_transcript_reaches_the_configured_endpoint(slm):
     endpoint, _proxy = slm
-    post_processor.process_slm_llm_rewrite("um so buy milk actually")
+    slm_client.process_slm_llm_rewrite("um so buy milk actually")
     assert len(endpoint.bodies) == 1
     assert b"buy milk" in endpoint.bodies[0]
 
@@ -126,14 +126,14 @@ def test_the_transcript_never_reaches_the_proxy(slm):
     proxy-free opener it cannot, whatever the environment says.
     """
     _endpoint, proxy = slm
-    post_processor.process_slm_llm_rewrite("um so buy milk actually")
+    slm_client.process_slm_llm_rewrite("um so buy milk actually")
     assert proxy.bodies == []
 
 
 def test_the_request_still_succeeds_when_a_proxy_is_configured(slm):
     """Opting out of the proxy must not break the pass, only redirect it."""
     endpoint, _proxy = slm
-    assert post_processor.process_slm_llm_rewrite("um so buy milk actually") == "buy milk"
+    assert slm_client.process_slm_llm_rewrite("um so buy milk actually") == "buy milk"
     assert len(endpoint.bodies) == 1
 
 
@@ -146,15 +146,15 @@ def test_model_discovery_queries_the_configured_endpoint(monkeypatch):
     """
     endpoint = _Recorder({"choices": [{"message": {"content": "buy milk"}}]},
                          models={"data": [{"id": "actual-model"}]})
-    monkeypatch.setattr(post_processor, "VLLM_API_URL",
+    monkeypatch.setattr(slm_client, "VLLM_API_URL",
                         f"http://127.0.0.1:{endpoint.port}/v1/chat/completions")
     monkeypatch.setenv("VT_ENABLE_SLM", "1")
     monkeypatch.delenv("VT_SLM_MODEL", raising=False)
     monkeypatch.setenv("VT_SLM_TIMEOUT", "5")
-    monkeypatch.setattr(post_processor, "_SLM_OFFLINE_STREAK", 0)
-    monkeypatch.setattr(post_processor, "_SLM_LAST_OFFLINE_CHECK", 0.0)
+    monkeypatch.setattr(slm_client, "_SLM_OFFLINE_STREAK", 0)
+    monkeypatch.setattr(slm_client, "_SLM_LAST_OFFLINE_CHECK", 0.0)
     try:
-        post_processor.process_slm_llm_rewrite("um so buy milk actually")
+        slm_client.process_slm_llm_rewrite("um so buy milk actually")
         assert "/v1/models" in endpoint.paths, endpoint.paths
         assert len(endpoint.bodies) == 1
         assert json.loads(endpoint.bodies[0])["model"] == "actual-model"
@@ -184,9 +184,9 @@ def _slm_enabled(monkeypatch):
     monkeypatch.setenv("VT_ENABLE_SLM", "1")
     monkeypatch.setenv("VT_SLM_MODEL", "test-model")     # skip the /v1/models probe
     monkeypatch.setenv("VT_SLM_TIMEOUT", "5")
-    monkeypatch.delenv(post_processor.ENV_ALLOW_REMOTE, raising=False)
-    monkeypatch.setattr(post_processor, "_SLM_OFFLINE_STREAK", 0)
-    monkeypatch.setattr(post_processor, "_SLM_LAST_OFFLINE_CHECK", 0.0)
+    monkeypatch.delenv(slm_client.ENV_ALLOW_REMOTE, raising=False)
+    monkeypatch.setattr(slm_client, "_SLM_OFFLINE_STREAK", 0)
+    monkeypatch.setattr(slm_client, "_SLM_LAST_OFFLINE_CHECK", 0.0)
 
 
 def test_a_remote_url_is_refused_and_names_the_flag(monkeypatch, capsys):
@@ -196,23 +196,23 @@ def test_a_remote_url_is_refused_and_names_the_flag(monkeypatch, capsys):
     with no loopback restriction and no TLS required.
     """
     opener = _NoNetwork()
-    monkeypatch.setattr(post_processor, "_VLLM_OPENER", opener)
-    monkeypatch.setattr(post_processor, "VLLM_API_URL",
+    monkeypatch.setattr(slm_client, "_VLLM_OPENER", opener)
+    monkeypatch.setattr(slm_client, "VLLM_API_URL",
                         "http://example.invalid:8000/v1/chat/completions")
     _slm_enabled(monkeypatch)
 
     original = "um so buy milk actually"
-    assert post_processor.process_slm_llm_rewrite(original) == original
+    assert slm_client.process_slm_llm_rewrite(original) == original
     out = capsys.readouterr().out
-    assert post_processor.ENV_ALLOW_REMOTE in out, out
+    assert slm_client.ENV_ALLOW_REMOTE in out, out
     assert opener.calls == [], "a refused pass must not touch the network"
 
 
 def test_the_flag_allows_a_remote_endpoint(monkeypatch):
     """The opt-in keeps an existing remote vLLM box working."""
     _slm_enabled(monkeypatch)
-    monkeypatch.setenv(post_processor.ENV_ALLOW_REMOTE, "1")
-    assert post_processor._slm_endpoint(
+    monkeypatch.setenv(slm_client.ENV_ALLOW_REMOTE, "1")
+    assert slm_client._slm_endpoint(
         "http://example.com:8000/v1/chat/completions")
 
 
@@ -223,8 +223,8 @@ def test_the_flag_allows_a_remote_endpoint(monkeypatch):
     "https://127.0.0.1:8443/v1/chat/completions",
 ])
 def test_loopback_endpoints_need_no_flag(monkeypatch, url):
-    monkeypatch.delenv(post_processor.ENV_ALLOW_REMOTE, raising=False)
-    assert post_processor._slm_endpoint(url)
+    monkeypatch.delenv(slm_client.ENV_ALLOW_REMOTE, raising=False)
+    assert slm_client._slm_endpoint(url)
 
 
 @pytest.mark.parametrize("url", [
@@ -236,6 +236,6 @@ def test_loopback_endpoints_need_no_flag(monkeypatch, url):
     "file:///etc/hosts",                             # scheme we cannot POST to
 ])
 def test_non_loopback_endpoints_are_refused(monkeypatch, url):
-    monkeypatch.delenv(post_processor.ENV_ALLOW_REMOTE, raising=False)
-    with pytest.raises(post_processor.SlmRemoteRefused):
-        post_processor._slm_endpoint(url)
+    monkeypatch.delenv(slm_client.ENV_ALLOW_REMOTE, raising=False)
+    with pytest.raises(slm_client.SlmRemoteRefused):
+        slm_client._slm_endpoint(url)

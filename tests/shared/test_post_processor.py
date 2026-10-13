@@ -24,6 +24,7 @@ LATENCY_CEILING_US = 500.0
 os.environ.setdefault("VT_ENABLE_SLM", "0")
 
 import post_processor as pp  # noqa: E402
+import slm_client as slm  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -140,17 +141,17 @@ def test_slm_disabled_by_default(monkeypatch):
     monkeypatch.delenv("VT_ENABLE_SLM", raising=False)
     # With SLM off, the pass must be a no-op and must not touch the network.
     text = "this is a long enough sentence"
-    assert pp.process_slm_llm_rewrite(text) == text
+    assert slm.process_slm_llm_rewrite(text) == text
 
 
 def test_slm_offline_backoff_escalates():
-    pp._SLM_OFFLINE_STREAK = 1
-    pp._SLM_LAST_OFFLINE_CHECK = time.time()
-    first = pp._slm_cooldown_remaining()
-    pp._SLM_OFFLINE_STREAK = 4
-    pp._SLM_LAST_OFFLINE_CHECK = time.time()
-    fourth = pp._slm_cooldown_remaining()
-    pp._SLM_OFFLINE_STREAK = 0
+    slm._SLM_OFFLINE_STREAK = 1
+    slm._SLM_LAST_OFFLINE_CHECK = time.time()
+    first = slm._slm_cooldown_remaining()
+    slm._SLM_OFFLINE_STREAK = 4
+    slm._SLM_LAST_OFFLINE_CHECK = time.time()
+    fourth = slm._slm_cooldown_remaining()
+    slm._SLM_OFFLINE_STREAK = 0
     assert first > 0
     assert fourth > first
 
@@ -1121,9 +1122,9 @@ def test_slm_output_sanitizer_exists_and_scrubs():
     function could be deleted from between the retraction patterns without a
     single test failing. ``ruff`` caught it; this pins it from the test side too.
     """
-    assert pp._sanitize_slm_output("hi", "<cleaned_text>hi there.</cleaned_text>") == "hi there."
-    assert pp._sanitize_slm_output("hi", '"hi there."') == "hi there."
-    assert pp._sanitize_slm_output("hi", "<b>hi</b> there") == "hi there"
+    assert slm._sanitize_slm_output("hi", "<cleaned_text>hi there.</cleaned_text>") == "hi there."
+    assert slm._sanitize_slm_output("hi", '"hi there."') == "hi there."
+    assert slm._sanitize_slm_output("hi", "<b>hi</b> there") == "hi there"
 
 
 # ---------------------------------------------------------------------------

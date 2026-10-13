@@ -126,7 +126,7 @@ class TestMicroBatchingEngine(unittest.TestCase):
 
     def test_process_slm_llm_rewrite_fallback(self):
         """Test vLLM SLM pass gracefully falls back when vLLM port is unavailable"""
-        from post_processor import process_slm_llm_rewrite
+        from slm_client import process_slm_llm_rewrite
         old_enable = os.environ.get("VT_ENABLE_SLM")
         old_url = os.environ.get("VT_VLLM_URL")
         try:
