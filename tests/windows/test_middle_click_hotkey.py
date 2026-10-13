@@ -16,7 +16,7 @@ if str(SRC_DIR) not in sys.path:
 import hal  # noqa: E402
 
 
-def test_windows_middle_click_hold():
+def test_windows_middle_click_hold(wait_until):
     """WindowsHotkeyManager triggers push-to-talk on middle click hold."""
     WindowsHotkeyManager = hal.load_backend("windows", "hotkeys").WindowsHotkeyManager
     cb_start = MagicMock()
@@ -34,12 +34,13 @@ def test_windows_middle_click_hold():
         assert cb_start.call_count == 0
         assert cb_stop.call_count == 0
 
-        # Hold >=0.25s
+        # Hold >=0.25s. The hold fires from a threading.Timer, so wait for the
+        # transition: a fixed sleep races the scheduler on a loaded runner.
         manager._on_mouse_click(0, 0, Button.middle, True)
         assert manager.are_modifiers_pressed() is True
-        time.sleep(0.3)
-        assert cb_start.call_count == 1
-        assert manager.hotkey_active is True
+        assert wait_until(
+            lambda: cb_start.call_count == 1 and manager.hotkey_active is True
+        ), "the hold delay elapsed but push-to-talk never started"
         assert manager.middle_click_active is True
 
         # Release
@@ -72,7 +73,7 @@ def test_windows_middle_click_disabled_ignores_events():
         manager.cleanup()
 
 
-def test_windows_disabling_mouse_mode_mid_hold_stops_recording():
+def test_windows_disabling_mouse_mode_mid_hold_stops_recording(wait_until):
     """Toggling mouse mode off during a hold cancels it and stops recording."""
     WindowsHotkeyManager = hal.load_backend("windows", "hotkeys").WindowsHotkeyManager
     cb_start = MagicMock()
@@ -83,8 +84,9 @@ def test_windows_disabling_mouse_mode_mid_hold_stops_recording():
         from pynput.mouse import Button
 
         manager._on_mouse_click(0, 0, Button.middle, True)
-        time.sleep(0.3)
-        assert cb_start.call_count == 1
+        assert wait_until(
+            lambda: cb_start.call_count == 1 and manager.middle_click_active is True
+        ), "the hold delay elapsed but push-to-talk never started"
 
         manager.set_middle_click_enabled(False)
         assert manager.middle_click_active is False

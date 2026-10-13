@@ -19,7 +19,6 @@ verification of the host script requires running on Windows/WSL.
 """
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -110,7 +109,7 @@ class TestWSLHostBridgeLatch:
 class TestWSLLatchEventMapping:
     """The Python half: host events -> the shared hotkey callbacks."""
 
-    def test_full_latch_workflow(self):
+    def test_full_latch_workflow(self, wait_until):
         manager = _manager_with_events(
             [
                 "HOTKEY_DOWN",  # 1. hold Alt+Shift -> start recording
@@ -121,40 +120,40 @@ class TestWSLLatchEventMapping:
         )
 
         manager._reader_loop()
-        time.sleep(0.05)
-
+        # The reader loop dispatches both callbacks on their own thread, so wait
+        # for them rather than sleeping a guessed margin.
+        assert wait_until(lambda: manager.callback_stop.call_count == 1)
         manager.callback_start.assert_called_once()
         manager.callback_stop.assert_called_once_with(copy_to_clipboard=True)
         assert manager.hotkey_active is False
         assert manager.latch_release is False
 
-    def test_latch_hold_does_not_stop_recording(self):
+    def test_latch_hold_does_not_stop_recording(self, wait_until):
         manager = _manager_with_events(["HOTKEY_DOWN", "LATCH_DOWN", "LATCH_HOLD"])
 
         manager._reader_loop()
-        time.sleep(0.05)
-
+        assert wait_until(lambda: manager.callback_start.call_count == 1)
+        # Nothing is physically held any more, but the recording is open.
         manager.callback_start.assert_called_once()
         manager.callback_stop.assert_not_called()
-        # Nothing is physically held any more, but the recording is open.
         assert manager.hotkey_active is False
 
     def test_latch_flag_is_visible_between_the_two_halves(self):
         """`latch_release` mirrors the Linux/Windows backends mid-latch."""
         manager = _manager_with_events(["HOTKEY_DOWN", "LATCH_DOWN"])
 
+        # `latch_release` is set by the loop itself, not by a callback thread,
+        # so this one needs no wait: it is already true when the loop returns.
         manager._reader_loop()
-        time.sleep(0.05)
 
         assert manager.latch_release is True
         manager.callback_stop.assert_not_called()
 
-    def test_plain_push_to_talk_still_stops_on_release(self):
+    def test_plain_push_to_talk_still_stops_on_release(self, wait_until):
         manager = _manager_with_events(["HOTKEY_DOWN", "HOTKEY_UP"])
 
         manager._reader_loop()
-        time.sleep(0.05)
-
+        assert wait_until(lambda: manager.callback_stop.call_count == 1)
         manager.callback_start.assert_called_once()
         manager.callback_stop.assert_called_once_with(copy_to_clipboard=True)
         assert manager.latch_release is False

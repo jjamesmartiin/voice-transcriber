@@ -214,6 +214,62 @@ def benchmark_reporter():
     return record_benchmark
 
 
+@pytest.fixture
+def wait_until():
+    """Wait for a transition instead of sleeping a guessed margin.
+
+    Several backends fire their callbacks from a ``threading.Timer`` or a freshly
+    spawned thread (middle-click hold on Linux/Windows/macOS, the WSL bridge's
+    reader loop). A test that asserts on such a callback after a fixed ``sleep``
+    is racing the scheduler: CI failed on exactly that
+    (``test_mouse_mode_contract.py`` on macOS, competing with the release
+    workflow's builds) while passing on a rerun of identical sources.
+
+    Poll for the state you expect. Callers must keep every "must not have
+    happened yet" assertion *before* the wait, so waiting longer can never turn
+    a real regression into a pass — and put the state the callback sets into the
+    predicate, not just ``call_count``, so a start that fires without the state
+    change still fails.
+
+    Returns the predicate's final value, so ``assert wait_until(...)`` reports
+    the expectation rather than a bare ``False``.
+    """
+
+    def _wait_until(predicate, timeout: float = 5.0, interval: float = 0.005):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(interval)
+        return predicate()
+
+    return _wait_until
+
+
+@pytest.fixture
+def require_tap():
+    """Skip when a "quick tap" was not quick any more — the host stalled.
+
+    The mirror of :func:`wait_until`. A 20–50 ms press whose release took 300 ms
+    of wall clock was not a tap: the backend would have started recording, and
+    been right to. Say that, naming the measured numbers, instead of blaming the
+    code under test.
+
+    Deliberately *not* skipped when the delay is degenerate (``0``): that is a
+    regression, and the caller's "nothing fired" assertions must fail on it.
+    """
+
+    def _require_tap(manager, held: float):
+        delay = manager.MIDDLE_CLICK_HOLD_DELAY
+        if delay > 0 and held >= delay:
+            pytest.skip(
+                f"host stalled: a quick tap took {held * 1000:.0f} ms, at or "
+                f"past the {delay * 1000:.0f} ms hold delay"
+            )
+
+    return _require_tap
+
+
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """Print a clean latency & accuracy benchmark matrix table if any benchmarks ran."""
     if not _BENCHMARK_REPORTS:
