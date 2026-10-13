@@ -60,12 +60,12 @@ python-dateutil==2.9.0.post0
 PyYAML==6.0.3
 regex==2026.4.4
 requests==2.33.1
-rich>=13.0.0
+rich==13.9.4
 safetensors==0.7.0
 scikit-learn==1.8.0
 scipy==1.17.1
 sentencepiece==0.2.1
-sherpa-onnx>=1.13.3
+sherpa-onnx==1.13.3
 six==1.17.0
 sounddevice==0.5.5
 soundfile==0.13.1

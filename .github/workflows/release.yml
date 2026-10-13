@@ -44,14 +44,14 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.inputs.build == 'true'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v23
+        uses: DeterminateSystems/nix-installer-action@2cb76beab460be7e44442c7ebdcbc30b638416df # v23
 
       - name: Build and bundle the app into a single AppImage
         run: |
-          nix bundle --bundler github:ralismark/nix-appimage \
+          nix bundle --bundler github:ralismark/nix-appimage/7946addbc0d97e358a6d7aefe5e82310f0fe6b18 \
             --extra-experimental-features "nix-command flakes" \
             ".#default"
           # Name the asset by architecture. Only x86_64-linux is built today
@@ -71,7 +71,7 @@ jobs:
           cat REQUIREMENTS.txt
 
       - name: Upload AppImage and REQUIREMENTS.txt to release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b5a645e6d7f681d09866ab86ba7918b222989555 # v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: |
@@ -86,10 +86,10 @@ jobs:
     # attached a Windows bundle to the release.
     if: github.event_name == 'push' || github.event.inputs.build == 'true'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@3892123fbe74688ccc83ec7c465dc688359e5199 # v5
         with:
           python-version: "3.11"
 
@@ -126,7 +126,7 @@ jobs:
           Get-Item dist/installer/*-setup.exe | Select-Object Name, Length
 
       - name: Upload Windows assets to release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b5a645e6d7f681d09866ab86ba7918b222989555 # v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: |
