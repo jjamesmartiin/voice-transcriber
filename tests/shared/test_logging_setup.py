@@ -98,7 +98,7 @@ class TestConfigureLogging:
         logging_setup.configure_logging(log_file=tmp_path / "vt.log", console=False)
         assert logging.getLogger().level == expected
 
-    @pytest.mark.parametrize("value", ["bogus", "", "  ", "verbose", "INFOO"])
+    @pytest.mark.parametrize("value", ["bogus", "", "  ", "verbose", "INFOO", "--5", "++5", "+-5", "-+5"])
     def test_unusable_level_falls_back_instead_of_raising(self, monkeypatch, tmp_path, value):
         """A typo'd VT_LOG_LEVEL must not be able to stop the app starting.
 

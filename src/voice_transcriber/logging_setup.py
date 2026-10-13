@@ -48,9 +48,10 @@ def _coerce_level(value) -> str | int | None:
     upper = text.upper()
     if upper in LEVEL_NAMES:
         return upper
-    if text.lstrip("+-").isdigit():  # e.g. VT_LOG_LEVEL=10 == DEBUG
-        return int(text)
-    return None
+    try:
+        return int(text)  # e.g. VT_LOG_LEVEL=10 == DEBUG
+    except ValueError:
+        return None
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
