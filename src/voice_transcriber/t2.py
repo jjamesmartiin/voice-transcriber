@@ -902,11 +902,15 @@ def _read_config_file(path):
     try:
         if path.suffix == ".toml":
             import tomllib
-            return tomllib.loads(content), None
-        if path.suffix in (".yaml", ".yml"):
+            data = tomllib.loads(content)
+        elif path.suffix in (".yaml", ".yml"):
             import yaml
-            return yaml.safe_load(content) or {}, None
-        return json.loads(content), None
+            data = yaml.safe_load(content)
+        else:
+            data = json.loads(content)
+        if not isinstance(data, dict):
+            return {}, "not a mapping"
+        return data, None
     except Exception as e:
         return {}, f"{type(e).__name__}: {e}"
 

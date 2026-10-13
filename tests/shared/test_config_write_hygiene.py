@@ -94,6 +94,21 @@ def test_an_existing_empty_config_is_treated_as_damaged(tmp_path, monkeypatch):
     assert yaml.safe_load(config.read_text())["is_muted"] is True
 
 
+@pytest.mark.parametrize("bad_content", ["- item1\n- item2\n", "just a scalar\n", "123\n"])
+def test_non_mapping_config_is_backed_up_before_save(tmp_path, monkeypatch, bad_content):
+    config = tmp_path / "config.yaml"
+    config.write_text(bad_content)
+    _point_at(monkeypatch, config)
+
+    t2.IS_MUTED = True
+    t2.save_audio_config()
+
+    backups = list(tmp_path.glob("config.yaml.corrupt-*"))
+    assert len(backups) == 1, f"bad config ({bad_content!r}) must be preserved, not silently replaced"
+    assert backups[0].read_text() == bad_content
+
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
 def test_the_data_dir_is_owner_only_when_created(tmp_path, monkeypatch):
     """The per-user data dir is created 0700, not world-traversable."""
