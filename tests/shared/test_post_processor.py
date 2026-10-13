@@ -503,6 +503,12 @@ def test_serial_detection_ignores_natural_english(serial_settings, text):
     assert pp.process_serial_numbers(text) == text
 
 
+def test_article_before_single_letter_does_not_collapse_to_serial():
+    """An article ('a', 'an') before a single letter code ('a B plan', 'a D student') must not collapse."""
+    assert pp.clean_speech_transcription("we need a B plan", skip_slm=True) == "we need a B plan."
+    assert pp.clean_speech_transcription("he is a D student", skip_slm=True) == "he is a D student."
+
+
 @pytest.mark.parametrize("text", [
     # A run made *entirely* of English single-letter words is prose, not an
     # initialism. Regression: the old guard only covered the 2-token case, so

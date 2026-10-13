@@ -2049,7 +2049,7 @@ def _is_valid_untriggered_serial(raw: str) -> bool:
             return False
         if lower_toks[0] in ("a", "an", "i") and (lower_toks[1].isdigit() or lower_toks[1] in _DIGIT_WORDS):
             return False
-        if lower_toks[0] in ("a", "an", "i") and lower_toks[1] in ("a", "i", "o"):
+        if lower_toks[0] in ("a", "an", "i") and len(lower_toks[1]) == 1 and lower_toks[1].isalpha():
             return False
 
     # Avoid pure digits (already handled by digit strings / phone numbers)
