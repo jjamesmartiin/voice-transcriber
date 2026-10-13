@@ -505,6 +505,21 @@ class TestZenityNotificationEscaping:
         assert "<50%" not in text_arg
         assert "& " not in text_arg
 
+    def test_terminal_notification_fallback_survives_ascii_stdout(self, monkeypatch):
+        import notifications
+        notifier = notifications.VisualNotification(app_name="TestApp", enable_logging=False)
+        real_print = print
+
+        def ascii_only_print(*args, **kwargs):
+            text = " ".join(str(a) for a in args)
+            text.encode("ascii")
+            real_print(*args, **kwargs)
+
+        monkeypatch.setattr("builtins.print", ascii_only_print)
+        # Printing box chars will raise UnicodeEncodeError and trigger fallback
+        notifier._show_terminal_notification("hello", "info")
+
+
 
 # ---------------------------------------------------------------------------
 # 7. Backend import must not permanently silence stderr (fd 2).

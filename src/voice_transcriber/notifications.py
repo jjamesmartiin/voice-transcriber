@@ -376,8 +376,12 @@ if __name__ == "__main__":
 
         except Exception as e:
             logger.debug(f"Terminal notification failed: {e}")
-            # Fallback to simple print
-            print(f"\n• {text}")
+            # Fallback to safe print with ASCII marker
+            try:
+                import console_text
+                console_text.safe_print(f"\n* {text}")
+            except Exception:
+                pass
 
     def hide_notification(self):
         """Hide all active notifications."""
