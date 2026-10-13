@@ -256,12 +256,17 @@ class AudioSpillBuffer:
             return
         if self._handle is None:
             self._open_temp_file()
-        for chunk in self._chunks:
-            self._handle.write(chunk.tobytes())
-            self._spilled_frames += int(chunk.size)
-        self._chunks.clear()
-        self._memory_frames = 0
-        self._handle.flush()
+        try:
+            for chunk in self._chunks:
+                self._handle.write(chunk.tobytes())
+                self._spilled_frames += int(chunk.size)
+            self._handle.flush()
+        except OSError as exc:
+            self._truncated = True
+            logger.error("audio spill write failed (disk full?): %s", exc)
+        finally:
+            self._chunks.clear()
+            self._memory_frames = 0
 
     # -- reading -----------------------------------------------------------
     def read_all(

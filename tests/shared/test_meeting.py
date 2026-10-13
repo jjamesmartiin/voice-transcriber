@@ -407,6 +407,22 @@ def test_close_waits_for_the_finalize_it_cannot_see_yet(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_spill_oserror_marks_buffer_truncated(tmp_path):
+    buf = meeting.AudioSpillBuffer(sample_rate=16000, directory=str(tmp_path), spill_after_s=0)
+    buf.append(np.ones(1000, dtype=np.float32))
+
+    class BrokenHandle:
+        def write(self, data):
+            raise OSError(28, "No space left on device")
+        def flush(self):
+            pass
+
+    buf._handle = BrokenHandle()
+    buf._chunks = [np.ones(500, dtype=np.float32)]
+    buf._spill()
+    assert buf.truncated is True
+
+
 def test_every_captured_chunk_is_tapped_for_a_live_view(tmp_path):
     """The live transcript is fed by the capture, not by the read-back at the end.
 
