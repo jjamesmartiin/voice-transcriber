@@ -929,6 +929,170 @@ def _backup_unreadable_config(path, problem) -> None:
     )
 
 
+def _apply_env_overrides() -> None:
+    """Apply environment variable overrides (VT_*) unconditionally."""
+    global PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, MEETING, MEETING_SPILL_MINUTES
+    global DIARIZATION, DIARIZATION_SPEAKERS, DIARIZATION_MODEL, MEETING_OUTPUT_DIR, MEETING_OUTPUT_FORMAT
+    global FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, LANGUAGE
+    global WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE
+    global MIDDLE_CLICK_ENABLED, KEEP_BLUETOOTH_HANDSFREE, IS_MUTED, OUTPUT_MODE, AUTO_TYPE
+    global SOUND_THEME, UI_THEME, NUMBER_MODE, NUMBER_DIGITS, SERIAL_COLLAPSE, SPELL_COMMAND, TYPING_WPM
+
+    env_punct = os.environ.get("VT_PRESET", "").strip().lower() or os.environ.get("VT_PUNCTUATION_MODE", "").strip().lower()
+    if env_punct:
+        PUNCTUATION_MODE = get_canonical_preset_name(env_punct)
+
+    env_structure = os.environ.get("VT_STRUCTURE_MODE", "").strip().lower()
+    if env_structure:
+        STRUCTURE_MODE = normalize_structure_mode(env_structure)
+
+    env_cleanup = os.environ.get("VT_CLEANUP_MODE", "").strip().lower()
+    if env_cleanup:
+        CLEANUP_MODE = normalize_cleanup_mode(env_cleanup)
+
+    env_meeting = os.environ.get("VT_MEETING", "").strip().lower()
+    if env_meeting:
+        MEETING = normalize_meeting(env_meeting)
+
+    env_meeting_spill = os.environ.get("VT_MEETING_SPILL_MINUTES", "").strip().lower()
+    if env_meeting_spill:
+        MEETING_SPILL_MINUTES = normalize_meeting_spill_minutes(env_meeting_spill)
+
+    env_diarization = os.environ.get("VT_DIARIZATION", "").strip().lower()
+    if env_diarization:
+        DIARIZATION = normalize_diarization(env_diarization)
+
+    env_diarization_speakers = os.environ.get("VT_DIARIZATION_SPEAKERS", "").strip().lower()
+    if env_diarization_speakers:
+        DIARIZATION_SPEAKERS = normalize_diarization_speakers(env_diarization_speakers)
+
+    env_diarization_model = os.environ.get("VT_DIARIZATION_MODEL", "").strip().lower()
+    if env_diarization_model:
+        DIARIZATION_MODEL = normalize_diarization_model(env_diarization_model)
+
+    env_meeting_output_dir = os.environ.get("VT_MEETING_OUTPUT_DIR", "").strip()
+    if env_meeting_output_dir:
+        MEETING_OUTPUT_DIR = env_meeting_output_dir
+
+    env_meeting_output_format = os.environ.get("VT_MEETING_OUTPUT_FORMAT", "").strip().lower()
+    if env_meeting_output_format:
+        MEETING_OUTPUT_FORMAT = normalize_meeting_output_format(env_meeting_output_format)
+
+    env_formatter = os.environ.get("VT_FORMATTER", "").strip().lower()
+    if env_formatter:
+        FORMATTER = normalize_formatter_enabled(env_formatter)
+
+    env_formatter_model = os.environ.get("VT_FORMATTER_MODEL", "").strip().lower()
+    if env_formatter_model:
+        FORMATTER_MODEL = normalize_formatter_model(env_formatter_model)
+
+    env_formatter_style = os.environ.get("VT_FORMATTER_STYLE", "").strip().lower()
+    if env_formatter_style:
+        FORMATTER_STYLE = normalize_formatter_style(env_formatter_style)
+
+    env_formatter_context = os.environ.get("VT_FORMATTER_CONTEXT", "").strip().lower()
+    if env_formatter_context:
+        FORMATTER_CONTEXT = normalize_formatter_context(env_formatter_context)
+
+    env_lang = os.environ.get("VT_LANGUAGE", "").strip().lower()
+    if env_lang:
+        LANGUAGE = env_lang
+    os.environ["VT_LANGUAGE"] = LANGUAGE
+
+    env_wait = os.environ.get("VT_WAIT_FOR_MODEL_ON_STARTUP", "").strip().lower()
+    if env_wait in ["1", "true", "yes"]:
+        WAIT_FOR_MODEL_ON_STARTUP = True
+    elif env_wait in ["0", "false", "no"]:
+        WAIT_FOR_MODEL_ON_STARTUP = False
+
+    env_slm = os.environ.get("VT_ENABLE_SLM", "").strip().lower()
+    if env_slm in ["1", "true", "yes"]:
+        ENABLE_SLM = True
+    elif env_slm in ["0", "false", "no"]:
+        ENABLE_SLM = False
+    os.environ["VT_ENABLE_SLM"] = "1" if ENABLE_SLM else "0"
+
+    env_trailing_space = os.environ.get("VT_AUTO_TYPE_TRAILING_SPACE", "").strip().lower()
+    if env_trailing_space in ["1", "true", "yes"]:
+        AUTO_TYPE_TRAILING_SPACE = True
+    elif env_trailing_space in ["0", "false", "no"]:
+        AUTO_TYPE_TRAILING_SPACE = False
+
+    env_auto_punctuate = os.environ.get("VT_AUTO_TYPE_AUTO_PUNCTUATE", "").strip().lower()
+    if env_auto_punctuate in ["1", "true", "yes"]:
+        AUTO_TYPE_AUTO_PUNCTUATE = True
+    elif env_auto_punctuate in ["0", "false", "no"]:
+        AUTO_TYPE_AUTO_PUNCTUATE = False
+
+    env_middle_click = os.environ.get("VT_MIDDLE_CLICK_ENABLED", "").strip().lower()
+    if env_middle_click in ["1", "true", "yes"]:
+        MIDDLE_CLICK_ENABLED = True
+    elif env_middle_click in ["0", "false", "no"]:
+        MIDDLE_CLICK_ENABLED = False
+
+    env_bt_handsfree = os.environ.get("VT_KEEP_BLUETOOTH_HANDSFREE", "").strip().lower()
+    if env_bt_handsfree in ["1", "true", "yes"]:
+        KEEP_BLUETOOTH_HANDSFREE = True
+    elif env_bt_handsfree in ["0", "false", "no"]:
+        KEEP_BLUETOOTH_HANDSFREE = False
+
+    env_muted = os.environ.get("VT_IS_MUTED", "").strip().lower()
+    if env_muted in ["1", "true", "yes"]:
+        IS_MUTED = True
+    elif env_muted in ["0", "false", "no"]:
+        IS_MUTED = False
+
+    env_auto_type = os.environ.get("VT_AUTO_TYPE", "").strip().lower()
+    if env_auto_type in ["1", "true", "yes"]:
+        OUTPUT_MODE = "type"
+    elif env_auto_type in ["0", "false", "no"] and OUTPUT_MODE in ("type", "type_fast"):
+        OUTPUT_MODE = "clipboard"
+
+    env_out_mode = os.environ.get("VT_OUTPUT_MODE", "").strip().lower()
+    if env_out_mode in OUTPUT_MODES:
+        OUTPUT_MODE = env_out_mode
+    elif env_out_mode in ("paste", "paste_terminal"):
+        OUTPUT_MODE = "type_fast"
+
+    AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
+
+    env_sound = os.environ.get("VT_SOUND_THEME", "").strip()
+    if env_sound:
+        SOUND_THEME = env_sound
+    if SOUND_THEME.lower() in ["silent", "muted", "none"]:
+        IS_MUTED = True
+
+    env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
+    if env_theme:
+        UI_THEME = env_theme
+
+    env_number_digits = os.environ.get("VT_NUMBER_DIGITS", "").strip()
+    if env_number_digits:
+        NUMBER_MODE = _normalize_number_mode(env_number_digits)
+        NUMBER_DIGITS = NUMBER_MODE != "words"
+
+    env_serial_collapse = os.environ.get("VT_SERIAL_COLLAPSE", "").strip().lower()
+    if env_serial_collapse in ["1", "true", "yes", "on", "collapsed", "collapse"]:
+        SERIAL_COLLAPSE = True
+    elif env_serial_collapse in ["0", "false", "no", "off", "spaced", "space"]:
+        SERIAL_COLLAPSE = False
+
+    env_spell_command = os.environ.get("VT_SPELL_COMMAND", "").strip().lower()
+    if env_spell_command in ["1", "true", "yes", "on"]:
+        SPELL_COMMAND = True
+    elif env_spell_command in ["0", "false", "no", "off"]:
+        SPELL_COMMAND = False
+
+    env_wpm = os.environ.get("VT_TYPING_WPM", "").strip()
+    if env_wpm:
+        try:
+            parsed_wpm = int(env_wpm)
+            if parsed_wpm > 0:
+                TYPING_WPM = parsed_wpm
+        except (ValueError, TypeError):
+            pass
+
+
 def load_audio_config(file_path=None):
     """Load audio device configuration from local file with fallback"""
     global INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME, SECONDARY_DEVICE_NAME, OVERRIDE_MODE, MODEL_BACKEND, IS_MUTED, AUTO_TYPE, OUTPUT_MODE, AUTO_TYPE_TRAILING_SPACE, AUTO_TYPE_AUTO_PUNCTUATE, NUMBER_DIGITS, NUMBER_MODE, SERIAL_COLLAPSE, SPELL_COMMAND, MIDDLE_CLICK_ENABLED, HOTKEY_BINDS, KEEP_BLUETOOTH_HANDSFREE, LANGUAGE, WAIT_FOR_MODEL_ON_STARTUP, ENABLE_SLM, SOUND_THEME, UI_THEME, PUNCTUATION_MODE, STRUCTURE_MODE, CLEANUP_MODE, MEETING, MEETING_SPILL_MINUTES, DIARIZATION, DIARIZATION_SPEAKERS, DIARIZATION_MODEL, MEETING_OUTPUT_DIR, MEETING_OUTPUT_FORMAT, FORMATTER, FORMATTER_MODEL, FORMATTER_STYLE, FORMATTER_CONTEXT, TYPING_WPM, CONFIG_FILE
@@ -982,107 +1146,32 @@ def load_audio_config(file_path=None):
             raw_punct = config.get('preset') or config.get('mode_preset') or config.get('punctuation_mode') or config.get('formatting_level') or DEFAULT_PUNCTUATION_MODE
             PUNCTUATION_MODE = get_canonical_preset_name(raw_punct)
 
-            env_punct = os.environ.get("VT_PRESET", "").strip().lower() or os.environ.get("VT_PUNCTUATION_MODE", "").strip().lower()
-            if env_punct:
-                PUNCTUATION_MODE = get_canonical_preset_name(env_punct)
-
             STRUCTURE_MODE = normalize_structure_mode(config.get('structure_mode', 'off'))
-            env_structure = os.environ.get("VT_STRUCTURE_MODE", "").strip().lower()
-            if env_structure:
-                STRUCTURE_MODE = normalize_structure_mode(env_structure)
-
             CLEANUP_MODE = normalize_cleanup_mode(config.get('cleanup_mode', 'full'))
-            env_cleanup = os.environ.get("VT_CLEANUP_MODE", "").strip().lower()
-            if env_cleanup:
-                CLEANUP_MODE = normalize_cleanup_mode(env_cleanup)
-
             MEETING = normalize_meeting(config.get('meeting', 'off'))
-            env_meeting = os.environ.get("VT_MEETING", "").strip().lower()
-            if env_meeting:
-                MEETING = normalize_meeting(env_meeting)
-
             MEETING_SPILL_MINUTES = normalize_meeting_spill_minutes(
                 config.get('meeting_spill_minutes', MEETING_SPILL_MINUTES))
-            env_meeting_spill = os.environ.get("VT_MEETING_SPILL_MINUTES", "").strip().lower()
-            if env_meeting_spill:
-                MEETING_SPILL_MINUTES = normalize_meeting_spill_minutes(env_meeting_spill)
-
             DIARIZATION = normalize_diarization(config.get('diarization', 'off'))
-            env_diarization = os.environ.get("VT_DIARIZATION", "").strip().lower()
-            if env_diarization:
-                DIARIZATION = normalize_diarization(env_diarization)
-
             DIARIZATION_SPEAKERS = normalize_diarization_speakers(
                 config.get('diarization_speakers', 'auto'))
-            env_diarization_speakers = os.environ.get("VT_DIARIZATION_SPEAKERS", "").strip().lower()
-            if env_diarization_speakers:
-                DIARIZATION_SPEAKERS = normalize_diarization_speakers(env_diarization_speakers)
-
             DIARIZATION_MODEL = normalize_diarization_model(
                 config.get('diarization_model', DIARIZATION_MODEL))
-            env_diarization_model = os.environ.get("VT_DIARIZATION_MODEL", "").strip().lower()
-            if env_diarization_model:
-                DIARIZATION_MODEL = normalize_diarization_model(env_diarization_model)
-
             MEETING_OUTPUT_DIR = str(
                 config.get('meeting_output_dir', MEETING_OUTPUT_DIR)).strip() or MEETING_OUTPUT_DIR
-            env_meeting_output_dir = os.environ.get("VT_MEETING_OUTPUT_DIR", "").strip()
-            if env_meeting_output_dir:
-                MEETING_OUTPUT_DIR = env_meeting_output_dir
-
             MEETING_OUTPUT_FORMAT = normalize_meeting_output_format(
                 config.get('meeting_output_format', 'text'))
-            env_meeting_output_format = os.environ.get("VT_MEETING_OUTPUT_FORMAT", "").strip().lower()
-            if env_meeting_output_format:
-                MEETING_OUTPUT_FORMAT = normalize_meeting_output_format(env_meeting_output_format)
-
             FORMATTER = normalize_formatter_enabled(config.get('formatter', 'off'))
-            env_formatter = os.environ.get("VT_FORMATTER", "").strip().lower()
-            if env_formatter:
-                FORMATTER = normalize_formatter_enabled(env_formatter)
-
             FORMATTER_MODEL = normalize_formatter_model(
                 config.get('formatter_model', FORMATTER_MODEL))
-            env_formatter_model = os.environ.get("VT_FORMATTER_MODEL", "").strip().lower()
-            if env_formatter_model:
-                FORMATTER_MODEL = normalize_formatter_model(env_formatter_model)
-
             FORMATTER_STYLE = normalize_formatter_style(
                 config.get('formatter_style', FORMATTER_STYLE))
-            env_formatter_style = os.environ.get("VT_FORMATTER_STYLE", "").strip().lower()
-            if env_formatter_style:
-                FORMATTER_STYLE = normalize_formatter_style(env_formatter_style)
-
             FORMATTER_CONTEXT = normalize_formatter_context(
                 config.get('formatter_context', FORMATTER_CONTEXT))
-            env_formatter_context = os.environ.get("VT_FORMATTER_CONTEXT", "").strip().lower()
-            if env_formatter_context:
-                FORMATTER_CONTEXT = normalize_formatter_context(env_formatter_context)
-
             LANGUAGE = config.get('language', 'en')
-            env_lang = os.environ.get("VT_LANGUAGE", "").strip().lower()
-            if env_lang:
-                LANGUAGE = env_lang
-            # The acoustic backend reads the language from the environment, so
-            # publish the resolved value (config or env), the same way the SLM
-            # flag is published below.
-            os.environ["VT_LANGUAGE"] = LANGUAGE
 
             WAIT_FOR_MODEL_ON_STARTUP = _normalize_bool(
                 config.get('wait_for_model_on_startup', True), default=True)
-            env_wait = os.environ.get("VT_WAIT_FOR_MODEL_ON_STARTUP", "").strip().lower()
-            if env_wait in ["1", "true", "yes"]:
-                WAIT_FOR_MODEL_ON_STARTUP = True
-            elif env_wait in ["0", "false", "no"]:
-                WAIT_FOR_MODEL_ON_STARTUP = False
-
             ENABLE_SLM = _normalize_bool(config.get('enable_slm', False))
-            env_slm = os.environ.get("VT_ENABLE_SLM", "").strip().lower()
-            if env_slm in ["1", "true", "yes"]:
-                ENABLE_SLM = True
-            elif env_slm in ["0", "false", "no"]:
-                ENABLE_SLM = False
-            os.environ["VT_ENABLE_SLM"] = "1" if ENABLE_SLM else "0"
 
             try:
                 TYPING_WPM = int(config.get('typing_wpm', 40))
@@ -1093,59 +1182,14 @@ def load_audio_config(file_path=None):
 
             AUTO_TYPE_TRAILING_SPACE = _normalize_bool(
                 config.get('auto_type_trailing_space', True), default=True)
-            env_trailing_space = os.environ.get("VT_AUTO_TYPE_TRAILING_SPACE", "").strip().lower()
-            if env_trailing_space in ["1", "true", "yes"]:
-                AUTO_TYPE_TRAILING_SPACE = True
-            elif env_trailing_space in ["0", "false", "no"]:
-                AUTO_TYPE_TRAILING_SPACE = False
-
             AUTO_TYPE_AUTO_PUNCTUATE = _normalize_bool(
                 config.get('auto_type_auto_punctuate', False), default=False)
-            env_auto_punctuate = os.environ.get("VT_AUTO_TYPE_AUTO_PUNCTUATE", "").strip().lower()
-            if env_auto_punctuate in ["1", "true", "yes"]:
-                AUTO_TYPE_AUTO_PUNCTUATE = True
-            elif env_auto_punctuate in ["0", "false", "no"]:
-                AUTO_TYPE_AUTO_PUNCTUATE = False
 
-            env_middle_click = os.environ.get("VT_MIDDLE_CLICK_ENABLED", "").strip().lower()
-            if env_middle_click in ["1", "true", "yes"]:
-                MIDDLE_CLICK_ENABLED = True
-            elif env_middle_click in ["0", "false", "no"]:
-                MIDDLE_CLICK_ENABLED = False
-
-            env_bt_handsfree = os.environ.get("VT_KEEP_BLUETOOTH_HANDSFREE", "").strip().lower()
-            if env_bt_handsfree in ["1", "true", "yes"]:
-                KEEP_BLUETOOTH_HANDSFREE = True
-            elif env_bt_handsfree in ["0", "false", "no"]:
-                KEEP_BLUETOOTH_HANDSFREE = False
-
-            env_muted = os.environ.get("VT_IS_MUTED", "").strip().lower()
-            if env_muted in ["1", "true", "yes"]:
-                IS_MUTED = True
-            elif env_muted in ["0", "false", "no"]:
-                IS_MUTED = False
-
-            env_auto_type = os.environ.get("VT_AUTO_TYPE", "").strip().lower()
-            if env_auto_type in ["1", "true", "yes"]:
-                OUTPUT_MODE = "type"
-            elif env_auto_type in ["0", "false", "no"] and OUTPUT_MODE in ("type", "type_fast"):
-                OUTPUT_MODE = "clipboard"
-
-            env_out_mode = os.environ.get("VT_OUTPUT_MODE", "").strip().lower()
-            if env_out_mode in OUTPUT_MODES:
-                OUTPUT_MODE = env_out_mode
-            elif env_out_mode in ("paste", "paste_terminal"):
-                OUTPUT_MODE = "type_fast"
-
-            AUTO_TYPE = (OUTPUT_MODE in ("type", "type_fast"))
-
-            env_sound = os.environ.get("VT_SOUND_THEME", "").strip()
-            SOUND_THEME = env_sound or config.get('sound_theme', 'proximity')
+            SOUND_THEME = config.get('sound_theme', 'proximity')
             if SOUND_THEME.lower() in ["silent", "muted", "none"]:
                 IS_MUTED = True
 
-            env_theme = os.environ.get("VT_UI_THEME", "").strip().lower()
-            UI_THEME = env_theme or config.get('ui_theme', 'auto')
+            UI_THEME = config.get('ui_theme', 'auto')
 
             # If we have an override, try that first
             if OVERRIDE_MODE == 'primary' and PRIMARY_DEVICE_NAME:
@@ -1209,36 +1253,12 @@ def load_audio_config(file_path=None):
             else:
                 logger.info("No configured audio devices found. Using system default.")
 
-        # Apply Bluetooth hands-free policy on Linux / PipeWire
-        apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
-
         # Environment overrides always win, even when no config file exists yet
         # (a fresh install with only VT_* vars exported).
-        env_number_digits = os.environ.get("VT_NUMBER_DIGITS", "").strip()
-        if env_number_digits:
-            NUMBER_MODE = _normalize_number_mode(env_number_digits)
-            NUMBER_DIGITS = NUMBER_MODE != "words"
+        _apply_env_overrides()
 
-        env_serial_collapse = os.environ.get("VT_SERIAL_COLLAPSE", "").strip().lower()
-        if env_serial_collapse in ["1", "true", "yes", "on", "collapsed", "collapse"]:
-            SERIAL_COLLAPSE = True
-        elif env_serial_collapse in ["0", "false", "no", "off", "spaced", "space"]:
-            SERIAL_COLLAPSE = False
-
-        env_spell_command = os.environ.get("VT_SPELL_COMMAND", "").strip().lower()
-        if env_spell_command in ["1", "true", "yes", "on"]:
-            SPELL_COMMAND = True
-        elif env_spell_command in ["0", "false", "no", "off"]:
-            SPELL_COMMAND = False
-
-        env_wpm = os.environ.get("VT_TYPING_WPM", "").strip()
-        if env_wpm:
-            try:
-                parsed_wpm = int(env_wpm)
-                if parsed_wpm > 0:
-                    TYPING_WPM = parsed_wpm
-            except (ValueError, TypeError):
-                pass
+        # Apply Bluetooth hands-free policy on Linux / PipeWire
+        apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
 
         # Keep the post-processor's runtime number mode in sync with the loaded config
         set_number_digits(NUMBER_MODE)

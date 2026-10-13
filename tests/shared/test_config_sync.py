@@ -16,6 +16,15 @@ import t2
 from ._rust_source import rust_implementation
 
 
+def test_env_overrides_apply_without_config_file(tmp_path, monkeypatch):
+    nonexistent = tmp_path / "does_not_exist.yaml"
+    monkeypatch.setenv("VT_CLEANUP_MODE", "off")
+    monkeypatch.setenv("VT_PRESET", "gen_z")
+    t2.load_audio_config(file_path=str(nonexistent))
+    assert t2.get_cleanup_mode() == "off"
+    assert t2.PUNCTUATION_MODE == "gen_z"
+
+
 def test_save_audio_config_preserves_yaml_and_extra_keys(tmp_path, monkeypatch):
     # Setup temporary yaml config file
     yaml_config = tmp_path / "config.yaml"
