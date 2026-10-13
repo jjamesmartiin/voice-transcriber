@@ -399,8 +399,9 @@ Expect exactly **four** assets:
 | `REQUIREMENTS.txt` | ~4 KB |
 
 plus GitHub's own `Source code (zip)` / `Source code (tar.gz)`, which every tag
-gets automatically and CI does not build. Releases predating `REQUIREMENTS.txt`
-legitimately have **two** assets and no manifest — `v1.4.1` does.
+gets automatically and CI does not build. The three-asset shape is
+`v1.4.4`'s; older releases that predate `REQUIREMENTS.txt` legitimately had two
+assets and no manifest, but they have since been pruned (see below).
 The Windows zip and the installer are the same PyInstaller bundle: the installer
 is the primary download (one file, per-user install, Start Menu entry), the zip
 is the portable fallback. The installer being **smaller** than the zip it wraps
@@ -577,11 +578,20 @@ assets were (all `vt-x86_64.AppImage` + `VoiceTranscriber-windows-x86_64.zip`):
 from here: the old bundles are gone from the build host too, so re-building the
 same tag is the only way back.
 
-**Pruned 2026-10-13:** `v1.4.0` followed it, leaving `v1.4.3`, `v1.4.2` and
-`v1.4.1` as the app releases (tags kept). Its assets were `vt-x86_64.AppImage`
-sha256 `112eac3d…` and `VoiceTranscriber-windows-x86_64.zip` `172999b3…`, both
-undownloaded. The trade is the one documented above: `v1.4.2` is now the oldest
-rollback download on the page.
+**Pruned 2026-10-13, first pass:** `v1.4.0` followed the earlier prune under the
+same rule (release object and assets removed, tag kept). Its assets were
+`vt-x86_64.AppImage` sha256 `112eac3d…` and `VoiceTranscriber-windows-x86_64.zip`
+`172999b3…`, both undownloaded.
+
+**Pruned 2026-10-13, second pass:** `v1.4.1`, `v1.4.2` and `v1.4.3`, leaving
+`v1.4.4` as the only app download and `PREREQUISITES` as the only other release
+(tags kept again). Their assets, all `vt-x86_64.AppImage` +
+`VoiceTranscriber-windows-x86_64.zip`, with the later two also carrying a
+`REQUIREMENTS.txt` and a `-setup.exe`: `v1.4.1` `638e15ef…`/`213b73b3…`,
+`v1.4.2` `385e3ace…`/`fac56bd8…`, `v1.4.3` `aa9ae602…`/`19b736cb…`. This is the
+trade above taken to its end: **there is no previous version to roll back to**.
+It was cheap by then because those versions cannot fetch prerequisites anyway
+(see the consolidation note), so installing one was already degraded.
 
 ---
 
