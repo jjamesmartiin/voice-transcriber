@@ -863,6 +863,23 @@ def test_diarization_speakers_env_override(tmp_path, monkeypatch):
         t2.set_diarization_speakers("auto")
 
 
+def test_the_diarization_model_list_matches_the_registry():
+    """``t2.DIARIZATION_MODELS`` and the registry's ``model_ids`` are one fact.
+
+    They are declared separately on purpose - ``t2`` must not import the
+    registry at module scope - which leaves the pair held together only by a
+    test. ``t2.FORMATTER_MODELS`` has had that comparison for a while
+    (``test_formatter_settings.py``); the diarization half only had membership
+    checks, so the two could drift apart while every test stayed green.
+    """
+    from voice_transcriber import model_download
+
+    spec = model_download.get_spec("diarization")
+    assert t2.DIARIZATION_MODELS == list(spec.model_ids), (
+        f"t2.DIARIZATION_MODELS={t2.DIARIZATION_MODELS} but the registry says "
+        f"{list(spec.model_ids)}; the lists are hand-kept and must agree")
+
+
 def test_diarization_model_default_and_fallback(tmp_path, monkeypatch):
     """The model is a registry name; an unknown one warns and keeps the default."""
     import yaml
