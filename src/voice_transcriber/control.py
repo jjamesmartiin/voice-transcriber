@@ -58,6 +58,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 
 import console_text
 
@@ -856,14 +857,20 @@ class ControlServer:
     def _handle(self, conn: socket.socket) -> None:
         response: dict = {"ok": False, "error": "no request received"}
         try:
-            conn.settimeout(DEFAULT_TIMEOUT)
+            deadline = time.monotonic() + DEFAULT_TIMEOUT
             data = b""
             while b"\n" not in data and len(data) < MAX_REQUEST_BYTES:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    response = {"ok": False, "error": "request timed out"}
+                    break
+                conn.settimeout(max(0.05, remaining))
                 chunk = conn.recv(4096)
                 if not chunk:
                     break
                 data += chunk
-            response = self.dispatch(data.split(b"\n", 1)[0].decode("utf-8", "replace"))
+            else:
+                response = self.dispatch(data.split(b"\n", 1)[0].decode("utf-8", "replace"))
         except Exception as exc:  # a bad client must not kill the engine
             response = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         try:

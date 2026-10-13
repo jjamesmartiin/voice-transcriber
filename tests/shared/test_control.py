@@ -384,6 +384,58 @@ class TestSocketTransport:
             first.close()
             server.stop()
 
+    def test_slow_clients_release_slots_by_deadline(self, sock_path, monkeypatch):
+        """Unauthenticated clients trickling bytes must not hold slots past the wall-clock deadline."""
+        monkeypatch.setattr(control, "DEFAULT_TIMEOUT", 0.2)
+        server = _server(sock_path, _FakeEngine())
+        assert server.start() is True
+
+        stop_trickle = threading.Event()
+        clients = []
+
+        def trickle(s):
+            try:
+                while not stop_trickle.is_set():
+                    s.sendall(b" ")
+                    time.sleep(0.08)
+            except OSError:
+                pass
+
+        threads = []
+        try:
+            # Fill all connection slots with slow trickling clients
+            for _ in range(control.MAX_CONCURRENT_CONNECTIONS):
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.connect(server.socket_path)
+                clients.append(s)
+                t = threading.Thread(target=trickle, args=(s,), daemon=True)
+                t.start()
+                threads.append(t)
+
+            # Wait past the wall-clock deadline (0.2s)
+            time.sleep(0.35)
+
+            # A legitimate client must now succeed because trickling clients were cut off
+            legit = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            legit.settimeout(1.0)
+            legit.connect(server.socket_path)
+            legit.sendall(b"status\n")
+            raw = legit.recv(4096)
+            res = json.loads(raw.decode("utf-8"))
+            assert res.get("ok") is True
+            legit.close()
+        finally:
+            stop_trickle.set()
+            for s in clients:
+                try:
+                    s.close()
+                except OSError:
+                    pass
+            for t in threads:
+                t.join(timeout=0.1)
+            server.stop()
+
+
 
 class TestSocketPathLength:
     """``sun_path`` is 104 bytes on macOS and 108 on Linux, NUL included.
