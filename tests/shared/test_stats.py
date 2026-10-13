@@ -108,6 +108,11 @@ class TestPersistence:
         assert record["time_saved_sec"] == 0.0
         assert json.loads(stats_file.read_text())["words"] == 0
 
+    def test_last_used_does_not_move_backwards_on_clock_skew(self, stats_file):
+        stats.record_transcription(10, 5.0, now="2026-06-01T12:00:00+00:00")
+        record = stats.record_transcription(5, 2.0, now="2026-06-01T11:00:00+00:00")
+        assert record["last_used"] == "2026-06-01T12:00:00+00:00"
+
     def test_writes_leave_no_temp_files_behind(self, stats_file):
         for _ in range(3):
             stats.record_transcription(1, 1.0)

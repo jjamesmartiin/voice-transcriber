@@ -84,7 +84,10 @@ def stats_path() -> Path:
 
 
 def _now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S")
+    """Current UTC timestamp in ISO 8601 format."""
+    import datetime as _dt
+
+    return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
 
 
 def _clean_number(value, default: float) -> float:
@@ -231,7 +234,9 @@ def _mutate(apply, now=None) -> dict:
         stamp = now or _now()
         if not data.get("first_used"):
             data["first_used"] = stamp
-        data["last_used"] = stamp
+        current_last = data.get("last_used")
+        if not current_last or stamp >= current_last:
+            data["last_used"] = stamp
         apply(data)
         _write_file(path, data)
         return data
