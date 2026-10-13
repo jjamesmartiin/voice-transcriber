@@ -96,9 +96,13 @@ def configure_logging(level: str | int | None = None, log_file=None, console: bo
     log_path: Path | None = None
     if not _env_flag("VT_LOG_DISABLE"):
         try:
+            from logging.handlers import RotatingFileHandler
+
             target = Path(log_file) if log_file is not None else default_log_path()
             target.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(target, encoding="utf-8")
+            file_handler = RotatingFileHandler(
+                target, maxBytes=10 * 1024 * 1024, backupCount=3, encoding="utf-8"
+            )
             file_handler.setFormatter(formatter)
             handlers.append(file_handler)
             log_path = target

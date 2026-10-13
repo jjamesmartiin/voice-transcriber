@@ -62,6 +62,15 @@ class TestDefaultLogPath:
 
 
 class TestConfigureLogging:
+    def test_file_handler_uses_rotating_handler(self, tmp_path):
+        from logging.handlers import RotatingFileHandler
+        target = tmp_path / "vt.log"
+        logging_setup.configure_logging(log_file=target, console=False)
+        handlers = [h for h in logging.getLogger().handlers if isinstance(h, RotatingFileHandler)]
+        assert len(handlers) == 1
+        assert handlers[0].maxBytes > 0
+        assert handlers[0].backupCount > 0
+
     def test_writes_to_the_file(self, tmp_path):
         target = tmp_path / "vt.log"
         path = logging_setup.configure_logging(log_file=target, console=False)
