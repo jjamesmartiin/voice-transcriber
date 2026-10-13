@@ -638,6 +638,36 @@ def test_linux_sync_actually_grabs_a_mouse_by_default(monkeypatch):
         manager.cleanup()
 
 
+def test_linux_grab_is_skipped_while_a_button_is_held(monkeypatch):
+    """Grabbing mid-press would strand libinput with the press and no release.
+
+    EVIOCGRAB is device-level: from that instant libinput stops receiving this
+    device's events, so a button that is already down never sends it a release.
+    Buttons are counted seat-wide, so that one device pins the button for every
+    pointer and each later click of it is dropped until the device disappears -
+    a dead button that no amount of clicking clears.
+    """
+    manager = ScriptedLinuxHotkeyManager(MagicMock(), MagicMock())
+    device = FakeDevice("Optical Mouse", [272, 273, 274])
+    grabbed = []
+    device.active_keys = lambda: {272}  # left button held right now
+    device.grab = lambda: grabbed.append(device)
+    manager.virtual_keyboard = MagicMock()
+    monkeypatch.setattr(manager, "_create_virtual_mouse", lambda d: MagicMock())
+    try:
+        assert manager._grab_mouse(device) is False
+        assert grabbed == [], "a device with a button held must not be grabbed"
+        assert device.path not in manager._mouse_grab_failed, (
+            "the skip must be retried on the next rescan, not blacklisted"
+        )
+
+        device.active_keys = lambda: set()
+        assert manager._grab_mouse(device) is True
+        assert grabbed == [device], "with nothing held the grab must still happen"
+    finally:
+        manager.cleanup()
+
+
 def test_linux_disabling_mouse_mode_drops_monitored_mice():
     """Disabling mouse mode must purge mouse devices from monitoring."""
     LinuxHotkeyManager = ScriptedLinuxHotkeyManager

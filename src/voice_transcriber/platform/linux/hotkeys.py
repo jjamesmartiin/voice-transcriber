@@ -722,6 +722,19 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             return True
         if device.path in self._mouse_grab_failed:
             return False
+        # A grab hides this device from every other reader, libinput included. A
+        # button held *now* would therefore never send libinput its release, and
+        # since buttons are counted seat-wide (libinput's seat_button_count, then
+        # mutter's own gate) that one device then pins the button for every
+        # pointer: every later click of it is dropped until the device goes
+        # away. Skip without blacklisting, so the next rescan retries.
+        try:
+            held = device.active_keys()
+        except Exception:
+            held = ()
+        if any(key in held for key in self.MOUSE_BUTTON_KEYS + self.MIDDLE_MOUSE_KEYS):
+            logger.debug(f"Not grabbing {device.name}: a button is held down")
+            return False
         if not self.virtual_keyboard:
             # Without a virtual keyboard we could swallow clicks but never send
             # Enter, so leave the mouse alone.
