@@ -467,11 +467,23 @@ def test_warm_is_optional_in_the_contract():
 # ---------------------------------------------------------------------------
 # Hard gate: the off behaviour
 # ---------------------------------------------------------------------------
-def test_may_run_is_false_when_diarization_is_off():
-    assert diarize.may_run("off") is False
-    assert diarize.may_run("  OFF ") is False
-    assert diarize.may_run("auto") is True
-    assert diarize.may_run("2") is True
+def test_only_an_explicit_on_enables_diarization():
+    """The gate fails safe: the pass loads a model, so a typo must not turn it on.
+
+    This replaces a ``diarize.may_run(...) != "off"`` test. That helper failed
+    the other way - it returned True for anything that was not the literal
+    "off", including "auto" and "2" (a speaker *count*, not the toggle) - which
+    contradicts the fail-safe policy below, so it was deleted rather than
+    adopted. The live gate is ``main.py``'s
+    ``diarization_gate=lambda: t2.get_diarization() == "on"``, which is safe
+    precisely because every value reaches it through this mapping.
+    """
+    import t2
+
+    for value in ("on", "ON", "true", "yes", "enabled", "1"):
+        assert t2.normalize_diarization(value) == "on", value
+    for value in ("off", "OFF", "auto", "2", "", None, "yes please", "onn"):
+        assert t2.normalize_diarization(value) == "off", value
 
 
 # ---------------------------------------------------------------------------

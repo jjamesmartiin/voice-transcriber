@@ -113,20 +113,6 @@ def warm(backend: str | None = None) -> bool:
         return False
 
 
-def may_run(diarization: str) -> bool:
-    """An earlier, different gate that is **not** the shipped rule.
-
-    There is no production caller. The live gate is
-    ``diarization_gate=lambda: t2.get_diarization() == "on"`` in ``main.py``.
-    That is a different rule: it treats every value except ``"on"`` as off, so
-    ``"auto"`` and ``"2"`` do not diarize, whereas this helper returns ``True``
-    for anything but the literal ``"off"``. Wiring this in would start
-    diarizing on values the shipped gate treats as off, so the two must not be
-    conflated. Kept, with its test, pending a delete-vs-adopt decision.
-    """
-    return str(diarization or "").strip().lower() != "off"
-
-
 # ---------------------------------------------------------------------------
 # The data contract
 # ---------------------------------------------------------------------------

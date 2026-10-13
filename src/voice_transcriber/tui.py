@@ -141,7 +141,6 @@ class VoiceTranscriberTUI:
 
         # Callbacks for terminal keypresses
         self.on_toggle_record = None
-        self.on_change_device = None
         self.on_toggle_mute = None
         # Backend selection is config-file only (edit config/config.yaml, restart);
         # no runtime model toggle to avoid loading the other ASR backend unexpectedly.

@@ -110,7 +110,6 @@ def test_tui_print_transcription():
 def test_tui_handle_keypress():
     tui = VoiceTranscriberTUI()
     called = []
-    tui.on_change_device = lambda: called.append("mic")
     tui.on_open_mic_picker = lambda: called.append("mic_picker")
     tui.on_open_settings_picker = lambda: called.append("settings")
     tui.on_reset_terminal = lambda: called.append("reset_terminal")

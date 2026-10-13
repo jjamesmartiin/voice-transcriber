@@ -87,7 +87,6 @@ class RatatuiTui:
 
         # Callbacks (wired by main.SimpleVoiceTranscriber).
         self.on_toggle_record = None
-        self.on_change_device = None
         self.on_toggle_mute = None
         self.on_toggle_autotype = None
         self.on_cycle_output_mode = None
@@ -309,8 +308,6 @@ class RatatuiTui:
         logger.debug("vt-tui command: %s", cmd)
         if cmd == "toggle_record" and self.on_toggle_record:
             self.on_toggle_record()
-        elif cmd == "change_device" and self.on_change_device:
-            self.on_change_device()
         elif cmd == "toggle_mute" and self.on_toggle_mute:
             self.on_toggle_mute()
         elif cmd in ("toggle_autotype", "cycle_output_mode"):

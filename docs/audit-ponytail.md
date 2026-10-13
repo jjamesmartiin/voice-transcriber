@@ -27,8 +27,7 @@ DER assignment returned a suboptimal mapping on 431/3000 fuzzed matrices, and th
 report's silence-hallucination rate was inverted.
 
 _Re-verified against the working tree 2026-10-13: §1 items 4–12 fixed; item 13 partly fixed
-(§1 table below). §4 closed except `diarize.may_run`, which is not dead but wrong to wire in.
-§3 partly done and partly declined — see below._
+(§1 table below). §4 closed. §3 partly done and partly declined — see below._
 
 **§2 duplication is folded.** The Rust items landed in one wave (net **-171 lines**: four
 byte-identical `fuzzy_subsequence` copies, the ~40 hand-rolled send-or-quit sites, six run loops,
@@ -71,11 +70,15 @@ aliases (already gone by then), `ignore_overlap`/`_is_reference_overlap`. Wired 
 `formatter.may_run` is now the single statement of the formatter gate, so
 `post_processor._removes_noise()` is no longer a second copy of it. Not dead after all:
 `change_device` and `on_open_preset_picker` have real callers, `_SPAWN_ATTEMPTS` lives in the
-test guard, and `EXPECTED_ORDER` is compared. Left in place deliberately: `diarize.may_run`,
-because it is **not the same rule** as the shipped gate — `main.py` uses
-`get_diarization() == "on"`, while `may_run` returns True for anything but `"off"`, so wiring it
-in would start diarizing on `"auto"`. Its docstring now says so; delete-vs-adopt is an owner
-call.
+test guard, and `EXPECTED_ORDER` is compared. Deleted after checking rather than on the audit's
+word: `diarize.may_run`, which the audit said to "keep or wire in". It is not the same rule as the
+shipped gate — `main.py` uses `get_diarization() == "on"`, while `may_run` returned True for
+anything but `"off"` — and it fails the *unsafe* way: `may_run("auto")` and `may_run("2")` were
+True, where `"2"` is a speaker *count*, not the toggle. `t2.normalize_diarization`'s docstring
+states the opposite policy in as many words ("fail-safe off: the pass loads a model, so a typo
+must not turn it on by accident"), so the helper contradicted the shipped design and would have
+silently reversed it if anyone wired it in. Nothing called it. Its test is replaced by one that
+pins the real policy and the normaliser, which had no test at all.
 
 One §4 entry stopped being true and is worth correcting here: `_SPAWN_ATTEMPTS` was listed as
 dead state, and it was — but the fix was to *assert* it rather than delete it, because a spawn
@@ -157,7 +160,7 @@ only one that mutates an ordered list rather than selecting an option.
 | `EXPECTED_ORDER` (§1 item 12) | nothing; the ref-derived check is stricter |
 | `_SPAWN_ATTEMPTS` (§1 item 9) | nothing |
 | `test_der_is_the_sum_of_its_three_components` | 6 lines; near-tautological, overlaps four other tests |
-| `formatter.may_run` / `diarize.may_run` | no production callers — the real gates are re-implemented in `post_processor` and `main`. **Keep or wire in; do not delete blind** |
+| `formatter.may_run` / `diarize.may_run` | no production callers — the real gates are re-implemented in `post_processor` and `main`. **Resolved:** `formatter.may_run` is now the gate, so the rule has one statement; `diarize.may_run` was deleted — it fails *open* and contradicts `t2.normalize_diarization`'s documented fail-safe policy |
 
 ---
 
