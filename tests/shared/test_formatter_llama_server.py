@@ -1634,3 +1634,43 @@ def test_a_literal_host_is_not_resolved(monkeypatch):
         assert llama_server._post_chat(server.url, {"x": 1}, 2.0)
     finally:
         server.close()
+
+
+def test_extract_archive_refuses_symlink_traversal(tmp_path):
+    import tarfile
+
+    victim = tmp_path / "victim.txt"
+    victim.write_text("original content")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    tar_path = tmp_path / "evil.tar"
+    with tarfile.open(tar_path, "w") as tf:
+        link_info = tarfile.TarInfo("symlink_out")
+        link_info.type = tarfile.SYMTYPE
+        link_info.linkname = str(victim)
+        tf.addfile(link_info)
+
+    with pytest.raises((llama_server.BackendUnavailable, RuntimeError)):
+        llama_server._extract_archive(str(tar_path), str(dest))
+    assert victim.read_text() == "original content"
+
+
+def test_resolve_binary_ignores_path_unless_opted_in(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_exe = bin_dir / ("llama-server.exe" if sys.platform == "win32" else "llama-server")
+    fake_exe.write_bytes(b"#!/bin/sh\n")
+    fake_exe.chmod(0o755)
+
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.delenv(llama_server.ENV_BINARY, raising=False)
+    monkeypatch.setattr(llama_server, "_candidate_binary_dirs", lambda: [])
+    monkeypatch.delenv("VT_ALLOW_PATH_LLAMA_SERVER", raising=False)
+
+    report = llama_server.resolve_binary()
+    assert report["source"] != "path"
+
+    monkeypatch.setenv("VT_ALLOW_PATH_LLAMA_SERVER", "1")
+    report_opted_in = llama_server.resolve_binary()
+    assert report_opted_in["source"] == "path"

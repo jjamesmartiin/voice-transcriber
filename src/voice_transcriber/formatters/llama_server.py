@@ -346,13 +346,14 @@ def resolve_binary() -> dict[str, Any]:
             source = label
             break
 
-    if found is None:
+    if found is None and os.environ.get("VT_ALLOW_PATH_LLAMA_SERVER") == "1":
         from shutil import which
         on_path = which("llama-server") or which("llama-server.exe")
         if on_path:
             searched.append(on_path)
             if consider(on_path):
                 source = "path"
+                logger.info(f"Using llama-server from PATH ({on_path}) via VT_ALLOW_PATH_LLAMA_SERVER=1")
 
     return _binary_report(found, source, searched, missing, override=False)
 
@@ -504,9 +505,12 @@ def _extract_archive(archive: str, dest: str) -> None:
     if lower.endswith((".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz")):
         import tarfile
         with tarfile.open(archive) as handle:
-            for member in handle.getmembers():
-                _check_archive_member(member.name)
-            handle.extractall(dest)  # noqa: S202 - members validated above
+            from voice_transcriber import model_download
+            model_download._check_tar_members(handle, os.path.abspath(dest))
+            if hasattr(tarfile, "data_filter"):
+                handle.extractall(dest, filter="data")
+            else:
+                handle.extractall(dest)
         return
     raise BackendUnavailable(f"unsupported llama-server archive: {archive}")
 
