@@ -534,11 +534,16 @@ bundle onward, no app release carries weights at all.
 
 ### Which releases are disposable, and which are not
 
-**Never delete a `model-*` or `tool-*` bundle release.** Its tag *is* the
-runtime download URL for every shipped app: the client resolves
-`.../releases/download/<bundle tag>/<manifest>` at first run and on demand. The
-bundle is also invisible to `/releases/latest` (it is a pre-release), so it never
-competes with an app download.
+**Never delete anything in the `PREREQUISITES` release.** Those assets *are* the
+runtime download path for every shipped app: the client resolves
+`.../releases/download/PREREQUISITES/<manifest>` at first run and on demand. It
+is also a pre-release, so it never competes with an app download for
+`/releases/latest`.
+
+This rule used to name four separate bundle tags (`model-cohere-<rev12>`,
+`model-formatter-<rev12>`, `model-diarization-<rev12>`,
+`tool-llama-server-<pin>`); they hold the same role, consolidated into one release
+on 2026-10-13 ("Why one shared tag, and what it costs").
 
 **App releases are the disposable ones.** No current client resolves anything
 through an app tag, so deleting an old `vX.Y.Z` release costs only the
@@ -550,10 +555,18 @@ links need.
 **Known drift (checked against the API 2026-10-12):** the `v1.1.0`, `v1.1.1` and
 `v1.2.0` releases **no longer exist** — the API 404s them. Any surviving
 `v1.1.1`/`v1.2.0` install therefore can no longer fetch weights, and has to be
-pointed at `model-cohere-499888924f5f` or given the files via `VT_MODEL_DIR`.
-Nothing current is affected, because today's client reads only the
-revision-derived tag. An earlier revision of this document claimed those assets
-*were* still there and must be kept — that was already false when it was read.
+pointed at `PREREQUISITES` or given the files via `VT_MODEL_DIR`.
+
+**Pruned 2026-10-13 (the consolidating release):** the four per-revision bundle
+releases — `model-cohere-499888924f5f`, `model-formatter-34add00a48a2`,
+`model-diarization-24615ee884c8`, `tool-llama-server-b11429` — were deleted once
+`v1.4.4`, the first app version that reads `PREREQUISITES`, had shipped. Their 11
+assets were verified byte-identical to the copies in `PREREQUISITES` before the
+deletion. Consequences, deliberately accepted: **app versions older than v1.4.4
+can no longer fetch prerequisites** (installed weights keep working; a fresh
+install of an older version, or its on-demand formatter backend, cannot
+download), and the only other copies of that payload are under `dist/` on the
+build host. Git tags were kept.
 
 **Pruned 2026-10-12:** `v1.2.1`, `v1.3.0` and `v1.3.1` were deleted under that
 rule — release objects and assets removed, git tags kept, so `CHANGELOG.md`'s
