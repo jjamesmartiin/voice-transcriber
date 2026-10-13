@@ -435,6 +435,14 @@ class TestSocketTransport:
                 t.join(timeout=0.1)
             server.stop()
 
+    def test_stop_does_not_unlink_regular_file(self, sock_path):
+        """stop() must only unlink socket files, never arbitrary regular files."""
+        sock_path.write_text("regular file", encoding="utf-8")
+        server = _server(sock_path, _FakeEngine())
+        server.stop()
+        assert sock_path.exists(), "stop() must not unlink a regular file"
+        assert sock_path.read_text(encoding="utf-8") == "regular file"
+
 
 
 class TestSocketPathLength:
@@ -590,6 +598,45 @@ class TestTcpTransport:
             assert published["token"] == server.token
         finally:
             server.stop()
+
+    def test_read_endpoint_refuses_non_loopback_host(self, endpoint_file):
+        endpoint_file.write_text(json.dumps({"port": 1234, "host": "127.0.0.2", "token": "tok"}))
+        assert control.read_endpoint_file(str(endpoint_file)) is None
+
+    def test_read_endpoint_refuses_foreign_owner(self, endpoint_file, monkeypatch):
+        if not hasattr(os, "getuid"):
+            pytest.skip("POSIX only")
+        endpoint_file.write_text(json.dumps({"port": 1234, "host": "127.0.0.1", "token": "tok"}))
+        real_lstat = os.lstat
+        def fake_lstat(path):
+            st = real_lstat(path)
+            if str(path) == str(endpoint_file):
+                return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink,
+                                       os.getuid() + 100, st.st_gid, st.st_size,
+                                       st.st_atime, st.st_mtime, st.st_ctime))
+            return st
+        monkeypatch.setattr(os, "lstat", fake_lstat)
+        assert control.read_endpoint_file(str(endpoint_file)) is None
+
+    def test_read_endpoint_refuses_world_readable_file(self, endpoint_file):
+        if os.name != "posix":
+            pytest.skip("POSIX only")
+        endpoint_file.write_text(json.dumps({"port": 1234, "host": "127.0.0.1", "token": "tok"}))
+        os.chmod(endpoint_file, 0o644)
+        assert control.read_endpoint_file(str(endpoint_file)) is None
+
+    def test_windows_uses_exclusive_addr_use(self, monkeypatch, tmp_path):
+        from unittest.mock import MagicMock
+        fake_sock = MagicMock()
+        fake_sock.getsockname.return_value = ("127.0.0.1", 1234)
+        fake_sock.accept.side_effect = socket.timeout
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(socket, "SO_EXCLUSIVEADDRUSE", 4, raising=False)
+        monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_sock)
+        ep = tmp_path / "ep.json"
+        server = control.ControlServer(_FakeEngine(), transport=control.TCP, endpoint_file=str(ep))
+        server._start_tcp()
+        fake_sock.setsockopt.assert_any_call(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
 
     def test_the_endpoint_is_removed_on_stop(self, endpoint_file):
         server = control.ControlServer(

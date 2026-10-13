@@ -55,6 +55,7 @@ import math
 import os
 import secrets
 import socket
+import stat
 import sys
 import tempfile
 import threading
@@ -528,6 +529,14 @@ def read_endpoint_file(path: str | None = None) -> dict | None:
     """Read a published TCP endpoint, or ``None`` if there is not one."""
     target = path or default_endpoint_file()
     try:
+        st = os.lstat(target)
+        if hasattr(os, "getuid"):
+            if st.st_uid != os.getuid():
+                return None
+            if (st.st_mode & 0o077) != 0:
+                return None
+        if not stat.S_ISREG(st.st_mode):
+            return None
         with open(target, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, json.JSONDecodeError, ValueError):
@@ -541,7 +550,8 @@ def read_endpoint_file(path: str | None = None) -> dict | None:
     # explicitly; the host is used to build a connection, so it must be a name.
     if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
         return None
-    if not isinstance(data.get("host"), str) or not data["host"]:
+    host = data.get("host")
+    if not isinstance(host, str) or host not in ("127.0.0.1", "::1", "localhost"):
         return None
     return data
 
@@ -672,8 +682,12 @@ class ControlServer:
         if not unix_sockets_supported():
             return False
         try:
-            if os.path.exists(self.socket_path):
-                os.unlink(self.socket_path)
+            try:
+                st = os.lstat(self.socket_path)
+                if stat.S_ISSOCK(st.st_mode):
+                    os.unlink(self.socket_path)
+            except OSError:
+                pass
             server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             server.bind(self.socket_path)
             try:
@@ -706,7 +720,10 @@ class ControlServer:
         """
         try:
             server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server.bind((self.host, 0))
             server.listen(8)
             server.settimeout(0.5)
@@ -763,7 +780,8 @@ class ControlServer:
             self._thread.join(timeout=1.0)
             self._thread = None
         try:
-            if os.path.exists(self.socket_path):
+            st = os.lstat(self.socket_path)
+            if stat.S_ISSOCK(st.st_mode):
                 os.unlink(self.socket_path)
         except OSError:
             pass
