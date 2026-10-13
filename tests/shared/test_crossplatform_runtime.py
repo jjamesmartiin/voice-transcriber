@@ -259,6 +259,17 @@ class TestAudioFramesEmptyCheck:
         app.micro_batcher.finish_and_get_text.assert_called_once()
         assert fallback_calls == []
 
+    def test_process_recording_times_out_when_model_never_ready(self, monkeypatch):
+        frames = [np.zeros(1024, dtype=np.float32)] * 3
+        app = self._make_app(monkeypatch, frames)
+        app._model_ready_event = threading.Event()  # never set!
+        monkeypatch.setattr("main.MODEL_READY_TIMEOUT_S", 0.05)
+
+        app.process_recording()
+
+        assert app.model_load_error is not None
+        assert "timed out" in app.model_load_error
+
     def test_numpy_audio_frames_still_work(self, monkeypatch):
         app = self._make_app(
             monkeypatch, np.ones(16000, dtype=np.float32) * 0.05

@@ -72,3 +72,17 @@ class TestRecordAudioStreamContract:
         joined = np.concatenate(frames)
         assert joined.shape == (N_BLOCKS * BLOCK,)
         assert len(frames) > 0  # works with the process_recording guard
+
+    def test_record_audio_stream_honours_independent_stop_event(self, monkeypatch):
+        """A cycle-specific stop_event must not be tricked if global stop_recording is cleared."""
+        monkeypatch.setattr(t2, "sd", _FakeSD())
+        monkeypatch.setattr(t2, "_is_wsl", lambda: False)
+        monkeypatch.setattr(t2, "INPUT_DEVICE_INDEX", 0)
+
+        t2.stop_recording.clear()
+        cycle_stop = threading.Event()
+        cycle_stop.set()
+
+        frames = t2.record_audio_stream(stop_event=cycle_stop)
+        assert isinstance(frames, list)
+

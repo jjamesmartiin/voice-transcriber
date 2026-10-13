@@ -91,6 +91,10 @@ def copy_to_clipboard_crossplatform(text, sink=None):
     except Exception:
         return False
 
+MODEL_READY_TIMEOUT_S = 30.0
+RECORD_THREAD_JOIN_TIMEOUT_S = 10.0
+
+
 class SimpleVoiceTranscriber:
     _process_lock = threading.Lock()
     _clipboard_lock = threading.Lock()
@@ -104,6 +108,7 @@ class SimpleVoiceTranscriber:
         self.audio_frames = []
         self.copy_to_clipboard = False
         self.start_time = 0
+        self.stop_event = threading.Event()
         self._process_lock = threading.Lock()
         self._clipboard_lock = threading.Lock()
 
@@ -436,7 +441,9 @@ class SimpleVoiceTranscriber:
         try:
             for t in self._preload_threads():
                 if t is not None:
-                    t.join()
+                    t.join(timeout=MODEL_READY_TIMEOUT_S)
+                    if t.is_alive():
+                        self.model_load_error = "model load timed out"
         except Exception as e:
             logger.debug(f"Model-load watcher error: {e}")
 
@@ -1287,6 +1294,7 @@ class SimpleVoiceTranscriber:
 
         self.recording = True
         self.start_time = time.time()
+        self.stop_event = threading.Event()
         stop_recording.clear()
         self.audio_frames = []
 
@@ -1318,6 +1326,7 @@ class SimpleVoiceTranscriber:
         self.release_time = time.time()
         self.recording = False
         self.copy_to_clipboard = copy_to_clipboard
+        self.stop_event.set()
         stop_recording.set()
 
         active_batcher = getattr(self, 'micro_batcher', None)
@@ -1330,7 +1339,7 @@ class SimpleVoiceTranscriber:
         # there so the hotkey monitoring loop is never blocked.
         def _process_worker():
             if active_record_thread:
-                active_record_thread.join()
+                active_record_thread.join(timeout=RECORD_THREAD_JOIN_TIMEOUT_S)
             with self._process_lock:
                 self.process_recording(
                     micro_batcher=active_batcher,
@@ -1347,7 +1356,7 @@ class SimpleVoiceTranscriber:
         """Recording worker thread"""
         try:
             cb = self.micro_batcher.feed_audio if hasattr(self, 'micro_batcher') and self.micro_batcher else None
-            self.audio_frames = record_audio_stream(stream_callback=cb)
+            self.audio_frames = record_audio_stream(stream_callback=cb, stop_event=self.stop_event)
         except Exception as e:
             logger.error(f"Recording error: {e}")
             self.recording = False
@@ -1435,7 +1444,8 @@ class SimpleVoiceTranscriber:
             # and bail out instead of pasting a load-error string to the clipboard.
             if not self._model_ready_event.is_set():
                 logger.info("⏳ Audio captured; waiting for the model to finish loading...")
-                self._model_ready_event.wait()
+                if not self._model_ready_event.wait(timeout=MODEL_READY_TIMEOUT_S):
+                    self.model_load_error = "model load timed out"
                 if self.model_load_error:
                     logger.error(f"Model load failed: {self.model_load_error}")
                     try:

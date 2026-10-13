@@ -4019,9 +4019,12 @@ def prewarm_input_stream():
         logger.debug(f"Input stream prewarm skipped: {e}")
 
 
-def record_audio_stream(interactive_mode=False, stream_callback=None):
+def record_audio_stream(interactive_mode=False, stream_callback=None, stop_event=None):
     """Record audio using sounddevice with fallback and auto-recovery support"""
     global INPUT_DEVICE_INDEX, ACTUAL_RATE, LAST_USED_DEVICE_NAME
+
+    if stop_event is None:
+        stop_event = stop_recording
 
     is_wsl = _is_wsl()
 
@@ -4038,7 +4041,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
             print(status, file=sys.stderr)
         q.put(indata.copy())
 
-    def perform_recording(device_idx, rate):
+    def perform_recording(device_idx, rate, stop_event=stop_event):
         nonlocal q
         frames = []
         try:
@@ -4047,7 +4050,7 @@ def record_audio_stream(interactive_mode=False, stream_callback=None):
             scipy = None
 
         def _consume():
-            while not stop_recording.is_set():
+            while not stop_event.is_set():
                 try:
                     # Responsive 10ms timeout for instant stop_recording detection
                     frame = q.get(timeout=0.01)
