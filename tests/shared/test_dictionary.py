@@ -407,10 +407,10 @@ def test_packaged_install_applies_a_cli_added_dictionary(tmp_path, monkeypatch):
     ``<data-dir>/config/dictionary.local.yaml`` the CLI reports as active.
     """
     import dictionary
-    from voice_transcriber import model_download
+    from voice_transcriber import paths
 
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    monkeypatch.setattr(model_download, "find_repo_root", lambda: None)
+    monkeypatch.setattr(paths, "find_repo_root", lambda: None)
     monkeypatch.chdir(tmp_path)
 
     # The CLI's own write path, exactly as a packaged user would invoke it.
@@ -437,10 +437,10 @@ def test_a_dictionary_in_the_launch_directory_is_ignored(tmp_path, monkeypatch):
     checkout root, or the per-user data dir.
     """
     import dictionary
-    from voice_transcriber import model_download
+    from voice_transcriber import paths
 
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(model_download, "find_repo_root", lambda: None)
+    monkeypatch.setattr(paths, "find_repo_root", lambda: None)
 
     cwd = tmp_path / "launch-here"
     (cwd / "config").mkdir(parents=True)

@@ -36,6 +36,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import model_download
+import paths
 from voice_transcriber import releases
 
 
@@ -494,11 +495,11 @@ def test_find_repo_root_accepts_a_worktree_marker(monkeypatch, tmp_path):
     """
     src = tmp_path / "checkout" / "src" / "voice_transcriber"
     src.mkdir(parents=True)
-    (src / "model_download.py").write_text("# stub", encoding="utf-8")
+    (src / "paths.py").write_text("# stub", encoding="utf-8")
     (tmp_path / "checkout" / ".git").write_text(
         "gitdir: /elsewhere/.git/worktrees/checkout\n", encoding="utf-8"
     )
-    monkeypatch.setattr(model_download, "__file__", str(src / "model_download.py"))
+    monkeypatch.setattr(paths, "__file__", str(src / "paths.py"))
 
     assert model_download.find_repo_root() == str(tmp_path / "checkout")
 
@@ -507,8 +508,8 @@ def test_find_repo_root_is_none_without_a_marker(monkeypatch, tmp_path):
     """Read-only installs (Nix store, AppImage) have no marker: fall back."""
     src = tmp_path / "readonly_app" / "src" / "voice_transcriber"
     src.mkdir(parents=True)
-    (src / "model_download.py").write_text("# stub", encoding="utf-8")
-    monkeypatch.setattr(model_download, "__file__", str(src / "model_download.py"))
+    (src / "paths.py").write_text("# stub", encoding="utf-8")
+    monkeypatch.setattr(paths, "__file__", str(src / "paths.py"))
 
     assert model_download.find_repo_root() is None
 

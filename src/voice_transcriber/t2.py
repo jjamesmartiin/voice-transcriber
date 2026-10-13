@@ -448,9 +448,9 @@ def _dump_toml(d: dict) -> str:
 
 def get_config_file():
     """Find local project config.yaml/config.yml/config.json/config.toml (in root or config/ dir), fallback to global data dir"""
-    from voice_transcriber import model_download
+    from voice_transcriber import paths
 
-    repo_root = model_download.find_repo_root()
+    repo_root = paths.find_repo_root()
     if repo_root is not None:
         root = Path(repo_root)
         candidates = [

@@ -387,7 +387,7 @@ class TestConfigResolutionIsolation:
 
     def test_get_config_file_ignores_cwd_when_repo_root_is_none(self, monkeypatch, tmp_path):
         import t2
-        from voice_transcriber import model_download
+        from voice_transcriber import paths
 
         foreign_dir = tmp_path / "foreign"
         foreign_dir.mkdir()
@@ -398,7 +398,7 @@ class TestConfigResolutionIsolation:
         dummy_yaml.write_text("hijacked: true")
 
         monkeypatch.chdir(foreign_dir)
-        monkeypatch.setattr(model_download, "find_repo_root", lambda: None)
+        monkeypatch.setattr(paths, "find_repo_root", lambda: None)
 
         config_path = t2.get_config_file()
         assert config_path != dummy_json.resolve()
@@ -407,7 +407,7 @@ class TestConfigResolutionIsolation:
 
     def test_get_config_file_anchors_to_repo_root(self, monkeypatch, tmp_path):
         import t2
-        from voice_transcriber import model_download
+        from voice_transcriber import paths
 
         repo_dir = tmp_path / "fake_repo"
         repo_config_dir = repo_dir / "config"
@@ -421,20 +421,20 @@ class TestConfigResolutionIsolation:
         other_yaml.write_text("language: es")
 
         monkeypatch.chdir(other_dir)
-        monkeypatch.setattr(model_download, "find_repo_root", lambda: str(repo_dir))
+        monkeypatch.setattr(paths, "find_repo_root", lambda: str(repo_dir))
 
         config_path = t2.get_config_file()
         assert config_path == repo_yaml.resolve()
         assert config_path != other_yaml.resolve()
 
     def test_dictionary_does_not_pollute_cwd_when_repo_root_is_none(self, monkeypatch, tmp_path):
-        from voice_transcriber import dictionary, model_download
+        from voice_transcriber import dictionary, paths
 
         work_dir = tmp_path / "work"
         work_dir.mkdir()
         monkeypatch.chdir(work_dir)
-        monkeypatch.setattr(model_download, "find_repo_root", lambda: None)
-        monkeypatch.setattr(model_download, "get_data_dir", lambda: str(tmp_path / "data"))
+        monkeypatch.setattr(paths, "find_repo_root", lambda: None)
+        monkeypatch.setattr(paths, "get_data_dir", lambda: str(tmp_path / "data"))
 
         common = dictionary.get_common_dictionary_path()
         local = dictionary.get_local_dictionary_path(create=True)

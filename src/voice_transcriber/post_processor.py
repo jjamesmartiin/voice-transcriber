@@ -2253,8 +2253,8 @@ def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
     # AppImage or PyInstaller tree has no repository marker, so this is None
     # there and the checkout-relative candidates below are skipped.
     try:
-        from voice_transcriber import model_download
-        _repo = model_download.find_repo_root()
+        from voice_transcriber import paths
+        _repo = paths.find_repo_root()
     except Exception:
         _repo = None
     repo_root = Path(_repo) if _repo else None

@@ -1,9 +1,12 @@
-"""The offline-first rule: the text cleaner must not drag in a network client.
+"""The offline-first rule: a module that only needs a path must stay offline.
 
 The SLM/vLLM client was split out of ``post_processor.py`` (audit §3) so that
 importing the cleaner no longer pulls an HTTP client into an otherwise
-offline-first package. Both halves are checked in a subprocess, because by the
-time any other test has run these modules may already be imported.
+offline-first package, and the path helpers were split out of
+``model_download.py`` (audit §6) so that ``t2`` (which resolves its config file
+at import time) and ``dictionary`` do not import the downloader either. Every
+half is checked in a subprocess, because by the time any other test has run
+these modules may already be imported.
 """
 
 import subprocess
@@ -55,6 +58,30 @@ def test_the_cleaner_still_reaches_the_slm_client():
         "import post_processor, slm_client; "
         "assert not hasattr(post_processor, 'process_slm_llm_rewrite'), "
         "'a shim re-export would defeat the split'; "
+        "print('OK')"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def test_importing_t2_does_not_import_a_network_client():
+    """``t2`` resolves its config file at import time; that must stay offline."""
+    result = _run_in_fresh_interpreter(
+        "import t2; "
+        "leaked = [m for m in ('urllib.request', 'http.client') if m in sys.modules]; "
+        "assert not leaked, f'network client leaked into import: {leaked}'; "
+        "print('OK')"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def test_importing_the_dictionary_does_not_import_a_network_client():
+    """The dictionary CLI reads a path, not a download: keep it offline."""
+    result = _run_in_fresh_interpreter(
+        "import dictionary; "
+        "leaked = [m for m in ('urllib.request', 'http.client') if m in sys.modules]; "
+        "assert not leaked, f'network client leaked into import: {leaked}'; "
         "print('OK')"
     )
     assert result.returncode == 0, result.stderr

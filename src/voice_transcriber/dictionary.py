@@ -20,7 +20,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import console_text
-from voice_transcriber import model_download
+from voice_transcriber import paths
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ LOCAL_CANDIDATE_PATHS = [
 
 def find_repo_root() -> Optional[Path]:
     """Find the root repository directory if running from a git checkout."""
-    root = model_download.find_repo_root()
+    root = paths.find_repo_root()
     return Path(root) if root else None
 
 
@@ -62,7 +62,7 @@ def get_common_dictionary_path() -> Path:
                 return p.resolve()
         base = repo_root / "config"
     else:
-        base = Path(model_download.get_data_dir()) / "config"
+        base = Path(paths.get_data_dir()) / "config"
         for c in COMMON_CANDIDATE_PATHS:
             p = base / c.name
             if p.exists():
@@ -83,7 +83,7 @@ def get_local_dictionary_path(create: bool = False) -> Path:
                 return p.resolve()
         base = repo_root / "config"
     else:
-        base = Path(model_download.get_data_dir()) / "config"
+        base = Path(paths.get_data_dir()) / "config"
         for c in LOCAL_CANDIDATE_PATHS:
             p = base / c.name
             if p.exists():
