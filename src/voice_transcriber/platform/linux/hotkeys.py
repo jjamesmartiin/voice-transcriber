@@ -102,6 +102,12 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         self._pending_events = []
         self._pending_forwarder = None
         self._pending_deadline = 0.0
+        #: Gap between the two halves of a replayed click. Some toolkits ignore a
+        #: click whose press and release land in the same millisecond, so the
+        #: release is *deferred* until this much has passed (see
+        #: :meth:`_defer_click_release`).
+        self.CLICK_REPLAY_GAP = 0.025
+        self._pending_click_releases = []
         self._chord_swallow = False
         self._mouse_forwards = {}  # device.path -> {"device": dev, "virtual": Device}
         self._mouse_grab_failed = set()  # paths we already gave up on
@@ -393,7 +399,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         try:
             evdev = self.evdev
 
-            current_paths = set(d.path for d in self.devices)
+            current_paths = set(d.path for d in list(self.devices))
 
             device_paths = evdev.list_devices()
 
@@ -768,6 +774,14 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         for path in list(self._mouse_forwards):
             self._release_mouse(path)
         self._mouse_grab_failed.clear()
+        if not self.middle_click_enabled:
+            for device in list(self.devices):
+                if self._is_mouse_device(device):
+                    self.devices.remove(device)
+                    try:
+                        device.close()
+                    except Exception:
+                        pass
 
     def _sync_mouse_grabs(self):
         """Grab any newly-seen mice while mouse mode is enabled."""
@@ -904,10 +918,14 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         code = event.code
         value = event.value
         self._record_key_state(device, code, value)
+        dev_key = device.path if device is not None else self._UNNAMED_DEVICE
         forward_later = []
         with self._lock:
             if self._chord_swallow:
-                if value == 0 and not self.is_key_pressed(self.MOUSE_BUTTON_KEYS):
+                if value == 0 and not any(
+                    self._seen_keys.get(dev_key, {}).get(k, False)
+                    for k in self.MOUSE_BUTTON_KEYS
+                ):
                     self._chord_swallow = False
                 return
 
@@ -954,8 +972,40 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             self._pending_events = []
             self._pending_forwarder = None
             self._pending_deadline = 0.0
-        for value in events:
+        for index, value in enumerate(events):
+            if index and value == 0 and events[index - 1] == 1:
+                # Defer the release half instead of sleeping it off: this runs on
+                # the reader thread, which also reads every other device and
+                # detects hotkeys, so a sleep here delays them all.
+                self._defer_click_release(forwarder, code)
+                continue
+            if value == 1:
+                # A press must not overtake a release still waiting to be
+                # replayed, or the app sees press,press,release,release and
+                # drops the first click.
+                self._expire_click_releases(force=True)
             self._forward_button(forwarder, code, value)
+
+    def _defer_click_release(self, forwarder, code):
+        """Queue a click's release half to be forwarded after the replay gap."""
+        self._pending_click_releases.append(
+            (time.monotonic() + self.CLICK_REPLAY_GAP, forwarder, code)
+        )
+
+    def _expire_click_releases(self, now=None, force=False):
+        """Forward deferred click releases whose gap has elapsed."""
+        if not self._pending_click_releases:
+            return
+        now = time.monotonic() if now is None else now
+        due = [entry for entry in self._pending_click_releases
+               if force or entry[0] <= now]
+        if not due:
+            return
+        self._pending_click_releases = [
+            entry for entry in self._pending_click_releases if entry not in due
+        ]
+        for _, forwarder, code in due:
+            self._forward_button(forwarder, code, 0)
 
     def _clear_pending_mouse_gestures(self):
         with self._lock:
@@ -963,6 +1013,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             self._pending_events = []
             self._pending_forwarder = None
             self._pending_deadline = 0.0
+            self._pending_click_releases = []
             self._chord_swallow = False
             self._pending_middle_events = []
             self._pending_middle_forwarder = None
@@ -1042,8 +1093,10 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                     time.sleep(0.5)
                     continue
 
+                # Snapshot: the settings/control thread can drop mouse devices
+                # from this list while we are iterating it.
                 devices_map = {
-                    dev.fd: dev for dev in self.devices if dev.fd is not None
+                    dev.fd: dev for dev in list(self.devices) if dev.fd is not None
                 }
 
                 if not devices_map:
@@ -1061,12 +1114,19 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                     timeout = max(
                         0.0, min(timeout, self._pending_middle_deadline - now)
                     )
+                if self._pending_click_releases:
+                    # Wake in time to replay the release half of the click.
+                    timeout = max(
+                        0.0,
+                        min(timeout, self._pending_click_releases[0][0] - now),
+                    )
                 r, w, x = select.select(devices_map, [], [], timeout)
 
                 # Flush any gesture whose decision window elapsed while blocked,
                 # so event ordering stays faithful.
                 self._expire_pending_mouse_chord()
                 self._expire_pending_middle_click()
+                self._expire_click_releases()
 
                 for fd in r:
                     device = devices_map.get(fd)
@@ -1119,7 +1179,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
 
         self._release_all_mice()
 
-        for device in self.devices:
+        for device in list(self.devices):
             try:
                 device.close()
             except Exception:

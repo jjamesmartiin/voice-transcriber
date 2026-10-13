@@ -67,9 +67,9 @@ class ScriptedLinuxHotkeyManager(_LinuxHotkeyManager):
         self._apply(event)
         return super().handle_key_event(event, forwarder)
 
-    def _handle_mouse_button_event(self, event, forwarder):
+    def _handle_mouse_button_event(self, event, forwarder, device=None):
         self._apply(event)
-        return super()._handle_mouse_button_event(event, forwarder)
+        return super()._handle_mouse_button_event(event, forwarder, device=device)
 
 
 class FakeEvdevEvent:
@@ -84,6 +84,10 @@ class FakeDevice:
         self.name = name
         self.path = f"/dev/input/fake_{name.replace(' ', '_')}"
         self._key_caps = set(key_caps)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
 
     def capabilities(self):
         return {1: self._key_caps}  # EV_KEY = 1
@@ -128,7 +132,7 @@ def test_linux_device_filtering():
         manager.cleanup()
 
 
-def test_linux_quick_middle_click_does_not_trigger():
+def test_linux_quick_middle_click_does_not_trigger(require_tap):
     """Quick middle click (<0.25s) should NOT trigger push-to-talk."""
     LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
@@ -136,13 +140,16 @@ def test_linux_quick_middle_click_does_not_trigger():
     manager = LinuxHotkeyManager(cb_start, cb_stop)
     manager.set_middle_click_enabled(True)
     try:
+        delay = manager.MIDDLE_CLICK_HOLD_DELAY
+        pressed_at = time.monotonic()
         # Press middle click (BTN_MIDDLE = 274)
         manager.handle_key_event(FakeEvdevEvent(274, 1))
         time.sleep(0.05)  # Quick click: release after 50ms
         manager.handle_key_event(FakeEvdevEvent(274, 0))
+        require_tap(manager, time.monotonic() - pressed_at)
 
         # Wait past the 0.25s threshold to ensure cancelled timer doesn't fire
-        time.sleep(0.25)
+        time.sleep(delay + 0.3)
 
         assert cb_start.call_count == 0
         assert cb_stop.call_count == 0
@@ -152,7 +159,7 @@ def test_linux_quick_middle_click_does_not_trigger():
         manager.cleanup()
 
 
-def test_linux_middle_click_hold_triggers_and_releases():
+def test_linux_middle_click_hold_triggers_and_releases(wait_until):
     """Middle click held for >=0.25s triggers push-to-talk, release stops it."""
     LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
@@ -164,12 +171,14 @@ def test_linux_middle_click_hold_triggers_and_releases():
         manager.handle_key_event(FakeEvdevEvent(274, 1))
         assert manager.are_modifiers_pressed() is True
 
-        # Wait for hold threshold to elapse (0.25s + margin)
-        time.sleep(0.3)
-
-        assert cb_start.call_count == 1
-        assert manager.hotkey_active is True
-        assert manager.middle_click_active is True
+        # The hold fires from a threading.Timer, so wait for the transition
+        # rather than sleeping a guessed margin (that raced the scheduler on a
+        # loaded CI runner: see tests/conftest.py::wait_until).
+        assert wait_until(
+            lambda: cb_start.call_count == 1
+            and manager.hotkey_active is True
+            and manager.middle_click_active is True
+        ), "the hold delay elapsed but push-to-talk never started"
         assert manager.is_hotkey_pressed() is True
         assert manager.are_modifiers_pressed() is True
 
@@ -185,7 +194,7 @@ def test_linux_middle_click_hold_triggers_and_releases():
         manager.cleanup()
 
 
-def test_linux_middle_click_space_latch():
+def test_linux_middle_click_space_latch(wait_until):
     """Holding middle click, tapping Space latches hands-free recording."""
     LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
@@ -195,8 +204,9 @@ def test_linux_middle_click_space_latch():
     try:
         # Press and hold middle click
         manager.handle_key_event(FakeEvdevEvent(274, 1))
-        time.sleep(0.3)
-        assert cb_start.call_count == 1
+        assert wait_until(
+            lambda: cb_start.call_count == 1 and manager.hotkey_active is True
+        ), "the hold delay elapsed but push-to-talk never started"
 
         # Tap Space (57)
         manager.handle_key_event(FakeEvdevEvent(57, 1))
@@ -206,12 +216,19 @@ def test_linux_middle_click_space_latch():
         manager.handle_key_event(FakeEvdevEvent(274, 0))
         assert cb_stop.call_count == 0
 
-        # Now stop latched recording by pressing and holding middle click again
+        # Now stop the latched recording by pressing and holding middle click
+        # again. Its release only stops when the hold was recognised (the timer
+        # sets middle_click_active), so wait for that rather than sleeping a
+        # guessed margin — and then for the stop, which the release fires.
         manager.handle_key_event(FakeEvdevEvent(274, 1))
-        time.sleep(0.3)
+        assert wait_until(lambda: manager.middle_click_active is True), (
+            "the second middle-click hold was never recognised"
+        )
         # Release to stop
         manager.handle_key_event(FakeEvdevEvent(274, 0))
-        assert cb_stop.call_count == 1
+        assert wait_until(lambda: cb_stop.call_count == 1), (
+            "releasing the second hold did not stop the latched recording"
+        )
     finally:
         manager.cleanup()
 
@@ -238,7 +255,7 @@ def test_linux_alt_shift_still_works():
         manager.cleanup()
 
 
-def test_linux_middle_click_quick_click_cancels():
+def test_linux_middle_click_quick_click_cancels(require_tap):
     """Quick middle click (<0.25s) cancels the hold timer and does not trigger PTT."""
     LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
@@ -246,12 +263,15 @@ def test_linux_middle_click_quick_click_cancels():
     manager = LinuxHotkeyManager(cb_start, cb_stop)
     manager.set_middle_click_enabled(True)
     try:
+        delay = manager.MIDDLE_CLICK_HOLD_DELAY
+        pressed_at = time.monotonic()
         # Press middle click (274, 1)
         manager.handle_key_event(FakeEvdevEvent(274, 1))
         time.sleep(0.05)  # Quick click
         # Release middle click (274, 0)
         manager.handle_key_event(FakeEvdevEvent(274, 0))
-        time.sleep(0.25)
+        require_tap(manager, time.monotonic() - pressed_at)
+        time.sleep(delay + 0.3)
         assert cb_start.call_count == 0
         assert cb_stop.call_count == 0
         assert manager.hotkey_active is False
@@ -259,7 +279,7 @@ def test_linux_middle_click_quick_click_cancels():
         manager.cleanup()
 
 
-def test_middle_click_toggle_disabled():
+def test_middle_click_toggle_disabled(wait_until):
     """When middle click mode is toggled off, middle clicks are ignored for push-to-talk."""
     LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     cb_start = MagicMock()
@@ -286,9 +306,9 @@ def test_middle_click_toggle_disabled():
 
         # Now hold >= 0.25s should trigger push-to-talk
         manager.handle_key_event(FakeEvdevEvent(274, 1))
-        time.sleep(0.3)
-        assert cb_start.call_count == 1
-        assert manager.hotkey_active is True
+        assert wait_until(
+            lambda: cb_start.call_count == 1 and manager.hotkey_active is True
+        ), "the hold delay elapsed but push-to-talk never started"
 
         manager.handle_key_event(FakeEvdevEvent(274, 0))
         assert cb_stop.call_count == 1
@@ -361,7 +381,13 @@ def test_linux_right_then_left_chord_is_symmetric():
 
 
 def test_linux_single_click_passes_through_after_window():
-    """A lone left click is buffered briefly, then replayed verbatim."""
+    """A lone left click is buffered briefly, then replayed with a real gap.
+
+    The replay must not sleep the reader thread, which is what staggered the two
+    halves before: it is deferred to a deadline that the select loop wakes for
+    (``CLICK_REPLAY_GAP``), so this asserts both the gap and the absence of a
+    blocking sleep.
+    """
     manager = _chord_manager()
     fwd = FakeForwarder()
     try:
@@ -369,12 +395,52 @@ def test_linux_single_click_passes_through_after_window():
         manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 0), fwd)
         assert fwd.events == []  # still inside the decision window
 
+        started = time.monotonic()
         manager._expire_pending_mouse_chord(force=True)
+        elapsed = time.monotonic() - started
+
+        # Only the press so far, and the reader thread was not blocked for it.
+        assert fwd.events == [((manager.EV_KEY, manager.BTN_LEFT), 1, True)]
+        assert elapsed < manager.CLICK_REPLAY_GAP, (
+            "the chord flush slept instead of deferring the release"
+        )
+        # Still held back while the gap is open...
+        manager._expire_click_releases(now=started + manager.CLICK_REPLAY_GAP / 2)
+        assert fwd.events == [((manager.EV_KEY, manager.BTN_LEFT), 1, True)]
+        # ...and forwarded once it has elapsed.
+        manager._expire_click_releases(now=started + manager.CLICK_REPLAY_GAP + 0.001)
         assert fwd.events == [
             ((manager.EV_KEY, manager.BTN_LEFT), 1, True),
             ((manager.EV_KEY, manager.BTN_LEFT), 0, True),
         ]
+        assert manager._pending_click_releases == []
         assert manager.virtual_keyboard.emit.call_count == 0
+    finally:
+        manager.cleanup()
+
+
+def test_linux_a_second_click_does_not_overtake_a_deferred_release():
+    """Ordering: press, release, press, release -- never the presses first.
+
+    A press forwarded while an earlier release is still waiting would reach the
+    app as press,press,release,release, and the first click is dropped.
+    """
+    manager = _chord_manager()
+    fwd = FakeForwarder()
+    try:
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 1), fwd)
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 0), fwd)
+        manager._expire_pending_mouse_chord(force=True)
+
+        # A second click inside the gap: its press must flush the pending release
+        # first, keeping the pairs in order.
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 1), fwd)
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 0), fwd)
+        manager._expire_pending_mouse_chord(force=True)
+        manager._expire_click_releases(force=True)
+
+        assert [value for _, value, _ in fwd.events] == [1, 0, 1, 0]
+        assert manager._pending_click_releases == []
     finally:
         manager.cleanup()
 
@@ -568,6 +634,37 @@ def test_linux_sync_actually_grabs_a_mouse_by_default(monkeypatch):
         monkeypatch.setenv("VT_GRAB_MOUSE", "0")
         manager._sync_mouse_grabs()
         assert grabbed == [], "VT_GRAB_MOUSE=0 must leave the pointer alone"
+    finally:
+        manager.cleanup()
+
+
+def test_linux_disabling_mouse_mode_drops_monitored_mice():
+    """Disabling mouse mode must purge mouse devices from monitoring."""
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
+    manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    mouse = FakeDevice("Optical Mouse", [272, 273, 274])
+    kb = FakeDevice("AT Keyboard", [30, 31, 32])
+    manager.devices = [mouse, kb]
+    manager.set_middle_click_enabled(True)
+    try:
+        manager.set_middle_click_enabled(False)
+        assert mouse not in manager.devices
+        assert kb in manager.devices
+        assert mouse.closed is True
+    finally:
+        manager.cleanup()
+
+
+def test_linux_chord_swallow_resets_on_button_up():
+    """Chord swallow must reset as soon as buttons are released on the device."""
+    manager = _chord_manager()
+    fwd = FakeForwarder()
+    mouse = FakeDevice("Optical Mouse", [272, 273])
+    try:
+        manager._chord_swallow = True
+        # Delivering release of BTN_LEFT clears chord swallow
+        manager._handle_mouse_button_event(FakeEvdevEvent(manager.BTN_LEFT, 0), fwd, device=mouse)
+        assert manager._chord_swallow is False
     finally:
         manager.cleanup()
 
