@@ -138,6 +138,21 @@ _COHERE_PROCESSOR_CONFIG_SHA256 = (
 _COHERE_PREPROCESSOR_CONFIG_SHA256 = (
     "9f297d330646ecc8ebb9dc5784f48b7c35b118c913e306a1ccd0192f2c976332"
 )
+_COHERE_GENERATION_CONFIG_SHA256 = (
+    "a4837377b5696b1d04033536f25a6d0a11d5e613c6d7d75bf20ffc463ae642c6"
+)
+_COHERE_TOKENIZER_CONFIG_SHA256 = (
+    "b462e16e04c9dbae82289b6ef9b080d8dbad331586ece3ebded0bd09996db636"
+)
+_COHERE_TOKENIZER_JSON_SHA256 = (
+    "780ccca2de2ccd289971b1fb7d4f0b5ec2dc908872f6e350181c7eba9db3fa9f"
+)
+_COHERE_TOKENIZER_MODEL_SHA256 = (
+    "6d21e6a83b2d0d3e1241a7817e4bef8eb63bcb7cfe4a2675af9a35ff3bbf0e14"
+)
+_COHERE_SPECIAL_TOKENS_MAP_SHA256 = (
+    "1814ce01458ff6a72b04a6618e75f18ce627be4dc17619cd3a7cd7f71e137f0f"
+)
 _COHERE_TAG = releases.PREREQUISITES_TAG
 
 COHERE = ModelSpec(
@@ -177,6 +192,11 @@ COHERE = ModelSpec(
         "modeling_cohere_asr.py": _COHERE_MODELING_SHA256,
         "processing_cohere_asr.py": _COHERE_PROCESSING_SHA256,
         "tokenization_cohere_asr.py": _COHERE_TOKENIZATION_SHA256,
+        "generation_config.json": _COHERE_GENERATION_CONFIG_SHA256,
+        "tokenizer_config.json": _COHERE_TOKENIZER_CONFIG_SHA256,
+        "tokenizer.json": _COHERE_TOKENIZER_JSON_SHA256,
+        "tokenizer.model": _COHERE_TOKENIZER_MODEL_SHA256,
+        "special_tokens_map.json": _COHERE_SPECIAL_TOKENS_MAP_SHA256,
     },
     license_file="config/licenses/Cohere-Apache-2.0.txt",
     license_name="Apache-2.0",
@@ -963,10 +983,16 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
         # Extract into a staging dir, then atomically move into place.
         staging = os.path.join(tmp_root, "extracted")
         with tarfile.open(tar_path, "r") as tf:
+            _check_tar_members(tf, os.path.abspath(staging))
+            for member in tf.getmembers():
+                if member.name not in spec.package_files:
+                    raise RuntimeError(
+                        f"Refusing archive member {member.name!r}: not in "
+                        f"{spec.name} package_files allowlist."
+                    )
             if hasattr(tarfile, "data_filter"):
                 tf.extractall(staging, filter="data")
             else:
-                _check_tar_members(tf, os.path.abspath(staging))
                 tf.extractall(staging)
         # Verify every redistributed file against the spec's digest map. Nothing
         # assumes the artifact is called model.safetensors: a GGUF or ONNX spec

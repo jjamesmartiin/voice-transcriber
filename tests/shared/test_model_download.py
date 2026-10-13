@@ -112,6 +112,12 @@ def test_get_spec_rejects_an_unknown_model():
         model_download.get_spec("nope")
 
 
+def test_cohere_spec_package_files_have_complete_digests():
+    """Every file in package_files must have a pinned SHA-256 digest."""
+    spec = model_download.get_spec("cohere")
+    assert set(spec.package_files) <= set(spec.digests)
+
+
 def test_formatter_and_diarization_specs_are_registered():
     """The two redistributable non-ASR models resolve and carry their own data.
 
@@ -1211,6 +1217,18 @@ def test_install_rejects_a_bad_digest_map_entry(monkeypatch, tmp_path):
     bundle = _make_bundle(tmp_path, spec.asset_prefix, good)
 
     with pytest.raises(RuntimeError, match=r"Extracted weights\.gguf sha256 .* does not match"):
+        model_download.install_model_from_local_bundle(
+            spec.name, str(bundle), dest=str(tmp_path / "dest"))
+
+
+def test_install_rejects_archive_member_not_in_allowlist(monkeypatch, tmp_path):
+    """An archive member not listed in spec.package_files must be refused."""
+    files = {"config.json": b"{}", "weights.gguf": b"fake-gguf-weights", "evil.py": b"print('pwned')"}
+    spec = _synthetic_spec(files={"config.json": b"{}", "weights.gguf": b"fake-gguf-weights"})
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    bundle = _make_bundle(tmp_path, spec.asset_prefix, files)
+
+    with pytest.raises(RuntimeError, match=r"Refusing archive member 'evil\.py': not in synthetic package_files allowlist"):
         model_download.install_model_from_local_bundle(
             spec.name, str(bundle), dest=str(tmp_path / "dest"))
 
