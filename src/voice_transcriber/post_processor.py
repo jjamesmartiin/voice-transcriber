@@ -3006,6 +3006,96 @@ def get_formatter_settings() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# The single config-mirror entry point
+# ---------------------------------------------------------------------------
+# ``t2`` owns config I/O and keeps a live copy of every user setting; this
+# module keeps its own runtime copy of the ones that shape cleaning. Those
+# copies used to be republished by hand from eleven scattered sites in ``t2``,
+# and the two whole-snapshot paths (config load and reset to defaults) had
+# drifted apart - one published the dictionary, the other did not - which is
+# the divergence class behind bug A6. ``apply_settings_from_config`` is now the
+# one place that publishes the snapshot, and both ``t2`` paths call it once.
+#
+# ``CONFIG_MIRRORED_SETTERS`` is the checklist the config-sync guard test drives.
+# Each entry names a real setter this module exposes. Adding a setting here
+# without teaching ``apply_settings_from_config`` to publish it fails that test,
+# instead of the setting silently reaching only one of the two ``t2`` paths.
+CONFIG_MIRRORED_SETTERS = (
+    ("number_mode", set_number_digits_mode),
+    ("serial_collapse", set_serial_collapse),
+    ("spell_command", set_spell_command),
+    ("punctuation_mode", set_punctuation_mode),
+    ("structure_mode", set_structure_mode),
+    ("cleanup_mode", set_cleanup_mode),
+    ("formatter_settings", set_formatter_settings),
+    ("custom_dictionary", set_custom_dictionary),
+    ("contextual_rules", set_contextual_rules),
+)
+
+
+def apply_settings_from_config(
+    *,
+    number_mode=None,
+    serial_collapse=None,
+    spell_command=None,
+    punctuation_mode=None,
+    structure_mode=None,
+    cleanup_mode=None,
+    formatter_enabled=None,
+    formatter_model=None,
+    formatter_style=None,
+    formatter_context=None,
+    dictionary=None,
+    dictionary_file=None,
+    contextual_rules=None,
+) -> None:
+    """Publish a whole settings snapshot from the config layer, once.
+
+    ``t2`` reads its config file, resolves every value (including the effective
+    structure mode, which downgrades ``blocks`` for typed output) and hands the
+    result here. This function never reads the config file and never saves; it
+    only updates this module's runtime copies. That keeps config I/O in one
+    layer and keeps the load and reset paths publishing the same set.
+
+    ``None`` means "leave the current value alone", matching
+    :func:`set_formatter_settings`. The custom dictionary is the one setting the
+    reset path deliberately omits, so ``dictionary=None`` (and
+    ``dictionary_file=None``) leaves it untouched rather than clearing it.
+    """
+    if number_mode is not None:
+        set_number_digits_mode(number_mode)
+    if serial_collapse is not None:
+        set_serial_collapse(serial_collapse)
+    if spell_command is not None:
+        set_spell_command(spell_command)
+    if punctuation_mode is not None:
+        set_punctuation_mode(punctuation_mode)
+    if structure_mode is not None:
+        set_structure_mode(structure_mode)
+    if cleanup_mode is not None:
+        set_cleanup_mode(cleanup_mode)
+    if any(v is not None for v in (
+            formatter_enabled, formatter_model, formatter_style, formatter_context)):
+        set_formatter_settings(
+            enabled=formatter_enabled,
+            model=formatter_model,
+            style=formatter_style,
+            context=formatter_context,
+        )
+    # An external dictionary file carries both the mapping and its contextual
+    # rules; the inline dictionary is mapping-only, so it takes the rules that
+    # came alongside it (if any).
+    if dictionary_file:
+        load_custom_dictionary_from_file(dictionary_file)
+    elif isinstance(dictionary, dict) and dictionary:
+        set_custom_dictionary(dictionary)
+        if contextual_rules:
+            set_contextual_rules(contextual_rules)
+    elif contextual_rules:
+        set_contextual_rules(contextual_rules)
+
+
 def formatter_is_active() -> bool:
     """Whether the formatter is allowed to run *at all* for these settings.
 

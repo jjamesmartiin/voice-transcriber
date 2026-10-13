@@ -1295,34 +1295,26 @@ def load_audio_config(file_path=None):
         # Apply Bluetooth hands-free policy on Linux / PipeWire
         apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
 
-        # Keep the post-processor's runtime number mode in sync with the loaded config
-        set_number_digits(NUMBER_MODE)
-
-        # Keep serial/NATO collapsing and the verbal spell command in sync
-        set_serial_collapse(SERIAL_COLLAPSE)
-        set_spell_command(SPELL_COMMAND)
-
-        # Keep post-processor punctuation mode in sync
-        set_punctuation_mode(PUNCTUATION_MODE)
-
-        # Publish the effective structured-output mode (never saves: this is a load)
-        _push_structure_mode()
-
-        # Publish the cleanup mode (never saves: this is a load)
-        _push_cleanup_mode()
-
-        # Publish the formatter settings (never saves: this is a load)
-        _push_formatter_settings()
-
-        # Sync custom word/phrase dictionary if configured in config or external file
-        dict_setting = config.get('dictionary')
-        dict_file = config.get('dictionary_file')
-        if dict_file:
-            from post_processor import load_custom_dictionary_from_file
-            load_custom_dictionary_from_file(dict_file)
-        elif dict_setting and isinstance(dict_setting, dict):
-            from post_processor import set_custom_dictionary
-            set_custom_dictionary(dict_setting)
+        # Publish the whole runtime snapshot through the single entry point.
+        # ``post_processor`` keeps its own copies of these settings and the load
+        # and reset paths must publish the same set, or a setting added to one
+        # silently misses the other (the divergence class behind A6). Never
+        # saves: this is a load.
+        from post_processor import apply_settings_from_config
+        apply_settings_from_config(
+            number_mode=NUMBER_MODE,
+            serial_collapse=SERIAL_COLLAPSE,
+            spell_command=SPELL_COMMAND,
+            punctuation_mode=PUNCTUATION_MODE,
+            structure_mode=get_effective_structure_mode(),
+            cleanup_mode=CLEANUP_MODE,
+            formatter_enabled=(FORMATTER == "on"),
+            formatter_model=FORMATTER_MODEL,
+            formatter_style=FORMATTER_STYLE,
+            formatter_context=FORMATTER_CONTEXT,
+            dictionary=config.get('dictionary'),
+            dictionary_file=config.get('dictionary_file'),
+        )
     except Exception as e:
         logger.warning(f"Could not load audio config: {e}")
 
@@ -1450,22 +1442,27 @@ def reset_to_defaults() -> dict:
     for name, value in DEFAULT_SETTINGS.items():
         globals()[name] = value
     NUMBER_DIGITS = (NUMBER_MODE != "words")
-    set_number_digits(NUMBER_MODE)
     MODEL_BACKEND = _load_model_backend(MODEL_BACKEND)
     os.environ["VT_LANGUAGE"] = LANGUAGE
-    # Push every setting that has a runtime copy, in the same order a config
-    # load does. Without this the reset only took effect on the next launch
-    # while save_audio_config() below already wrote the new values to disk - the
-    # delayed-action surprise A6 was filed for. The post-processor keeps its own
-    # copies of the punctuation, structure, cleanup, number, serial, spell and
-    # formatter state, so all of them must be re-published, not just the
-    # globals assigned above.
-    set_punctuation_mode(PUNCTUATION_MODE)
-    set_serial_collapse(SERIAL_COLLAPSE)
-    set_spell_command(SPELL_COMMAND)
-    _push_structure_mode()
-    _push_cleanup_mode()
-    _push_formatter_settings()
+    # Re-publish every runtime copy through the same single entry point a config
+    # load uses, so the reset takes effect immediately and the two paths cannot
+    # drift. Without this the reset only took effect on the next launch while
+    # save_audio_config() below already wrote the new values to disk - the
+    # delayed-action surprise A6 was filed for. The dictionary is deliberately
+    # not passed: reset leaves the custom dictionary untouched.
+    from post_processor import apply_settings_from_config
+    apply_settings_from_config(
+        number_mode=NUMBER_MODE,
+        serial_collapse=SERIAL_COLLAPSE,
+        spell_command=SPELL_COMMAND,
+        punctuation_mode=PUNCTUATION_MODE,
+        structure_mode=get_effective_structure_mode(),
+        cleanup_mode=CLEANUP_MODE,
+        formatter_enabled=(FORMATTER == "on"),
+        formatter_model=FORMATTER_MODEL,
+        formatter_style=FORMATTER_STYLE,
+        formatter_context=FORMATTER_CONTEXT,
+    )
     try:
         import hotkeys
 

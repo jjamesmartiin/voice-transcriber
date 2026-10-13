@@ -1399,3 +1399,111 @@ def test_ratatui_meeting_capture_row_matches_python():
         )
     # Same engine command from both front ends: the row is not a second path.
     assert '"toggle_meeting"' in implementation
+
+
+# ---------------------------------------------------------------------------
+# The single config-mirror entry point (audit section 3)
+# ---------------------------------------------------------------------------
+# ``t2`` used to republish each mirrored setting by hand from one of two
+# whole-snapshot paths (config load and reset to defaults) that had drifted
+# apart - one carried the custom dictionary, the other did not - so a setting
+# added to either could silently miss the other. That is the divergence class
+# behind bug A6. ``post_processor.apply_settings_from_config`` is now the only
+# publisher. These guards drive the real setters ``t2`` mirrors (the ones listed
+# in ``post_processor.CONFIG_MIRRORED_SETTERS``) rather than restating them in a
+# second, hand-kept list, so adding a mirrored setting without wiring the apply
+# entry point fails here.
+
+def test_every_mirrored_setting_is_published_by_the_single_entry_point(monkeypatch):
+    import post_processor as pp
+
+    published = set()
+
+    def make_spy(original):
+        def spy(*args, **kwargs):
+            published.add(original.__name__)
+            return original(*args, **kwargs)
+        return spy
+
+    for _label, setter in pp.CONFIG_MIRRORED_SETTERS:
+        monkeypatch.setattr(pp, setter.__name__, make_spy(setter))
+
+    pp.apply_settings_from_config(
+        number_mode="digits",
+        serial_collapse=False,
+        spell_command=False,
+        punctuation_mode="gen_z",
+        structure_mode="inline",
+        cleanup_mode="artifacts",
+        formatter_enabled=True,
+        formatter_model="s1-mini",
+        formatter_style="formal",
+        formatter_context="email",
+        dictionary={"spoken phrase": "SpokenPhrase"},
+        contextual_rules=[{"target": "SpokenPhrase", "spoken": ["spoken phrase"]}],
+    )
+
+    missing = {
+        setter.__name__ for _label, setter in pp.CONFIG_MIRRORED_SETTERS
+    } - published
+    assert not missing, (
+        f"apply_settings_from_config did not publish {sorted(missing)}. Every "
+        "setter in post_processor.CONFIG_MIRRORED_SETTERS must be applied there, "
+        "or a setting will silently reach only one of the two t2 paths (the A6 "
+        "divergence class)."
+    )
+
+
+def test_both_config_snapshot_paths_call_the_single_entry_point(tmp_path, monkeypatch):
+    """load_audio_config and reset_to_defaults each publish the snapshot once."""
+    import post_processor as pp
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("ui_theme: auto\n")
+    monkeypatch.setattr(t2, "get_config_file", lambda: cfg)
+    monkeypatch.setattr(t2, "CONFIG_FILE", cfg)
+    # reset_to_defaults writes through save_audio_config() and assigns the t2
+    # globals directly; keep both off the user's real config and restore them.
+    monkeypatch.setattr(t2, "save_audio_config", lambda *a, **k: None)
+    for name in t2.DEFAULT_SETTINGS:
+        monkeypatch.setattr(t2, name, getattr(t2, name))
+    monkeypatch.setenv("VT_LANGUAGE", os.environ.get("VT_LANGUAGE", "en"))
+
+    applies = []
+    counts = {}
+    real_apply = pp.apply_settings_from_config
+
+    def make_counter(setter):
+        def counter(*args, **kwargs):
+            counts[setter.__name__] = counts.get(setter.__name__, 0) + 1
+            return setter(*args, **kwargs)
+        return counter
+
+    for _label, setter in pp.CONFIG_MIRRORED_SETTERS:
+        monkeypatch.setattr(pp, setter.__name__, make_counter(setter))
+
+    def spy(**kwargs):
+        applies.append(kwargs)
+        return real_apply(**kwargs)
+
+    monkeypatch.setattr(pp, "apply_settings_from_config", spy)
+
+    t2.load_audio_config()
+    assert len(applies) == 1, f"config load published the snapshot {len(applies)} times"
+    # A load must hand the dictionary through so an external file or inline map
+    # reaches the post-processor.
+    assert "dictionary" in applies[0] and "dictionary_file" in applies[0]
+    # No setter is published twice: a hand-written per-setting call alongside the
+    # aggregate would show up here as a count of two.
+    assert all(n <= 1 for n in counts.values()), f"load published directly: {counts}"
+    assert counts.get("set_number_digits_mode") == 1
+    assert counts.get("set_spell_command") == 1
+
+    applies.clear()
+    counts.clear()
+    t2.reset_to_defaults()
+    assert len(applies) == 1, f"reset published the snapshot {len(applies)} times"
+    # Reset deliberately leaves the custom dictionary untouched.
+    assert "dictionary" not in applies[0] and "dictionary_file" not in applies[0]
+    assert all(n <= 1 for n in counts.values()), f"reset published directly: {counts}"
+    assert counts.get("set_number_digits_mode") == 1
