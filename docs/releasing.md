@@ -361,15 +361,20 @@ Expect exactly **four** assets:
 | :--- | :--- |
 | `vt-x86_64.AppImage` | ~1.14 GB |
 | `VoiceTranscriber-windows-x86_64.zip` | ~373 MiB |
-| `VoiceTranscriber-windows-x86_64-setup.exe` | ~373 MiB |
-| `REQUIREMENTS.txt` | <2 KB |
+| `VoiceTranscriber-windows-x86_64-setup.exe` | ~259 MiB |
+| `REQUIREMENTS.txt` | ~4 KB |
 
 plus GitHub's own `Source code (zip)` / `Source code (tar.gz)`, which every tag
 gets automatically and CI does not build. Releases predating `REQUIREMENTS.txt`
 legitimately have **two** assets and no manifest — `v1.4.1` and `v1.4.0` do.
 The Windows zip and the installer are the same PyInstaller bundle: the installer
 is the primary download (one file, per-user install, Start Menu entry), the zip
-is the portable fallback. Both asset names are unversioned on purpose, so
+is the portable fallback. The installer being **smaller** than the zip it wraps
+is expected, not a truncated upload: Inno Setup uses solid LZMA2 where
+`Compress-Archive` uses deflate — measured on v1.4.2, 259 MiB against 373 MiB.
+That release is also the first with a log-verified installer build: the job
+printed `App version: 1.4.2`, Inno Setup 6.7.1 compiled in 91 s, and the resulting
+`272,089,917` bytes matched the uploaded asset exactly. Both asset names are unversioned on purpose, so
 `releases/latest/download/<name>` is a stable link; the version lives inside the
 installer (`/DAppVersion=`, read from `voice_transcriber.__version__`, never the
 tag) and in the app itself.
