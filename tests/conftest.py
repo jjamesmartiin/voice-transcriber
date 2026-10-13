@@ -46,6 +46,10 @@ os.environ.setdefault("VT_LOG_FILE", str(_TEST_LOG_FILE))
 _TEST_STATS_FILE = Path(tempfile.gettempdir()) / f"vt-stats-tests-{os.getpid()}.json"
 os.environ.setdefault("VT_STATS_FILE", str(_TEST_STATS_FILE))
 
+#: The shipped custom dictionary, captured once per session by
+#: ``_isolate_runtime_settings`` (see the note there).
+_SHIPPED_DICTIONARY = None
+
 @pytest.fixture(autouse=True)
 def _isolate_runtime_settings():
     """Stop a test's settings mutation leaking into the next one.
@@ -100,10 +104,27 @@ def _isolate_runtime_settings():
             if hasattr(pp_mod, name):
                 saved.append((pp_mod, name, getattr(pp_mod, name)))
 
+    # The custom dictionary is module state too, but it is a mapping plus a
+    # derived replacer rather than a scalar, so it is restored through its setter
+    # instead of setattr. It is captured once per session, and that first capture
+    # is itself what triggers the first-use auto-load, so it holds the *shipped*
+    # mapping. Without it, a test that loaded a config whose [dictionary] is a
+    # small stand-in left the shipped mapping replaced, and test_cleanup_modes
+    # then lost `nixos -> NixOS` whenever it happened to run after such a file -
+    # which several files do (test_dictionary, test_config_sync, test_post_processor,
+    # test_user_workflows), making results depend on file order. The comparison
+    # before restoring keeps the common path to a dict copy and a compare.
+    global _SHIPPED_DICTIONARY
+    if pp_mod is not None and _SHIPPED_DICTIONARY is None:
+        _SHIPPED_DICTIONARY = pp_mod.get_custom_dictionary()
+
     yield
 
     for mod, name, value in saved:
         setattr(mod, name, value)
+    if pp_mod is not None and _SHIPPED_DICTIONARY is not None:
+        if pp_mod.get_custom_dictionary() != _SHIPPED_DICTIONARY:
+            pp_mod.set_custom_dictionary(_SHIPPED_DICTIONARY)
 
 
 class PowerCpuMonitor:

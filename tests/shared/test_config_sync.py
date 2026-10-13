@@ -16,27 +16,6 @@ import t2
 from ._rust_source import rust_implementation
 
 
-@pytest.fixture(autouse=True)
-def _restore_post_processor_dictionary():
-    """Put the live custom dictionary back after every test in this module.
-
-    Several tests here load a config whose ``[dictionary]`` is a small stand-in
-    (``test_toml_config_support`` uses one entry), and ``load_audio_config``
-    replaces the post-processor's live mapping with it. That used to leak: a
-    later test file expecting the shipped entries - ``test_cleanup_modes`` wants
-    ``nixos`` -> ``NixOS`` - failed when it happened to run after this module,
-    which made results depend on file order. ``None`` restores an empty mapping,
-    so an empty snapshot is passed through as such rather than re-auto-loaded.
-    """
-    import post_processor as pp
-
-    saved = pp.get_custom_dictionary()  # also triggers the first-use auto-load
-    try:
-        yield
-    finally:
-        pp.set_custom_dictionary(saved)
-
-
 def test_env_overrides_apply_without_config_file(tmp_path, monkeypatch):
     nonexistent = tmp_path / "does_not_exist.yaml"
     monkeypatch.setenv("VT_CLEANUP_MODE", "off")
