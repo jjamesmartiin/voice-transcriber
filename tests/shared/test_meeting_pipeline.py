@@ -743,6 +743,38 @@ def test_meeting_session_drives_the_pipeline_end_to_end(tmp_path):
     assert pipeline.last_transcript.speaker_count == 2
 
 
+def test_pipeline_busy_guard_refuses_concurrent_process(tmp_path):
+    gate = threading.Event()
+    entered = threading.Event()
+
+    def slow_diarizer(audio, sample_rate, *, progress=None):
+        entered.set()
+        gate.wait(5.0)
+        return [Turn(0.0, 1.0, 0)]
+
+    pipeline = mp.MeetingPipeline(
+        diarizer=slow_diarizer,
+        transcriber=lambda seg: "hello",
+        output_dir=str(tmp_path),
+    )
+
+    t1_result = []
+    t = threading.Thread(target=lambda: t1_result.append(pipeline.process(_audio(1.0))), daemon=True)
+    t.start()
+
+    assert entered.wait(2.0), "first process never entered"
+
+    # Second call while first is still running
+    second = pipeline.process(_audio(1.0))
+    assert second.error is not None
+    assert "busy" in second.error.lower()
+
+    gate.set()
+    t.join(timeout=2.0)
+    assert len(t1_result) == 1
+    assert t1_result[0].error is None
+
+
 def _make_engine(tmp_path, monkeypatch):
     """A real ``SimpleVoiceTranscriber`` with no TUI, no audio, no model."""
     from unittest.mock import MagicMock

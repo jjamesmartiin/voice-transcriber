@@ -300,6 +300,8 @@ class MeetingPipeline:
         self._stage = "idle"
         self._last: MeetingTranscript | None = None
         self._lock = threading.Lock()
+        self._busy = False
+        self._busy_lock = threading.Lock()
 
     # -- introspection -----------------------------------------------------
     @property
@@ -323,23 +325,36 @@ class MeetingPipeline:
     def process(self, audio: Any, sample_rate: int | None = None) -> MeetingTranscript:
         """Run the whole batch pipeline. Never raises."""
         created = self._now()
-        try:
-            samples = _prepare_audio(audio, sample_rate or self._sample_rate)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("meeting pipeline could not read the audio: %s", exc)
-            return self._finish(MeetingTranscript(
-                created_at=created.strftime("%Y-%m-%d %H:%M:%S"),
-                error=f"{type(exc).__name__}: {exc}",
-            ))
+        with self._busy_lock:
+            if self._busy:
+                logger.warning("meeting pipeline is already processing a recording")
+                return self._finish(MeetingTranscript(
+                    created_at=created.strftime("%Y-%m-%d %H:%M:%S"),
+                    error="pipeline is busy with a previous recording",
+                ))
+            self._busy = True
 
         try:
-            return self._finish(self._run(samples, created))
-        except Exception as exc:  # a batch failure must never escape the thread
-            logger.warning("meeting pipeline failed", exc_info=True)
-            return self._finish(MeetingTranscript(
-                created_at=created.strftime("%Y-%m-%d %H:%M:%S"),
-                error=f"{type(exc).__name__}: {exc}",
-            ))
+            try:
+                samples = _prepare_audio(audio, sample_rate or self._sample_rate)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("meeting pipeline could not read the audio: %s", exc)
+                return self._finish(MeetingTranscript(
+                    created_at=created.strftime("%Y-%m-%d %H:%M:%S"),
+                    error=f"{type(exc).__name__}: {exc}",
+                ))
+
+            try:
+                return self._finish(self._run(samples, created))
+            except Exception as exc:  # a batch failure must never escape the thread
+                logger.warning("meeting pipeline failed", exc_info=True)
+                return self._finish(MeetingTranscript(
+                    created_at=created.strftime("%Y-%m-%d %H:%M:%S"),
+                    error=f"{type(exc).__name__}: {exc}",
+                ))
+        finally:
+            with self._busy_lock:
+                self._busy = False
 
     def _run(self, samples: np.ndarray, created: _dt.datetime) -> MeetingTranscript:
         duration = len(samples) / float(TARGET_SAMPLE_RATE)

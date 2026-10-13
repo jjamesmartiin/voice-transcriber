@@ -527,6 +527,8 @@ class MeetingSession:
     def cancel(self) -> None:
         """Ask the batch phase to stop at its next turn boundary. Idempotent."""
         self._cancel.set()
+        if hasattr(self, "_current_cancel"):
+            self._current_cancel.set()
 
     def set_stage(self, stage: Any) -> str:
         """Record the live batch stage and notify the UI. Returns the stage."""
@@ -591,6 +593,7 @@ class MeetingSession:
                 directory=self._directory,
             )
             self._stop.clear()
+            self._current_cancel = threading.Event()
             self._cancel.clear()
             self._error = None
             self._elapsed_s = 0.0
@@ -651,6 +654,8 @@ class MeetingSession:
         # daemon thread, but cancelling lets it stop at the next turn boundary
         # instead of running the whole meeting out while the app is quitting.
         self._cancel.set()
+        if hasattr(self, "_current_cancel"):
+            self._current_cancel.set()
         for thread in (self._ticker_thread, self._capture_thread):
             if thread is not None and thread.is_alive():
                 thread.join(timeout=5.0)
@@ -753,24 +758,29 @@ class MeetingSession:
                 # A partial transcript plus a loud error beats no transcript at
                 # all, so keep the audio and tell the user it is incomplete.
                 with self._lock:
-                    self._error = (
-                        "recording is incomplete: the audio spill file was "
-                        "truncated (out of disk space?)"
-                    )
-            self._duration_s = len(audio) / float(buffer.sample_rate)
-            if self._on_audio is not None and not self._cancel.is_set():
+                    if self._buffer is buffer:
+                        self._error = (
+                            "recording is incomplete: the audio spill file was "
+                            "truncated (out of disk space?)"
+                        )
+            duration = len(audio) / float(buffer.sample_rate)
+            with self._lock:
+                if self._buffer is buffer:
+                    self._duration_s = duration
+            if self._on_audio is not None and not self._cancel.is_set() and not getattr(self, "_current_cancel", self._cancel).is_set():
                 try:
                     self._on_audio(audio, buffer.sample_rate)
                 except Exception:
                     logger.warning("meeting audio consumer failed", exc_info=True)
             del audio
             with self._lock:
-                if self._total > 0:
+                if self._buffer is buffer and self._total > 0:
                     self._progress_pct = 100
         except Exception as exc:
             logger.warning("meeting finalize failed: %s", exc)
             with self._lock:
-                self._error = f"{type(exc).__name__}: {exc}"
+                if self._buffer is buffer:
+                    self._error = f"{type(exc).__name__}: {exc}"
         finally:
             try:
                 if buffer is not None:
