@@ -102,7 +102,8 @@ class TestGlobalToggleShim:
         import hotkeys
 
         fake = MagicMock()
-        monkeypatch.setattr(hotkeys, "_current_hotkey_instance", fake)
+        monkeypatch.setattr(hotkeys, "_current_hotkey_instance", None)
+        hotkeys.register_manager(fake)
         hotkeys.set_global_middle_click_enabled(True)
         hotkeys.set_global_middle_click_enabled(False)
         assert [c.args[0] for c in fake.set_middle_click_enabled.call_args_list] == [
@@ -115,6 +116,26 @@ class TestGlobalToggleShim:
 
         monkeypatch.setattr(hotkeys, "_current_hotkey_instance", None)
         hotkeys.set_global_middle_click_enabled(True)  # must not raise
+
+    def test_registration_is_identity_scoped(self, monkeypatch):
+        """A stale teardown must not steal the live manager's registration.
+
+        Restarting hotkeys (or toggling them off and on) leaves the old manager's
+        cleanup running after a new one has registered; clearing unconditionally
+        there would silently disable every ``set_global_*`` propagation.
+        """
+        import hotkeys
+
+        monkeypatch.setattr(hotkeys, "_current_hotkey_instance", None)
+        first, second = MagicMock(), MagicMock()
+        hotkeys.register_manager(first)
+        hotkeys.register_manager(second)
+
+        hotkeys.release_manager(first)  # the older instance, mid-teardown
+        assert hotkeys._current_hotkey_instance is second
+
+        hotkeys.release_manager(second)
+        assert hotkeys._current_hotkey_instance is None
 
 
 def _make_manager(platform: str):

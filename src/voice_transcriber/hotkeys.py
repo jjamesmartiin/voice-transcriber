@@ -28,6 +28,31 @@ logger = logging.getLogger(__name__)
 _current_hotkey_instance = None
 
 
+def register_manager(manager):
+    """Point this shim at the live hotkey ``manager``.
+
+    The engine builds its manager straight from the HAL (``hal.create_hotkey_manager``),
+    which used to leave this module pointing at nothing, so every ``set_global_*``
+    call silently did nothing on that path. Callers assigned
+    ``hotkeys._current_hotkey_instance`` themselves to work around it; this is
+    that assignment, in one place, named.
+    """
+    global _current_hotkey_instance
+    _current_hotkey_instance = manager
+
+
+def release_manager(manager):
+    """Drop ``manager`` if it is the registered one, and only then.
+
+    A newer manager may already have replaced it (a restart, or the settings
+    modal toggling hotkeys), and clearing unconditionally would then steal the
+    live manager's registration during the old one's teardown.
+    """
+    global _current_hotkey_instance
+    if _current_hotkey_instance is manager:
+        _current_hotkey_instance = None
+
+
 def is_running_in_wsl() -> bool:
     """Return ``True`` when running inside WSL (delegates to the HAL)."""
     return hal.detect_platform() == hal.WSL
@@ -105,6 +130,8 @@ def __getattr__(name):
 __all__ = [
     "create_global_hotkeys",
     "is_running_in_wsl",
+    "register_manager",
+    "release_manager",
     "set_global_sound_theme",
     "set_global_middle_click_enabled",
     "WaylandGlobalHotkeys",

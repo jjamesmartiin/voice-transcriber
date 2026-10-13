@@ -191,5 +191,9 @@ class TestHotkeyVerb:
         engine.audio_cues = MagicMock()
         engine.clipboard_sink = MagicMock()
 
+        import hotkeys
         assert engine.init_hotkeys() is True
         assert [b.chord for b in captured["binds"]] == ["f13"]
+        assert hotkeys._current_hotkey_instance is engine.hotkey_system
+        engine.cleanup()
+        assert hotkeys._current_hotkey_instance is None

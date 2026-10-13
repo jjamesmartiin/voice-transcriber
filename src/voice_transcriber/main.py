@@ -1225,6 +1225,10 @@ class SimpleVoiceTranscriber:
             self.visual_notification.cleanup()
         if hasattr(self, 'hotkey_system') and self.hotkey_system:
             self.hotkey_system.cleanup()
+            # Publish the teardown through the shim: it clears the registration
+            # only if this is still the registered manager.
+            import hotkeys
+            hotkeys.release_manager(self.hotkey_system)
 
     def init_hotkeys(self):
         """Initialize the global hotkey system via the HAL."""
@@ -1237,6 +1241,11 @@ class SimpleVoiceTranscriber:
                 callback_stop=self.stop_recording,
                 binds=getattr(t2, "HOTKEY_BINDS", None),
             )
+            # The engine builds its manager from the HAL, so the shim has to be
+            # told: ``t2.set_hotkey_binds`` and the middle-click/sound-theme
+            # setters propagate through it.
+            import hotkeys
+            hotkeys.register_manager(self.hotkey_system)
 
             if self.hotkey_system.devices:
                 logger.debug("Global hotkey system initialized")
