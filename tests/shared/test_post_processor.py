@@ -1130,6 +1130,19 @@ def test_short_parallel_sentences_keep_their_boundaries(text):
     assert pp.clean_speech_transcription(text, skip_slm=True, punctuation_mode="full") == text
 
 
+def test_real_question_mark_kept_before_lowercase_word():
+    """A mid-phrase question mark must survive even when the following word is lowercase."""
+    res = pp.clean_speech_transcription("Is it right? yes it is", skip_slm=True)
+    assert res == "Is it right? yes it is."
+
+
+def test_dangling_word_regex_does_not_destroy_adjective_sentence_boundaries():
+    """Adjectives like 'different' can end sentences/predicates and must not swallow periods."""
+    res = pp.clean_speech_transcription("this is different. The next step is important", skip_slm=True)
+    assert res == "this is different. The next step is important."
+
+
+
 @pytest.mark.parametrize("spoken,expected", [
     ("I can list them like: Thing one. Thing two.", "I can list them like: Thing one. Thing two."),
     ("Note: Remember this", "Note: Remember this."),

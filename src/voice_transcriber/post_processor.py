@@ -48,7 +48,6 @@ DANGLING_WORDS_REGEX = re.compile(
     r"and|or|but|because|if|while|since|until|unless|"
     r"very|too|quite|really|such|more|less|most|least|"
     r"several|multiple|few|many|some|another|each|every|"
-    r"different|similar|same|other|next|previous|main|"
     r"is|are|was|were|be|been|being|have|has|had|can|could|would|should|shall|will|might|must"
     r")\s*[.?!]\s+([a-zA-Z])",
     re.IGNORECASE
@@ -127,11 +126,6 @@ PREPOSITION_COMPOUND_STUTTER_REGEX = re.compile(
 COORD_CONJUNCTIONS_REGEX = re.compile(
     r"[.]\s+(and|or|but|so|yet|nor)\b",
     re.IGNORECASE
-)
-
-# Mid-phrase spurious question mark followed by lowercase continuation (e.g. "the right? stuff" -> "the right stuff")
-MID_PHRASE_QUESTION_MARK_REGEX = re.compile(
-    r"\b([a-zA-Z0-9]+)\s*\?\s+([a-z][a-zA-Z0-9_-]*)\b"
 )
 
 # Spoken Unix paths, IP addresses and CIDR subnets.
@@ -3534,10 +3528,6 @@ def clean_speech_transcription(
 
     # 12. Normalize mid-sentence random capitalizations
     cleaned = normalize_mid_sentence_casing(cleaned)
-
-    # 13. Scrub mid-phrase spurious question marks
-    if "?" in cleaned:
-        cleaned = MID_PHRASE_QUESTION_MARK_REGEX.sub(r"\1 \2", cleaned)
 
     # 13c. Apply legacy homophone repair patterns if configured
     if HOMOPHONE_REPAIR_PATTERNS:
