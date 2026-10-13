@@ -366,7 +366,7 @@ Expect exactly **four** assets:
 
 plus GitHub's own `Source code (zip)` / `Source code (tar.gz)`, which every tag
 gets automatically and CI does not build. Releases predating `REQUIREMENTS.txt`
-legitimately have **two** assets and no manifest — `v1.4.1` and `v1.4.0` do.
+legitimately have **two** assets and no manifest — `v1.4.1` does.
 The Windows zip and the installer are the same PyInstaller bundle: the installer
 is the primary download (one file, per-user install, Start Menu entry), the zip
 is the portable fallback. The installer being **smaller** than the zip it wraps
@@ -514,6 +514,12 @@ assets were (all `vt-x86_64.AppImage` + `VoiceTranscriber-windows-x86_64.zip`):
 `v1.3.1` `7d890099…`/`a8413b74…`. Re-uploading a deleted asset is not possible
 from here: the old bundles are gone from the build host too, so re-building the
 same tag is the only way back.
+
+**Pruned 2026-10-13:** `v1.4.0` followed it, leaving `v1.4.3`, `v1.4.2` and
+`v1.4.1` as the app releases (tags kept). Its assets were `vt-x86_64.AppImage`
+sha256 `112eac3d…` and `VoiceTranscriber-windows-x86_64.zip` `172999b3…`, both
+undownloaded. The trade is the one documented above: `v1.4.2` is now the oldest
+rollback download on the page.
 
 ---
 
