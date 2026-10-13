@@ -1411,11 +1411,13 @@ def reset_to_defaults() -> dict:
     custom dictionary are intentionally untouched, and unknown keys already
     present in the config file are preserved.
     """
-    global NUMBER_DIGITS
+    global NUMBER_DIGITS, MODEL_BACKEND
     for name, value in DEFAULT_SETTINGS.items():
         globals()[name] = value
     NUMBER_DIGITS = (NUMBER_MODE != "words")
     set_number_digits(NUMBER_MODE)
+    MODEL_BACKEND = _load_model_backend(MODEL_BACKEND)
+    os.environ["VT_LANGUAGE"] = LANGUAGE
     # Push every setting that has a runtime copy, in the same order a config
     # load does. Without this the reset only took effect on the next launch
     # while save_audio_config() below already wrote the new values to disk - the

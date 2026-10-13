@@ -362,6 +362,20 @@ class TestResetToDefaults:
         assert pp.get_serial_collapse() is t2.DEFAULT_SETTINGS["SERIAL_COLLAPSE"]
         assert pp.get_spell_command() is t2.DEFAULT_SETTINGS["SPELL_COMMAND"]
 
+    def test_reset_restores_live_backend_and_language(self, cfg, monkeypatch):
+        import os
+        import transcribe2
+
+        monkeypatch.setattr(transcribe2, "_active", "parakeet")
+        monkeypatch.setenv("VT_LANGUAGE", "es")
+        monkeypatch.setattr(t2, "MODEL_BACKEND", "parakeet")
+        monkeypatch.setattr(t2, "LANGUAGE", "es")
+
+        t2.reset_to_defaults()
+
+        assert transcribe2._active == transcribe2.DEFAULT_BACKEND
+        assert os.environ.get("VT_LANGUAGE") == t2.LANGUAGE
+
     def test_reset_keeps_microphone_and_unknown_keys(self, cfg, monkeypatch):
         import json
 
