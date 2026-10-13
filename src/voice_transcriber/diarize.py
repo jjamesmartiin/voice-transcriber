@@ -114,11 +114,15 @@ def warm(backend: str | None = None) -> bool:
 
 
 def may_run(diarization: str) -> bool:
-    """False when diarization is switched off.
+    """An earlier, different gate that is **not** the shipped rule.
 
-    ``diarization: off`` is the default and promises the dictation engine is
-    byte-identical to a build without this feature. This is a hard gate, not a
-    preference: it is what keeps that promise true.
+    There is no production caller. The live gate is
+    ``diarization_gate=lambda: t2.get_diarization() == "on"`` in ``main.py``.
+    That is a different rule: it treats every value except ``"on"`` as off, so
+    ``"auto"`` and ``"2"`` do not diarize, whereas this helper returns ``True``
+    for anything but the literal ``"off"``. Wiring this in would start
+    diarizing on values the shipped gate treats as off, so the two must not be
+    conflated. Kept, with its test, pending a delete-vs-adopt decision.
     """
     return str(diarization or "").strip().lower() != "off"
 

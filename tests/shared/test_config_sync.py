@@ -16,6 +16,27 @@ import t2
 from ._rust_source import rust_implementation
 
 
+@pytest.fixture(autouse=True)
+def _restore_post_processor_dictionary():
+    """Put the live custom dictionary back after every test in this module.
+
+    Several tests here load a config whose ``[dictionary]`` is a small stand-in
+    (``test_toml_config_support`` uses one entry), and ``load_audio_config``
+    replaces the post-processor's live mapping with it. That used to leak: a
+    later test file expecting the shipped entries - ``test_cleanup_modes`` wants
+    ``nixos`` -> ``NixOS`` - failed when it happened to run after this module,
+    which made results depend on file order. ``None`` restores an empty mapping,
+    so an empty snapshot is passed through as such rather than re-auto-loaded.
+    """
+    import post_processor as pp
+
+    saved = pp.get_custom_dictionary()  # also triggers the first-use auto-load
+    try:
+        yield
+    finally:
+        pp.set_custom_dictionary(saved)
+
+
 def test_env_overrides_apply_without_config_file(tmp_path, monkeypatch):
     nonexistent = tmp_path / "does_not_exist.yaml"
     monkeypatch.setenv("VT_CLEANUP_MODE", "off")
@@ -972,6 +993,35 @@ def test_main_typing_formatting_options(monkeypatch):
     assert typed[0] == "hello world. "
 
 
+def test_a_handler_whose_setter_does_not_persist_still_saves_the_config(tmp_path, monkeypatch):
+    """Guard against an over-eager cleanup deleting the only save.
+
+    ``t2.set_number_digits`` deliberately does not persist (it only sets the
+    global and pushes to the post-processor), so the ``numbers`` control handler
+    must write the config itself. If a future dedup pass removes that call the
+    setting reaches only the post-processor and is lost on restart.
+    """
+    from main import SimpleVoiceTranscriber
+    from unittest.mock import MagicMock
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    monkeypatch.setattr(t2, "get_config_file", lambda: cfg)
+    monkeypatch.setattr(t2, "CONFIG_FILE", cfg)
+
+    app = SimpleVoiceTranscriber.__new__(SimpleVoiceTranscriber)
+    app.recording = False
+    app.hotkey_system = None
+    app.tui = MagicMock()
+    app.tui.state = "READY"
+
+    response = app.handle_control("numbers", {"value": "digits"})
+    assert response["ok"] is True
+
+    assert cfg.exists(), "the handler did not persist the config file"
+    saved = yaml.safe_load(cfg.read_text())
+    assert saved["number_digits"] == "digits"
+
 
 
 
@@ -1421,8 +1471,10 @@ def test_every_mirrored_setting_is_published_by_the_single_entry_point(monkeypat
 
     def make_spy(original):
         def spy(*args, **kwargs):
+            # Record only: the real setter would overwrite this module's live
+            # settings for every later test in the session, and a guard test has
+            # no business mutating the state other test files read.
             published.add(original.__name__)
-            return original(*args, **kwargs)
         return spy
 
     for _label, setter in pp.CONFIG_MIRRORED_SETTERS:
@@ -1475,8 +1527,10 @@ def test_both_config_snapshot_paths_call_the_single_entry_point(tmp_path, monkey
 
     def make_counter(setter):
         def counter(*args, **kwargs):
+            # Record only, for the same reason as the test above: actually
+            # applying the snapshot would leave this module's live settings
+            # changed for every test that runs afterwards.
             counts[setter.__name__] = counts.get(setter.__name__, 0) + 1
-            return setter(*args, **kwargs)
         return counter
 
     for _label, setter in pp.CONFIG_MIRRORED_SETTERS:
@@ -1485,7 +1539,6 @@ def test_both_config_snapshot_paths_call_the_single_entry_point(tmp_path, monkey
     def spy(**kwargs):
         applies.append(kwargs)
         return real_apply(**kwargs)
-
     monkeypatch.setattr(pp, "apply_settings_from_config", spy)
 
     t2.load_audio_config()

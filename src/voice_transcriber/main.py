@@ -508,12 +508,9 @@ class SimpleVoiceTranscriber:
         if new_mode in ("type", "type_fast") and getattr(t2, 'AUTO_TYPE_AUTO_PUNCTUATE', True):
             self.tui.print_event("✍️ Formatting Mode", "Punctuation mode automatically set to Full Punctuation", level="info")
 
-    _on_tui_toggle_autotype = _on_tui_cycle_output_mode
-
     def _on_tui_toggle_trailing_space(self):
         import t2
         new_state = t2.toggle_auto_type_trailing_space()
-        t2.save_audio_config()
         self._sync_tui_state()
         status = "ENABLED (Appends ' ')" if new_state else "DISABLED (Exact Text)"
         self.tui.print_event("␣ Trailing Space", f"Auto-type trailing space is now {status}", level="info")
@@ -521,7 +518,6 @@ class SimpleVoiceTranscriber:
     def _on_tui_toggle_auto_punctuate(self):
         import t2
         new_state = t2.toggle_auto_type_auto_punctuate()
-        t2.save_audio_config()
         self._sync_tui_state()
         status = "ENABLED (Full + Period)" if new_state else "DISABLED (Preserve User Punctuation)"
         self.tui.print_event("✍️ Auto-Punctuate", f"Auto-type full punctuation enforcement is now {status}", level="info")
@@ -557,7 +553,6 @@ class SimpleVoiceTranscriber:
     def _on_tui_cycle_typing_wpm(self):
         import t2
         new_wpm = t2.cycle_typing_wpm()
-        t2.save_audio_config()
         self._sync_tui_state()
         self.tui.print_event("⚡ Typing Speed", f"Typing speed is now {new_wpm} WPM", level="info")
 
@@ -567,7 +562,6 @@ class SimpleVoiceTranscriber:
             val = int(wpm)
             if val > 0:
                 t2.set_typing_wpm(val)
-                t2.save_audio_config()
                 self._sync_tui_state()
                 self.tui.print_event("⚡ Typing Speed", f"Typing speed is now {val} WPM", level="info")
         except (ValueError, TypeError):
@@ -2007,14 +2001,12 @@ class SimpleVoiceTranscriber:
         if verb in ("structure", "structure-mode"):
             need_value()
             t2.set_structure_mode(value)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)
 
         if verb in ("cleanup", "cleanup-mode"):
             need_value()
             t2.set_cleanup_mode(value)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)
 
@@ -2023,7 +2015,6 @@ class SimpleVoiceTranscriber:
             state = self._control_on_off(value)
             current = t2.get_meeting() == "on"
             t2.set_meeting((not current) if state is None else state)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb, meeting=t2.get_meeting())
 
@@ -2038,7 +2029,6 @@ class SimpleVoiceTranscriber:
                 t2.set_meeting_spill_minutes(minutes)
             else:
                 t2.cycle_meeting_spill_minutes()
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(
                 verb, meeting_spill_minutes=t2.get_meeting_spill_minutes()
@@ -2105,28 +2095,24 @@ class SimpleVoiceTranscriber:
         if verb in ("formatter", "formatter-mode"):
             need_value()
             t2.set_formatter(value)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)
 
         if verb in ("formatter-model", "formatter_model"):
             need_value()
             t2.set_formatter_model(value)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)
 
         if verb in ("formatter-style", "formatter_style"):
             need_value()
             t2.set_formatter_style(value)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)
 
         if verb in ("formatter-context", "formatter_context"):
             need_value()
             t2.set_formatter_context(value)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb)
 
@@ -2141,7 +2127,6 @@ class SimpleVoiceTranscriber:
             state = self._control_on_off(value)
             toggle = t2.get_auto_type_trailing_space()
             t2.set_auto_type_trailing_space(toggle if state is None else state)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb, trailing_space=t2.get_auto_type_trailing_space())
 
@@ -2149,7 +2134,6 @@ class SimpleVoiceTranscriber:
             state = self._control_on_off(value)
             toggle = t2.get_auto_type_auto_punctuate()
             t2.set_auto_type_auto_punctuate(toggle if state is None else state)
-            t2.save_audio_config()
             self._sync_tui_state()
             return self._control_status(verb, auto_punctuate=t2.get_auto_type_auto_punctuate())
 
@@ -2180,12 +2164,10 @@ class SimpleVoiceTranscriber:
                 except ValueError:
                     raise ValueError(f"WPM must be a positive integer, got {value!r}") from None
                 t2.set_typing_wpm(val)
-                t2.save_audio_config()
                 self._sync_tui_state()
                 return self._control_status(verb, typing_wpm=t2.TYPING_WPM)
             else:
                 new_wpm = t2.cycle_typing_wpm()
-                t2.save_audio_config()
                 self._sync_tui_state()
                 return self._control_status(verb, typing_wpm=new_wpm)
 

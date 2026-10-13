@@ -3109,7 +3109,10 @@ def formatter_is_active() -> bool:
       ``formatter.may_run()`` applies; docs/cleanup_modes.md sec 4 states it for
       the SLM pass and this is the same bargain.
     """
-    return _FORMATTER_ENABLED and _removes_noise()
+    if not _FORMATTER_ENABLED:
+        return False
+    import formatter  # noqa: PLC0415 - lazy import keeps formatter optional
+    return formatter.may_run(_CLEANUP_MODE)
 
 
 def _apply_formatter(text: str, structure_mode: str | None = None) -> str:
