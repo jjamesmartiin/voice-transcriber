@@ -20,7 +20,13 @@ def _data_dir():
         return os.path.join(os.environ["XDG_DATA_HOME"], "vt")
     if os.name == "posix":
         return os.path.join(os.path.expanduser("~"), ".local", "share", "vt")
-    return os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "vt")
+    # Windows: Local, not the roaming profile. This directory holds the
+    # multi-gigabyte weight cache, which must not sync between machines in a
+    # domain. It mirrors ``t2.get_data_dir()``, which
+    # tests/shared/test_crossplatform_runtime.py pins to Local; the installer and
+    # the app must resolve the same place, or one caches weights where the other
+    # never looks.
+    return os.path.join(os.path.expanduser("~"), "AppData", "Local", "vt")
 
 
 def get_data_dir():

@@ -369,6 +369,33 @@ class TestDataDirSelection:
         assert data_dir.is_absolute(), f"relative data dir: {data_dir!r}"
         assert data_dir == home / ".local" / "share" / "vt"
 
+    def test_the_installer_and_the_app_resolve_the_same_windows_dir(self, monkeypatch, tmp_path):
+        """``paths`` and ``t2`` must answer the same directory on Windows.
+
+        ``paths`` serves the weight cache and the local dictionary; ``t2`` serves
+        stats, device config and meeting output. Divergent answers mean the
+        installer caches gigabytes where the app never looks - and ``paths`` used
+        the *roaming* profile, which must not carry a model cache at all. The
+        equality is the assertion: the shape alone would have passed while they
+        disagreed.
+        """
+        import t2
+        from voice_transcriber import paths
+
+        home = self._isolate_home(monkeypatch, tmp_path)
+        # ``paths`` resolves the home with os.path.expanduser, t2 with Path.home;
+        # pin both so the comparison is about the platform branch and nothing else.
+        monkeypatch.setenv("HOME", str(home))
+        self._pretend_platform(monkeypatch, "nt")
+        monkeypatch.setattr(paths, "os", types.SimpleNamespace(
+            name="nt", environ=os.environ, path=os.path))
+
+        app_dir = str(t2.get_data_dir())
+        installer_dir = paths._data_dir()
+        assert installer_dir == app_dir, (
+            f"the installer writes to {installer_dir!r} but the app reads {app_dir!r}")
+        assert installer_dir.endswith(os.path.join("AppData", "Local", "vt")), installer_dir
+
     def test_first_launch_creates_stats_in_the_windows_data_dir(self, monkeypatch, tmp_path):
         """End-to-end: Windows path resolution + automatic file creation."""
         import stats
