@@ -10,7 +10,6 @@ if _SRC_DIR not in sys.path:
 import logging
 import warnings
 import threading
-import os as _os
 import time
 import torch
 import torch.nn as nn
@@ -47,11 +46,6 @@ warnings.filterwarnings("ignore", message=".*Init provider bridge failed.*")
 
 for logger_name in ["transformers", "huggingface_hub", "httpx", "tqdm", "urllib3", "requests", "urllib"]:
     logging.getLogger(logger_name).setLevel(logging.CRITICAL)
-
-_devnull = _os.open(_os.devnull, _os.O_WRONLY)
-_old_stderr = _os.dup(2)
-_os.dup2(_devnull, 2)
-_os.close(_devnull)
 
 _model = None
 _processor = None

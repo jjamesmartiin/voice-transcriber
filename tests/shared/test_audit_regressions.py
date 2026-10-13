@@ -504,3 +504,26 @@ class TestZenityNotificationEscaping:
         assert '<span font="12">Error: &lt;50% &amp; &quot;High&quot;&gt; alert!</span>' in text_arg
         assert "<50%" not in text_arg
         assert "& " not in text_arg
+
+
+# ---------------------------------------------------------------------------
+# 7. Backend import must not permanently silence stderr (fd 2).
+# ---------------------------------------------------------------------------
+class TestStderrNotSilencedOnBackendImport:
+    """Importing the Cohere backend must not redirect process fd 2 to /dev/null."""
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="inspects /proc/self/fd/2")
+    def test_import_cohere_backend_keeps_stderr_intact(self):
+        import subprocess
+
+        code = (
+            "import sys; sys.path.insert(0, 'src'); "
+            "import voice_transcriber.transcribe2 as t; "
+            "t.get_backend('cohere'); "
+            "import os; "
+            "print(os.readlink('/proc/self/fd/2'))"
+        )
+        res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+        target = res.stdout.strip()
+        assert target != "/dev/null", f"fd 2 was redirected to {target}"
+
