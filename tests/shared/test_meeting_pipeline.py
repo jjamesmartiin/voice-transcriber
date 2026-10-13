@@ -720,6 +720,15 @@ def test_relative_output_dir_with_a_checkout_stays_in_the_repo(tmp_path, monkeyp
     assert mp.meeting_output_dir(setting="meetings") == str(tmp_path / "checkout" / "meetings")
 
 
+def test_write_uses_mkstemp_avoiding_symlink_following(tmp_path):
+    import datetime as _dt
+    pipeline = mp.MeetingPipeline(output_dir=str(tmp_path))
+    created = _dt.datetime(2026, 1, 1, 12, 0, 0)
+    path = pipeline._write("hello transcript", created)
+    assert os.path.exists(path)
+    assert Path(path).read_text(encoding="utf-8") == "hello transcript"
+
+
 # ---------------------------------------------------------------------------
 # End-to-end: session capture -> pipeline -> status, plus spill cleanup
 # ---------------------------------------------------------------------------

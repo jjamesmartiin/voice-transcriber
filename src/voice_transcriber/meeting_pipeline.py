@@ -39,6 +39,7 @@ import datetime as _dt
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -703,9 +704,13 @@ class MeetingPipeline:
         while os.path.exists(path):
             path = os.path.join(directory, f"{base}-{counter}{ext}")
             counter += 1
-        temp = f"{path}.{os.getpid()}.tmp"
+        fd, temp = tempfile.mkstemp(
+            dir=directory,
+            prefix=f"{os.path.basename(path)}.tmp{os.getpid()}.",
+            suffix=".tmp",
+        )
         try:
-            with open(temp, "w", encoding="utf-8") as handle:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(rendered)
                 handle.flush()
                 os.fsync(handle.fileno())
