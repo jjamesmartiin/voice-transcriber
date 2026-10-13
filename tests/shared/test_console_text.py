@@ -53,6 +53,25 @@ class AsciiStream:
         return "".join(self.chunks)
 
 
+class NoEncodingAsciiStream:
+    encoding = None
+
+    def __init__(self):
+        self.chunks = []
+
+    def write(self, text):
+        text.encode("ascii")
+        self.chunks.append(text)
+        return len(text)
+
+
+def test_safe_print_never_raises_on_stream_reporting_no_encoding():
+    stream = NoEncodingAsciiStream()
+    console_text.safe_print("test \u2022 bullet", file=stream)
+    assert len(stream.chunks) > 0
+    assert "?" in stream.chunks[0]
+
+
 @pytest.fixture
 def ascii_stream():
     return AsciiStream()

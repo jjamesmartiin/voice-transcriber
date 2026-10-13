@@ -142,6 +142,8 @@ def write(text: str, stream=None) -> None:
     except UnicodeEncodeError:
         # Last resort: something outside the glyph table is un-encodable.
         encoding = encoding_of(stream)
+        if not encoding or encoding.lower() in ("utf-8", "utf8"):
+            encoding = "ascii"
         stream.write(downgraded.encode(encoding, "replace").decode(encoding, "replace"))
 
 
