@@ -164,15 +164,50 @@ def _make_manager(platform: str):
     return manager, inject, cb_start, cb_stop
 
 
+def _wait_until(predicate, timeout, interval=0.005):
+    """Poll ``predicate`` until it holds, or ``timeout`` elapses. Returns it.
+
+    The hold contract fires from a timer thread, so a fixed ``sleep`` is a race:
+    a loaded CI runner can miss a 100 ms window and fail a test that has nothing
+    to do with the code under test (observed on macOS, competing with the
+    release workflow's builds). Wait for the transition instead — and keep every
+    "must not have happened yet" assertion *before* the wait, so waiting longer
+    can never turn a real regression into a pass.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
+
+
 class TestMiddleClickHoldContract:
     @pytest.mark.parametrize("platform", [hal.LINUX, hal.WINDOWS])
     def test_quick_tap_never_triggers(self, platform):
         manager, inject, cb_start, cb_stop = _make_manager(platform)
         try:
+            delay = manager.MIDDLE_CLICK_HOLD_DELAY
+            pressed_at = time.monotonic()
             inject(True)
             time.sleep(0.02)
             inject(False)
-            time.sleep(manager.MIDDLE_CLICK_HOLD_DELAY + 0.1)
+            held = time.monotonic() - pressed_at
+            if delay > 0 and held >= delay:
+                # The press stayed down past a real hold delay, so this was not a
+                # tap any more and the test cannot speak for the tap contract:
+                # the host stalled between two adjacent calls. Say that instead
+                # of blaming the code under test. Deliberately not skipped when
+                # `delay` is degenerate (0): that is a regression, and the
+                # assertions below are what must catch it.
+                pytest.skip(
+                    f"host stalled: a 20 ms tap took {held * 1000:.0f} ms, at or "
+                    f"past the {delay * 1000:.0f} ms hold delay"
+                )
+            # Inside the hold delay, and after it: neither may start anything.
+            assert cb_start.call_count == 0
+            assert cb_stop.call_count == 0
+            time.sleep(delay + 0.3)
             assert cb_start.call_count == 0
             assert cb_stop.call_count == 0
             assert manager.hotkey_active is False
@@ -183,16 +218,20 @@ class TestMiddleClickHoldContract:
     def test_hold_starts_and_release_stops(self, platform):
         manager, inject, cb_start, cb_stop = _make_manager(platform)
         try:
+            delay = manager.MIDDLE_CLICK_HOLD_DELAY
             inject(True)
             assert cb_start.call_count == 0  # not yet: still inside the hold delay
 
-            time.sleep(manager.MIDDLE_CLICK_HOLD_DELAY + 0.1)
-            assert cb_start.call_count == 1
-            assert manager.hotkey_active is True
+            assert _wait_until(
+                lambda: cb_start.call_count == 1 and manager.hotkey_active is True,
+                delay + 5.0,
+            ), "the hold delay elapsed but push-to-talk never started"
 
             inject(False)
-            assert cb_stop.call_count == 1
-            assert manager.hotkey_active is False
+            assert _wait_until(
+                lambda: cb_stop.call_count == 1 and manager.hotkey_active is False,
+                5.0,
+            ), "releasing the middle button did not stop the recording"
         finally:
             manager.cleanup()
 
@@ -202,7 +241,9 @@ class TestMiddleClickHoldContract:
         try:
             manager.set_middle_click_enabled(False)
             inject(True)
-            time.sleep(manager.MIDDLE_CLICK_HOLD_DELAY + 0.1)
+            # A *minimum* wait, unlike the other two: nothing may fire, so
+            # waiting longer can only make this assertion stronger.
+            time.sleep(manager.MIDDLE_CLICK_HOLD_DELAY + 0.3)
             inject(False)
             assert cb_start.call_count == 0
             assert cb_stop.call_count == 0
