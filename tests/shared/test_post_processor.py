@@ -65,6 +65,12 @@ def test_spoken_ip_survives_the_number_pass(number_mode):
     ) == "connect to 10.0.0.0/24 now."
 
 
+def test_spoken_ip_without_cidr_in_pipeline():
+    """A spoken IP without a slash CIDR suffix must be converted by the full pipeline."""
+    res = pp.clean_speech_transcription("the address is 10 dot 0 dot 0 dot 0", skip_slm=True)
+    assert res == "the address is 10.0.0.0."
+
+
 def test_backslash_is_not_treated_as_a_path():
     assert pp.clean_spoken_paths("a backslash in text") == "a backslash in text"
 

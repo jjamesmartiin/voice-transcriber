@@ -3544,7 +3544,7 @@ def clean_speech_transcription(
         cleaned = _CUSTOM_DICT_REPLACER(cleaned)
 
     # 13f. Clean spoken Unix file paths and subnet notation
-    if "slash" in cleaned_lower:
+    if "slash" in cleaned_lower or " dot " in cleaned_lower:
         cleaned = clean_spoken_paths(cleaned)
 
     # 13g. Process verbal spell commands ("spell C A T" -> "CAT")
