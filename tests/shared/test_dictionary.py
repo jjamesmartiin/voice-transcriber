@@ -142,6 +142,8 @@ def test_saved_values_round_trip_exactly(tmp_path):
         "emoji": "café 🎤",
         "colon": "a: b",
         "dash": "- lead",
+        "del_control": "a\x7fb",
+        "c1_control": "a\x85b",
     }
     path = tmp_path / "dict.yaml"
 

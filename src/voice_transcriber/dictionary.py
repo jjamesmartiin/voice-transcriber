@@ -13,6 +13,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 import time
@@ -270,8 +271,11 @@ def _yaml_scalar(value) -> str:
     version did not: a newline (which split the entry across lines and made the
     whole file unparseable), a backslash, an embedded quote, and the values YAML
     would otherwise re-type -- ``007`` became ``7``, ``yes`` became ``True``.
+    DEL and C1 controls (0x7F-0x9F) are escaped to ``\\uXXXX`` so PyYAML's reader
+    does not reject them as unprintable characters.
     """
-    return json.dumps(str(value), ensure_ascii=False)
+    raw = json.dumps(str(value), ensure_ascii=False)
+    return re.sub(r"[\x7f-\x9f]", lambda m: f"\\u{ord(m.group()):04x}", raw)
 
 
 def _format_yaml(mapping: Dict[str, str], contextual_rules: List[Dict[str, Any]], is_local: bool = False) -> str:
