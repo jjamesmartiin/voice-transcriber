@@ -409,6 +409,26 @@ class TestLiveTranscript(unittest.TestCase):
             batcher.stop()
         self.assertFalse(batcher.running)
 
+    def test_finish_and_get_text_drains_slow_worker_queue(self):
+        """finish_and_get_text must keep draining if worker takes longer than initial join bound."""
+        import time
+
+        batcher = self._fresh()
+        batcher.start()
+        batcher.join_timeout = 0.01  # Tiny join timeout
+
+        def slow_transcribe(audio_data, sample_rate):
+            time.sleep(0.04)
+            return "chunk transcribed"
+
+        with mock.patch.object(micro_batcher.transcribe2, "transcribe_audio", side_effect=slow_transcribe):
+            speech = np.random.uniform(-0.05, 0.05, 16000).astype(np.float32)
+            batcher.feed_audio(speech)
+            text = batcher.finish_and_get_text()
+
+        self.assertIn("chunk transcribed", text)
+
+
 
 if __name__ == "__main__":
     unittest.main(argv=['first-arg'], exit=False)

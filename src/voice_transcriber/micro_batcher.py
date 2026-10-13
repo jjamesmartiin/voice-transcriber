@@ -9,7 +9,10 @@ import sys
 import queue
 import threading
 import re
+import logging
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # Put ``src/`` — the shim directory — on sys.path, not this package's own
 # directory, which double-loaded every ``voice_transcriber`` module under its
@@ -307,6 +310,7 @@ class StreamingMicroBatcher:
         self._live_text = ''
         self._live_index = -1
         self.running = True
+        self.join_timeout = 25.0
 
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.worker_thread.start()
@@ -548,7 +552,16 @@ class StreamingMicroBatcher:
         self.chunk_queue.put(None)
 
         if self.worker_thread and self.worker_thread.is_alive():
-            self.worker_thread.join(timeout=25.0)
+            self.worker_thread.join(timeout=self.join_timeout)
+            drains = 0
+            while self.worker_thread.is_alive() and drains < 10:
+                self.worker_thread.join(timeout=self.join_timeout)
+                drains += 1
+            if self.worker_thread.is_alive():
+                logger.error(
+                    "⚠️  Micro-batch worker did not finish processing all chunks within timeout; "
+                    "transcription may be truncated."
+                )
 
         with self.results_lock:
             # Sort by chunk index and stitch full transcript with overlap deduplication
