@@ -89,6 +89,69 @@ class TestWSLPlatformDetection:
 
 
 # ===========================================================================
+# 1b. WSL ALSA Configuration Security
+# ===========================================================================
+class TestWSLAlsaConfig:
+    """Verifies safe creation and validation of WSL ALSA PulseAudio configuration."""
+
+    def test_creates_owner_only_alsa_config(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.delenv("ALSA_CONFIG_PATH", raising=False)
+        monkeypatch.setattr(t2, "_is_wsl", lambda: True)
+
+        t2._setup_wsl_alsa()
+
+        conf = tmp_path / "vt" / "vt-alsa-pulse.conf"
+        assert conf.exists()
+        assert os.environ.get("ALSA_CONFIG_PATH") == str(conf)
+        if os.name != "nt":
+            import stat
+            assert stat.S_IMODE(conf.stat().st_mode) == 0o600
+
+    def test_refuses_foreign_owned_file(self, tmp_path, monkeypatch):
+        conf = tmp_path / "vt" / "vt-alsa-pulse.conf"
+        conf.parent.mkdir(parents=True)
+        conf.write_text("planted", encoding="utf-8")
+
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.delenv("ALSA_CONFIG_PATH", raising=False)
+        monkeypatch.setattr(t2, "_is_wsl", lambda: True)
+
+        real_lstat = os.lstat
+        def fake_lstat(path):
+            st = real_lstat(path)
+            if str(path) == str(conf):
+                # Fake foreign ownership
+                fake_st = os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink,
+                                          os.getuid() + 100, st.st_gid, st.st_size,
+                                          st.st_atime, st.st_mtime, st.st_ctime))
+                return fake_st
+            return st
+
+        monkeypatch.setattr(os, "lstat", fake_lstat)
+        t2._setup_wsl_alsa()
+
+        assert "ALSA_CONFIG_PATH" not in os.environ
+
+    def test_refuses_symlink_file(self, tmp_path, monkeypatch):
+        vt_dir = tmp_path / "vt"
+        vt_dir.mkdir(parents=True)
+        target = tmp_path / "victim.txt"
+        target.write_text("victim", encoding="utf-8")
+        conf = vt_dir / "vt-alsa-pulse.conf"
+        conf.symlink_to(target)
+
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.delenv("ALSA_CONFIG_PATH", raising=False)
+        monkeypatch.setattr(t2, "_is_wsl", lambda: True)
+
+        t2._setup_wsl_alsa()
+
+        assert "ALSA_CONFIG_PATH" not in os.environ
+        assert target.read_text(encoding="utf-8") == "victim"
+
+
+# ===========================================================================
 # 2. WSL Clipboard Sink (clip.exe & PowerShell fallback)
 # ===========================================================================
 class TestWSLClipboardSink:

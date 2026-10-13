@@ -4,6 +4,9 @@
 
 import os
 import sys
+import stat
+import tempfile
+from pathlib import Path
 
 from voice_transcriber import accent
 from voice_transcriber import keybinds
@@ -31,13 +34,47 @@ def _is_wsl() -> bool:
         return "microsoft" in os.uname().release.lower()
     return False
 
-# In WSL, ALSA needs to be told to use PulseAudio explicitly, otherwise PortAudio finds 0 devices
-if _is_wsl():
-    alsa_conf_path = "/tmp/vt-alsa-pulse.conf"
-    if not os.path.exists(alsa_conf_path):
-        with open(alsa_conf_path, "w") as f:
-            f.write("pcm.!default { type pulse }\nctl.!default { type pulse }\n")
-    os.environ["ALSA_CONFIG_PATH"] = alsa_conf_path
+def _setup_wsl_alsa() -> None:
+    """In WSL, point ALSA at PulseAudio safely."""
+    if not _is_wsl():
+        return
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        base_dir = Path(runtime_dir) / "vt"
+    else:
+        base_dir = Path(tempfile.gettempdir())
+    try:
+        base_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError:
+        pass
+    conf_path = base_dir / "vt-alsa-pulse.conf"
+
+    try:
+        st = os.lstat(conf_path)
+        if hasattr(os, "getuid") and st.st_uid != os.getuid():
+            logger.error(f"⚠️ Refusing WSL ALSA config at {conf_path}: foreign owner (uid {st.st_uid})")
+            return
+        if not stat.S_ISREG(st.st_mode):
+            logger.error(f"⚠️ Refusing WSL ALSA config at {conf_path}: not a regular file")
+            return
+    except FileNotFoundError:
+        try:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            fd = os.open(conf_path, flags, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("pcm.!default { type pulse }\nctl.!default { type pulse }\n")
+        except Exception as e:
+            logger.error(f"⚠️ Could not create WSL ALSA config at {conf_path}: {e}")
+            return
+    except OSError as e:
+        logger.error(f"⚠️ Could not stat WSL ALSA config at {conf_path}: {e}")
+        return
+
+    os.environ["ALSA_CONFIG_PATH"] = str(conf_path)
+
+_setup_wsl_alsa()
 
 import queue
 import threading
@@ -52,10 +89,8 @@ from transcribe2 import transcribe_audio, get_model
 import transcribe2
 import json
 import re
-import tempfile
 import contextlib
 import subprocess
-from pathlib import Path
 
 # Tracking the most recent model preload thread
 # This allows the main app to wait for it before recording
