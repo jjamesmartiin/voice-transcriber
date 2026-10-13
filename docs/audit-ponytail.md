@@ -20,13 +20,15 @@ being listed first, and **unbuilt-but-intended features are out of scope for del
 ## Status — updated after the cleanup waves
 
 **All but one of the 13 defects in §1 are fixed and merged**; item 13, the duplicate config save,
-is open and is waste rather than a bug. Each fix is pinned by a test that was proven to
-*fail* when the bug is reintroduced. The two that mattered most were found by `audit-eval` in
-code written this same session, and both were wrong in the expensive half: the DER assignment
-returned a suboptimal mapping on 431/3000 fuzzed matrices, and the review report's
-silence-hallucination rate was inverted.
+is now partly fixed and the exception is explained in the table. Each fix is pinned by a test
+that was proven to *fail* when the bug is reintroduced. The two that mattered most were found by
+`audit-eval` in code written this same session, and both were wrong in the expensive half: the
+DER assignment returned a suboptimal mapping on 431/3000 fuzzed matrices, and the review
+report's silence-hallucination rate was inverted.
 
-_Re-verified against the working tree 2026-10-13: §1 items 4–12 are fixed; item 13 remains open._
+_Re-verified against the working tree 2026-10-13: §1 items 4–12 fixed; item 13 partly fixed
+(§1 table below). §4 closed except `diarize.may_run`, which is not dead but wrong to wire in.
+§3 partly done and partly declined — see below._
 
 **§2 duplication is folded.** The Rust items landed in one wave (net **-171 lines**: four
 byte-identical `fuzzy_subsequence` copies, the ~40 hand-rolled send-or-quit sites, six run loops,
@@ -36,15 +38,44 @@ three backend registries landed in another (net **-80 lines** of triplicated log
 user-visible error text verified character-for-character and the lazy-import property re-pinned
 by its existing subprocess tests.
 
-**§3 modularity is NOT started, and that is the honest remaining gap:** `t2.py` (4,247 lines),
-`post_processor.py` (3,433 lines including a network SLM client — against `src/`'s offline-first
-rule), and the seven settings hand-mirrored from `t2` into `post_processor`. These move a lot of
-code for a branch that is ~74 commits from a release, so they are waiting on an owner decision
-rather than on effort.
+**§3 modularity: the two named violations are fixed, and the `t2` split is declined because its
+premise was measured false.** Done 2026-10-13: the network SLM client left `post_processor.py`
+for `slm_client.py` (301 lines), so importing the text cleaner no longer drags an HTTP client
+into an offline-first package; and the seven settings hand-mirrored from `t2` into
+`post_processor` are now published by one `apply_settings_from_config`, called once from each of
+`t2`'s two snapshot paths, so a setting can no longer reach the load path and miss the reset
+path (the A6 divergence class). Sizes now: `t2.py` **4,476**, `post_processor.py` **3,444**.
 
-**§4 "probably dead" is untouched by design — nothing has been deleted.** The list still needs
-an explicit yes/no per item, including the one that is a real trade-off rather than free: 14
-unpinned `_dispatch` aliases buy tolerance for an older `vt-tui` binary.
+**Declined, with the measurement:** the audit said config loading "cannot be imported without
+pulling in `rich`". It can — `import t2` loads `numpy`, `sounddevice` and `urllib.request`, and
+**not** `rich`, because every `rich` import in `t2.py` is already function-local. Splitting
+~4,500 lines across ~125 importers to fix a cost that does not exist is the opposite of the
+rule this audit is written against, so it was not done. If `t2.py`'s size is a problem in its
+own right, that is a separate decision with its own justification.
+
+**What is genuinely still open in §3:** the model-id lists remain declared three times
+(`t2.FORMATTER_MODELS`, `t2.DIARIZATION_MODELS`, and the registry's `model_ids`), held together
+only by tests; and the Rust defaults are still pinned by label rather than by value, which is how
+a stale backend default slipped through once already.
+
+**A second offline-first violation turned up while pinning the first.** The new import guard
+failed on its first run: the module-level dictionary auto-load reached `model_download` — and
+`urllib.request` with it — through `load_merged_dictionaries`, so `post_processor` was still not
+clean after the SLM split. It now loads on first use, from the entry points its own docstring
+always claimed. The same class of leak remains in `t2`: `import t2` pulls `model_download`
+through `get_config_file()` at module scope, recorded in [`TODO.md`](TODO.md) rather than fixed
+here.
+
+**§4 is closed except one item.** Deleted: the `_on_tui_toggle_autotype` alias, the 14 `_dispatch`
+aliases (already gone by then), `ignore_overlap`/`_is_reference_overlap`. Wired in:
+`formatter.may_run` is now the single statement of the formatter gate, so
+`post_processor._removes_noise()` is no longer a second copy of it. Not dead after all:
+`change_device` and `on_open_preset_picker` have real callers, `_SPAWN_ATTEMPTS` lives in the
+test guard, and `EXPECTED_ORDER` is compared. Left in place deliberately: `diarize.may_run`,
+because it is **not the same rule** as the shipped gate — `main.py` uses
+`get_diarization() == "on"`, while `may_run` returns True for anything but `"off"`, so wiring it
+in would start diarizing on `"auto"`. Its docstring now says so; delete-vs-adopt is an owner
+call.
 
 One §4 entry stopped being true and is worth correcting here: `_SPAWN_ATTEMPTS` was listed as
 dead state, and it was — but the fix was to *assert* it rather than delete it, because a spawn
@@ -71,7 +102,7 @@ passed, 3 skipped**; `ruff` clean; `cargo test` 63 passed and `clippy -D warning
 | 10 | **Two validators for `diarization_speakers` with different ranges** — `t2` restricts to 2–8, `diarize.parse_speakers` accepts any positive int, and the pipeline parses twice. | **FIXED** — pinned by `test_speaker_count_validators_agree_on_the_2_to_8_range`; `diarize.parse_speakers` now degrades anything outside 2–8 to auto |
 | 11 | **`app.rs` has a comment contradicting the value under it** — it says the default is the subprocess backend and "not `s1-mini`", immediately above `formatter_model: "s1-mini"`. It describes a bug, then documents the wrong conclusion. | **FIXED** — the comment now calls `s1-mini` the shipped *model* name and says it is not a backend; the value is pinned by `test_rust_app_defaults_match_the_python_shipped_defaults` |
 | 12 | **`EXPECTED_ORDER` is written to JSON but the gate compares ref-derived order instead**, so editing the constant keeps every test passing while the recorded field lies. | **FIXED** — the gate itself now compares `ref_order == EXPECTED_ORDER` (`eval/score_diarization.py:744`); in-source guard, no separate test |
-| 13 | **Two config saves per settings change** — the setters persist and the control layer calls `save_audio_config()` again. Mirrors pre-existing house style, so it is waste rather than a regression. | **OPEN** |
+| 13 | **Two config saves per settings change** — the claim was that the setters persist and the control layer calls `save_audio_config()` again. Only partly true: `set_formatter`, `set_structure_mode`, `set_cleanup_mode` and friends do persist, but `set_punctuation_mode`, `set_number_digits` and the direct global assignments do not. | **PARTLY FIXED** — all 39 sites classified; the 16 that provably followed a persisting setter are gone, and the other 23 are the only save |
 
 ---
 
