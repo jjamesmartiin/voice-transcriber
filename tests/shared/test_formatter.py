@@ -359,6 +359,21 @@ def test_guardrail_3_recognises_numbered_items():
     assert formatter.validate(original, candidate) is None
 
 
+@pytest.mark.parametrize("candidate", [
+    "• milk\n• eggs",
+    "* milk\n* eggs",
+    "# milk\n# eggs",
+    "– milk\n– eggs",
+    "— milk\n— eggs",
+    "‣ milk\n‣ eggs",
+    "● milk\n● eggs",
+    "▪ milk\n▪ eggs",
+])
+def test_guardrail_3b_rejects_unicode_and_markdown_list_markup_in_prose(candidate):
+    reason = formatter.validate("milk and eggs", candidate, structure="prose")
+    assert reason == "output contains list markup but prose was requested"
+
+
 # ---------------------------------------------------------------------------
 # Guardrail 4 - refusal / meta commentary
 # ---------------------------------------------------------------------------

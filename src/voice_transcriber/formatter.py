@@ -259,10 +259,16 @@ _NUMBER_WORDS = {
 #: summarisation is rejected.
 _MIN_RETENTION = 0.4
 
-_LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(\S.*?)\s*$", re.MULTILINE)
+_LIST_ITEM_RE = re.compile(
+    r"^[ \t]*(?:[-*+#\u2022\u2023\u25cf\u25aa\u2013\u2014]|\d+[.)])[ \t]*(\S.*?)\s*$",
+    re.MULTILINE,
+)
 
 #: Just the leading marker, for stripping structure before a content comparison.
-_LIST_MARKER_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+", re.MULTILINE)
+_LIST_MARKER_RE = re.compile(
+    r"^[ \t]*(?:[-*+#\u2022\u2023\u25cf\u25aa\u2013\u2014]|\d+[.)])[ \t]*",
+    re.MULTILINE,
+)
 
 
 def _strip_list_markers(text: str) -> str:
@@ -343,7 +349,10 @@ def has_content_words(text: str) -> bool:
 
 #: A rendered list-item line: marker, then the item body. Used to touch only the
 #: body's first letter.
-_LIST_ITEM_LINE_RE = re.compile(r"^([ \t]*(?:[-*+]|\d+[.)])[ \t]+)(\S.*)$", re.MULTILINE)
+_LIST_ITEM_LINE_RE = re.compile(
+    r"^([ \t]*(?:[-*+#\u2022\u2023\u25cf\u25aa\u2013\u2014]|\d+[.)])[ \t]*)(\S.*)$",
+    re.MULTILINE,
+)
 
 
 def _restore_list_item_casing(candidate: str, original: str) -> str:
