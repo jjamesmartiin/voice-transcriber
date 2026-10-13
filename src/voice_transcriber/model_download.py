@@ -529,11 +529,17 @@ def cohere_models_dir():
 def _write_provenance(spec, dest, base_url, resolved_url=None, source_kind="remote"):
     """Write SOURCE.json next to the weights so their origin is unambiguous."""
     import datetime as _dt
+    # Which release this came from. ``resolved_url`` is where the request ended
+    # up; a release asset redirects to objects.githubusercontent.com, whose URL
+    # carries no tag, so fall back to the URL we asked for. Without that the
+    # field is null for every real download while `download_url_base` still names
+    # the tag -- exactly the ambiguity this file exists to remove.
     release_tag = None
-    if resolved_url:
-        m = re.search(r"/releases/download/([^/]+)/", resolved_url)
+    for url in (resolved_url, base_url):
+        m = re.search(r"/releases/download/([^/]+)", url or "")
         if m:
             release_tag = m.group(1)
+            break
     info = {
         "model": spec.repo_id,
         "revision": spec.revision,

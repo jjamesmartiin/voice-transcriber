@@ -506,6 +506,26 @@ def test_write_provenance(tmp_path):
     assert data["digests"] == dict(model_download.COHERE.digests)
 
 
+def test_write_provenance_records_the_tag_a_real_download_came_from(tmp_path):
+    """The assets redirect, so the tag has to come from the URL we asked for.
+
+    A release asset 302s to objects.githubusercontent.com, whose URL carries no
+    tag; deriving `release_tag` from the resolved URL alone left it null for
+    every real download while `download_url_base` named the tag.
+    """
+    model_download._write_provenance(
+        model_download.get_spec("diarization"),
+        str(tmp_path),
+        base_url="https://github.com/jjamesmartiin/voice-transcriber"
+                 f"/releases/download/{releases.PREREQUISITES_TAG}",
+        resolved_url="https://objects.githubusercontent.com/github-production"
+                     "/release-assets/1234?X-Amz-Expires=300",
+    )
+    data = json.loads((tmp_path / "SOURCE.json").read_text(encoding="utf-8"))
+    assert data["release_tag"] == releases.PREREQUISITES_TAG
+    assert data["download_url_base"].endswith(f"/{releases.PREREQUISITES_TAG}")
+
+
 def test_write_provenance_single_safetensors_omits_digests_map(tmp_path):
     """A spec containing only model.safetensors keeps the legacy key set without redundant digests map."""
     spec = dataclasses.replace(

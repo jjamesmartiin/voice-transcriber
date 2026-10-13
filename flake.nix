@@ -40,7 +40,7 @@
           };
         };
 
-      version = "1.4.3";
+      version = "1.4.4";
     in
     {
       packages = forEachSupportedSystem ({ system, pkgs, sherpaPkgs }:
@@ -130,7 +130,7 @@
 
           default = pkgs.stdenv.mkDerivation {
             pname = "vt";
-            version = "1.4.3";
+            version = "1.4.4";
             src = ./.;
             
             installPhase = ''

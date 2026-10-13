@@ -58,16 +58,19 @@ fi
 
 # Read the constants out of the pin module so the publisher can never disagree
 # with what the client will actually fetch. Our own release repo comes from the
-# model registry, which is the single source of truth for it.
-read -r UPSTREAM_REPO PIN_TAG BUNDLE_TAG ASSET_NAME ASSET_SHA256 UPSTREAM_URL \
-        PIN_COMMIT PIN_STABLE_TAG ATTESTATION_URL REPO MANIFEST TITLE NOTES < <("$PY" -c '
+# model registry, which is the single source of truth for it. Tab-separated, for
+# the same reason as the model publisher: the title and notes contain spaces.
+IFS=$'\t' read -r UPSTREAM_REPO PIN_TAG BUNDLE_TAG ASSET_NAME ASSET_SHA256 \
+        UPSTREAM_URL PIN_COMMIT PIN_STABLE_TAG ATTESTATION_URL REPO MANIFEST \
+        TITLE NOTES < <("$PY" -c '
 import sys; sys.path.insert(0, "src")
 from voice_transcriber import llama_server_bundle as p
 from voice_transcriber import model_download as m
 from voice_transcriber import releases as r
-print(p.UPSTREAM_REPO, p.PIN_TAG, p.BUNDLE_TAG, p.ASSET_NAME, p.ASSET_SHA256,
-      p.UPSTREAM_URL, p.PIN_COMMIT, p.PIN_STABLE_TAG, p.ATTESTATION_URL,
-      m.REPO_SLUG, p.MANIFEST_NAME, r.PREREQUISITES_TITLE, r.PREREQUISITES_NOTES)
+print("\t".join([p.UPSTREAM_REPO, p.PIN_TAG, p.BUNDLE_TAG, p.ASSET_NAME,
+                p.ASSET_SHA256, p.UPSTREAM_URL, p.PIN_COMMIT, p.PIN_STABLE_TAG,
+                p.ATTESTATION_URL, m.REPO_SLUG, p.MANIFEST_NAME,
+                r.PREREQUISITES_TITLE, r.PREREQUISITES_NOTES]))
 ')
 
 OUT="${OUT:-dist/llama-server}"

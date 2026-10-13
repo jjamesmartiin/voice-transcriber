@@ -108,11 +108,14 @@ Launch the app. It sees the bundle before it ever touches the network, verifies
 and assembles it exactly as the online path does, and installs to the per-user
 model dir. Later runs load from disk with no removable media attached.
 
-For a source checkout, the same code path is available directly:
+For a source checkout, the same code path is available directly. `src/` is not on
+`PYTHONPATH` in the dev shell, and `python -m model_download` hits the re-export
+shim — which never runs this module's `__main__`, so it exits 0 having done
+nothing:
 
 ```bash
-python -m model_download --from /media/usb/cohere-transcribe-bundle.zip
-python -m model_download --verify-only         # confirm the local copy
+PYTHONPATH=src python -m voice_transcriber.model_download --from /media/usb/cohere-transcribe-bundle.zip
+PYTHONPATH=src python -m voice_transcriber.model_download --verify-only   # confirm the local copy
 ```
 
 ### 5. Verify (optional but recommended)

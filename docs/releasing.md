@@ -467,8 +467,11 @@ This exercises the real download/verify/install code.
 
 ```bash
 # Force a clean install into a throwaway dir and confirm it round-trips.
+# `src/` is not on PYTHONPATH in the dev shell, and `python -m model_download`
+# would hit the re-export shim, which never runs this module's ``__main__`` (it
+# exits 0 having done nothing) -- so name the package module explicitly.
 VT_MODEL_DIR=$(mktemp -d)/cohere \
-  nix develop --command python -m src.model_download
+  nix develop --command env PYTHONPATH=src python -m voice_transcriber.model_download
 ```
 
 It fetches the manifest, downloads both parts, checks each SHA-256, decompresses,
@@ -598,7 +601,8 @@ Environment knobs:
 Manual check of an existing install:
 
 ```bash
-nix develop --command python -m src.model_download --verify-only
+nix develop --command env PYTHONPATH=src \
+  python -m voice_transcriber.model_download --verify-only
 ```
 
 ---

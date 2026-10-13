@@ -62,13 +62,17 @@ else
 fi
 
 # Read the constants out of the client module so the publisher can never
-# disagree with what the client will actually request.
-read -r REPO TAG REV PREFIX DISPLAY TITLE NOTES < <(MODEL="$MODEL" "$PY" -c \
+# disagree with what the client will actually request. Tab-separated, because
+# the title and notes contain spaces: a space-separated `read` shifts every
+# field after the first multi-word value (it published a release titled
+# "Transcribe" once).
+IFS=$'\t' read -r REPO TAG REV PREFIX DISPLAY TITLE NOTES < <(MODEL="$MODEL" "$PY" -c \
     'import os, sys; sys.path.insert(0, "src"); import model_download as m; \
      from voice_transcriber import releases as r; \
      s = m.get_spec(os.environ["MODEL"]); \
-     print(m.REPO_SLUG, s.bundle_tag, s.revision, s.asset_prefix, s.display_name, \
-           r.PREREQUISITES_TITLE, r.PREREQUISITES_NOTES)')
+     print("\t".join([m.REPO_SLUG, s.bundle_tag, s.revision, s.asset_prefix, \
+                      s.display_name, r.PREREQUISITES_TITLE, \
+                      r.PREREQUISITES_NOTES]))')
 
 OUT="${OUT:-dist/model}"
 SUMS="$OUT/${PREFIX}.SHA256SUMS"
