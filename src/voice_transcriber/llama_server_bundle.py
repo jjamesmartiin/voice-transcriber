@@ -29,6 +29,8 @@ behaviour: importing it downloads nothing and starts nothing.
 
 from __future__ import annotations
 
+from voice_transcriber import releases
+
 #: Upstream project the binary comes from.
 UPSTREAM_REPO = "ggml-org/llama.cpp"
 
@@ -60,10 +62,18 @@ UPSTREAM_URL = (
     f"https://github.com/{UPSTREAM_REPO}/releases/download/{PIN_TAG}/{ASSET_NAME}"
 )
 
-#: Our own pre-release tag holding the redistributed copy plus ``SHA256SUMS`` —
-#: the same shape as the model bundles, and republished only when the pin above
-#: changes, never per app release.
-BUNDLE_TAG = f"tool-llama-server-{PIN_TAG}"
+#: The release tag holding the redistributed copy, shared with the model bundles
+#: (see ``voice_transcriber.releases.PREREQUISITES_TAG``): one entry in the list for
+#: everything a first run needs. This module owns the *pin*; the tag it is
+#: published under is a release-organisation decision, so it is imported rather
+#: than declared twice.
+BUNDLE_TAG = releases.PREREQUISITES_TAG
+
+#: The manifest that ships beside the archive. Not the bare ``SHA256SUMS`` the
+#: model bundles would never have used anyway: in a shared release, a file named
+#: just ``SHA256SUMS`` sits next to three revision-named manifests and reads as
+#: "the" checksum file for the release rather than for this archive.
+MANIFEST_NAME = f"{ASSET_NAME}.SHA256SUMS"
 
 
 def bundle_url(repo_slug: str) -> str:

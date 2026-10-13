@@ -44,6 +44,11 @@ import time
 import urllib.error
 import urllib.request
 
+try:
+    from voice_transcriber import releases
+except ImportError:  # run as a script: `python src/voice_transcriber/model_download.py`
+    import releases
+
 
 @dataclasses.dataclass(frozen=True)
 class ModelSpec:
@@ -98,12 +103,14 @@ class ModelSpec:
 REPO_SLUG = "jjamesmartiin/voice-transcriber"
 _REPO_URL = f"https://github.com/{REPO_SLUG}"
 
-# Weights are addressed by *model revision*, never by app release. The revision
+# Every prerequisite lives in one release tag; the tag itself lives in
+# :mod:`voice_transcriber.releases` because this module imports the network
+# stack and the formatter's pin module must not.
+#
+# Weights are addressed by *model revision*, never by app release: the revision
 # is compiled into the binary and already names the asset files, so every app
-# version resolves to the same bundle: publishing weights is a once-per-revision
-# job, not a once-per-version one. Bumping the revision renames the tag, which
-# is what forces a fresh publish when (and only when) the weights actually
-# change.
+# version resolves to the same bundle and publishing weights is a
+# once-per-revision job, not a once-per-version one.
 _COHERE_REVISION = "499888924f5f1313b48ab0686c8f3a94178a4709"
 _COHERE_SHA256 = "987bd3e141c7bfdb5a78f5db11397ee7737308357e6cc0a3f36a4979b158137a"
 _COHERE_CONFIGURATION_SHA256 = (
@@ -131,7 +138,7 @@ _COHERE_PROCESSOR_CONFIG_SHA256 = (
 _COHERE_PREPROCESSOR_CONFIG_SHA256 = (
     "9f297d330646ecc8ebb9dc5784f48b7c35b118c913e306a1ccd0192f2c976332"
 )
-_COHERE_TAG = f"model-cohere-{_COHERE_REVISION[:12]}"
+_COHERE_TAG = releases.PREREQUISITES_TAG
 
 COHERE = ModelSpec(
     name="cohere",
@@ -192,7 +199,7 @@ COHERE = ModelSpec(
 # ``v1`` ref 404s). The digest is the extracted file, not the download wrapper.
 _FORMATTER_REVISION = "34add00a48a2e5d24e5a4ee5405a99620a3a240c"
 _FORMATTER_SHA256 = "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634"
-_FORMATTER_TAG = f"model-formatter-{_FORMATTER_REVISION[:12]}"
+_FORMATTER_TAG = releases.PREREQUISITES_TAG
 
 FORMATTER = ModelSpec(
     name="formatter",
@@ -237,7 +244,7 @@ _DIARIZATION_EMBEDDING_SHA256 = (
     "c59158379255ad66e161679cca6af8d52d51e389e3224ab7d7a7baae295c2db5"
 )
 _DIARIZATION_REVISION = _DIARIZATION_TARBALL_SHA256
-_DIARIZATION_TAG = f"model-diarization-{_DIARIZATION_REVISION[:12]}"
+_DIARIZATION_TAG = releases.PREREQUISITES_TAG
 #: Installed layout the backend reads (see diarizers/sherpa_onnx.py).
 _DIARIZATION_SEGMENTATION_PATH = (
     "sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
@@ -335,13 +342,14 @@ def _resolved_spec(name, revision=None):
     if not revision or revision == spec.revision:
         return spec
     template = spec.asset_prefix.replace(spec.revision, "{revision}")
-    bundle_tag = f"model-{spec.name}-{revision[:12]}"
     return dataclasses.replace(
         spec,
         revision=revision,
         asset_prefix=template.format(revision=revision),
-        bundle_tag=bundle_tag,
-        release_base=f"{_REPO_URL}/releases/download/{bundle_tag}",
+        # The tag is shared now, so an alternate revision adds assets to it rather
+        # than getting a tag of its own; the asset names carry the revision.
+        bundle_tag=releases.PREREQUISITES_TAG,
+        release_base=f"{_REPO_URL}/releases/download/{releases.PREREQUISITES_TAG}",
     )
 
 _status_handler = None  # set by the app: fn(stage: str, pct: int, text: str)

@@ -17,15 +17,23 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
 from voice_transcriber import llama_server_bundle as pin
+from voice_transcriber import releases
 
 
 def test_the_tag_appears_in_every_derived_name():
     """A bump that misses one of these is how a release ships the wrong binary."""
     assert pin.PIN_TAG in pin.ASSET_NAME
     assert pin.PIN_TAG in pin.UPSTREAM_URL
-    assert pin.PIN_TAG in pin.BUNDLE_TAG
     assert pin.ASSET_NAME in pin.UPSTREAM_URL
     assert pin.UPSTREAM_REPO in pin.UPSTREAM_URL
+    # The *tag* is deliberately not pin-derived any more: every prerequisite
+    # lives in one release, which is a release-organisation decision rather than
+    # part of the pin. The pin still names the asset, which is what the client
+    # verifies (ASSET_SHA256), so a wrong binary cannot be served.
+    assert pin.BUNDLE_TAG == releases.PREREQUISITES_TAG
+    # ...and the manifest is named for the archive, so a shared release never has
+    # a bare `SHA256SUMS` claiming to cover everything in it.
+    assert pin.MANIFEST_NAME == f"{pin.ASSET_NAME}.SHA256SUMS"
 
 
 def test_the_digest_is_a_sha256_and_the_attestation_is_ours_to_check():

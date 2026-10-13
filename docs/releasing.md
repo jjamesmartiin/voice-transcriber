@@ -145,31 +145,60 @@ cohere-transcribe-<revision>.SHA256SUMS     # "<sha256>  <filename>" per part
 with `<revision> = 499888924f5f1313b48ab0686c8f3a94178a4709` (the
 `CohereLabs/cohere-transcribe-03-2026` HF revision).
 
-Those assets are attached to a **model bundle tag**, not to an app release:
+Those assets are attached to the **shared prerequisites release**, not to an app
+release and not to a tag of their own:
 
 ```
-model-cohere-<revision[:12]>               # e.g. model-cohere-499888924f5f
+PREREQUISITES                              # every prerequisite, one release
 ```
 
 Two parts by default, so each stays under GitHub's **2 GiB per-file** release
 limit after xz compression.
 
+### Why one shared tag, and what it costs
+
+Every prerequisite a first run needs lives in that single release, so the
+releases list carries one entry for all of them instead of one per model
+revision. Safety does **not** come from the tag: it comes from the asset names,
+which embed the revision, and from each bundle having its own manifest. The
+client asks for `cohere-transcribe-<rev>.SHA256SUMS`, so a bundle for a different
+revision 404s on its own manifest and is skipped rather than served in its
+place — the property that made the old revision-derived tags safe survives.
+
+What was traded away:
+
+- **Per-revision isolation.** Old revisions' assets stay in the release for the
+  older app versions that ask for them, so the release grows where the tag list
+  used to. Deleting a superseded revision's parts breaks every app built against
+  it — the same rule as bundle tags under "Which releases are disposable".
+- **A tag rename as the publish forcing function.** Bumping a revision no longer
+  renames anything, so nothing *forces* a fresh publish; a missing revision now
+  surfaces as a 404 on its manifest. `scripts/publish_model_bundle.sh --build`
+  is still the publish, and re-running it is idempotent.
+
+The trade was made deliberately on 2026-10-13; the previous scheme (one tag per
+revision, `model-<name>-<rev12>`) is in the git history, and the four tags it
+produced were deleted at the same time, once the app that reads this release had
+shipped.
+
 ### Where they already are
 
 They are normally **already built and sitting in the working tree**:
 
-- `dist/model/` — the ready-to-upload release assets
+- `dist/model/` — the ready-to-upload assets for all three model bundles
+  (`cohere`, `s1-mini`, `diarization` parts, each with its `SHA256SUMS`)
+- `dist/llama-server/` — the fetched upstream archive plus its manifest
 - `models/cohere/` — the unpacked flat HF snapshot (~4.13 GB, gitignored)
 
-`dist/model/` is gitignored, so it does not travel with a clone. It is a build
-output, like `result/`, and can be stale — but the weights are versioned by
-content hash, so they are only regenerated when the upstream model revision
-changes.
-
-Confirm the local copies are intact before uploading:
+`dist/` is gitignored, so it does not travel with a clone. It is a build output,
+like `result/`, and can be stale — but the weights are versioned by content hash,
+so they are only regenerated when the upstream model revision changes. This is
+also the only remaining copy once a revision is deleted from the release, so
+verify before uploading (and before deleting anything):
 
 ```bash
-cd dist/model && sha256sum -c cohere-transcribe-499888924f5f1313b48ab0686c8f3a94178a4709.SHA256SUMS
+cd dist/model && sha256sum -c *.SHA256SUMS
+cd ../llama-server && sha256sum -c *.SHA256SUMS
 ```
 
 ### Regenerating them (only when the model revision changes)
@@ -211,9 +240,9 @@ document as well, since those are prose.
 
 ## Publishing a new model revision
 
-**Only when `REVISION` changes.** Weights are keyed by model revision, so a new
-app version is not a reason to run this — drop as many versions as you like and
-upload nothing.
+**Only when `REVISION` changes.** Prerequisites are keyed by model revision, so a
+new app version is not a reason to run this — drop as many versions as you like
+and upload nothing.
 
 One command does the whole job — package *and* publish:
 
@@ -235,10 +264,12 @@ Omit `--build` to publish assets already sitting in `dist/model/`. Extra flags
 go to the packaging step, e.g.
 `./scripts/publish_model_bundle.sh --build -- --parts 3`.
 
-The script reads `REPO_SLUG`, `MODEL_BUNDLE_TAG` and `REVISION` straight out of
-`src/model_download.py`, so it cannot disagree with what the client requests. It
-verifies the local parts against `SHA256SUMS` first, creates the bundle release
-as a **prerelease** (keeping it out of `/releases/latest`, which is where the
+The script reads `REPO_SLUG`, the spec's `bundle_tag` and `REVISION` straight out
+of `src/voice_transcriber/model_download.py` (plus the release title and notes
+from `src/voice_transcriber/releases.py`), so it cannot disagree with what the
+client requests. It verifies the local parts against `SHA256SUMS` first, creates
+the prerequisites release as a **prerelease** if it is missing (keeping it out of
+`/releases/latest`, which is where the
 AppImage is found), then:
 
 1. uploads each part and re-reads its remote digest to confirm it landed,
@@ -283,7 +314,7 @@ constant back out of it, so the two cannot drift.
 | Commit | `d81235049384534c167caea52b85a694f6103d14` |
 | Asset | `llama-b11429-bin-win-cpu-x64.zip` — 19,398,918 bytes (~18.5 MiB), 51 files, ~47.2 MiB unpacked |
 | SHA-256 | `1283323272b04cd07905816a597a0da810918102de958f4ff6f7bbaa70ed2efe` |
-| Our tag | `tool-llama-server-b11429`, a **pre-release** |
+| Our copy | the shared `PREREQUISITES` release, tagged there as `llama-b11429-bin-win-cpu-x64.zip` with `llama-b11429-bin-win-cpu-x64.zip.SHA256SUMS` beside it |
 | Attestation | <https://github.com/ggml-org/llama.cpp/attestations/52904614> |
 
 **Why a nightly.** Upstream publishes no binary on its stable tags: the `v0.6.0`
@@ -304,13 +335,16 @@ gh attestation verify --owner ggml-org llama-b11429-bin-win-cpu-x64.zip
 ```
 
 **Publishing it** (`scripts/publish_llama_server_bundle.sh`) fetches
-`UPSTREAM_URL`, verifies `ASSET_SHA256` **before touching GitHub**, creates
-`tool-llama-server-b11429` as a pre-release, and uploads the archive first and
-`SHA256SUMS` last — the same "SHA256SUMS makes a bundle discoverable" rule as
-the model weights. A digest mismatch, or a failed archive upload, aborts
-**without** publishing the manifest. Re-running is idempotent (remote digests are
-compared), `--dry-run` prints the plan and changes nothing, and the download is
-cached under `dist/llama-server/`.
+`UPSTREAM_URL`, verifies `ASSET_SHA256` **before touching GitHub**, adds it to
+the shared prerequisites release (creating it with `releases.PREREQUISITES_TITLE`
+/ `_NOTES` if it is missing), and uploads the archive first and its manifest last
+— the same "the manifest makes a bundle discoverable" rule as the model weights.
+The manifest is named after the archive rather than `SHA256SUMS`, because in a
+shared release a bare `SHA256SUMS` reads as "the" checksum file for everything in
+it. A digest mismatch, or a failed archive upload, aborts **without** publishing
+the manifest. Re-running is idempotent (remote digests are compared),
+`--dry-run` prints the plan and changes nothing, and the download is cached under
+`dist/llama-server/`.
 
 **This bundle is re-published only when the pin changes** — never per app
 release. Bumping `PIN_TAG` / `PIN_COMMIT` / `ASSET_*` in
@@ -416,11 +450,13 @@ Check the bundle, which is what first-run users actually download:
 
 ```bash
 TAG=$(nix develop --command python -c 'import sys; sys.path.insert(0,"src");
-import model_download as m; print(m.MODEL_BUNDLE_TAG)')
+from voice_transcriber import releases; print(releases.PREREQUISITES_TAG)')
 nix develop --command gh release view "$TAG"
 ```
 
-Expect `part1.xz`, `part2.xz` and `SHA256SUMS` — and **not** `vt.AppImage`.
+Expect every bundle's parts (each pair with its own manifest) plus the
+llama-server archive and its manifest — and **not** `vt-x86_64.AppImage` or
+`VoiceTranscriber-windows-x86_64.zip`: those belong to an app release.
 
 End-to-end check that the *client* path works — i.e. what a first-run user gets.
 This exercises the real download/verify/install code.
@@ -445,25 +481,35 @@ a tag other than the default.
 
 ## Where the weights live
 
-In `src/model_download.py`:
+In `src/voice_transcriber/releases.py` (a leaf module: see its docstring for why
+the tag is not declared in either module that needs it):
 
 ```python
-REPO_SLUG            = "jjamesmartiin/voice-transcriber"
-MODEL_BUNDLE_TAG     = f"model-cohere-{REVISION[:12]}"
-DEFAULT_RELEASE_BASE = f"https://github.com/{REPO_SLUG}/releases/download/{MODEL_BUNDLE_TAG}"
+PREREQUISITES_TAG    = "PREREQUISITES"
+PREREQUISITES_TITLE  = "Prerequisites (model weights and formatter backend)"
 ```
+
+and in `src/voice_transcriber/model_download.py`, per spec:
+
+```python
+release_base = f"https://github.com/{REPO_SLUG}/releases/download/{releases.PREREQUISITES_TAG}"
+```
+
+`MODEL_BUNDLE_TAG` and `DEFAULT_RELEASE_BASE` survive as deprecated aliases of
+the cohere entry, which is what the publisher reads.
 
 The client never consults `/releases/latest`. That tag belongs to the AppImage,
 and resolving weights through it is what previously let a mid-upload bundle
-shadow a complete one. The bundle URL is instead **derived from `REVISION`**:
+shadow a complete one. The bundle URL is instead **derived from the shared tag**:
 
-- **A new app release uploads nothing.** Same `REVISION` → same tag → same
-  assets. Publishing weights is a once-per-revision job, not a per-version one.
-- **Bumping `REVISION` renames the tag**, which is what forces a fresh publish
-  when — and only when — the weights actually change.
+- **A new app release uploads nothing.** Nothing in the URL changes between app
+  versions, so publishing prerequisites stays a once-per-revision job.
+- **Bumping `REVISION` adds assets** to the same release instead of renaming a
+  tag, so nothing forces a publish — a revision that was never published shows
+  up as a missing manifest (see "Why one shared tag, and what it costs").
 - Weights can never silently come from the wrong revision: the manifest name
-  embeds the revision (`cohere-transcribe-<rev>.SHA256SUMS`), so a tag holding a
-  *different* revision 404s on the manifest and is skipped.
+  embeds the revision (`cohere-transcribe-<rev>.SHA256SUMS`), so a release
+  holding a *different* revision 404s on the manifest and is skipped.
 
 Candidate order is `[requested base, DEFAULT_RELEASE_BASE]`, deduplicated — an
 explicit override or `VT_MODEL_RELEASE_BASE` is tried first, with the canonical

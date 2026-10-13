@@ -23,11 +23,8 @@ import sys
 sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "src"))
 from voice_transcriber import llama_server_bundle as llama  # noqa: E402
+from voice_transcriber import releases  # noqa: E402
 from voice_transcriber.model_download import MODELS, REPO_SLUG  # noqa: E402
-
-
-def _asset_base(tag):
-    return f"https://github.com/{REPO_SLUG}/releases/download/{tag}"
 
 
 def render(tag=None):
@@ -37,15 +34,17 @@ def render(tag=None):
         f"Release: {tag or 'unreleased working tree'}",
         "",
         "This release ships the application runtime only: no model weights, no",
-        "config. The bundles below are downloaded on demand and live in their own",
-        "pre-release tags, keyed by model revision / upstream pin. They are",
-        "re-published only when a pin changes — never once per app release, so the",
-        "same tag serves every app version built from the same revision.",
+        "config. Everything below comes from one prerequisites release, addressed",
+        "by content: each bundle is named for the model revision or upstream pin it",
+        "was built from and carries its own SHA256SUMS. Nothing is re-uploaded for",
+        "an app release, so this list only changes where a revision number does.",
         "",
-        "Each tag carries a SHA256SUMS manifest plus split parts named by that",
-        "manifest. Fetch the parts first and the manifest last: the manifest is",
-        "what makes a bundle discoverable, so a half-published one stays visible",
-        "as incomplete rather than appearing valid.",
+        f"Prerequisites release: {releases.PREREQUISITES_TAG}",
+        f"  https://github.com/{REPO_SLUG}/releases/tag/{releases.PREREQUISITES_TAG}",
+        "",
+        "Fetch each bundle's parts first and its manifest last: the manifest is what",
+        "makes a bundle discoverable, so a half-published one stays visible as",
+        "incomplete rather than appearing valid.",
         "",
         "Model bundles",
     ]
@@ -53,8 +52,6 @@ def render(tag=None):
         install = spec.target_subdir or spec.name
         lines += [
             f"  {spec.name} — {spec.display_name}",
-            f"    tag        {spec.bundle_tag}",
-            f"    source     {spec.release_base}",
             f"    manifest   {spec.asset_prefix}.SHA256SUMS",
             f"    revision   {spec.revision}",
         ]
@@ -69,8 +66,8 @@ def render(tag=None):
         "",
         "Tool bundle",
         "  llama-server — the optional formatter's backend",
-        f"    tag        {llama.BUNDLE_TAG}",
         f"    asset      {llama.ASSET_NAME}",
+        f"    manifest   {llama.MANIFEST_NAME}",
         f"    sha256     {llama.ASSET_SHA256}",
         f"    upstream   {llama.UPSTREAM_URL}",
         f"    note       fetched on demand by this build; needs on the host: "

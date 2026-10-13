@@ -133,8 +133,8 @@ for the platform you are targeting.
 | **Disk (standalone Windows EXE)** | ~6 GB — the bundle carries its own Python, PyTorch, and the full 3.9 GB model. |
 | **Network** | ~2.8 GB download on **first launch only**, for the compressed model weights. Fully offline afterwards. Set `VT_AUTO_DOWNLOAD_MODEL=0` to skip the download and supply weights yourself. |
 | **Model weights** | Auto-installed on first run, or provided via `VT_MODEL_DIR` / a local `models/cohere/`. The download is split-xz and needs ~2.8 GB down / ~4 GB on disk. |
-| **Optional on-device formatter** | Off by default. Needs a `llama-server` binary and ~462 MiB for the S1-mini Q4 GGUF. The first-use prompt (or the `formatter-download` verb) fetches a pinned, SHA-256-verified `llama-server` into the app's data dir, and the weights from GitHub Releases (`model-formatter-34add00a48a2`). Bring your own backend with `VT_FORMATTER_BINARY`, attach to a running one with `VT_FORMATTER_SERVER_URL`, or supply weights locally via `models/formatter/`. The pinned backend is Windows x64, and needs the executable **and** its DLLs plus the Microsoft VC++ Redistributable. |
-| **Optional meeting mode (diarization)** | Off by default. Needs ~40 MB for the two sherpa-onnx graphs (pyannote segmentation + 3D-Speaker VoxCeleb English). Auto-installed from GitHub Releases (`model-diarization-24615ee884c8`), or supply weights locally via `models/diarization/`. |
+| **Optional on-device formatter** | Off by default. Needs a `llama-server` binary and ~462 MiB for the S1-mini Q4 GGUF. The first-use prompt (or the `formatter-download` verb) fetches a pinned, SHA-256-verified `llama-server` into the app's data dir, and the weights from GitHub Releases (the shared `PREREQUISITES` release). Bring your own backend with `VT_FORMATTER_BINARY`, attach to a running one with `VT_FORMATTER_SERVER_URL`, or supply weights locally via `models/formatter/`. The pinned backend is Windows x64, and needs the executable **and** its DLLs plus the Microsoft VC++ Redistributable. |
+| **Optional meeting mode (diarization)** | Off by default. Needs ~40 MB for the two sherpa-onnx graphs (pyannote segmentation + 3D-Speaker VoxCeleb English). Auto-installed from GitHub Releases (the shared `PREREQUISITES` release), or supply weights locally via `models/diarization/`. |
 | **Audio** | A working microphone exposed as the system default input device. |
 | **Python** | **3.10+** — only needed to run from source or to build. The Nix package and the Windows EXE bundle their own interpreter. |
 
@@ -627,8 +627,9 @@ Two optional models are registered bundles:
   graphs (`k2-fsa/sherpa-onnx`, MIT + Apache-2.0); see
   [`config/licenses/`](config/licenses/).
 
-The bundles are published as GitHub **pre-releases**
-(`model-formatter-34add00a48a2`, `model-diarization-24615ee884c8`), and the
+The bundles are published in one GitHub **pre-release** — the shared
+`PREREQUISITES` release, so the releases list has a single entry for all of them
+— and the
 formatter's first-use prompt can fetch them: it states the size and asks before
 anything downloads. Weights can still be installed by hand under the model
 directory (`VT_MODEL_DIR`, or the per-user install dir). The app degrades to

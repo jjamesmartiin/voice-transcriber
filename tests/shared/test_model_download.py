@@ -18,6 +18,7 @@ import io
 import json
 import lzma
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -35,6 +36,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import model_download
+from voice_transcriber import releases
 
 
 # ---------------------------------------------------------------------------
@@ -698,21 +700,45 @@ def test_ensure_local_cohere_fallback_candidate_chain(monkeypatch, tmp_path):
     assert bundle in attempts
 
 
-def test_model_bundle_tag_is_revision_derived():
-    """Weights are keyed by *model revision*, not app version.
+def test_every_bundle_shares_one_prerequisites_release():
+    """One release hosts every prerequisite, keyed by *content* not by tag.
 
-    That is what makes a new app release upload nothing: the tag only changes
-    when the revision does.
+    That is what keeps the releases list to a single prerequisites entry: a new
+    app release uploads nothing, and a model revision adds assets to this tag
+    instead of minting one. Safety comes from the asset names -- they embed the
+    revision, so a bundle for another revision 404s on its own revision-named
+    manifest rather than being served in its place.
     """
-    assert model_download.MODEL_BUNDLE_TAG == (
-        f"model-cohere-{model_download.REVISION[:12]}")
-    assert model_download.DEFAULT_RELEASE_BASE == (
-        "https://github.com/jjamesmartiin/voice-transcriber"
-        f"/releases/download/{model_download.MODEL_BUNDLE_TAG}")
+    assert releases.PREREQUISITES_TAG == "PREREQUISITES"
+    for name, spec in model_download.MODELS.items():
+        assert spec.bundle_tag == releases.PREREQUISITES_TAG, name
+        assert spec.release_base == (
+            "https://github.com/jjamesmartiin/voice-transcriber"
+            f"/releases/download/{releases.PREREQUISITES_TAG}"), name
+        # The revision survives in the asset names, which is the whole safety net.
+        assert spec.revision in spec.asset_prefix, name
+
+    # The deprecated aliases still point at the cohere entry.
     spec = model_download.get_spec("cohere")
-    assert spec.bundle_tag == model_download.MODEL_BUNDLE_TAG
-    assert spec.release_base == model_download.DEFAULT_RELEASE_BASE
+    assert model_download.MODEL_BUNDLE_TAG == spec.bundle_tag
+    assert model_download.DEFAULT_RELEASE_BASE == spec.release_base
     assert spec.asset_prefix == f"cohere-transcribe-{model_download.REVISION}"
+
+
+def test_an_alternate_revision_does_not_mint_a_tag():
+    """A legacy revision override reuses the shared tag, as the real specs do.
+
+    It used to derive `model-<name>-<rev12>`; with one prerequisites release the
+    override must not go looking for a tag that will never exist.
+    """
+    other = "f" * 40
+    resolved = model_download._resolved_spec("cohere", other)
+    assert resolved.bundle_tag == releases.PREREQUISITES_TAG
+    assert resolved.release_base == (
+        "https://github.com/jjamesmartiin/voice-transcriber"
+        f"/releases/download/{releases.PREREQUISITES_TAG}")
+    assert resolved.asset_prefix == f"cohere-transcribe-{other}"
+    assert resolved.asset_prefix != model_download.get_spec("cohere").asset_prefix
 
 
 def test_candidates_never_consult_the_app_latest_release():
@@ -783,10 +809,15 @@ def test_publish_script_reads_constants_from_this_module():
     assert os.access(script, os.X_OK), "publisher script is not executable"
     text = script.read_text(encoding="utf-8")
     # Prose may name the scheme (`model-cohere-<rev12>`), but the *resolved*
-    # values must come from the import, never be pasted in.
-    assert model_download.MODEL_BUNDLE_TAG not in text, (
+    # values must come from the import, never be pasted in. Matched on word
+    # boundaries: the tag is a plain word now, so a substring test would also
+    # fire on the publisher reading `releases.PREREQUISITES_TITLE`.
+    def _pasted(value):
+        return re.search(rf"\b{re.escape(value)}\b", text)
+
+    assert not _pasted(model_download.MODEL_BUNDLE_TAG), (
         "publisher hardcodes the resolved bundle tag instead of importing it")
-    assert model_download.REVISION not in text, (
+    assert not _pasted(model_download.REVISION), (
         "publisher hardcodes REVISION instead of importing it")
     assert "import model_download" in text
     # It selects a registry entry by name, so a second artifact can publish.

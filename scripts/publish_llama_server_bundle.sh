@@ -13,11 +13,12 @@
 # against pin.ASSET_SHA256 *before* publishing anything. A digest mismatch means
 # upstream re-cut the asset (or the pin is wrong), and aborts the run.
 #
-# Ordering is the part that actually matters. The archive goes up first and
-# SHA256SUMS is published LAST, only once the archive has been verified present
-# on the remote. SHA256SUMS is what makes a bundle discoverable, so publishing it
-# early advertises a server that is not there. If the archive fails to verify,
-# the script aborts WITHOUT publishing the manifest, so a half-uploaded bundle
+# Ordering is the part that actually matters. The archive goes up first and the
+# manifest ($MANIFEST_NAME) is published LAST, only once the archive has been
+# verified present on the remote. The manifest is what makes a bundle
+# discoverable, so publishing it early advertises a server that is not there. If
+# the archive fails to verify, the script aborts WITHOUT publishing the manifest,
+# so a half-uploaded bundle
 # stays invisible instead of becoming a broken one.
 #
 # Usage:
@@ -59,18 +60,19 @@ fi
 # with what the client will actually fetch. Our own release repo comes from the
 # model registry, which is the single source of truth for it.
 read -r UPSTREAM_REPO PIN_TAG BUNDLE_TAG ASSET_NAME ASSET_SHA256 UPSTREAM_URL \
-        PIN_COMMIT PIN_STABLE_TAG ATTESTATION_URL REPO < <("$PY" -c '
+        PIN_COMMIT PIN_STABLE_TAG ATTESTATION_URL REPO MANIFEST TITLE NOTES < <("$PY" -c '
 import sys; sys.path.insert(0, "src")
 from voice_transcriber import llama_server_bundle as p
 from voice_transcriber import model_download as m
+from voice_transcriber import releases as r
 print(p.UPSTREAM_REPO, p.PIN_TAG, p.BUNDLE_TAG, p.ASSET_NAME, p.ASSET_SHA256,
       p.UPSTREAM_URL, p.PIN_COMMIT, p.PIN_STABLE_TAG, p.ATTESTATION_URL,
-      m.REPO_SLUG)
+      m.REPO_SLUG, p.MANIFEST_NAME, r.PREREQUISITES_TITLE, r.PREREQUISITES_NOTES)
 ')
 
 OUT="${OUT:-dist/llama-server}"
 ARCHIVE="$OUT/$ASSET_NAME"
-SUMS="$OUT/SHA256SUMS"
+SUMS="$OUT/$MANIFEST"
 
 echo "bundle  : $BUNDLE_TAG"
 echo "repo    : $REPO"
@@ -89,8 +91,8 @@ if [ "$DRY_RUN" = 1 ] && [ ! -f "$ARCHIVE" ]; then
     echo "     -> $ARCHIVE"
     echo "  2. verify sha256 == $ASSET_SHA256 (abort on mismatch)"
     echo "  3. write $SUMS"
-    echo "  4. create pre-release $BUNDLE_TAG (if absent)"
-    echo "  5. upload $ASSET_NAME, then SHA256SUMS last"
+    echo "  4. create the prerequisites release $BUNDLE_TAG (if absent)"
+    echo "  5. upload $ASSET_NAME, then $MANIFEST_NAME last"
     exit 0
 fi
 
@@ -137,26 +139,20 @@ echo "  + $ASSET_NAME verified"
 
 # 3. Local assets must be self-consistent before anything is published.
 echo "Writing $SUMS ..."
-(cd "$OUT" && sha256sum "$ASSET_NAME" > SHA256SUMS)
-(cd "$OUT" && sha256sum -c SHA256SUMS)
+(cd "$OUT" && sha256sum "$ASSET_NAME" > "$MANIFEST")
+(cd "$OUT" && sha256sum -c "$MANIFEST")
 
-# 4. The release object hosts the assets. --prerelease keeps it out of
-#    /releases/latest, which is where the AppImage is published.
+# 4. The release object hosts the assets for every prerequisite, so it is
+#    created once (by whichever publisher runs first) and added to thereafter.
+#    --prerelease keeps it out of /releases/latest, which is where the app is.
 if ! "${GH[@]}" release view "$BUNDLE_TAG" --repo "$REPO" >/dev/null 2>&1; then
     if [ "$DRY_RUN" = 1 ]; then
-        echo "would create pre-release $BUNDLE_TAG"
+        echo "would create prerequisites release $BUNDLE_TAG"
     else
-        echo "Creating pre-release $BUNDLE_TAG ..."
+        echo "Creating prerequisites release $BUNDLE_TAG ..."
         "${GH[@]}" release create "$BUNDLE_TAG" --repo "$REPO" --prerelease \
-            --title "llama-server ${PIN_TAG} (Windows x64 CPU)" \
-            --notes "Pinned llama.cpp ${PIN_TAG} Windows x64 CPU build, redistributed
-with its licence notices (see config/licenses/LlamaServer-LICENSES.txt).
-
-Third-party build, not an app release: this tag exists only to host the
-redistributed formatter server, and is republished only when the pin in
-src/voice_transcriber/llama_server_bundle.py changes, never per app release.
-Upstream: ${UPSTREAM_URL}
-See docs/releasing.md."
+            --title "$TITLE" \
+            --notes "$NOTES"
     fi
 fi
 
@@ -206,13 +202,13 @@ publish() {  # $1 = path to a local asset; idempotent
 # 5. The archive first.
 if ! publish "$ARCHIVE"; then
     echo >&2
-    echo "aborting: SHA256SUMS was NOT published, so no client can discover" >&2
+    echo "aborting: the manifest was NOT published, so no client can discover" >&2
     echo "$BUNDLE_TAG yet. Fix the failing upload and re-run; an already-good" >&2
     echo "archive is skipped, so a re-run is cheap." >&2
     exit 1
 fi
 
-# 6. SHA256SUMS last, and only now.
+# 6. The manifest last, and only now.
 echo
 echo "Archive verified on the remote; publishing the manifest."
 publish "$SUMS"

@@ -14,6 +14,38 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
+### Changed
+
+- **Every prerequisite now lives in one `PREREQUISITES` release** instead of one
+  release per model revision (`model-cohere-<rev12>`, `model-formatter-<rev12>`,
+  `model-diarization-<rev12>`, `tool-llama-server-<pin>`). The releases page
+  carries a single entry for all of them, and publishing a new model revision
+  adds assets to it rather than minting a tag. Safety is unchanged in the part
+  that matters: assets are still named for the revision or upstream pin they were
+  built from, and each bundle still has its own manifest, so a bundle for another
+  revision 404s on its manifest instead of being served in its place. What was
+  given up is per-revision isolation — superseded revisions' assets must stay in
+  that release for the app versions that ask for them, so it grows where the tag
+  list used to. The tag itself lives in `src/voice_transcriber/releases.py`, a
+  leaf module, because the formatter's pin module must stay importable without
+  dragging in the network stack.
+- **The formatter backend's manifest is now named after its archive**
+  (`llama-b11429-bin-win-cpu-x64.zip.SHA256SUMS`) rather than `SHA256SUMS`: in a
+  shared release, a bare `SHA256SUMS` reads as covering everything in it.
+
+### Removed
+
+- **The four per-revision prerequisite tags were deleted** once this version had
+  shipped: `model-cohere-499888924f5f`, `model-formatter-34add00a48a2`,
+  `model-diarization-24615ee884c8` and `tool-llama-server-b11429`. **This is the
+  one breaking change here:** an installed version *older* than this one fetches
+  prerequisites from those tags and can no longer download them. The app keeps
+  working — weights already installed are untouched — but a fresh install of an
+  older version, or its on-demand formatter backend, will fail to fetch. Update
+  to this version to read prerequisites from the new release. The assets were
+  verified byte-identical to the published digests before the old tags went, and
+  the local copies under `dist/` are the only other copy.
+
 ## [1.4.3] — 2026-10-12
 
 ### Fixed

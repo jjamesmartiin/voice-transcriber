@@ -71,14 +71,20 @@ nix build .#vt-tui --no-link --print-out-paths
 
 ## Gotchas that have actually bitten
 
-- **Weights are keyed by model revision, not by app release.** `release.yml`
-  attaches only `./*.AppImage`; the ~2.8 GB of Cohere weights live on a
-  revision-derived bundle tag (`model-cohere-<rev12>`, from `REVISION` in
-  `src/model_download.py`) and are re-published **only when `REVISION`
-  changes** — never per release. Publish with `scripts/publish_model_bundle.sh`,
-  which reads its constants out of the module (so it cannot drift from the
-  client) and uploads parts first, `SHA256SUMS` last. Do not hand-upload weights
-  to a version tag: the client never reads them there. See `docs/releasing.md`.
+- **Prerequisites live in ONE release, keyed by content not by tag.** `release.yml`
+  attaches only the app assets; the ASR weights, the formatter's weights and the
+  pinned `llama-server` all live in the shared `PREREQUISITES` release
+  (`PREREQUISITES_TAG` in `src/voice_transcriber/releases.py`, so the releases
+  list has one entry for all of them instead of one per model revision). Assets
+  are named for the revision or upstream pin they carry and each bundle has its
+  own manifest, so a bundle for another revision 404s on its manifest rather than
+  being served in its place. Publish with `scripts/publish_model_bundle.sh`
+  (weights) and `scripts/publish_llama_server_bundle.sh` (the backend), which read
+  their constants out of the modules — so they cannot drift from the client — and
+  upload parts first, the manifest last. **Never delete a bundle's assets** to
+  tidy the release: they are the runtime download path for every app built
+  against that revision. Do not hand-upload weights to a version tag: the client
+  never reads them there. See `docs/releasing.md`.
 
 - **Nix flakes only see git-tracked files.** A new file in `src/` that is left
   untracked is **excluded** from `nix build` / `nix run` even though the working

@@ -63,10 +63,12 @@ fi
 
 # Read the constants out of the client module so the publisher can never
 # disagree with what the client will actually request.
-read -r REPO TAG REV PREFIX DISPLAY < <(MODEL="$MODEL" "$PY" -c \
+read -r REPO TAG REV PREFIX DISPLAY TITLE NOTES < <(MODEL="$MODEL" "$PY" -c \
     'import os, sys; sys.path.insert(0, "src"); import model_download as m; \
+     from voice_transcriber import releases as r; \
      s = m.get_spec(os.environ["MODEL"]); \
-     print(m.REPO_SLUG, s.bundle_tag, s.revision, s.asset_prefix, s.display_name)')
+     print(m.REPO_SLUG, s.bundle_tag, s.revision, s.asset_prefix, s.display_name, \
+           r.PREREQUISITES_TITLE, r.PREREQUISITES_NOTES)')
 
 OUT="${OUT:-dist/model}"
 SUMS="$OUT/${PREFIX}.SHA256SUMS"
@@ -124,19 +126,17 @@ for p in "${PARTS[@]}"; do
     esac
 done
 
-# 3. The release object hosts the assets. --prerelease keeps it out of
-#    /releases/latest, which is where the AppImage is published.
+# 3. The release object hosts the assets for every prerequisite, so it is
+#    created once (by whichever publisher runs first) and added to thereafter.
+#    --prerelease keeps it out of /releases/latest, which is where the app is.
 if ! "${GH[@]}" release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
     if [ "$DRY_RUN" = 1 ]; then
-        echo "would create weights release $TAG (prerelease)"
+        echo "would create prerequisites release $TAG (prerelease)"
     else
-        echo "Creating weights release $TAG ..."
+        echo "Creating prerequisites release $TAG ..."
         "${GH[@]}" release create "$TAG" --repo "$REPO" --prerelease \
-            --title "Model ${MODEL} ${REV:0:12}" \
-            --notes "Fine-tuned open source ${MODEL} weights (revision \`${REV}\`).
-
-Not an app release: this tag exists only to host the model assets, so app
-releases never have to re-upload them. See docs/releasing.md."
+            --title "$TITLE" \
+            --notes "$NOTES"
     fi
 fi
 
