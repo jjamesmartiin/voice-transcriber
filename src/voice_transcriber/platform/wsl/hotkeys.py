@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -221,7 +222,8 @@ class WSLHotkeyManager(BaseHotkeyManager):
 
     def set_sound_theme(self, theme):
         """Set the sound theme dynamically on the Windows host."""
-        return self._send(f"SET_SOUND:{theme}\n")
+        clean_theme = re.sub(r"[\r\n]", "", str(theme or "")).strip()
+        return self._send(f"SET_SOUND:{clean_theme}\n")
 
     def set_middle_click_enabled(self, enabled: bool):
         """Toggle middle click push-to-talk mode on the Windows host."""

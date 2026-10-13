@@ -358,6 +358,12 @@ class TestWSLHotkeyManagerIPC:
 
             assert manager.set_middle_click_enabled(False) is True
             assert "SET_MCLICK:0\n" in proc.stdin.writes
+
+            # A theme with newlines must not inject extra bridge commands
+            assert manager.set_sound_theme("notify\nEXIT") is True
+            assert "SET_SOUND:notifyEXIT\n" in proc.stdin.writes
+            # Only the final cleanup should write EXIT\n
+            assert proc.stdin.writes.count("EXIT\n") == 0
         finally:
             manager.stop()
             assert "EXIT\n" in proc.stdin.writes
