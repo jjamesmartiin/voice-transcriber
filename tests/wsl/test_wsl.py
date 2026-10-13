@@ -21,13 +21,22 @@ from unittest.mock import MagicMock
 import numpy as np
 
 # Ensure src is on sys.path
-SRC_DIR = Path(__file__).resolve().parents[2] / "src"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import hal
 from hal import WSL
 import t2
+
+
+def test_run_wsl_escapes_wsl_path():
+    """run_wsl.ps1 must escape single quotes in wslPath before cd '$wslPath'."""
+    script = REPO_ROOT / "platforms" / "wsl" / "run_wsl.ps1"
+    content = script.read_text(encoding="utf-8")
+    assert "cd '$wslPath'" not in content, "wslPath must be single-quote escaped before interpolation"
+    assert "escapedWslPath" in content
 
 
 # ===========================================================================

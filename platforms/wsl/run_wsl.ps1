@@ -75,8 +75,9 @@ $quoted = (($guestArgs | ForEach-Object {
     "'" + ("$_" -replace "'", "'\''") + "'"
 }) -join ' ')
 
+$escapedWslPath = $wslPath -replace "'", "'\''"
 $pulse = "export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native"
-$inner = "$pulse; cd '$wslPath' && bash ./$guestVerb.sh $quoted"
+$inner = "$pulse; cd '$escapedWslPath' && bash ./$guestVerb.sh $quoted"
 
 Write-Step "Running '$guestVerb' inside $Distro..."
 if ($guestVerb -eq "run" -and $guestArgs.Count -eq 0) {
