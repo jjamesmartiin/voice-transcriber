@@ -272,31 +272,48 @@ class RatatuiTui:
     def _read_loop(self):
         try:
             self._conn.settimeout(1.0)
-            buf = self._conn.makefile("r", encoding="utf-8", errors="replace")
+            # recv() and our own line buffer, not makefile(): a socket with a
+            # timeout makes the buffered reader raise OSError("cannot read from
+            # timed out object") instead of socket.timeout, so the poll below
+            # never fired and the loop died on the first idle second.
+            buf = b""
             MAX_LINE = 65536
             while not self._closed:
                 try:
-                    line = buf.readline(MAX_LINE)
+                    chunk = self._conn.recv(4096)
                 except (socket.timeout, TimeoutError):
                     continue
-                if not line:
+                if not chunk:
                     break
-                line = line.strip()
-                if not line:
+                buf += chunk
+                if len(buf) > MAX_LINE:
+                    buf = b""  # runaway line from a wedged peer
                     continue
-                try:
-                    msg = json.loads(line)
-                except ValueError:
-                    continue
-                if msg.get("t") == "cmd":
-                    self._dispatch(msg)
+                while b"\n" in buf:
+                    raw, buf = buf.split(b"\n", 1)
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except ValueError:
+                        continue
+                    if msg.get("t") == "cmd":
+                        self._dispatch(msg)
         except Exception as exc:
             logger.debug("vt-tui read loop ended: %s", exc)
         finally:
-            # The TUI process is gone (quit key, terminal closed, crash). If it
-            # exited on its own, treat it as a request to shut the app down.
             _dbg("read_loop EOF")
-            if not self._closed and self.on_quit:
+            # A frontend that really exited (quit key, terminal closed, crash)
+            # is a quit request. A read error while it is still running is not:
+            # taking the engine down over one used to leave no UI and no error.
+            frontend_gone = self._proc is None or self._proc.poll() is not None
+            if not self._closed and not frontend_gone:
+                logger.warning(
+                    "vt-tui read loop ended but the frontend is still running; "
+                    "keeping the engine alive"
+                )
+            elif not self._closed and self.on_quit:
                 try:
                     self.on_quit()
                 except Exception:
