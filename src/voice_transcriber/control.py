@@ -898,18 +898,34 @@ class ControlServer:
         try:
             deadline = time.monotonic() + DEFAULT_TIMEOUT
             data = b""
+            timed_out = False
             while b"\n" not in data and len(data) < MAX_REQUEST_BYTES:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    response = {"ok": False, "error": "request timed out"}
+                    timed_out = True
                     break
                 conn.settimeout(max(0.05, remaining))
-                chunk = conn.recv(4096)
+                try:
+                    chunk = conn.recv(4096)
+                except (socket.timeout, TimeoutError):
+                    timed_out = True
+                    break
                 if not chunk:
                     break
                 data += chunk
+
+            if timed_out:
+                response = {"ok": False, "error": "request timed out"}
+            elif len(data) >= MAX_REQUEST_BYTES and b"\n" not in data:
+                response = {
+                    "ok": False,
+                    "error": f"request exceeds maximum size ({MAX_REQUEST_BYTES} bytes)",
+                }
+            elif data:
+                line = data.split(b"\n", 1)[0].decode("utf-8", "replace")
+                response = self.dispatch(line)
             else:
-                response = self.dispatch(data.split(b"\n", 1)[0].decode("utf-8", "replace"))
+                response = {"ok": False, "error": "no request received"}
         except Exception as exc:  # a bad client must not kill the engine
             response = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         try:

@@ -338,6 +338,46 @@ class TestSocketTransport:
         finally:
             server.stop()
 
+    def test_client_closing_without_newline_is_dispatched(self, sock_path):
+        """A client that half-closes (EOF) without a trailing newline is still parsed."""
+        server = _server(sock_path)
+        assert server.start() is True
+        try:
+            import socket as socketlib
+
+            client = socketlib.socket(socketlib.AF_UNIX, socketlib.SOCK_STREAM)
+            client.settimeout(5.0)
+            client.connect(server.socket_path)
+            client.sendall(b'{"cmd": "toggle"}')
+            client.shutdown(socketlib.SHUT_WR)
+            reply = json.loads(client.recv(4096).decode().strip())
+            client.close()
+            assert reply.get("ok") is True, f"Expected ok: True, got {reply}"
+        finally:
+            server.stop()
+
+    def test_oversized_request_without_newline_is_rejected(self, sock_path, monkeypatch):
+        """A client sending more than MAX_REQUEST_BYTES without newline is rejected."""
+        server = _server(sock_path)
+        assert server.start() is True
+        try:
+            import socket as socketlib
+
+            monkeypatch.setattr(control, "MAX_REQUEST_BYTES", 1024)
+            client = socketlib.socket(socketlib.AF_UNIX, socketlib.SOCK_STREAM)
+            client.settimeout(5.0)
+            client.connect(server.socket_path)
+            # Send 1025 bytes without a newline
+            client.sendall(b"x" * 1025)
+            client.shutdown(socketlib.SHUT_WR)
+            raw = client.recv(4096).decode().strip()
+            client.close()
+            reply = json.loads(raw)
+            assert reply.get("ok") is False
+            assert "exceeds maximum size" in reply.get("error", "")
+        finally:
+            server.stop()
+
     def test_send_command_without_an_engine_is_a_clean_failure(self, tmp_path):
         missing = str(tmp_path / "nobody-home.sock")
         response = control.send_command("toggle", socket_path=missing)
