@@ -1,6 +1,7 @@
 # I built an offline dictation engine, and the speech recognition was the easy part
 
-*Draft — for review before publishing.*
+<!-- For cross-posting (Medium, Dev.to, Substack): replace 'assets/' with
+     https://raw.githubusercontent.com/jjamesmartiin/voice-transcriber/main/docs/assets/ -->
 
 ![Voice Transcriber's terminal UI: transcriptions stream into scrollback above a live inline prompt showing the microphone level, delivery mode and formatting preset.](assets/vt-demo.gif)
 
@@ -122,6 +123,8 @@ quantisation:
 | **overall (speech)** | **142** | **3.57%** | **1.43%** | **70.4%** |
 | **silence hallucination** | **12** | — | — | **0/12** |
 
+*(Note: We also benchmarked **Parakeet TDT 0.6B v3** across the exact same 154-clip suite. While Parakeet is faster and lighter on memory, Cohere decisively won on transcription accuracy across every category, so Cohere remains the default model.)*
+
 Two things worth saying about that table, because the honest version is more
 useful than the flattering one:
 
@@ -202,6 +205,20 @@ contextual_rules:
 `"push to get tea"` becomes `"push to Gitea"`; `"a cup of get tea"` does not
 become anything. This is a small idea that makes the feature usable in practice,
 because a dictionary that corrupts normal speech is worse than no dictionary.
+
+### Beyond dictation bursts: Meeting Mode and local diarization
+
+Push-to-talk solves the typing problem, but meetings are different: they run for
+an hour, multiple people speak, and you do not want text injected into your active
+window while listening.
+
+Voice Transcriber includes a dedicated **Meeting Mode** with a separate capture lifecycle:
+it buffers multi-hour audio without memory bloat (spilling raw audio chunks to temporary
+files after a configurable threshold), streams an in-progress preview to the terminal,
+and runs local, on-device speaker diarization (`sherpa-onnx` / `pyannote`) when finished.
+You can name speakers live in the TUI during the call and export formatted Markdown
+transcripts with speaker labels — entirely offline, with zero audio sent to
+cloud meeting-bot vendors.
 
 ---
 
@@ -458,7 +475,7 @@ practical:
 The shared tier is **hermetic** — no model, no microphone, no network, no
 touching the user's real config — so it runs in seconds on every platform, and CI
 runs four jobs (Linux, macOS, Windows, and a simulated WSL job) plus a lint step
-and a build of the Rust frontend. Just under a thousand tests currently.
+and a build of the Rust frontend. Over 1,830 tests currently across the matrix.
 
 The tiering is what let me be honest about a hard limit: the PowerShell bridge
 that serves WSL hotkeys **cannot run in CI**, because the Ubuntu runner has no
@@ -474,13 +491,13 @@ say exactly that. I would rather a user knows what has not been proven.
 ## Try it
 
 - **Linux:** `vt-x86_64.AppImage` from [releases], or `nix run github:jjamesmartiin/voice-transcriber`
-- **Windows:** `VoiceTranscriber-windows-x86_64.zip` — self-contained, no Python needed
+- **Windows:** Download the single-file installer `VoiceTranscriber-windows-x86_64-setup.exe` or portable `VoiceTranscriber-windows-x86_64.zip` from [releases] (self-contained, no Python needed). Or clone and run `scripts\setup.bat` then `scripts\run.bat`.
 - **macOS / from source:** `./scripts/setup.sh` then `./scripts/run.sh`, or `nix run .`
 
 Hold **Alt+Shift**, talk, release. Tap **Space** while holding it to latch
-hands-free. Bind anything you like with `vt hotkey add …` — including a single key
+hands-free. Bind anything you like with `vt hotkey add …` (or `python src/main.py hotkey add …`) — including a single key
 such as `f13`, or a chord your keyboard remapper produces. Run `./scripts/run.sh doctor`
-if your microphone is being difficult; there is a decent chance it is the muted-
+(or `scripts\run.bat doctor` on Windows) if your microphone is being difficult; there is a decent chance it is the muted-
 source bug above.
 
 - Source: [github.com/jjamesmartiin/voice-transcriber](https://github.com/jjamesmartiin/voice-transcriber)
