@@ -97,6 +97,40 @@ class TestLinuxClipboardSink:
         assert sink.type_text("one", fast=True) is True
         assert seen[-1] == ["ydotool", "type", "-d", "1", "-s", "1", "--", "one"]
 
+    def test_ydotool_failure_falls_back_to_xdotool(self, monkeypatch):
+        """When ydotool exits with error (e.g. ydotoold not running), xdotool is tried."""
+        seen = []
+        monkeypatch.setattr(
+            shutil, "which", lambda name: f"/usr/bin/{name}" if name in ("ydotool", "xdotool") else None
+        )
+        def run_fail_first(args, **kw):
+            seen.append(args[0])
+            if args[0] == "ydotool":
+                return subprocess.CompletedProcess(args, 1)  # failed
+            return subprocess.CompletedProcess(args, 0)      # success
+
+        monkeypatch.setattr(subprocess, "run", run_fail_first)
+        sink = hal.get_clipboard_sink(hal.LINUX)
+        assert sink.type_text("hello") is True
+        assert seen == ["ydotool", "xdotool"]
+
+    def test_all_typing_tools_failing_falls_back_to_clipboard(self, monkeypatch):
+        """When all typing tools fail, text is preserved by copying to clipboard."""
+        monkeypatch.setattr(
+            shutil, "which", lambda name: f"/usr/bin/{name}" if name in ("ydotool", "wl-copy") else None
+        )
+        calls = []
+        def run_check(args, **kw):
+            calls.append(args[0])
+            if args[0] == "ydotool":
+                return subprocess.CompletedProcess(args, 1)  # failed typing
+            return subprocess.CompletedProcess(args, 0)      # successful copy
+
+        monkeypatch.setattr(subprocess, "run", run_check)
+        sink = hal.get_clipboard_sink(hal.LINUX)
+        assert sink.type_text("hello") is True
+        assert "wl-copy" in calls
+
 
 class TestPasteTextSupport:
     def test_linux_hotkey_manager_paste_text(self):
