@@ -26,7 +26,8 @@ def _data_dir():
     # tests/shared/test_crossplatform_runtime.py pins to Local; the installer and
     # the app must resolve the same place, or one caches weights where the other
     # never looks.
-    return os.path.join(os.path.expanduser("~"), "AppData", "Local", "vt")
+    user_home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+    return os.path.join(user_home, "AppData", "Local", "vt")
 
 
 def get_data_dir():

@@ -486,7 +486,7 @@ def default_endpoint_file() -> str:
     so it cannot be guessed, so the running engine publishes an endpoint file next
     to where the ``AF_UNIX`` socket would have lived.
     """
-    override = os.environ.get(CONTROL_ENDPOINT_ENV)
+    override = os.environ.get(CONTROL_ENDPOINT_ENV) or os.environ.get("VT_CONTROL_ENDPOINT")
     if override:
         return override
     return os.path.join(

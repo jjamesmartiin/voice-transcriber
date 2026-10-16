@@ -52,6 +52,7 @@ _TEST_CONTROL_SOCKET = Path(tempfile.gettempdir()) / f"vt-control-tests-{os.getp
 os.environ.setdefault("VT_CONTROL_SOCKET", str(_TEST_CONTROL_SOCKET))
 _TEST_CONTROL_ENDPOINT = Path(tempfile.gettempdir()) / f"vt-control-tests-{os.getpid()}.json"
 os.environ.setdefault("VT_CONTROL_ENDPOINT", str(_TEST_CONTROL_ENDPOINT))
+os.environ.setdefault("VT_CONTROL_ENDPOINT_FILE", str(_TEST_CONTROL_ENDPOINT))
 
 #: The shipped custom dictionary, captured once per session by
 #: ``_isolate_runtime_settings`` (see the note there).

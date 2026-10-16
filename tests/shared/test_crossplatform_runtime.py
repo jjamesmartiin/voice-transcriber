@@ -337,6 +337,8 @@ class TestDataDirSelection:
         """Never touch the real home: creating ~/AppData on Linux would be a mess."""
         home = tmp_path / "home"
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
         monkeypatch.delenv("XDG_DATA_HOME", raising=False)
         return home
 
@@ -403,6 +405,7 @@ class TestDataDirSelection:
         # ``paths`` resolves the home with os.path.expanduser, t2 with Path.home;
         # pin both so the comparison is about the platform branch and nothing else.
         monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
         self._pretend_platform(monkeypatch, "nt")
         monkeypatch.setattr(paths, "os", types.SimpleNamespace(
             name="nt", environ=os.environ, path=os.path))
