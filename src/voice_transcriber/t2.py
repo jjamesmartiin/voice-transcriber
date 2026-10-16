@@ -4357,8 +4357,20 @@ def process_audio_stream(audio_data=None):
     if audio_data is None or len(audio_data) == 0:
         return "", 0
 
-    duration = len(audio_data) / ACTUAL_RATE
-    if duration < 0.15: # Support short single-word utterances (0.2s - 0.5s)
+    # Flatten audio before checking sample duration (audio_data may be a list of chunks)
+    try:
+        if isinstance(audio_data, np.ndarray) and audio_data.dtype == np.float32 and audio_data.ndim == 1:
+            flat_audio = audio_data
+        elif isinstance(audio_data, list) and len(audio_data) > 0 and isinstance(audio_data[0], np.ndarray):
+            flat_audio = np.concatenate([c.ravel() for c in audio_data]).astype(np.float32)
+        else:
+            flat_audio = np.asarray(audio_data, dtype=np.float32).ravel()
+    except Exception as e:
+        print(f"Processing error: {e}")
+        return "", 0
+
+    duration = len(flat_audio) / ACTUAL_RATE
+    if duration < 0.15:  # Support short single-word utterances (0.2s - 0.5s)
         return "", 0
 
     get_model(device=get_device())
@@ -4367,10 +4379,6 @@ def process_audio_stream(audio_data=None):
 
     # Transcribe directly from numpy array (zero-copy flattening)
     try:
-        if isinstance(audio_data, np.ndarray) and audio_data.dtype == np.float32 and audio_data.ndim == 1:
-            flat_audio = audio_data
-        else:
-            flat_audio = np.asarray(audio_data, dtype=np.float32).ravel()
         result = transcribe_audio(audio_data=flat_audio, sample_rate=ACTUAL_RATE, device=get_device())
     except Exception as e:
         print(f"Processing error: {e}")

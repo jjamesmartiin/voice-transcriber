@@ -544,3 +544,30 @@ class TestStderrNotSilencedOnBackendImport:
         target = res.stdout.strip()
         assert target != "/dev/null", f"fd 2 was redirected to {target}"
 
+
+class TestProcessAudioStreamChunkedInput:
+    """process_audio_stream must calculate duration from sample count, not chunk count."""
+
+    def test_list_of_chunks_is_not_dropped_as_under_duration(self, monkeypatch):
+        import numpy as np
+        import t2
+
+        # 30 chunks of 1024 samples = 30,720 samples (~1.92s at 16kHz)
+        chunks = [np.zeros(1024, dtype=np.float32) for _ in range(30)]
+
+        called = []
+        monkeypatch.setattr(t2, "get_model", lambda **kw: None)
+        monkeypatch.setattr(
+            t2,
+            "transcribe_audio",
+            lambda audio_data, sample_rate, **kw: (
+                called.append((len(audio_data), sample_rate)) or "test transcription"
+            ),
+        )
+
+        text, _ = t2.process_audio_stream(chunks)
+        assert text == "test transcription"
+        assert len(called) == 1
+        assert called[0][0] == 30 * 1024
+
+
