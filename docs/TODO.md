@@ -8,7 +8,7 @@ got: ...
 -->
 
 # Other things to fix 
-- So I set the word per minute for myself to 120 word per minute, and now it's not showing like my time saved kind of thing. 
+- [x] **Time saved badge disappearing when typing WPM is set to 120 (fixed in Rust & Python).** At 120 WPM, speaking + processing time often equals or exceeds typing duration (0.5s/word), producing `time_saved == 0.0`. Both frontends (`tui-rs/src/ui.rs` and `tui.py`) previously gated the entire badge on `saved > 0.0`, which suppressed accumulated session and lifetime totals whenever an utterance saved 0s. The badge now renders whenever `time_saved > 0.0` or session/lifetime totals exist, showing `⚡ saved: +0s (session: ... · total: ...)`. Pinned by tests in `tests/shared/test_time_saved.py` and `tui-rs/src/ui.rs`. 
 
 
 

@@ -525,34 +525,39 @@ class VoiceTranscriberTUI:
             else:
                 top_rule.append("│ ", style="dim white")
                 top_rule.append(f"proc: {elapsed_sec:.2f}s ", style="yellow")
-            if time_saved:
+            session_str = _format_optional_duration(session_time_saved)
+            lifetime_str = _format_optional_duration(lifetime_time_saved)
+            if session_str and lifetime_str and lifetime_str != session_str:
+                totals = f"(session: {session_str} · total: {lifetime_str})"
+            elif lifetime_str:
+                # Fresh session: the all-time total is the interesting number.
+                totals = f"(total: {lifetime_str})"
+            elif session_str:
+                totals = f"(session: {session_str})"
+            else:
+                totals = None
+
+            saved_pos = False
+            saved_str = None
+            if time_saved is not None:
                 if isinstance(time_saved, (int, float)):
-                    saved_str = f"+{_format_duration_helper(time_saved)}" if time_saved > 0 else None
+                    saved_pos = time_saved > 0
+                    saved_str = f"+{_format_duration_helper(max(0.0, float(time_saved)))}"
                 else:
-                    saved_str = str(time_saved).strip()
-                    if saved_str and not saved_str.startswith("+"):
-                        saved_str = f"+{saved_str}"
+                    raw_str = str(time_saved).strip()
+                    if raw_str:
+                        saved_str = raw_str if raw_str.startswith("+") else f"+{raw_str}"
+                        saved_pos = True
 
-                if saved_str:
-                    session_str = _format_optional_duration(session_time_saved)
-                    lifetime_str = _format_optional_duration(lifetime_time_saved)
-                    if session_str and lifetime_str and lifetime_str != session_str:
-                        totals = f"(session: {session_str} · total: {lifetime_str})"
-                    elif lifetime_str:
-                        # Fresh session: the all-time total is the interesting number.
-                        totals = f"(total: {lifetime_str})"
-                    elif session_str:
-                        totals = f"(session: {session_str})"
-                    else:
-                        totals = None
-
-                    top_rule.append("│ ", style="dim white")
-                    badge = (
-                        f"⚡ saved: {saved_str} {totals} "
-                        if totals
-                        else f"⚡ saved: {saved_str} "
-                    )
-                    top_rule.append(badge, style="bold green")
+            if saved_pos or totals:
+                saved_display = saved_str or "+0s"
+                top_rule.append("│ ", style="dim white")
+                badge = (
+                    f"⚡ saved: {saved_display} {totals} "
+                    if totals
+                    else f"⚡ saved: {saved_display} "
+                )
+                top_rule.append(badge, style="bold green")
             top_rule.append("│ ", style="dim white")
             top_rule.append(f"{status_str}\n", style=status_color)
             self.console.print(top_rule)

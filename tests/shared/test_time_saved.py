@@ -451,6 +451,25 @@ class TestTuiDisplay:
         assert "⚡ saved:" not in output
         assert "rec: 2.00s" in output
 
+    def test_rich_tui_shows_totals_when_time_saved_is_zero(self):
+        """When an utterance saves 0s (e.g. 120 WPM), totals must still render."""
+        tui = VoiceTranscriberTUI(ui_theme="cyan")
+        tui.console.width = 120
+        tui.console.record = True
+
+        tui.print_transcription(
+            text="Short utterance at fast typing speed.",
+            elapsed_sec=0.5,
+            rec_duration=2.0,
+            proc_time=0.4,
+            time_saved=0.0,
+            session_time_saved=105.0,
+            lifetime_time_saved=3661.0,
+        )
+
+        output = tui.console.export_text()
+        assert "⚡ saved: +0s (session: 1m 45s · total: 1h 01m)" in output
+
     def test_rich_tui_formatted_string_input(self):
         """print_transcription accepts pre-formatted strings for time saved."""
         tui = VoiceTranscriberTUI(ui_theme="cyan")

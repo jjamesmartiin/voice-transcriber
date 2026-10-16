@@ -487,28 +487,28 @@ pub fn transcription_block(
             Style::default().fg(Color::Yellow),
         ));
     }
-    if let Some(saved) = time_saved {
-        if saved > 0.0 {
-            spans.push(Span::styled("│ ", dim()));
-            let session = format_optional_duration(session_time_saved);
-            let lifetime = format_optional_duration(lifetime_time_saved);
-            let totals = match (&session, &lifetime) {
-                (Some(s), Some(l)) if s != l => {
-                    Some(format!("(session: {s} · total: {l})"))
-                }
-                // Fresh session: the all-time total is the interesting number.
-                (_, Some(l)) => Some(format!("(total: {l})")),
-                (Some(s), None) => Some(format!("(session: {s})")),
-                (None, None) => None,
-            };
-            let badge = match totals {
-                Some(totals) => {
-                    format!("⚡ saved: +{} {totals} ", format_duration(saved))
-                }
-                None => format!("⚡ saved: +{} ", format_duration(saved)),
-            };
-            spans.push(Span::styled(badge, bold(Color::Green)));
+    let session = format_optional_duration(session_time_saved);
+    let lifetime = format_optional_duration(lifetime_time_saved);
+    let totals = match (&session, &lifetime) {
+        (Some(s), Some(l)) if s != l => {
+            Some(format!("(session: {s} · total: {l})"))
         }
+        // Fresh session: the all-time total is the interesting number.
+        (_, Some(l)) => Some(format!("(total: {l})")),
+        (Some(s), None) => Some(format!("(session: {s})")),
+        (None, None) => None,
+    };
+    let saved_pos = time_saved.map(|s| s > 0.0).unwrap_or(false);
+    if saved_pos || totals.is_some() {
+        spans.push(Span::styled("│ ", dim()));
+        let saved_val = time_saved.unwrap_or(0.0).max(0.0);
+        let badge = match totals {
+            Some(totals) => {
+                format!("⚡ saved: +{} {totals} ", format_duration(saved_val))
+            }
+            None => format!("⚡ saved: +{} ", format_duration(saved_val)),
+        };
+        spans.push(Span::styled(badge, bold(Color::Green)));
     }
     spans.push(Span::styled("│ ", dim()));
     spans.push(Span::styled(
@@ -655,6 +655,25 @@ mod tests {
         );
         let top_str: String = block.top.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(top_str.contains("⚡ saved: +12s (session: 1m 45s · total: 1h 00m)"));
+    }
+
+    #[test]
+    fn test_transcription_block_shows_totals_when_time_saved_is_zero() {
+        let app = App::new("1.1.1", Theme::Cyan);
+        let block = transcription_block(
+            &app,
+            80,
+            "hello world",
+            1.5,
+            0.5,
+            0.2,
+            OutStatus::Typed,
+            Some(0.0),
+            Some(105.0),
+            Some(3661.0),
+        );
+        let top_str: String = block.top.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(top_str.contains("⚡ saved: +0s (session: 1m 45s · total: 1h 01m)"));
     }
 
     /// Parity with tui.format_duration_helper / t2.format_duration in Python.
