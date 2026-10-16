@@ -1662,9 +1662,13 @@ def test_extract_archive_refuses_symlink_traversal(tmp_path):
 def test_resolve_binary_ignores_path_unless_opted_in(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    fake_exe = bin_dir / ("llama-server.exe" if sys.platform == "win32" else "llama-server")
-    fake_exe.write_bytes(b"#!/bin/sh\n")
-    fake_exe.chmod(0o755)
+    if sys.platform == "win32":
+        from voice_transcriber.llama_server_bundle import REQUIRED_MEMBERS
+        _write_windows_bundle(bin_dir, REQUIRED_MEMBERS)
+    else:
+        fake_exe = bin_dir / "llama-server"
+        fake_exe.write_bytes(b"#!/bin/sh\n")
+        fake_exe.chmod(0o755)
 
     monkeypatch.setenv("PATH", str(bin_dir))
     monkeypatch.delenv(llama_server.ENV_BINARY, raising=False)

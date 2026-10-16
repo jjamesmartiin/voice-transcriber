@@ -96,7 +96,7 @@ class TestFullDictationSimulation:
 
         monkeypatch.setattr(micro_batcher, "StreamingMicroBatcher", FakeBatcher)
 
-        def fake_record_audio_stream(stream_callback=None):
+        def fake_record_audio_stream(stream_callback=None, **kwargs):
             frames = [np.full(1024, 0.05, dtype=np.float32) for _ in range(4)]
             for f in frames:
                 if stream_callback:
