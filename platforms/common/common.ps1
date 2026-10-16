@@ -60,6 +60,74 @@ function Update-SessionPath {
 
 function Get-VenvPython { param([string]$VenvDir) Join-Path $VenvDir "Scripts\python.exe" }
 
+# Locate a standalone prebuilt VoiceTranscriber.exe in dist/ or repo root.
+function Find-PrebuiltExe {
+    param([string]$RepoRoot)
+    $candidates = @(
+        (Join-Path $RepoRoot "dist\VoiceTranscriber\VoiceTranscriber.exe"),
+        (Join-Path $RepoRoot "VoiceTranscriber\VoiceTranscriber.exe"),
+        (Join-Path $RepoRoot "VoiceTranscriber.exe")
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c) { return $c }
+    }
+    return $null
+}
+
+# Download and extract the latest prebuilt standalone bundle from GitHub.
+function Install-PrebuiltRelease {
+    param(
+        [string]$RepoRoot,
+        [switch]$NoModel
+    )
+    $distDir = Join-Path $RepoRoot "dist"
+    if (-not (Test-Path $distDir)) {
+        New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+    }
+    $targetExe = Join-Path $distDir "VoiceTranscriber\VoiceTranscriber.exe"
+    $zipPath = Join-Path $distDir "VoiceTranscriber-windows-x86_64.zip"
+    $url = "https://github.com/jjamesmartiin/voice-transcriber/releases/latest/download/VoiceTranscriber-windows-x86_64.zip"
+
+    Write-Step "Downloading prebuilt VoiceTranscriber standalone bundle..."
+    Write-Host "URL: $url" -ForegroundColor Gray
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+        $ProgressPreference = 'Continue'
+        Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+    } catch {
+        Write-Err "Failed to download prebuilt bundle: $_"
+        return $false
+    }
+
+    Write-Step "Extracting bundle to $distDir..."
+    try {
+        Expand-Archive -Path $zipPath -DestinationPath $distDir -Force
+        Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+    } catch {
+        Write-Err "Failed to extract bundle: $_"
+        return $false
+    }
+
+    if (-not (Test-Path $targetExe)) {
+        Write-Err "Expected binary not found at $targetExe after extraction."
+        return $false
+    }
+
+    Write-Success "Prebuilt VoiceTranscriber extracted to $targetExe"
+
+    if (-not $NoModel) {
+        $modelDir = Join-Path $RepoRoot "models\cohere"
+        if (-not (Test-Path $modelDir)) {
+            Write-Host "`nNote: Model weights (~2.8 GB) will download automatically on first launch." -ForegroundColor Cyan
+            Write-Host "Or launch now with: run.bat" -ForegroundColor Cyan
+        } else {
+            Write-Success "Model weights found at $modelDir"
+        }
+    }
+
+    return $true
+}
+
 # The interpreter a platform script should use: the repo venv if present, else
 # the host Python. Launchers never create anything - that is setup's job.
 function Get-LaunchPython {

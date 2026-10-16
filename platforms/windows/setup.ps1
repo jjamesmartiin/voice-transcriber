@@ -10,10 +10,12 @@ $ErrorActionPreference = "Stop"
 
 $NoDev = $false
 $NoModel = $false
+$Prebuilt = $false
 foreach ($a in $args) {
     switch ("$a") {
         "--no-dev"   { $NoDev = $true }
         "--no-model" { $NoModel = $true }
+        "--prebuilt" { $Prebuilt = $true }
         "-h"         { $ShowHelp = $true }
         "--help"     { $ShowHelp = $true }
         default {
@@ -28,8 +30,9 @@ if ($ShowHelp) {
     Write-Host @"
 Voice Transcriber - Windows setup
 
-Usage: setup.bat [--no-dev] [--no-model]
+Usage: setup.bat [--prebuilt] [--no-dev] [--no-model]
 
+  --prebuilt   Download and set up the standalone prebuilt bundle (no Python required).
   --no-dev     Skip the dev/test tooling (pytest, PyInstaller).
   --no-model   Do not acquire the model. Use when running fully offline with
                no weights yet, or when you will place them in models\ manually.
@@ -75,25 +78,63 @@ function Ensure-LongPathsSupport {
 }
 Ensure-LongPathsSupport | Out-Null
 
-# --- Python 3.10+ (bootstrap with winget; the rest is in vt_dev.py) ----------
+# --- Python 3.10+ or Prebuilt Standalone ------------------------------------
+if ($Prebuilt) {
+    Write-Step "1. Installing prebuilt standalone bundle"
+    if (Install-PrebuiltRelease -RepoRoot $RepoRoot -NoModel:$NoModel) {
+        Write-Host @"
+
+======================================================
+             Setup Complete (Prebuilt)
+======================================================
+Launch:      run.bat
+Status:      run.bat status
+Diagnostics: run.bat doctor
+
+"@ -ForegroundColor Green
+        exit 0
+    }
+    exit 1
+}
+
 Write-Step "1. Checking host Python installation"
 $hostPy = Resolve-HostPython
 if ($hostPy) {
     Write-Success "Found Python: $($hostPy.Version)"
 } else {
     Write-Warn "Python 3.10+ was not found on your system."
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        $answer = Read-Host "Install Python 3.13 now with winget? [y/N]"
-        if ($answer -match '^(y|yes)$') {
+    Write-Host "You can download the prebuilt standalone bundle (no Python required),"
+    Write-Host "or install Python 3.13 via winget."
+    $choice = "1"
+    try {
+        $choice = Read-Host "Choose: [1] Download prebuilt standalone (Recommended) | [2] Install Python 3.13 | [3] Exit [1]"
+    } catch {}
+    if (-not $choice -or $choice -eq "1") {
+        if (Install-PrebuiltRelease -RepoRoot $RepoRoot -NoModel:$NoModel) {
+            Write-Host @"
+
+======================================================
+             Setup Complete (Prebuilt)
+======================================================
+Launch:      run.bat
+Status:      run.bat status
+Diagnostics: run.bat doctor
+
+"@ -ForegroundColor Green
+            exit 0
+        }
+        exit 1
+    } elseif ($choice -eq "2") {
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
             & winget install -e --id Python.Python.3.13 --accept-package-agreements --accept-source-agreements
             Update-SessionPath
             $hostPy = Resolve-HostPython
         }
     }
     if (-not $hostPy) {
-        Write-Err "Python 3.10+ is required."
+        Write-Err "Python 3.10+ is required when not using prebuilt standalone."
         Write-Host "Install from https://www.python.org/downloads/ (tick 'Add python.exe to PATH')," -ForegroundColor Yellow
-        Write-Host "or run: winget install -e --id Python.Python.3.13" -ForegroundColor Yellow
+        Write-Host "or run: setup.bat --prebuilt" -ForegroundColor Yellow
         exit 1
     }
     Write-Success "Python installed via winget: $($hostPy.Version)"

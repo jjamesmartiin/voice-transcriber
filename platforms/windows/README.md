@@ -20,21 +20,22 @@ or from the prebuilt self-contained EXE (see
 from source needs Python and a one-time `scripts\setup.bat`; the EXE needs neither.
 
 ### 1. Prerequisites
-- Python 3.10+ installed on Windows (from https://www.python.org/downloads/ with "Add python.exe to PATH" checked).
-- PowerShell 5.1+ or PowerShell 7+ (or Command Prompt).
+- **Option A (Standalone / Prebuilt - No Python needed)**: Just PowerShell 5.1+ (built into Windows 10/11) and git.
+- **Option B (From Source)**: Python 3.10+ installed on Windows (from https://www.python.org/downloads/ with "Add python.exe to PATH" checked).
 
-> If Python is missing, `scripts\setup.bat` offers to install Python 3.13 for you with
-> `winget` (included with Windows 10/11) before it continues.
+> If Python is missing, `scripts\setup.bat` offers to automatically download the prebuilt standalone bundle (`--prebuilt`), or install Python 3.13 via `winget`.
 
 ### 2. One-Click Setup & Launch (Recommended)
 From the repository root, you can simply run the batch launchers (by double-clicking them in File Explorer, or running from Command Prompt / PowerShell):
 ```cmd
-# Run setup (creates venv and installs dependencies):
+# Run setup (auto-downloads prebuilt bundle if Python is absent, or builds venv):
 scripts\setup.bat
 
 # Launch Voice Transcriber:
 scripts\run.bat
 ```
+
+> **No Python? No problem:** `scripts\setup.bat --prebuilt` downloads and extracts the prebuilt standalone Windows bundle into `dist\VoiceTranscriber`. `scripts\run.bat` automatically launches the standalone executable when no Python `.venv` is present.
 
 > **Note:** The `.bat` launchers automatically bypass PowerShell's script execution policy (`-ExecutionPolicy Bypass`), so you will not run into digital signature or `PSSecurityException` errors on downloaded scripts.
 
@@ -46,7 +47,8 @@ scripts\run.bat
 ### 2a. The five entry points
 
 ```cmd
-scripts\setup.bat                  :: prepare: venv + deps + model (drop weights in models\)
+scripts\setup.bat                  :: prepare: venv + deps + model (or prebuilt bundle if no Python)
+scripts\setup.bat --prebuilt       :: download standalone bundle directly (no Python needed)
 scripts\setup.bat --no-dev         :: skip pytest / PyInstaller (faster)
 scripts\setup.bat --no-model       :: do not acquire the model (weights placed later)
 

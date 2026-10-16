@@ -248,17 +248,17 @@ chmod +x vt-x86_64.AppImage
 
 #### 🪟 Windows (Native)
 **Option A: Prebuilt Standalone EXE (no Python or build tools required)**
-1. Download **`VoiceTranscriber-windows-x86_64.zip`** from [Latest Release](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) and extract it anywhere.
+1. Download **`VoiceTranscriber-windows-x86_64.zip`** (or `VoiceTranscriber-windows-x86_64-setup.exe`) from [Latest Release](https://github.com/jjamesmartiin/voice-transcriber/releases/latest) and extract/install it.
 2. Run **`VoiceTranscriber.exe`**.
 3. On first launch, it will offer to download the Cohere model weights (~2.8 GB) automatically. If offline or preferred, drop the unpacked model files into `models\cohere\` next to `VoiceTranscriber.exe`.
 
-**Option B: From Source (with local venv)**
+**Option B: Cloned Git Checkout (with or without Python)**
 From File Explorer or Command Prompt in the repo root:
 ```cmd
-scripts\setup.bat     :: One-time: create .venv, install dependencies, get the model
+scripts\setup.bat     :: One-time setup: downloads prebuilt bundle if Python is absent, or builds .venv
 scripts\run.bat       :: Launch (or: scripts\run.bat doctor)
 ```
-> `scripts\setup.bat` also works offline: drop weights in `models\` and it uses them.
+> Running `scripts\setup.bat --prebuilt` explicitly downloads the standalone Windows bundle into `dist\VoiceTranscriber` without requiring Python on the system. `scripts\run.bat` automatically launches the standalone binary when no Python `.venv` is present. `scripts\setup.bat` also works offline: drop weights in `models\` and it uses them.
 
 #### 🐧 Windows via WSL2 (any distro)
 From File Explorer or Command Prompt in the repo root:

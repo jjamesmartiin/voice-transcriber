@@ -33,7 +33,8 @@ class TestSharedCore:
     def test_common_ps1_defines_the_bootstrap_helpers(self):
         text = _read(COMMON_PS1)
         for fn in ("Write-Step", "Write-Success", "Write-Warn", "Write-Err",
-                   "Get-RepoRoot", "Resolve-HostPython", "Get-LaunchPython"):
+                   "Get-RepoRoot", "Resolve-HostPython", "Get-LaunchPython",
+                   "Find-PrebuiltExe", "Install-PrebuiltRelease"):
             assert f"function {fn}" in text, fn
 
     def test_verb_runner_exists_and_defines_every_verb(self):
@@ -78,12 +79,14 @@ class TestSetup:
         text = _read(WIN_DIR / "setup.ps1")
         assert '"--no-dev"' in text
         assert '"--no-model"' in text
+        assert '"--prebuilt"' in text
 
 
 class TestRunVerb:
     def test_run_requires_an_environment(self):
         text = _read(WIN_DIR / "run.ps1")
         assert "Get-LaunchPython" in text
+        assert "Find-PrebuiltExe" in text
         assert "setup.bat" in text
 
     def test_run_ends_by_propagating_the_app_exit_code(self):
