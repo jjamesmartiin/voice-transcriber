@@ -4,7 +4,7 @@ set -euo pipefail
 # ==============================================================================
 # Voice Transcriber - entry point: TEST
 #
-# ./scripts/test.sh [all|shared|platform|e2e|perf|verify] [pytest args]
+# ./scripts/test.sh [all|shared|platform|e2e|perf|verify|fast] [pytest args]
 #
 # One verb = one script. This dispatcher picks the platform toolchain and execs
 # platforms/<toolchain>/test.sh, which uses that OS's native tooling (apt/brew/

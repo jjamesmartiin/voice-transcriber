@@ -20,6 +20,7 @@ SRC_DIR = Path(__file__).resolve().parents[2] / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+import pytest
 from tui_ratatui import RatatuiTui
 
 
@@ -33,6 +34,7 @@ def make_tui(conn, exited=False):
     return tui
 
 
+@pytest.mark.slow
 def test_idle_socket_is_not_a_quit_request():
     local, peer = socket.socketpair()
     tui = make_tui(local)

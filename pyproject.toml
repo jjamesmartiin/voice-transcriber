@@ -56,6 +56,7 @@ dependencies = [
 dev = [
     "pytest",
     "pytest-mock",
+    "pytest-xdist",
     "ruff",
     "pyinstaller",
 ]
@@ -117,3 +118,7 @@ select = ["E4", "E7", "E9", "F", "W", "B"]
 # Keep the cache inside tests/ so the repo root stays flat. (Was pytest.ini.)
 [tool.pytest.ini_options]
 cache_dir = "tests/.pytest_cache"
+addopts = "-ra --tb=short"
+markers = [
+    "slow: marks tests as slow / subprocess-heavy (deselect with '-m \"not slow\"')",
+]

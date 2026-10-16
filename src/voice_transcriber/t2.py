@@ -868,16 +868,24 @@ def reset_terminal():
     except Exception:
         pass
 
-# Global device variable
+# Global device variable (lazy to avoid importing torch/urllib at t2 import time)
+_DEVICE = None
+
 def get_device():
+    global _DEVICE
+    if _DEVICE is not None:
+        return _DEVICE
     try:
         import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     except ImportError:
-        device = "cpu"
-    return device
+        _DEVICE = "cpu"
+    return _DEVICE
 
-DEVICE = get_device()
+def __getattr__(name: str):
+    if name == "DEVICE":
+        return get_device()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Audio buffering
 stop_recording = threading.Event()
@@ -2693,8 +2701,13 @@ def _score_setting(query: str, title: str, keywords: str = "") -> int | None:
 
     if t == q:
         return 1000
+    name = t.split(": ", 1)[1] if ": " in t else t
+    if name == q or (len(q) > 3 and q.endswith("s") and name == q[:-1]):
+        return 900
     if t.startswith(q):
         return 800 - len(q)
+    if name.startswith(q):
+        return 750 - len(q)
     if q in t:
         return 600 - t.find(q) * 10
     if kw and q in kw:
@@ -3227,8 +3240,8 @@ def select_settings_picker():
         {
             "id": "microphone",
             "icon": "🎙️ ",
-            "title": "Audio: Device (Mic)",
-            "keywords": "mic microphone audio device input hardware primary secondary",
+            "title": "Audio: Microphone",
+            "keywords": "mic mics microphone microphones audio device input hardware primary secondary",
         },
         {
             "id": "sound_mute",
@@ -4348,7 +4361,7 @@ def process_audio_stream(audio_data=None):
     if duration < 0.15: # Support short single-word utterances (0.2s - 0.5s)
         return "", 0
 
-    get_model(device=DEVICE)
+    get_model(device=get_device())
 
     transcribe_start_time = time.time()
 
@@ -4358,7 +4371,7 @@ def process_audio_stream(audio_data=None):
             flat_audio = audio_data
         else:
             flat_audio = np.asarray(audio_data, dtype=np.float32).ravel()
-        result = transcribe_audio(audio_data=flat_audio, sample_rate=ACTUAL_RATE, device=DEVICE)
+        result = transcribe_audio(audio_data=flat_audio, sample_rate=ACTUAL_RATE, device=get_device())
     except Exception as e:
         print(f"Processing error: {e}")
         result = ""
@@ -4446,11 +4459,11 @@ def getch():
 
 def main():
     print("T2 Transcription Tool (Optimized)")
-    print(f"Using device: {DEVICE}")
+    print(f"Using device: {get_device()}")
     load_audio_config()
 
     # Preload model at startup
-    preload_thread = preload_model(device=DEVICE)
+    preload_thread = preload_model(device=get_device())
 
     if preload_thread.is_alive():
         print("Waiting for model...")

@@ -83,8 +83,8 @@ pub const SETTINGS: [SettingItem; 31] = [
     SettingItem {
         kind: SettingKind::Microphone,
         icon: "•",
-        title: "Audio: Device (Mic)",
-        keywords: "mic microphone audio device input hardware primary secondary",
+        title: "Audio: Microphone",
+        keywords: "mic mics microphone microphones audio device input hardware primary secondary",
         menu: SettingsMenu::Main,
     },
     SettingItem {
@@ -913,9 +913,18 @@ pub fn score_setting(query: &str, item: &SettingItem) -> Option<i32> {
     if title == q {
         return Some(1000);
     }
+    // Sub-title / name match without category prefix (e.g. "Microphone" in "Audio: Microphone")
+    let name = title.split_once(": ").map(|(_, n)| n).unwrap_or(&title);
+    if name == q || (q.len() > 3 && q.ends_with('s') && name == &q[..q.len() - 1]) {
+        return Some(900);
+    }
     // Title starts with query
     if title.starts_with(&q) {
         return Some(800 - q.len() as i32);
+    }
+    // Setting name starts with query
+    if name.starts_with(&q) {
+        return Some(750 - q.len() as i32);
     }
     // Title contains query
     if let Some(pos) = title.find(&q) {
@@ -1982,6 +1991,35 @@ mod tests {
         assert!(score_setting("mouse", item_mouse).is_some());
         assert!(score_setting("mute", item_mute).is_some());
         assert!(score_setting("xyzabc", item_space).is_none());
+    }
+
+    #[test]
+    fn test_microphone_search_ranks_audio_above_reset() {
+        let mut state = SettingsPickerState::new();
+        state.query = "microphone".to_string();
+        state.update_filter();
+
+        assert!(state.filtered_indices.len() >= 2);
+        assert_eq!(
+            SETTINGS[state.filtered_indices[0]].kind,
+            SettingKind::Microphone,
+            "Audio: Microphone must be ranked first when searching 'microphone'"
+        );
+        assert_eq!(
+            SETTINGS[state.filtered_indices[1]].kind,
+            SettingKind::RescanMics,
+            "Reset: Microphones must be ranked below Audio: Microphone"
+        );
+
+        for q in ["mic", "micro", "microphones"] {
+            state.query = q.to_string();
+            state.update_filter();
+            assert_eq!(
+                SETTINGS[state.filtered_indices[0]].kind,
+                SettingKind::Microphone,
+                "Audio: Microphone must be ranked first when searching '{q}'"
+            );
+        }
     }
 
     #[test]

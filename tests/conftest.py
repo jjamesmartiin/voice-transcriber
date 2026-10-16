@@ -46,6 +46,13 @@ os.environ.setdefault("VT_LOG_FILE", str(_TEST_LOG_FILE))
 _TEST_STATS_FILE = Path(tempfile.gettempdir()) / f"vt-stats-tests-{os.getpid()}.json"
 os.environ.setdefault("VT_STATS_FILE", str(_TEST_STATS_FILE))
 
+# Control API socket and endpoint must never touch or conflict with a live
+# running engine on the user's default socket.
+_TEST_CONTROL_SOCKET = Path(tempfile.gettempdir()) / f"vt-control-tests-{os.getpid()}.sock"
+os.environ.setdefault("VT_CONTROL_SOCKET", str(_TEST_CONTROL_SOCKET))
+_TEST_CONTROL_ENDPOINT = Path(tempfile.gettempdir()) / f"vt-control-tests-{os.getpid()}.json"
+os.environ.setdefault("VT_CONTROL_ENDPOINT", str(_TEST_CONTROL_ENDPOINT))
+
 #: The shipped custom dictionary, captured once per session by
 #: ``_isolate_runtime_settings`` (see the note there).
 _SHIPPED_DICTIONARY = None
@@ -85,6 +92,10 @@ def _isolate_runtime_settings():
         "MEETING", "MEETING_SPILL_MINUTES", "TYPING_WPM",
         "DIARIZATION", "DIARIZATION_SPEAKERS", "DIARIZATION_MODEL",
         "MEETING_OUTPUT_DIR", "MEETING_OUTPUT_FORMAT",
+        "OUTPUT_MODE", "AUTO_TYPE", "AUTO_TYPE_TRAILING_SPACE", "AUTO_TYPE_AUTO_PUNCTUATE",
+        "IS_MUTED", "MIDDLE_CLICK_ENABLED", "KEEP_BLUETOOTH_HANDSFREE",
+        "SOUND_THEME", "UI_THEME", "MODEL_BACKEND", "OVERRIDE_MODE",
+        "LANGUAGE", "WAIT_FOR_MODEL_ON_STARTUP", "HOTKEY_BINDS",
     )
     pp_attrs = (
         "_PUNCTUATION_MODE", "_STRUCTURE_MODE", "_CLEANUP_MODE",

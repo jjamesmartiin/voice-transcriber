@@ -249,6 +249,25 @@ def test_score_setting_fuzzy_matching():
     assert t2._score_setting("nonexistentqueryxyz", "Trailing Space", "kw") is None
 
 
+def test_microphone_search_ranks_audio_above_reset():
+    """Searching for microphone/mic must rank the Audio device row above Reset: Microphones."""
+    import t2
+
+    mic_title = "Audio: Microphone"
+    mic_kw = "mic mics microphone microphones audio device input hardware primary secondary"
+    reset_title = "Reset: Microphones"
+    reset_kw = "reset rescan refresh microphones mics devices audio input list enumerate plugged busy stale missing"
+
+    for q in ("microphone", "mic", "micro", "microphones"):
+        mic_score = t2._score_setting(q, mic_title, mic_kw)
+        reset_score = t2._score_setting(q, reset_title, reset_kw)
+        assert mic_score is not None
+        assert reset_score is not None
+        assert mic_score >= reset_score, (
+            f"Query '{q}': mic score {mic_score} < reset score {reset_score}"
+        )
+
+
 def test_read_key_windows_simulation(monkeypatch):
     import t2
     # Simulate Windows platform

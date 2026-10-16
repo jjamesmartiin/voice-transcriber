@@ -32,7 +32,7 @@ IS_WINDOWS = os.name == "nt"
 IS_DARWIN = sys.platform == "darwin"
 
 _VALID_TIERS = ("all", "shared", "platform", "e2e", "model", "perf", "verify",
-                "latency", "benchmark", "windows", "linux", "macos", "wsl")
+                "fast", "latency", "benchmark", "windows", "linux", "macos", "wsl")
 
 _COLOR = sys.stdout.isatty()
 
@@ -66,6 +66,7 @@ def _env(extra: dict | None = None) -> dict:
     """
     env = dict(os.environ)
     env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUNBUFFERED", "1")
     if extra:
         env.update(extra)
     return env
@@ -463,7 +464,10 @@ def cmd_test(args: list[str]) -> int:
 
     if tier == "verify":
         return 0 if have_model else 1
-    if tier in ("model", "e2e"):
+    if tier == "fast":
+        targets = ["tests/shared"]
+        rest = ["-m", "not slow", *rest]
+    elif tier in ("model", "e2e"):
         targets = ["tests/e2e"]
     elif tier in ("perf", "latency", "benchmark"):
         targets = ["tests/e2e/test_latency_and_accuracy.py"]
@@ -480,6 +484,16 @@ def cmd_test(args: list[str]) -> int:
 
     if not ensure_dev_tool(py, "pytest", "pytest", no_dev):
         return 1
+    # Auto-parallelize with xdist when available and not overridden.
+    if not any(a == "-n" or a.startswith("-n") for a in rest):
+        try:
+            has_xdist = subprocess.call(
+                [str(py), "-c", "import xdist"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=_env()) == 0
+            if has_xdist:
+                rest = ["-n", "auto", *rest]
+        except OSError:
+            pass
     step(f"TEST running [{tier}] on {plat_name}: {' '.join(targets)}")
     return sh([py, "-m", "pytest", *targets, *rest])
 

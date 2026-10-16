@@ -62,7 +62,7 @@ try:
         _per_user_model_dir,
     )
 except ImportError:  # run as a script: `python src/voice_transcriber/model_download.py`
-    from paths import (
+    from paths import (  # noqa: F401
         find_repo_root,
         get_data_dir,
         _has_repo_marker,

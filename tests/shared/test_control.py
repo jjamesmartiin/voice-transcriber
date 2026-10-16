@@ -454,8 +454,9 @@ class TestSocketPathLength:
     and it looked like the control API was broken on macOS.
     """
 
-    def test_the_default_path_fits_in_sun_path(self):
+    def test_the_default_path_fits_in_sun_path(self, monkeypatch):
         """The derived path must be bindable on the strictest platform."""
+        monkeypatch.delenv(control.CONTROL_SOCKET_ENV, raising=False)
         assert len(control.default_socket_path().encode()) <= 103
 
     @requires_af_unix
@@ -635,8 +636,11 @@ class TestTcpTransport:
         monkeypatch.setattr(socket, "socket", lambda *a, **k: fake_sock)
         ep = tmp_path / "ep.json"
         server = control.ControlServer(_FakeEngine(), transport=control.TCP, endpoint_file=str(ep))
-        server._start_tcp()
-        fake_sock.setsockopt.assert_any_call(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        try:
+            server._start_tcp()
+            fake_sock.setsockopt.assert_any_call(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        finally:
+            server.stop()
 
     def test_the_endpoint_is_removed_on_stop(self, endpoint_file):
         server = control.ControlServer(

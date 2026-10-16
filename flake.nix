@@ -210,6 +210,7 @@
             librosa
             sherpaOnnx
             pytest
+            pytest-xdist
             psutil
             pyyaml
             rich
@@ -286,6 +287,7 @@
               export PYTHONPATH=$PYTHONPATH:$(pwd):$(pwd)/src
               export OPENBLAS_NUM_THREADS=1
               export MKL_NUM_THREADS=1
+              export PYTHONUNBUFFERED=1
               TIER=tests/linux
               if [ -n "''${WSL_DISTRO_NAME:-}" ] || [ -e /mnt/wslg ]; then
                 TIER=tests/wsl
@@ -366,6 +368,7 @@
             sherpaOnnx
             pip
             pytest
+            pytest-xdist
             psutil
             pyyaml
             rich
@@ -391,6 +394,7 @@
 
             shellHook = ''
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
+              export PYTHONUNBUFFERED=1
               export PS1='\[\033[1;32m\][VT-dev:\w]\$\[\033[0m\] '
               # Send the banner to stderr: `nix develop --command ... --json`
               # is a documented way to drive the app, and a banner on stdout

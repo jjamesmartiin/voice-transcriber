@@ -185,6 +185,7 @@ def _make_manager(platform: str):
     return manager, inject, cb_start, cb_stop
 
 
+@pytest.mark.slow
 class TestMiddleClickHoldContract:
     @pytest.mark.parametrize("platform", [hal.LINUX, hal.WINDOWS])
     def test_quick_tap_never_triggers(self, platform, require_tap):

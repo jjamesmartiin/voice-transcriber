@@ -70,6 +70,7 @@ class _FakeNumpy:
 # ===========================================================================
 # 1. bf16 CPU detection (the exact behavior that made Windows 2x slower)
 # ===========================================================================
+@pytest.mark.slow
 class TestCpuBf16Detection:
     def _proc_readable_as(self, monkeypatch, content):
         real_open = builtins.open
@@ -138,6 +139,7 @@ class TestCpuBf16Detection:
 # ===========================================================================
 # 2. CPU thread selection (physical cores on Windows, 8-cap elsewhere)
 # ===========================================================================
+@pytest.mark.slow
 class TestCpuThreadSelection:
     def _capture(self, monkeypatch):
         tc = _import_tc()
@@ -428,6 +430,7 @@ class TestDataDirSelection:
         assert target.exists()
 
 
+@pytest.mark.slow
 class TestQuantizeDynamicDefaults:
     def test_default_is_off_on_cpu(self, monkeypatch):
         tc = _import_tc()

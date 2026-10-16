@@ -320,6 +320,7 @@ class TestOneFileIsOneModule:
     modules. Run in a subprocess, because what matters is the *first* import.
     """
 
+    @pytest.mark.slow
     def test_bare_imports_are_the_package_modules(self, tmp_path):
         import os
 

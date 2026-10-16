@@ -77,7 +77,7 @@ class _Recorder:
 
         self.server = Server(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02), daemon=True).start()
 
     def close(self):
         self.server.shutdown()

@@ -277,6 +277,7 @@ class TestHandsFreeLatchWorkflow:
 # ===========================================================================
 # 3. Middle-Click Push-to-Talk & Quick Click Cancellation
 # ===========================================================================
+@pytest.mark.slow
 class TestMiddleClickWorkflow:
     def test_middle_click_default_disabled(self):
         import t2

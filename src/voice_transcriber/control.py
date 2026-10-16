@@ -695,7 +695,7 @@ class ControlServer:
             except OSError:
                 pass
             server.listen(8)
-            server.settimeout(0.5)  # so the accept loop can notice _stop
+            server.settimeout(0.05)  # so the accept loop can notice _stop quickly
         except OSError as e:
             # Never raise: a missing control API must not stop the app. But say
             # *why* — the usual cause is a socket path longer than sun_path
@@ -726,7 +726,7 @@ class ControlServer:
                 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server.bind((self.host, 0))
             server.listen(8)
-            server.settimeout(0.5)
+            server.settimeout(0.05)
         except OSError as e:
             logger.warning(
                 "Control API unavailable on %s (%s); the app runs, but control "
@@ -765,11 +765,26 @@ class ControlServer:
         )
         self._thread.start()
 
+    def _wake_server(self) -> None:
+        """Poke the listening socket so ``_serve``'s accept loop unblocks immediately."""
+        try:
+            if self.transport == TCP and self.port and self.host:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.05)
+                    s.connect((self.host, self.port))
+            elif self.transport == UNIX and self.socket_path and os.path.exists(self.socket_path):
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.05)
+                    s.connect(self.socket_path)
+        except Exception:
+            pass
+
     def stop(self) -> None:
         """Stop serving and remove the socket."""
         self._stop.set()
         self._cancel_meeting_watchdog()
         self._started = False
+        self._wake_server()
         if self._server is not None:
             try:
                 self._server.close()
@@ -856,6 +871,12 @@ class ControlServer:
             except socket.timeout:
                 continue
             except OSError:
+                break
+            if self._stop.is_set():
+                try:
+                    conn.close()
+                except OSError:
+                    pass
                 break
             if not _CONNECTION_SLOTS.acquire(blocking=False):
                 # At the cap: refuse immediately rather than spawn a thread that

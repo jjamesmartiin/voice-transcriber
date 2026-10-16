@@ -443,6 +443,7 @@ class TestConfigResolutionIsolation:
         assert str(common).startswith(str(tmp_path / "data" / "config"))
         assert str(local).startswith(str(tmp_path / "data" / "config"))
 
+    @pytest.mark.slow
     def test_the_cohere_loader_does_not_search_cwd(self, monkeypatch, tmp_path):
         """A model directory is loaded with ``trust_remote_code=True``.
 
@@ -527,6 +528,7 @@ class TestZenityNotificationEscaping:
 class TestStderrNotSilencedOnBackendImport:
     """Importing the Cohere backend must not redirect process fd 2 to /dev/null."""
 
+    @pytest.mark.slow
     @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="inspects /proc/self/fd/2")
     def test_import_cohere_backend_keeps_stderr_intact(self):
         import subprocess

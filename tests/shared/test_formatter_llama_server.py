@@ -546,6 +546,7 @@ def test_a_crashing_server_reports_its_stderr(tmp_path, monkeypatch):
     assert "refusing to start" in str(caught.value)
 
 
+@pytest.mark.slow
 def test_a_server_that_never_became_healthy_times_out(stub_env, monkeypatch):
     monkeypatch.setenv("VT_STUB_UNHEALTHY", "100000")
     monkeypatch.setattr(llama_server, "SPAWN_TIMEOUT_S", 0.5)
@@ -579,6 +580,7 @@ def test_an_http_error_is_reported(stub_env, monkeypatch):
 # ---------------------------------------------------------------------------
 # Cancellation - kill on timeout, and never kill someone else's server
 # ---------------------------------------------------------------------------
+@pytest.mark.slow
 def test_a_timeout_terminates_the_spawned_server(stub_env, monkeypatch):
     monkeypatch.setenv("VT_STUB_DELAY", "10")
     llama_server.warm()
@@ -598,6 +600,7 @@ def test_a_timeout_terminates_the_spawned_server(stub_env, monkeypatch):
     assert proc.poll() is not None, "the runaway server was left running"
 
 
+@pytest.mark.slow
 def test_a_timeout_never_kills_an_attached_server(stub_env, monkeypatch):
     """We do not own an attached server, so we must not terminate it."""
     proc, url = _start_stub(stub_env, VT_STUB_DELAY="10")
