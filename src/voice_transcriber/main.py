@@ -1334,12 +1334,14 @@ class SimpleVoiceTranscriber:
         def _process_worker():
             if active_record_thread:
                 active_record_thread.join(timeout=RECORD_THREAD_JOIN_TIMEOUT_S)
+            captured_frames = getattr(self, 'audio_frames', None)
             with self._process_lock:
                 self.process_recording(
                     micro_batcher=active_batcher,
                     copy_to_clipboard=active_copy_clipboard,
                     start_time=active_start_time,
                     release_time=active_release_time,
+                    audio_frames=captured_frames,
                 )
 
         self.process_thread = threading.Thread(target=_process_worker)
@@ -1355,7 +1357,7 @@ class SimpleVoiceTranscriber:
             logger.error(f"Recording error: {e}")
             self.recording = False
 
-    def process_recording(self, micro_batcher=None, copy_to_clipboard=None, start_time=None, release_time=None):
+    def process_recording(self, micro_batcher=None, copy_to_clipboard=None, start_time=None, release_time=None, audio_frames=None):
         """Process the recorded audio frames"""
         if start_time is None:
             start_time = getattr(self, 'start_time', time.time())
@@ -1365,6 +1367,8 @@ class SimpleVoiceTranscriber:
             copy_to_clipboard = getattr(self, 'copy_to_clipboard', False)
         if micro_batcher is None:
             micro_batcher = getattr(self, 'micro_batcher', None)
+        if audio_frames is None:
+            audio_frames = getattr(self, 'audio_frames', None)
 
         rec_duration = time.time() - start_time
         audio_rec_duration = max(0.0, release_time - start_time)
@@ -1416,7 +1420,7 @@ class SimpleVoiceTranscriber:
                 return
 
         micro_batcher = getattr(self, 'micro_batcher', None)
-        if not micro_batcher and (self.audio_frames is None or len(self.audio_frames) == 0):
+        if not micro_batcher and (audio_frames is None or len(audio_frames) == 0):
             # Hide recording notification
             try:
                 self.visual_notification.hide_notification()
@@ -1454,14 +1458,15 @@ class SimpleVoiceTranscriber:
             if micro_batcher:
                 transcription = micro_batcher.finish_and_get_text(skip_slm=True).strip()
             else:
-                result, transcribe_time = process_audio_stream(self.audio_frames)
+                result, transcribe_time = process_audio_stream(audio_frames)
                 from post_processor import clean_speech_transcription
                 transcription = clean_speech_transcription(result.strip(), skip_slm=True)
             proc_time = time.time() - t0_proc
 
             # Explicitly free the audio data memory after processing
-            del self.audio_frames
-            self.audio_frames = []
+            if getattr(self, 'audio_frames', None) is audio_frames:
+                self.audio_frames = []
+            del audio_frames
 
             if transcription:
                 import t2

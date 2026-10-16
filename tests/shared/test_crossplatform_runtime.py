@@ -286,6 +286,21 @@ class TestAudioFramesEmptyCheck:
         assert len(seen) == 1
         assert isinstance(seen[0], np.ndarray)
 
+    def test_process_recording_does_not_clear_subsequent_recording_frames(self, monkeypatch):
+        """When recording #2 starts while #1 is processing, #2's frames must not be cleared."""
+        frames1 = [np.zeros(1024, dtype=np.float32)] * 2
+        app = self._make_app(monkeypatch, frames1)
+        seen = []
+        monkeypatch.setattr("main.process_audio_stream", lambda f: (seen.append(f) or ("ok", 0.01)))
+
+        # Simulate recording #2 starting while #1 is processing
+        frames2 = [np.ones(1024, dtype=np.float32)] * 5
+        app.audio_frames = frames2
+
+        app.process_recording(audio_frames=frames1)
+        assert seen == [frames1]
+        assert app.audio_frames is frames2
+
     def test_empty_list_without_batcher_returns_early(self, monkeypatch):
         app = self._make_app(monkeypatch, [])
         seen = []
