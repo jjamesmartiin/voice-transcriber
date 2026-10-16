@@ -110,8 +110,8 @@ structure_mode: "off"
 # Not gated by this setting: number/date formatting, the dictionary, casing, the
 # punctuation preset and structured output — those change how text looks, not
 # which words survive. See docs/cleanup_modes.md.
-# Default: "full"
-cleanup_mode: "full"
+# Default: "artifacts"
+cleanup_mode: "artifacts"
 
 # ------------------------------------------------------------------------------
 # Meeting Mode (long, non-injecting capture)

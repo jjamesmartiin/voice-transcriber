@@ -64,10 +64,10 @@ class TestMicroBatchingEngine(unittest.TestCase):
             self.assertEqual(clean_speech_transcription("Hello world whoops"), "Hello world")
 
         # Verbal retractions & speech self-corrections
-            self.assertEqual(clean_speech_transcription("Let's meet at 5 PM... actually 6 PM"), "Let's meet at 6 PM.")
-            self.assertEqual(clean_speech_transcription("Send the report to John... I mean Alice"), "Send the report to Alice.")
-            self.assertEqual(clean_speech_transcription("We should deploy on Tuesday... no wait Wednesday"), "We should deploy on Wednesday.")
-            self.assertEqual(clean_speech_transcription("Add the class definition... scratch that"), "Add the class definition.")
+            self.assertEqual(clean_speech_transcription("Let's meet at 5 PM... actually 6 PM", cleanup_mode="full"), "Let's meet at 6 PM.")
+            self.assertEqual(clean_speech_transcription("Send the report to John... I mean Alice", cleanup_mode="full"), "Send the report to Alice.")
+            self.assertEqual(clean_speech_transcription("We should deploy on Tuesday... no wait Wednesday", cleanup_mode="full"), "We should deploy on Wednesday.")
+            self.assertEqual(clean_speech_transcription("Add the class definition... scratch that", cleanup_mode="full"), "Add the class definition.")
 
             # Repeated stutters
             self.assertEqual(clean_speech_transcription("about. about this project"), "about this project.")

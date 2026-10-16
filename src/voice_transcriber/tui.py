@@ -124,7 +124,7 @@ class VoiceTranscriberTUI:
         self.middle_click_enabled = False
         self.punctuation_mode = "full"
         self.structure_mode = "off"
-        self.cleanup_mode = "full"
+        self.cleanup_mode = "artifacts"
         self.meeting_mode = "off"
         self.meeting_spill_minutes = 10
         self.diarization = "off"

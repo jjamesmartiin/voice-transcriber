@@ -44,7 +44,7 @@ structure_mode = "off"
 # "artifacts" (drop filler/stutters/hallucinations only), or "full" (default;
 # also resolves self-corrections). Number/date formatting, the dictionary, casing
 # and punctuation are separate settings, not gated by this.
-cleanup_mode = "full"
+cleanup_mode = "artifacts"
 
 # Convert spoken number words to digits. Options: auto (consecutive digit
 # chains only; ordinals and small isolated counts read as words, e.g.

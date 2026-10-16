@@ -334,13 +334,13 @@ class TestPostProcessorDictationWorkflows:
         pp.set_number_digits_mode("digits")
         try:
             # 'make that'
-            assert pp.clean_speech_transcription("we will launch on monday make that tuesday", skip_slm=True) == "we will launch on tuesday."
+            assert pp.clean_speech_transcription("we will launch on monday make that tuesday", skip_slm=True, cleanup_mode="full") == "we will launch on tuesday."
             # 'actually'
-            assert pp.clean_speech_transcription("the meeting is at two actually three", skip_slm=True) == "the meeting is at 3."
+            assert pp.clean_speech_transcription("the meeting is at two actually three", skip_slm=True, cleanup_mode="full") == "the meeting is at 3."
             # 'I mean'
-            assert pp.clean_speech_transcription("send it to bob I mean alice", skip_slm=True) == "send it to alice."
+            assert pp.clean_speech_transcription("send it to bob I mean alice", skip_slm=True, cleanup_mode="full") == "send it to alice."
             # 'scratch that' at phrase end
-            assert pp.clean_speech_transcription("I think we should cancel the deploy, scratch that", skip_slm=True) == "I think we should cancel the deploy."
+            assert pp.clean_speech_transcription("I think we should cancel the deploy, scratch that", skip_slm=True, cleanup_mode="full") == "I think we should cancel the deploy."
         finally:
             pp.set_number_digits_mode(prev_mode)
 

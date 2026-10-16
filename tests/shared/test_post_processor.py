@@ -1005,7 +1005,7 @@ def test_digit_string_guards_unit(number_mode):
     ("Add the class definition... scratch that", "Add the class definition."),
 ])
 def test_verbal_self_corrections_are_resolved(spoken, expected):
-    assert pp.clean_speech_transcription(spoken, skip_slm=True, punctuation_mode="full") == expected
+    assert pp.clean_speech_transcription(spoken, skip_slm=True, punctuation_mode="full", cleanup_mode="full") == expected
 
 
 @pytest.mark.parametrize("spoken", [
@@ -1035,7 +1035,7 @@ def test_the_advertised_demo_is_pinned():
     try:
         out = pp.clean_speech_transcription(
             "remind me tuesday no wait make that wednesday uh and uh also add a note to the github issue",
-            skip_slm=True, punctuation_mode="full")
+            skip_slm=True, punctuation_mode="full", cleanup_mode="full")
     finally:
         pp.set_custom_dictionary(saved if saved else None)
     assert out == "remind me wednesday also add a note to the GitHub issue."
@@ -1087,7 +1087,7 @@ def test_weekday_capitalisation_is_preserved_mid_sentence():
     ("Let's schedule it for Tuesday no uh Wednesday", "Let's schedule it for Wednesday."),
 ])
 def test_an_apology_or_filler_inside_a_correction(spoken, expected):
-    assert pp.clean_speech_transcription(spoken, skip_slm=True, punctuation_mode="full") == expected
+    assert pp.clean_speech_transcription(spoken, skip_slm=True, punctuation_mode="full", cleanup_mode="full") == expected
 
 
 @pytest.mark.parametrize("text", [

@@ -286,7 +286,7 @@ impl App {
             formatter_model: "s1-mini".to_string(),
             formatter_style: "semi-formal".to_string(),
             formatter_context: "general".to_string(),
-            cleanup_mode: "full".to_string(),
+            cleanup_mode: "artifacts".to_string(),
             meeting_mode: "off".to_string(),
             meeting_spill_minutes: 10,
             diarization: "off".to_string(),

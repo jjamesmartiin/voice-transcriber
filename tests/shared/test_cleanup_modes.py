@@ -46,17 +46,17 @@ def render(text, mode):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("value,expected", [
-    (None, "full"),
-    ("", "full"),
+    (None, "artifacts"),
+    ("", "artifacts"),
     ("OFF", "off"),
     ("artifacts", "artifacts"),
     ("noise", "artifacts"),
     ("safe", "artifacts"),
     ("full", "full"),
     ("corrections", "full"),
-    # Unknown means "full", not "off": this setting defaults to the shipped
+    # Unknown means "artifacts", not "off": this setting defaults to the shipped
     # behaviour, so a typo must not silently disable cleaning.
-    ("nonsense", "full"),
+    ("nonsense", "artifacts"),
 ])
 def test_cleanup_mode_normalisation(value, expected):
     assert pp.normalize_cleanup_mode(value) == expected
@@ -67,17 +67,17 @@ def test_set_and_get_cleanup_mode_round_trip():
     try:
         assert pp.set_cleanup_mode("artifacts") == "artifacts"
         assert pp.get_cleanup_mode() == "artifacts"
-        assert pp.set_cleanup_mode("bogus") == "full"
+        assert pp.set_cleanup_mode("bogus") == "artifacts"
     finally:
         pp.set_cleanup_mode(previous)
 
 
 def test_the_default_is_the_shipped_behaviour():
-    """Whatever the default is, it must be "full" — that is what v1.3.1 did."""
+    """Whatever the default is, it must be "artifacts"."""
     previous = pp.get_cleanup_mode()
     try:
         pp.set_cleanup_mode(previous)
-        assert pp.get_cleanup_mode() == "full"
+        assert pp.get_cleanup_mode() == "artifacts"
     finally:
         pp.set_cleanup_mode(previous)
 

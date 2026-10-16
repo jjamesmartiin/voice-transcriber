@@ -444,7 +444,7 @@ class TestResetToDefaults:
         assert t2.DEFAULT_SETTINGS["FORMATTER"] == "off"
         assert t2.DEFAULT_SETTINGS["MEETING"] == "off"
         # Cheap deterministic corrections stay on.
-        assert t2.DEFAULT_SETTINGS["CLEANUP_MODE"] == "full"
+        assert t2.DEFAULT_SETTINGS["CLEANUP_MODE"] == "artifacts"
         assert t2.DEFAULT_SETTINGS["SERIAL_COLLAPSE"] is True
         assert t2.DEFAULT_SETTINGS["SPELL_COMMAND"] is True
 

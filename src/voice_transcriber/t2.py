@@ -193,9 +193,9 @@ PUNCTUATION_MODES = ["full", "no_terminal_period", "no_punctuation", "aesthetic_
 STRUCTURE_MODE = "off"
 STRUCTURE_MODES = ["off", "inline", "blocks"]
 #: Cleanup modes: how much of the post-processing pass may change the words.
-#: "full" is the shipped default, "artifacts" removes noise only, "off" keeps every
-#: word. See docs/cleanup_modes.md.
-CLEANUP_MODE = "full"
+#: "artifacts" is the shipped default (removes noise only), "full" resolves corrections,
+#: "off" keeps every word. See docs/cleanup_modes.md.
+CLEANUP_MODE = "artifacts"
 CLEANUP_MODES = ["off", "artifacts", "full"]
 #: Meeting mode (docs/plan-diarization.md sec 5.2): a second, non-injecting
 #: capture lifecycle for minutes-to-hours recordings. "off" is the shipped
@@ -300,7 +300,7 @@ DEFAULT_SETTINGS = {
     # See the comment on that constant for why `full` and not `no_punctuation`.
     'PUNCTUATION_MODE': DEFAULT_PUNCTUATION_MODE,
     'STRUCTURE_MODE': "off",
-    'CLEANUP_MODE': "full",
+    'CLEANUP_MODE': "artifacts",
     'MEETING': "off",
     'MEETING_SPILL_MINUTES': 10,
     'DIARIZATION': "off",
@@ -1193,7 +1193,7 @@ def load_audio_config(file_path=None):
             PUNCTUATION_MODE = get_canonical_preset_name(raw_punct)
 
             STRUCTURE_MODE = normalize_structure_mode(config.get('structure_mode', 'off'))
-            CLEANUP_MODE = normalize_cleanup_mode(config.get('cleanup_mode', 'full'))
+            CLEANUP_MODE = normalize_cleanup_mode(config.get('cleanup_mode', 'artifacts'))
             MEETING = normalize_meeting(config.get('meeting', 'off'))
             MEETING_SPILL_MINUTES = normalize_meeting_spill_minutes(
                 config.get('meeting_spill_minutes', MEETING_SPILL_MINUTES))

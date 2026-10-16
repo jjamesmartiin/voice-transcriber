@@ -317,7 +317,7 @@ class SimpleVoiceTranscriber:
             ui_theme=getattr(t2, 'UI_THEME', 'auto'),
             punctuation_mode=getattr(t2, 'PUNCTUATION_MODE', 'full'),
             structure_mode=getattr(t2, 'get_structure_mode', lambda: 'off')(),
-            cleanup_mode=getattr(t2, 'get_cleanup_mode', lambda: 'full')(),
+            cleanup_mode=getattr(t2, 'get_cleanup_mode', lambda: 'artifacts')(),
             meeting_mode=getattr(t2, 'get_meeting', lambda: 'off')(),
             meeting_spill_minutes=getattr(t2, 'get_meeting_spill_minutes', lambda: 10)(),
             diarization=getattr(t2, 'get_diarization', lambda: 'off')(),
@@ -1613,7 +1613,7 @@ class SimpleVoiceTranscriber:
             "punctuation_mode": getattr(t2, "PUNCTUATION_MODE", "full"),
             "structure_mode": getattr(t2, "get_effective_structure_mode", lambda: "off")(),
             "structure_setting": getattr(t2, "get_structure_mode", lambda: "off")(),
-            "cleanup_mode": getattr(t2, "get_cleanup_mode", lambda: "full")(),
+            "cleanup_mode": getattr(t2, "get_cleanup_mode", lambda: "artifacts")(),
             # Configured vs effective, like the structure pair above: with
             # cleanup off the formatter cannot run, and `status` should say so
             # rather than report "on" for something that is inert.

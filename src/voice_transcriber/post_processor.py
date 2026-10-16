@@ -2926,7 +2926,7 @@ def process_structure_blocks(text: str, mode: str | None = None) -> str:
 # dictionary, casing, the punctuation preset and structured output are *not*
 # gated here: they are separate settings, and they change how text looks rather
 # than which words survive.
-_CLEANUP_MODE = "full"
+_CLEANUP_MODE = "artifacts"
 _CLEANUP_MODES = ["off", "artifacts", "full"]
 _CLEANUP_MODE_ALIASES = {
     "off": "off", "none": "off", "no": "off", "raw": "off", "verbatim": "off",
@@ -2941,13 +2941,13 @@ _CLEANUP_MODE_ALIASES = {
 def normalize_cleanup_mode(value) -> str:
     """Map a user value onto ``off``/``artifacts``/``full``.
 
-    An unrecognised value means ``full``, unlike the structure modes (where it
+    An unrecognised value means ``artifacts``, unlike the structure modes (where it
     means ``off``): this setting *defaults* to the shipped behaviour, so going
     quiet on a typo would look like the feature was broken instead of disabled.
     """
     if value is None:
-        return "full"
-    return _CLEANUP_MODE_ALIASES.get(str(value).strip().lower().replace("-", "_"), "full")
+        return "artifacts"
+    return _CLEANUP_MODE_ALIASES.get(str(value).strip().lower().replace("-", "_"), "artifacts")
 
 
 def set_cleanup_mode(mode) -> str:

@@ -588,7 +588,7 @@ def test_typing_downgrades_blocks_to_inline(tmp_path, monkeypatch):
 
 
 def test_cleanup_mode_defaults_full_and_round_trips(tmp_path, monkeypatch):
-    """The cleanup setting persists, and "full" is the shipped default."""
+    """The cleanup setting persists, and "artifacts" is the shipped default."""
     import yaml
 
     import post_processor
@@ -597,34 +597,36 @@ def test_cleanup_mode_defaults_full_and_round_trips(tmp_path, monkeypatch):
     monkeypatch.setattr(t2, 'get_config_file', lambda: config)
 
     t2.load_audio_config()
-    assert t2.get_cleanup_mode() == "full"
+    assert t2.get_cleanup_mode() == "artifacts"
     # Loading publishes it to the post-processor, so the default is in force too.
-    assert post_processor.get_cleanup_mode() == "full"
+    assert post_processor.get_cleanup_mode() == "artifacts"
 
     try:
-        t2.set_cleanup_mode("artifacts")
-        assert t2.get_cleanup_mode() == "artifacts"
-        assert post_processor.get_cleanup_mode() == "artifacts"
-        assert yaml.safe_load(config.read_text())["cleanup_mode"] == "artifacts"
+        t2.set_cleanup_mode("full")
+        assert t2.get_cleanup_mode() == "full"
+        assert post_processor.get_cleanup_mode() == "full"
+        assert yaml.safe_load(config.read_text())["cleanup_mode"] == "full"
 
         # A fresh load reads it back.
-        t2.CLEANUP_MODE = "full"
+        t2.CLEANUP_MODE = "off"
         t2.load_audio_config()
-        assert t2.get_cleanup_mode() == "artifacts"
+        assert t2.get_cleanup_mode() == "full"
 
         # Cycling walks off -> artifacts -> full -> off.
+        t2.set_cleanup_mode("off")
+        assert t2.toggle_cleanup_mode() == "artifacts"
         assert t2.toggle_cleanup_mode() == "full"
         assert t2.toggle_cleanup_mode() == "off"
         assert post_processor.get_cleanup_mode() == "off"
     finally:
-        t2.set_cleanup_mode("full")
+        t2.set_cleanup_mode("artifacts")
 
 
 def test_cleanup_mode_env_override_and_unknown_value(tmp_path, monkeypatch):
     import yaml
 
     config = tmp_path / "config.yaml"
-    config.write_text(yaml.dump({"cleanup_mode": "artifacts"}))
+    config.write_text(yaml.dump({"cleanup_mode": "full"}))
     monkeypatch.setattr(t2, 'get_config_file', lambda: config)
 
     monkeypatch.setenv("VT_CLEANUP_MODE", "off")
@@ -635,8 +637,8 @@ def test_cleanup_mode_env_override_and_unknown_value(tmp_path, monkeypatch):
     # not look like a deliberately disabled feature.
     monkeypatch.setenv("VT_CLEANUP_MODE", "nonsense")
     t2.load_audio_config()
-    assert t2.get_cleanup_mode() == "full"
-    t2.set_cleanup_mode("full")
+    assert t2.get_cleanup_mode() == "artifacts"
+    t2.set_cleanup_mode("artifacts")
 
 
 def test_meeting_defaults_off_and_round_trips(tmp_path, monkeypatch):

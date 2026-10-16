@@ -19,14 +19,14 @@ Implemented by `src/voice_transcriber/post_processor.py` →
 | Mode | Noise | Self-corrections | Use when |
 | --- | --- | --- | --- |
 | `off` | kept | kept | you want every word that was said, verbatim |
-| `artifacts` | removed | kept | you want the junk gone but your words left alone |
-| `full` | removed | resolved | the shipped default: you want the correction to land |
+| `artifacts` | removed | kept | the shipped default: you want the junk gone but your words left alone |
+| `full` | removed | resolved | you want the correction to land |
 
 Aliases: `none`/`raw`/`verbatim`/`no`/`disabled` → `off`; `noise`/`safe`/
 `cleanup`/`light`/`artifact` → `artifacts`; `all`/`corrections`/`complete`/
 `heavy` → `full`.
 
-An **unrecognised** value means `full`, which is the opposite of the structure
+An **unrecognised** value means `artifacts`, which is the opposite of the structure
 modes (where it means `off`) and deliberate: this setting *defaults* to the
 shipped behaviour, so a typo must not look like a feature that stopped working.
 
@@ -65,12 +65,12 @@ full        : (empty)
 
 ## 4. Invariants
 
-1. `full` is the default and reproduces the pre-existing behaviour exactly.
+1. `artifacts` is the default: strips silence hallucinations and noise while keeping spoken words intact.
 2. `off` deletes nothing: no hallucination stripping, no filler, no stutters, no
    self-correction rewriting — and the model-backed SLM pass does not run either,
    since its contract is retraction and filler removal.
 3. `artifacts` never rewrites a correction: the retracted words stay in place.
-4. An unknown value is `full`, never a silent `off`.
+4. An unknown value is `artifacts`, never a silent `off`.
 5. The mode is a single global that callers may pin per utterance
    (`clean_speech_transcription(..., cleanup_mode="off")`), which is how the tests
    exercise it.
