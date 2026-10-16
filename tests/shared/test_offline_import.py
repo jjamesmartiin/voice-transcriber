@@ -86,3 +86,15 @@ def test_importing_the_dictionary_does_not_import_a_network_client():
     )
     assert result.returncode == 0, result.stderr
     assert "OK" in result.stdout
+
+
+def test_importing_main_does_not_import_torch():
+    """Importing main must not eagerly import torch."""
+    result = _run_in_fresh_interpreter(
+        "import main; "
+        "assert 'torch' not in sys.modules, 'importing main eagerly imported torch'; "
+        "print('OK')"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+

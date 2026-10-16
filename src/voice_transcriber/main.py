@@ -45,7 +45,7 @@ from tui import VoiceTranscriberTUI
 # silently missed across the pair. See the note in docs/TODO.md.
 import t2
 from t2 import (
-    preload_model, DEVICE, record_audio_stream, process_audio_stream,
+    preload_model, record_audio_stream, process_audio_stream,
     stop_recording, load_audio_config, get_active_device_name
 )
 
@@ -192,7 +192,7 @@ class SimpleVoiceTranscriber:
         # Preload model in background with live loading spinner animation
         from t2 import MODEL_BACKEND
         self.tui.update_state("PROCESSING", f"Loading {MODEL_BACKEND.capitalize()} model weights...")
-        self.preload_thread = preload_model(device=DEVICE)
+        self.preload_thread = preload_model(device=t2.get_device())
 
         # Non-blocking model-load tracking: the app must stay fully responsive
         # even when loading the model stalls (e.g. slow/flaky connection to
