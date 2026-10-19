@@ -1197,3 +1197,95 @@ def test_spoken_quotation_marks_become_real_quotes(spoken, expected):
 def test_a_lone_quote_word_is_left_alone(text):
     """Only a matched pair is a quotation; a single "quote" is ordinary speech."""
     assert pp.process_spoken_quotes(text) == text
+
+
+# ---------------------------------------------------------------------------
+# Nix vocabulary vs. honest English ("next packages", a person named Nick)
+# ---------------------------------------------------------------------------
+# Every string below is real Cohere output captured from synthesised dictation,
+# not invented. Measured over 49 utterances: spoken "nix packages" reaches the
+# post-processor as "nix packages" (8x) or "nick's packages" (1x) and NEVER as
+# "next packages" (0x); honest "the next packages" likewise never comes out
+# nix-like (0x). POSITIVES and NEGATIVES therefore live in the same test: the
+# guarantee is worth nothing if it is proved on a different corpus.
+_NIX_POSITIVES = [
+    ("I need to update nick's packages on the laptop tonight.", "update nixpkgs on the laptop"),
+    ("Nix packages is pinned to an old revision in the flake lock file.", "nixpkgs is pinned"),
+    ("I patched nix packages locally to fix the build.", "patched nixpkgs locally"),
+    ("The nix packages revision is behind upstream.", "the nixpkgs revision"),
+    ("Our nix packages fork carries a local patch.", "our nixpkgs fork"),
+    ("Bump nix packages in the flake inputs.", "bump nixpkgs in the flake inputs"),
+    ("Switch nix packages to the unstable channel.", "switch nixpkgs to the unstable channel"),
+    ("Run nixo's rebuild switch and then reboot the machine.", "run nixos-rebuild switch"),
+    ("Nix's rebuild takes a while on this machine.", "nixos-rebuild takes a while"),
+    ("Nick's flake show lists the outputs.", "nix flake show lists the outputs"),
+    ("Nick's flake check fails on that package.", "nix flake check fails"),
+]
+
+_NIX_NEGATIVES = [
+    # A real person named Nick, with packages.
+    "Nick's packages arrived at the front door.",
+    "Nick's packages were left with the neighbor.",
+    # The phrase the whole exercise is about protecting.
+    "We ship the next packages in the release on Friday.",
+    "The next packages we ship need a signature.",
+    "Let me know the next packages you want installed.",
+    "Install the next packages after the reboot.",
+    "The next packages are already in the staging repo.",
+    "Next packages will land in the main channel.",
+    "I will review the next packages tomorrow morning.",
+    "The next packages we ship will be smaller.",
+    "Please test the next packages before the deadline.",
+    "He mentioned next packages in the stand-up notes.",
+    "Ship the next packages to staging.",
+    "The next packages replace the old ones.",
+    "Update the next packages first.",
+    "The next packages get tested next week.",
+    # "next" near the trigger verb: the trigger must not reach across it.
+    "We need to update the packages next week.",
+    # "nix" as a verb meaning cancel, next to the word "packages".
+    "Nix the idea, the packages are fine.",
+    "He said, nix the old packages.",
+    "Let's nix the extra packages.",
+    "The packages are in the staging store.",
+]
+
+
+def test_nix_vocabulary_is_rewritten_but_next_packages_is_untouched():
+    """Positives and adversarial negatives in one test, on one dictionary load."""
+    dictionary_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "config", "dictionary.yaml")
+    pp.load_custom_dictionary_from_file(dictionary_path)
+
+    for spoken, wanted in _NIX_POSITIVES:
+        out = pp.clean_speech_transcription(spoken, skip_slm=True)
+        assert wanted in out.lower(), f"recall miss: {spoken!r} -> {out!r}"
+
+    for text in _NIX_NEGATIVES:
+        out = pp.clean_speech_transcription(text, skip_slm=True)
+        assert out == text, f"PRECISION MISFIRE: {text!r} -> {out!r}"
+
+
+def test_nix_dictionary_fires_are_visible_at_debug_level(caplog):
+    """A dictionary fire is logged as rule -> (before, after), and only at DEBUG.
+
+    Without this a misfire is invisible and the whole rule set is untunable next
+    month. The default root level is WARNING, so the line costs nothing in normal
+    use.
+    """
+    import logging
+
+    dictionary_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "config", "dictionary.yaml")
+    pp.load_custom_dictionary_from_file(dictionary_path)
+    spoken = "I need to update nick's packages on the laptop tonight."
+
+    with caplog.at_level(logging.WARNING, logger=pp.logger.name):
+        pp.clean_speech_transcription(spoken, skip_slm=True)
+    assert not [r for r in caplog.records if "nixpkgs" in r.getMessage()]
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger=pp.logger.name):
+        pp.clean_speech_transcription(spoken, skip_slm=True)
+    fired = [r.getMessage() for r in caplog.records if "contextual rule" in r.getMessage()]
+    assert any("nixpkgs" in m and "nick's packages" in m for m in fired), fired

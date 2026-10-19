@@ -101,6 +101,9 @@ class BaseHotkeyManager:
     def stop(self) -> None:
         """Stop the event loop and release resources."""
 
+    def reset(self) -> None:
+        """Reset transient state and re-evaluate devices if supported."""
+
     def cleanup(self) -> None:
         """Full teardown; defaults to :meth:`stop`."""
         self.stop()

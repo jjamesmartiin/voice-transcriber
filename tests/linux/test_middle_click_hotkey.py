@@ -699,6 +699,131 @@ def test_linux_chord_swallow_resets_on_button_up():
         manager.cleanup()
 
 
+def test_linux_scan_for_devices_caches_ignored_paths(monkeypatch):
+    """scan_for_devices must cache non-monitored paths to avoid stalling the loop."""
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
+    manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    ignored_dev = FakeDevice("Lid Switch", [0])
+    opened_paths = []
+
+    def fake_input_device(path):
+        opened_paths.append(path)
+        return ignored_dev
+
+    monkeypatch.setattr(manager.evdev, "list_devices", lambda: [ignored_dev.path])
+    monkeypatch.setattr("glob.glob", lambda pat: [ignored_dev.path])
+    monkeypatch.setattr(manager.evdev, "InputDevice", fake_input_device)
+
+    try:
+        manager._ignored_paths.clear()
+        manager.scan_for_devices()
+        assert ignored_dev.path in manager._ignored_paths
+        assert len(opened_paths) == 1
+
+        # Second scan: ignored path must be skipped without re-opening
+        manager.scan_for_devices()
+        assert len(opened_paths) == 1
+    finally:
+        manager.cleanup()
+
+
+def test_linux_toggling_mouse_mode_clears_ignored_paths():
+    """Toggling middle click mode must reset _ignored_paths so mice are rescanned."""
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
+    manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    try:
+        manager._ignored_paths.add("/dev/input/fake_mouse")
+        manager.set_middle_click_enabled(True)
+        assert len(manager._ignored_paths) == 0
+
+        manager._ignored_paths.add("/dev/input/fake_mouse")
+        manager.set_middle_click_enabled(False)
+        assert len(manager._ignored_paths) == 0
+    finally:
+        manager.cleanup()
+
+
+def test_linux_grab_mouse_busy_device_handled_cleanly(monkeypatch, caplog):
+    """A busy pointing device (e.g. held by input-remapper) must skip without WARNING."""
+    import errno
+    import logging
+
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
+    manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    device = FakeDevice("TPPS/2 Elan TrackPoint", [272, 273, 274])
+    device.ungrab = lambda: None
+
+    def fail_busy():
+        err = OSError("Device or resource busy")
+        err.errno = errno.EBUSY
+        raise err
+
+    device.grab = fail_busy
+    virtual_created = []
+    monkeypatch.setattr(manager, "_create_virtual_mouse", lambda d: virtual_created.append(d))
+
+    try:
+        with caplog.at_level(logging.DEBUG):
+            res = manager._grab_mouse(device)
+        assert res is False
+        assert device.path in manager._mouse_grab_failed
+        assert len(virtual_created) == 0, "must not create a virtual clone for a busy device"
+
+        # Verify no WARNING was logged, only INFO
+        warnings = [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
+        assert len(warnings) == 0, f"Expected no warnings, got: {warnings}"
+        infos = [rec for rec in caplog.records if "busy" in rec.message]
+        assert len(infos) == 1
+    finally:
+        manager.cleanup()
+
+
+def test_linux_reset_clears_failed_grabs_and_syncs():
+    """manager.reset() must clear failed grabs and cached paths to retry devices."""
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
+    manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    try:
+        manager._mouse_grab_failed.add("/dev/input/failed_mouse")
+        manager._ignored_paths.add("/dev/input/ignored_dev")
+        manager._grab_sync_pending = False
+
+        manager.reset()
+
+        assert len(manager._mouse_grab_failed) == 0
+        assert len(manager._ignored_paths) == 0
+        assert manager._grab_sync_pending is True
+    finally:
+        manager.cleanup()
+
+
+def test_linux_set_middle_click_enabled_clears_failed_grabs():
+    """Enabling mouse mode must clear _mouse_grab_failed to retry grabbing."""
+    LinuxHotkeyManager = ScriptedLinuxHotkeyManager
+    manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    try:
+        manager._mouse_grab_failed.add("/dev/input/failed_mouse")
+        manager.set_middle_click_enabled(True)
+        assert len(manager._mouse_grab_failed) == 0
+    finally:
+        manager.cleanup()
+
+
+def test_reset_global_hotkeys_calls_manager_reset():
+    """hotkeys.reset_global_hotkeys must call reset() on the registered manager."""
+    from voice_transcriber import hotkeys
+
+    mock_mgr = MagicMock()
+    hotkeys.register_manager(mock_mgr)
+    try:
+        hotkeys.reset_global_hotkeys()
+        assert mock_mgr.reset.called
+    finally:
+        hotkeys.release_manager(mock_mgr)
+
+
+
+
+
 
 
 

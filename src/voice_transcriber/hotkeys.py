@@ -78,6 +78,16 @@ def set_global_middle_click_enabled(enabled: bool):
             logger.debug(f"set_global_middle_click_enabled failed: {e}")
 
 
+def reset_global_hotkeys():
+    """Reset failed device grabs and path caches on the active hotkey manager."""
+    global _current_hotkey_instance
+    if _current_hotkey_instance and hasattr(_current_hotkey_instance, "reset"):
+        try:
+            _current_hotkey_instance.reset()
+        except Exception as e:
+            logger.debug(f"reset_global_hotkeys failed: {e}")
+
+
 def set_global_binds(binds):
     """Propagate push-to-talk binds to the active hotkey manager.
 
@@ -132,6 +142,7 @@ __all__ = [
     "is_running_in_wsl",
     "register_manager",
     "release_manager",
+    "reset_global_hotkeys",
     "set_global_sound_theme",
     "set_global_middle_click_enabled",
     "WaylandGlobalHotkeys",

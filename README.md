@@ -999,6 +999,32 @@ The LLM can directly emit the clean YAML entry:
     guards: ["museum", "gallery", "drawing", "class", "student"]
 ```
 
+#### What a trigger can and cannot express
+
+`triggers_before` matches only when the spoken form follows the trigger
+immediately, or with exactly one filler taken from a fixed built-in set
+(`it`, `changes`, `code`, `branch`):
+
+| text | fires? |
+|---|---|
+| `update nix packages` | yes |
+| `update it nix packages` | yes |
+| `update the nix packages` | **no** — `the` is not in the filler set |
+| `update all of the nix packages` | **no** |
+
+`triggers_after` is stricter: the trigger must follow immediately, no gap. A
+`guards` entry cancels the rule if it appears *anywhere* in the text, so a guard
+must be a word that never occurs in the sentence you do want rewritten. There is
+no "within N words" or "same sentence only" support — if a phrase needs either,
+widen `triggers_before` instead.
+
+#### Seeing every dictionary fire
+
+`VT_LOG_LEVEL=DEBUG` logs one line per fire — `contextual rule 'nixpkgs' ->
+(before, after)` or `dictionary -> (before, after)` — from post-processing steps
+13d/13e. It is off by default (the root level is `WARNING`), so a misfire leaves
+no trace in a normal log; turn it on for a session while you add or tune a rule.
+
 ---
 
 ## License

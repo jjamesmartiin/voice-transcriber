@@ -20,6 +20,11 @@ dictionary:
   nixos rebuild: nixos-rebuild
   nixos-rebuild: nixos-rebuild
   nix os rebuild: nixos-rebuild
+  # ASR renders the spoken "nixos rebuild" as a possessive; "nixo's"/"nix's" are
+  # not English, so a flat rewrite cannot steal a real phrase. "nix shell" is
+  # deliberately absent: that IS the modern CLI's name, not a mishearing.
+  nixo's rebuild: nixos-rebuild
+  nix's rebuild: nixos-rebuild
   configuration dot nix: configuration.nix
   configuration.nix: configuration.nix
   flake dot nix: flake.nix
@@ -340,5 +345,82 @@ contextual_rules:
       - "greek"
       - "myth"
       - "deucalion"
+
+  # ---------------------------------------------------------------------------
+  # Nix. Measured against the real Cohere backend over 49 utterances: spoken
+  # "nix packages" surfaces as "nix packages" 8x and "nick's packages" 1x; it
+  # never surfaces as "next packages" (0/49), and honest "the next packages"
+  # never surfaces as anything nix-like (0/10). So "next packages" is not a
+  # spoken form here and is deliberately in no list below -- no rule can fire on
+  # it, which is a stronger guarantee than a guard. "nick's packages" IS a real
+  # person-name sentence, so THE GUARD IS THE POINT of the nixpkgs rule: it is
+  # only allowed to fire behind a verb that operates on a package *set*.
+  # ---------------------------------------------------------------------------
+  - target: nixpkgs
+    spoken:
+      - "nix packages"
+      - "nick's packages"
+      - "nix's packages"
+    triggers_before:
+      - "update"
+      - "updated"
+      - "bump"
+      - "bumped"
+      - "upgrade"
+      - "downgrade"
+      - "pin"
+      - "pinned"
+      - "patch"
+      - "patched"
+      - "switch"
+      - "rebase"
+      - "override"
+      - "track"
+    triggers_after:
+      - "revision"
+      - "rev"
+      - "fork"
+      - "tree"
+      - "overlay"
+      - "upstream"
+      - "unstable"
+      - "channel"
+      - "lock"
+      - "is pinned"
+      - "is behind"
+      - "checkout"
+    guards:
+      # delivery / person context. None of these words ever occurs in a
+      # sentence that is actually about a package set.
+      - "arrived"
+      - "arriving"
+      - "door"
+      - "parcel"
+      - "delivery"
+      - "neighbour"
+      - "neighbor"
+      - "amazon"
+      - "birthday"
+      - "christmas"
+
+  - target: nix flake
+    spoken:
+      - "nick's flake"
+      - "nix's flake"
+    triggers_after:
+      - "show"
+      - "check"
+      - "lock"
+      - "update"
+      - "build"
+      - "inputs"
+      - "metadata"
+      - "archive"
+      - "eval"
+    guards:
+      - "paint"
+      - "chocolate"
+      - "snow"
+      - "dandruff"
 
 

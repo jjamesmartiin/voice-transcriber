@@ -6,6 +6,7 @@ compatibility.
 """
 from __future__ import annotations
 
+import errno
 import glob
 import logging
 import os
@@ -112,6 +113,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         self._mouse_forwards = {}  # device.path -> {"device": dev, "virtual": Device}
         self._mouse_grab_failed = set()  # paths we already gave up on
         self._grab_sync_pending = True
+        self._ignored_paths = set()  # paths examined and found to not be monitored devices
 
         # What each device's *event stream* last said about each key, keyed by
         # device path: an fd is reused the moment it is closed, so fd-keyed
@@ -398,6 +400,8 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         """Scan for new keyboard and mouse devices."""
         try:
             evdev = self.evdev
+            if not hasattr(self, "_ignored_paths"):
+                self._ignored_paths = set()
 
             current_paths = set(d.path for d in list(self.devices))
 
@@ -408,16 +412,22 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                 if path not in device_paths:
                     device_paths.append(path)
 
+            all_known = set(device_paths)
+            self._ignored_paths = {p for p in self._ignored_paths if p in all_known}
+
             new_devices = []
 
             for path in device_paths:
-                if path in current_paths:
+                if path in current_paths or path in self._ignored_paths:
                     continue
                 try:
                     device = evdev.InputDevice(path)
                     if self._is_monitored_device(device):
                         new_devices.append(device)
+                    else:
+                        self._ignored_paths.add(path)
                 except (PermissionError, OSError):
+                    self._ignored_paths.add(path)
                     continue
 
             if new_devices:
@@ -574,6 +584,8 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         release_mice = False
         with self._lock:
             self.middle_click_enabled = bool(enabled)
+            if hasattr(self, "_ignored_paths"):
+                self._ignored_paths.clear()
             if not self.middle_click_enabled:
                 if self._middle_click_timer:
                     self._middle_click_timer.cancel()
@@ -586,6 +598,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                             self.callback_stop(copy_to_clipboard=self.copy_to_clipboard_mode)
                 release_mice = True
             else:
+                self._mouse_grab_failed.clear()
                 # Ask the event loop to grab pointing devices on its next tick.
                 self._grab_sync_pending = True
 
@@ -743,6 +756,24 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             )
             self._mouse_grab_failed.add(device.path)
             return False
+        if hasattr(device, "ungrab"):
+            try:
+                device.grab()
+                device.ungrab()
+            except OSError as e:
+                if getattr(e, "errno", None) in (errno.EBUSY, errno.EACCES, errno.EPERM):
+                    logger.info(
+                        f"Skipping {device.name} for mouse grab: device is busy or inaccessible ({e})"
+                    )
+                else:
+                    logger.warning(f"Could not grab {device.name} for mouse chord: {e}")
+                self._mouse_grab_failed.add(device.path)
+                return False
+            except Exception as e:
+                logger.warning(f"Could not grab {device.name} for mouse chord: {e}")
+                self._mouse_grab_failed.add(device.path)
+                return False
+
         virtual = self._create_virtual_mouse(device)
         if virtual is None:
             logger.warning(
@@ -755,6 +786,19 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         time.sleep(0.15)
         try:
             device.grab()
+        except OSError as e:
+            if getattr(e, "errno", None) in (errno.EBUSY, errno.EACCES, errno.EPERM):
+                logger.info(
+                    f"Skipping {device.name} for mouse grab: device is busy or inaccessible ({e})"
+                )
+            else:
+                logger.warning(f"Could not grab {device.name} for mouse chord: {e}")
+            try:
+                virtual.destroy()
+            except Exception:
+                pass
+            self._mouse_grab_failed.add(device.path)
+            return False
         except Exception as e:
             logger.warning(f"Could not grab {device.name} for mouse chord: {e}")
             try:
@@ -787,6 +831,8 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         for path in list(self._mouse_forwards):
             self._release_mouse(path)
         self._mouse_grab_failed.clear()
+        if hasattr(self, "_ignored_paths"):
+            self._ignored_paths.clear()
         if not self.middle_click_enabled:
             for device in list(self.devices):
                 if self._is_mouse_device(device):
@@ -1087,7 +1133,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         self.running = True
         logger.info("Started hotkey monitor loop")
 
-        last_scan_time = 0
+        last_scan_time = time.time()
         scan_interval = 5.0  # Seconds between scans when no devices found
 
         while self.running:
@@ -1100,6 +1146,7 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                     self._sync_mouse_grabs()
                 elif self._grab_sync_pending:
                     self._grab_sync_pending = False
+                    self.scan_for_devices()
                     self._sync_mouse_grabs()
 
                 if not self.devices:
@@ -1177,6 +1224,13 @@ class LinuxHotkeyManager(BaseHotkeyManager):
 
         return True
 
+    def reset(self):
+        """Reset failed device grabs and path caches so devices can be re-evaluated."""
+        self._mouse_grab_failed.clear()
+        if hasattr(self, "_ignored_paths"):
+            self._ignored_paths.clear()
+        self._grab_sync_pending = True
+
     def stop(self):
         """Stop the hotkey monitoring."""
         self.running = False
@@ -1199,6 +1253,8 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                 pass
         self.devices = []
         self._seen_keys.clear()
+        if hasattr(self, "_ignored_paths"):
+            self._ignored_paths.clear()
         if self.virtual_keyboard:
             try:
                 self.virtual_keyboard.destroy()

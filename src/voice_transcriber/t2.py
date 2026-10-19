@@ -865,6 +865,13 @@ def reset_terminal():
                 termios.tcgetattr(fd)
             except Exception:
                 pass
+
+        # Reset hotkey manager transient state (device grab failures, cached scans)
+        try:
+            from voice_transcriber import hotkeys
+            hotkeys.reset_global_hotkeys()
+        except Exception:
+            pass
     except Exception:
         pass
 

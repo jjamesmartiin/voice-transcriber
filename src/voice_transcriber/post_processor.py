@@ -14,8 +14,14 @@ import os
 import sys
 import re
 import json
+import logging
 from pathlib import Path
 from typing import Any
+
+# Dictionary/contextual-rule fires are logged at DEBUG so a misfire is visible
+# (VT_LOG_LEVEL=DEBUG) without adding a flag or paying a cost when it is off:
+# the root level is WARNING by default (logging_setup.DEFAULT_LEVEL).
+logger = logging.getLogger(__name__)
 
 _current_mod = sys.modules.get(__name__)
 if _current_mod is not None:
@@ -3375,12 +3381,19 @@ def clean_speech_transcription(
 
     # 13d. Apply context-aware word/phrase disambiguation rules
     if _CONTEXTUAL_RULES:
+        _dict_debug = logger.isEnabledFor(logging.DEBUG)
         for rule in _CONTEXTUAL_RULES:
+            _before = cleaned
             cleaned = rule.apply(cleaned)
+            if _dict_debug and cleaned != _before:
+                logger.debug("contextual rule %r -> (%r, %r)", rule.target, _before, cleaned)
 
     # 13e. Apply custom vocabulary / phrase dictionary substitutions (~5 us)
     if _CUSTOM_DICT_REPLACER is not None:
+        _before = cleaned
         cleaned = _CUSTOM_DICT_REPLACER(cleaned)
+        if cleaned != _before and logger.isEnabledFor(logging.DEBUG):
+            logger.debug("dictionary -> (%r, %r)", _before, cleaned)
 
     # 13f. Clean spoken Unix file paths and subnet notation
     if "slash" in cleaned_lower or " dot " in cleaned_lower:
