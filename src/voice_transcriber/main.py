@@ -211,11 +211,19 @@ class SimpleVoiceTranscriber:
             warn_msg = f"⚠️ MICROPHONE PROBLEM DETECTED ({platform_name})!\n" + "\n".join([f" • {issue}" for issue in mic_issues])
             self.tui.print_warning("MICROPHONE WARNING", warn_msg)
 
-        # Initialize visual notification (platform-appropriate backend)
+        # Initialize visual notification (platform-appropriate backend). The
+        # Windows tray is a settings surface, so it is handed the engine's own
+        # shutdown and device-change paths rather than exiting the process
+        # behind the engine's back.
         self.visual_notification = hal.get_visual_notification(
-            app_name="Voice Transcriber", tui=self.tui
+            app_name="Voice Transcriber",
+            tui=self.tui,
+            on_quit=self._on_tui_quit,
+            on_device_changed=self._on_notification_device_changed,
         )
         self.visual_notification.set_active_device(get_active_device_name())
+        if not is_healthy and hasattr(self.visual_notification, "show_warning"):
+            self.visual_notification.show_warning("Microphone Warning", "; ".join(mic_issues))
 
         # State tracking for SLM On-Demand Quick-Tap retro-polishing
         self.last_transcription = ""
@@ -347,6 +355,21 @@ class SimpleVoiceTranscriber:
         if hasattr(self, 'visual_notification') and self.visual_notification:
             self.visual_notification.set_active_device(get_active_device_name(include_model=False))
 
+    def _on_notification_device_changed(self, device_name):
+        """A tray/menu surface switched the input device; refresh the UI.
+
+        ``t2`` already holds the new selection (the notification backend owns
+        that write so it can be tested without the engine); this keeps the TUI
+        badge and the transcription footer in step. Called from the tray's
+        message-pump thread, exactly like the control-API verbs.
+        """
+        try:
+            if getattr(self, 'visual_notification', None):
+                self.visual_notification.set_active_device(device_name)
+            self._sync_tui_state()
+        except Exception as e:
+            logger.debug("Could not sync UI after tray device change: %s", e)
+
     def _wire_tui_callbacks(self):
         """Wire direct terminal keyboard shortcuts from TUI"""
         self.tui.on_toggle_record = self._on_tui_toggle_record
@@ -429,6 +452,9 @@ class SimpleVoiceTranscriber:
             return
         try:
             self.tui.update_state("PROCESSING", text)
+            if hasattr(self, "visual_notification") and self.visual_notification:
+                if hasattr(self.visual_notification, "show_processing"):
+                    self.visual_notification.show_processing(text)
         except Exception:
             pass
 
@@ -1197,6 +1223,8 @@ class SimpleVoiceTranscriber:
     def _on_tui_reset_terminal(self):
         import t2
         t2.reset_terminal()
+        if self.hotkey_system and hasattr(self.hotkey_system, "reset"):
+            self.hotkey_system.reset()
         self._sync_tui_state()
         self.tui.print_event("🔄 Terminal Reset", "Terminal state and clipboard bridge reset successfully.", level="info")
 
@@ -2320,11 +2348,38 @@ def cli():
         if _control_exit is not None:
             sys.exit(_control_exit)
 
-    if check_permissions():
-        app = SimpleVoiceTranscriber()
-        sys.exit(0 if app.run() else 1)
-    else:
-        sys.exit(1)
+    _mutex_handle = None
+    if hal.detect_platform() == hal.WINDOWS:
+        try:
+            from voice_transcriber.platform.windows.single_instance import (
+                acquire_single_instance_mutex,
+            )
+            is_primary, _mutex_handle = acquire_single_instance_mutex()
+            if not is_primary:
+                logger.info("Another instance of Voice Transcriber is already active.")
+                try:
+                    control.send_command("status")
+                except Exception:
+                    pass
+                sys.exit(0)
+        except Exception as e:
+            logger.debug("Single-instance check bypassed: %s", e)
+
+    try:
+        if check_permissions():
+            app = SimpleVoiceTranscriber()
+            sys.exit(0 if app.run() else 1)
+        else:
+            sys.exit(1)
+    finally:
+        if _mutex_handle is not None:
+            try:
+                from voice_transcriber.platform.windows.single_instance import (
+                    release_single_instance_mutex,
+                )
+                release_single_instance_mutex(_mutex_handle)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

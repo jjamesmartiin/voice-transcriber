@@ -1,124 +1,149 @@
-"""Native Windows visual notification overlay (Tkinter).
+"""Native Windows visual notification overlay and system tray integration.
 
-Ported from ``main-windows:src/notifications_windows.py``. The constructor is
-adapted to accept the same ``app_name``/``tui`` keyword arguments as the Linux
-:class:`notifications.VisualNotification`, so ``main.py`` can select it through
-the HAL without special-casing the call site.
+Combines:
+1. WindowsOverlayWindow: Focus-safe (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST)
+   floating recording indicator that never steals cursor focus.
+2. WindowsSystemTray: Background taskbar tray icon with dynamic states, right-click
+   configuration menu, and native toast/balloon notifications.
+
+Callbacks
+---------
+The tray is a settings surface with no engine knowledge. ``on_quit`` and
+``on_device_changed`` are supplied by the engine (see ``main.py``) so that
+"Quit" unwinds through the normal shutdown path (control socket, audio devices,
+hotkeys, mutex) instead of calling ``os._exit``, and a microphone picked from
+the tray refreshes the TUI badge.
 """
 from __future__ import annotations
 
 import logging
-import threading
+import os
+from typing import Callable, Optional
+
+from voice_transcriber.platform.windows.overlay import WindowsOverlayWindow
+from voice_transcriber.platform.windows.tray import WindowsSystemTray
 
 logger = logging.getLogger(__name__)
 
 
 class WindowsVisualNotification:
-    """Windows visual notifications using a non-focus-stealing Tkinter overlay."""
+    """Windows visual notifications combining focus-safe floating pill and system tray."""
 
-    def __init__(self, app_name: str = "Voice Transcriber", tui=None):
+    def __init__(
+        self,
+        app_name: str = "Voice Transcriber",
+        tui=None,
+        on_quit: Optional[Callable[[], None]] = None,
+        on_device_changed: Optional[Callable[[str], None]] = None,
+    ):
         self.app_name = app_name
         self.tui = tui
-        self.active_overlay = None
+        self.active_device = None
+
+        # Floating recording pill overlay
+        try:
+            self.overlay = WindowsOverlayWindow(title=f"{app_name} Overlay")
+        except Exception as e:
+            logger.debug("Failed initializing Windows overlay: %s", e)
+            self.overlay = None
+
+        # System tray icon
+        if os.environ.get("VT_DISABLE_TRAY") != "1":
+            try:
+                self.tray = WindowsSystemTray(
+                    app_name=app_name,
+                    on_quit=on_quit,
+                    on_device_changed=on_device_changed,
+                )
+            except Exception as e:
+                logger.debug("Failed initializing Windows system tray: %s", e)
+                self.tray = None
+        else:
+            self.tray = None
 
     # -- TUI-compatible surface -------------------------------------------
     def update_state(self, *args, **kwargs):
-        if self.tui and hasattr(self.tui, "update_state"):
+        tui = self.tui
+        if tui and hasattr(tui, "update_state"):
             try:
-                self.tui.update_state(*args, **kwargs)
+                tui.update_state(*args, **kwargs)
             except Exception:
                 pass
 
     def hide_notification(self):
-        """Overlays auto-close after 2.5s; flip the TUI back to READY."""
-        if self.tui and hasattr(self.tui, "update_state"):
-            try:
-                self.tui.update_state("READY")
-            except Exception:
-                pass
+        """Dismiss active overlay and reset state."""
+        overlay = self.overlay
+        if overlay:
+            overlay.hide()
+        tray = self.tray
+        if tray:
+            tray.set_state("READY")
+        self.update_state("READY")
 
     def set_active_device(self, device_name):
         self.active_device = device_name
 
     def cleanup(self):
-        pass
-
-    # -- overlays ----------------------------------------------------------
-    def _show_tkinter_overlay(self, text, color="#0066cc"):
-        def create_overlay():
+        """Clean up both overlay window and system tray icon."""
+        overlay, self.overlay = self.overlay, None
+        if overlay:
             try:
-                import tkinter as tk
-
-                root = tk.Tk()
-                root.title(self.app_name)
-                root.overrideredirect(True)
-                root.attributes("-topmost", True)
-                root.attributes("-alpha", 0.9)
-                root.attributes("-disabled", True)
-                root.configure(bg=color)
-
-                screen_width = root.winfo_screenwidth()
-                window_width = 320
-                window_height = 60
-                x = (screen_width - window_width) // 2
-                y = 100
-                root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-
-                try:
-                    import ctypes
-
-                    GWL_EXSTYLE = -20
-                    WS_EX_NOACTIVATE = 0x08000000
-                    WS_EX_TOOLWINDOW = 0x00000080
-                    ex_style = ctypes.windll.user32.GetWindowLongW(
-                        root.winfo_id(), GWL_EXSTYLE
-                    )
-                    ctypes.windll.user32.SetWindowLongW(
-                        root.winfo_id(),
-                        GWL_EXSTYLE,
-                        ex_style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-                    )
-                except Exception:
-                    pass
-
-                label = tk.Label(
-                    root, text=text, bg=color, fg="white",
-                    font=("Arial", 12, "bold"),
-                )
-                label.pack(expand=True)
-
-                root.after(2500, root.destroy)
-                root.mainloop()
+                overlay.cleanup()
             except Exception as e:
-                logger.debug(f"Tkinter overlay failed: {e}")
+                logger.debug("Overlay cleanup error: %s", e)
 
-        self.active_overlay = threading.Thread(target=create_overlay, daemon=True)
-        self.active_overlay.start()
+        tray, self.tray = self.tray, None
+        if tray:
+            try:
+                tray.cleanup()
+            except Exception as e:
+                logger.debug("Tray cleanup error: %s", e)
 
-    def _play_sound(self, sound_type):
-        # Audio cue playback is handled centrally by WindowsAudioCuePlayer via hal.
-        pass
-
+    # -- Visual notifications & States -------------------------------------
+    # Each method snapshots the component it talks to: cleanup() (shutdown) can
+    # null either one from another thread between the `if` and the call, and an
+    # AttributeError there would kill an audio worker mid-recording.
     def show_recording(self):
         logger.info("Recording...")
-        self._show_tkinter_overlay("● RECORDING", "#ff4444")
+        overlay = self.overlay
+        if overlay:
+            overlay.show_recording()
+        tray = self.tray
+        if tray:
+            tray.set_state("RECORDING")
+        self.update_state("RECORDING")
 
-    def show_processing(self, message="Processing"):
+    def show_processing(self, message: str = "Processing"):
         logger.info(message)
-        self._show_tkinter_overlay(f"LOADING {str(message).upper()}", "#ffaa00")
+        overlay = self.overlay
+        if overlay:
+            overlay.show_processing(str(message))
+        tray = self.tray
+        if tray:
+            tray.set_state("PROCESSING")
+        self.update_state("PROCESSING", message)
 
     def show_completed(self, sub_text=None, **kwargs):
         message = "✓ COMPLETED"
         if sub_text:
             message = f"✓ {sub_text[:30]}..."
         logger.info(f"Transcription: {sub_text}")
-        if self.tui and sub_text and hasattr(self.tui, "print_transcription"):
+
+        overlay = self.overlay
+        if overlay:
+            overlay.show_completed(sub_text)
+        tray = self.tray
+        if tray:
+            tray.set_state("READY")
+
+        tui = self.tui
+        if tui and sub_text and hasattr(tui, "print_transcription"):
             try:
                 import t2
                 typed = getattr(t2, "AUTO_TYPE", False)
             except Exception:
                 typed = False
-            self.tui.print_transcription(
+            tui.print_transcription(
                 sub_text,
                 elapsed_sec=kwargs.get("elapsed_sec") or 0.0,
                 copy_success=True,
@@ -129,10 +154,27 @@ class WindowsVisualNotification:
                 time_saved=kwargs.get("time_saved", 0.0),
                 session_time_saved=kwargs.get("session_time_saved", 0.0),
             )
-            if hasattr(self.tui, "update_state"):
-                self.tui.update_state("READY")
-        self._show_tkinter_overlay(message, "#00aa44")
+            if hasattr(tui, "update_state"):
+                tui.update_state("READY")
 
-    def show_error(self, message):
+    def show_error(self, message: str):
         logger.error(message)
-        self._show_tkinter_overlay(f"✗ {str(message)[:40]}", "#cc0000")
+        overlay = self.overlay
+        if overlay:
+            overlay.show_error(str(message))
+        tray = self.tray
+        if tray:
+            tray.set_state("READY")
+            tray.show_balloon("Voice Transcriber Error", str(message), is_error=True)
+
+    def show_warning(self, title: str, message: str):
+        logger.warning("%s: %s", title, message)
+        tray = self.tray
+        if tray:
+            tray.show_balloon(title, message, is_error=False)
+
+    # Legacy Tkinter helper maintained for test compatibility
+    def _show_tkinter_overlay(self, text, color="#0066cc"):
+        overlay = self.overlay
+        if overlay:
+            overlay.show_processing(text)

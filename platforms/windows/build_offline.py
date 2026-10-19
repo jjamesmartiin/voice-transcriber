@@ -34,14 +34,19 @@ def copy_with_progress(src, dst, desc="Copying"):
     print(f"{desc}: {src.name} ({size_mb:.1f} MB)...")
 
     copied = [0]
+    failures = []
+
     def progress_copy():
-        if src.is_dir():
-            shutil.copytree(src, dst, dirs_exist_ok=True)
-            copied[0] = total_size
-        else:
-            shutil.copy2(src, dst)
-            copied[0] = total_size
-        print(f"{desc} complete: {size_mb:.1f} MB")
+        try:
+            if src.is_dir():
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+                copied[0] = total_size
+            else:
+                shutil.copy2(src, dst)
+                copied[0] = total_size
+            print(f"{desc} complete: {size_mb:.1f} MB")
+        except BaseException as exc:  # surfaced on the caller's thread below
+            failures.append(exc)
 
     if size_mb > 100:
         thread = threading.Thread(target=progress_copy)
@@ -53,6 +58,12 @@ def copy_with_progress(src, dst, desc="Copying"):
             thread.join(timeout=0.5)
     else:
         progress_copy()
+
+    # A copy running on a worker thread used to fail silently: the build went on
+    # with a truncated ~GB model directory and shipped it. Never let a copy
+    # error be swallowed by the thread that performed it.
+    if failures:
+        raise RuntimeError(f"{desc} failed: {failures[0]}") from failures[0]
 
 # Configuration
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -298,11 +309,13 @@ def prepare_bundled_models():
     print(f"Total bundle size: {total_size / (1024*1024):.1f} MB")
     print()
 
-def build_exe():
+def build_exe(noconsole: bool = False):
     """Build the EXE with PyInstaller"""
     print("=" * 60)
     print("Building EXE with PyInstaller...")
     print("=" * 60)
+
+    console_flag = "--noconsole" if noconsole else "--console"
 
     # PyInstaller options - copy src files to root of bundle (not in src/ subfolder)
     pyinstaller_args = [
@@ -310,7 +323,7 @@ def build_exe():
         str(SRC_DIR / "main.py"),
         "--name=VoiceTranscriber",
         "--onedir",
-        "--console",
+        console_flag,
         "--clean",
         "-y",
         "--log-level=INFO",
@@ -367,6 +380,10 @@ def build_exe():
         "--hidden-import=voice_transcriber.formatters.llama_server",
         "--hidden-import=voice_transcriber.formatters.noop",
         "--hidden-import=voice_transcriber.meeting",
+        "--hidden-import=voice_transcriber.platform.windows.autostart",
+        "--hidden-import=voice_transcriber.platform.windows.single_instance",
+        "--hidden-import=voice_transcriber.platform.windows.overlay",
+        "--hidden-import=voice_transcriber.platform.windows.tray",
         "--hidden-import=voice_transcriber.meeting_pipeline",
         "--hidden-import=voice_transcriber.tui",
         "--hidden-import=voice_transcriber.tui_ratatui",
@@ -451,6 +468,9 @@ def main():
         help="Do not bundle the Cohere weights. The app installs them on first "
              "run, from the release assets or an offline model-bundle/ directory "
              "(VT_MODEL_SOURCE_DIR) - the airgapped-friendly build.")
+    parser.add_argument(
+        "--noconsole", "--windowed", action="store_true", dest="noconsole",
+        help="Build windowed/headless without forcing an open console window.")
     args = parser.parse_args()
 
     print("Voice Transcriber - Offline Build Script")
@@ -482,7 +502,7 @@ def main():
         prepare_bundled_models()
 
     # Build the EXE
-    build_exe()
+    build_exe(noconsole=args.noconsole)
 
 if __name__ == "__main__":
     main()

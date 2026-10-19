@@ -183,18 +183,28 @@ def create_hotkey_manager(
     )
 
 
-def get_visual_notification(*, app_name: str = "Voice Transcriber", tui=None):
+def get_visual_notification(*, app_name: str = "Voice Transcriber", tui=None,
+                            on_quit=None, on_device_changed=None):
     """Return a platform-appropriate visual notification backend.
 
-    Windows uses the native Tkinter/winsound overlay; macOS uses native user
+    Windows uses the native Win32 overlay + system tray; macOS uses native user
     notifications via osascript; Linux and WSL use the generic TUI-aware
     notification object from :mod:`notifications`.
+
+    ``on_quit`` / ``on_device_changed`` are optional engine callbacks. Only the
+    Windows tray has a settings surface to invoke them from; other backends
+    ignore them.
     """
     platform = detect_platform()
     if platform == WINDOWS:
         from .windows.notifications import WindowsVisualNotification
 
-        return WindowsVisualNotification(app_name=app_name, tui=tui)
+        return WindowsVisualNotification(
+            app_name=app_name,
+            tui=tui,
+            on_quit=on_quit,
+            on_device_changed=on_device_changed,
+        )
     elif platform == MACOS:
         from .macos.notifications import MacOSVisualNotification
 

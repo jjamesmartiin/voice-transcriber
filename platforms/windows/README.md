@@ -8,7 +8,17 @@
 > still to confirm on this platform.
 
 
-Run Voice Transcriber natively on Windows with global hotkeys, Windows audio cues, and active-window clipboard pasting.
+Run Voice Transcriber natively on Windows with global hotkeys, Windows audio cues, active-window clipboard pasting, system tray integration, and a focus-safe floating recording pill.
+
+---
+
+## Desktop Experience for Non-Technical Users
+
+- **Focus-Safe Floating Pill:** While holding the push-to-talk hotkey, a semi-transparent indicator appears showing recording state (`● Recording...` / `⚡ Transcribing...` / `✓ Finished`). Created with `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED`, it **never** steals input focus from the active foreground window (Notepad, Word, Slack, Chrome, IDE).
+- **System Tray Integration:** Voice Transcriber runs quietly in the Windows Notification Area (System Tray next to the clock) with dynamic state icons (Ready / Recording / Transcribing). Right-click the tray icon to switch microphones, toggle "Start with Windows", run diagnostics, or quit. Quit goes through the engine's normal shutdown (control socket, audio devices, hotkeys, single-instance mutex), so no ghost icon is left behind.
+- **Single-Instance Protection:** Launching Voice Transcriber while an instance is already running takes a Win32 named mutex (`Local\VoiceTranscriber_App_Mutex`), queries the running engine's control API for its status, and exits cleanly instead of colliding, locking audio devices, or fighting for the global keyboard hooks. `VT_SINGLE_INSTANCE_DISABLED=1` opts out (useful for running two isolated instances with different `VT_CONTROL_SOCKET`s).
+- **Start with Windows:** Select the "Start with Windows" checkbox in the installer, or toggle it anytime from the tray icon menu.
+- **Proactive Health Toast:** If your default microphone is muted or disconnected, a native Windows balloon notification warns you immediately at launch.
 
 ---
 

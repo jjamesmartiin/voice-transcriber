@@ -57,6 +57,15 @@ class TestInstallerScript:
         assert "PrivilegesRequired=lowest" in iss
         assert "DefaultDirName={localappdata}" in iss
 
+    def test_autostart_task_and_registry_run_key(self):
+        """Autostart on boot should be an optional task writing to HKCU Run."""
+        iss = _read(ISS)
+        assert 'Name: "autostart"' in iss
+        assert r'Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"' in iss
+        assert 'ValueName: "{#AppName}"' in iss
+        assert 'Tasks: autostart' in iss
+        assert 'Flags: uninsdeletevalue' in iss
+
     def test_uninstall_leaves_user_data_alone(self):
         """Weights (~4 GB), config and logs live outside {app}; a hand-placed
         models\\ directory lives inside it. [UninstallDelete] would add deletes
