@@ -1924,6 +1924,14 @@ class SimpleVoiceTranscriber:
             return doctor.run_doctor(json_format=True)
 
         if verb == "ping":
+            if request.get("notify") and hasattr(self, "visual_notification") and self.visual_notification:
+                try:
+                    self.visual_notification.show_warning(
+                        "Voice Transcriber",
+                        "Already active! Hold Alt+Shift to speak, or check the System Tray.",
+                    )
+                except Exception:
+                    pass
             return {"ok": True, "cmd": verb, "pid": os.getpid()}
 
         if verb in ("status", "state"):
@@ -2358,7 +2366,7 @@ def cli():
             if not is_primary:
                 logger.info("Another instance of Voice Transcriber is already active.")
                 try:
-                    control.send_command("status")
+                    control.send_command("ping", notify=True)
                 except Exception:
                     pass
                 sys.exit(0)

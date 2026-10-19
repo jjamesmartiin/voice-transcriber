@@ -66,6 +66,14 @@ class TestInstallerScript:
         assert 'Tasks: autostart' in iss
         assert 'Flags: uninsdeletevalue' in iss
 
+    def test_autostart_preserved_on_upgrade_via_wizard_code(self):
+        """On upgrade, if autostart was previously enabled, it must be pre-selected."""
+        iss = _read(ISS)
+        assert "[Code]" in iss
+        assert "procedure InitializeWizard" in iss
+        assert "RegQueryStringValue" in iss
+        assert "WizardSelectTasks('autostart')" in iss
+
     def test_uninstall_leaves_user_data_alone(self):
         """Weights (~4 GB), config and logs live outside {app}; a hand-placed
         models\\ directory lives inside it. [UninstallDelete] would add deletes

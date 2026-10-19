@@ -151,6 +151,9 @@ class Win32:
                wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID])
             p(u.DestroyWindow, wintypes.BOOL, [wintypes.HWND])
             p(u.ShowWindow, wintypes.BOOL, [wintypes.HWND, ctypes.c_int])
+            p(u.SetWindowPos, wintypes.BOOL,
+              [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+               ctypes.c_int, ctypes.c_int, wintypes.UINT])
             p(u.InvalidateRect, wintypes.BOOL,
               [wintypes.HWND, ctypes.POINTER(wintypes.RECT), wintypes.BOOL])
             p(u.SetLayeredWindowAttributes, wintypes.BOOL,

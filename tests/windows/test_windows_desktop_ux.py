@@ -160,6 +160,7 @@ class TestFocusSafeOverlay:
 
         ov.show_recording()
         assert ov.current_text == "Recording..."
+        fake_user32.SetWindowPos.assert_called()
         fake_user32.ShowWindow.assert_called_with(9999, 4)  # SW_SHOWNOACTIVATE
         fake_user32.InvalidateRect.assert_called_with(9999, None, True)
 
@@ -769,6 +770,8 @@ class TestSingleInstanceCliWiring:
         vt_main = self._import_main()
         from voice_transcriber.platform.windows import single_instance
 
+        commands = []
+        monkeypatch.setattr(vt_main.control, "send_command", lambda cmd, **kwargs: commands.append((cmd, kwargs)))
         monkeypatch.setattr(vt_main.hal, "detect_platform", lambda: vt_main.hal.WINDOWS)
         monkeypatch.setattr(single_instance, "acquire_single_instance_mutex", lambda: (False, None))
         monkeypatch.setattr(_sys, "argv", ["main.py"])
@@ -782,6 +785,20 @@ class TestSingleInstanceCliWiring:
         with pytest.raises(SystemExit) as exc:
             vt_main.cli()
         assert exc.value.code == 0
+        assert commands == [("ping", {"notify": True})]
+
+    def test_primary_instance_warns_on_ping_notify(self):
+        vt_main = self._import_main()
+        app = vt_main.SimpleVoiceTranscriber.__new__(vt_main.SimpleVoiceTranscriber)
+        app.visual_notification = MagicMock()
+
+        res = app.handle_control("ping", {"notify": True})
+        assert res["ok"] is True
+        assert res["cmd"] == "ping"
+        app.visual_notification.show_warning.assert_called_once()
+        warning_args = app.visual_notification.show_warning.call_args[0]
+        assert "Voice Transcriber" in warning_args[0]
+        assert "Already active" in warning_args[1]
 
     def test_primary_instance_releases_the_mutex_when_startup_fails(self, monkeypatch):
         import sys as _sys

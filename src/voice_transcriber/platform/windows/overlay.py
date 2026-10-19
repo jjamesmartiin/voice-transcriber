@@ -25,6 +25,9 @@ WS_EX_LAYERED = 0x00080000
 WS_POPUP = 0x80000000
 SW_SHOWNOACTIVATE = 4
 SW_HIDE = 0
+SWP_NOSIZE = 0x0001
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
 LWA_ALPHA = 0x00000002
 
 WM_DESTROY = 0x0002
@@ -379,6 +382,8 @@ class WindowsOverlayWindow:
         if w is None or not hwnd:
             return token
         try:
+            x, y = self._resolve_origin(w.user32, 240, 46)
+            w.user32.SetWindowPos(hwnd, 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
             w.user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
             w.user32.InvalidateRect(hwnd, None, True)
         except Exception as e:  # pragma: no cover - OS dependent

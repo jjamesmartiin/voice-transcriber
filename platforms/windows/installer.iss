@@ -79,3 +79,16 @@ Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait
 ; any model files a user dropped into <install dir>\models\ by hand (a documented
 ; option). Deleting ~4 GB of weights that the next install would just re-download,
 ; or a hand-placed model, is not worth the tidiness.
+
+[Code]
+// Pre-check the autostart task on upgrades if the user had autostart enabled,
+// so an upgrade does not silently disable their startup preference.
+procedure InitializeWizard;
+var
+  ExistingRunCmd: String;
+begin
+  if RegQueryStringValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', '{#AppName}', ExistingRunCmd) then
+  begin
+    WizardSelectTasks('autostart');
+  end;
+end;
