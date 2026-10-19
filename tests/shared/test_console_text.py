@@ -143,8 +143,8 @@ class TestSafePrintAndWrite:
     def test_harden_standard_streams_is_safe_to_call_repeatedly(self, monkeypatch):
         monkeypatch.setattr(sys, "stdout", AsciiStream())
         monkeypatch.setattr(sys, "stderr", AsciiStream())
-        console_text.harden_standard_streams()
-        console_text.harden_standard_streams()  # idempotent
+        assert console_text.harden_standard_streams() is None
+        assert console_text.harden_standard_streams() is None  # idempotent
 
 
 class TestEncodingSafeStream:
@@ -192,19 +192,19 @@ class TestNoConsoleInterpreter:
 
     def test_safe_print_noops_when_stdout_is_none(self, monkeypatch):
         monkeypatch.setattr(sys, "stdout", None)
-        console_text.safe_print("⚡ saved: +12s · total: 1h")
+        assert console_text.safe_print("⚡ saved: +12s · total: 1h") is None
 
     def test_safe_print_noops_when_the_explicit_file_is_none(self, monkeypatch):
         monkeypatch.setattr(sys, "stdout", None)
-        console_text.safe_print("x", file=sys.stdout)
+        assert console_text.safe_print("x", file=sys.stdout) is None
 
     def test_safe_print_noops_when_stderr_is_none(self, monkeypatch):
         monkeypatch.setattr(sys, "stderr", None)
-        console_text.safe_print("✗ command failed", file=sys.stderr)
+        assert console_text.safe_print("✗ command failed", file=sys.stderr) is None
 
     def test_write_noops_when_stream_is_none(self, monkeypatch):
         monkeypatch.setattr(sys, "stdout", None)
-        console_text.write("⚡ ·")
+        assert console_text.write("⚡ ·") is None
 
     def test_ascii_text_tolerates_a_none_stream(self):
         assert console_text.ascii_text("⚡ ·", None) == "⚡ ·"

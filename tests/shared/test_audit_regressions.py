@@ -200,7 +200,8 @@ class TestOverlayScriptIsNotInjectable:
         notifier._create_tkinter_overlay(self.HOSTILE, "#ff4444", False)
 
         script = _FakePopen.last_args[2]
-        compile(script, "<overlay>", "exec")  # SyntaxError if the payload escaped
+        code = compile(script, "<overlay>", "exec")  # SyntaxError if the payload escaped
+        assert code is not None
 
     def test_payload_is_passed_as_a_literal_not_as_code(self, overlay):
         notifier = overlay.VisualNotification(app_name="App", enable_logging=False)
@@ -216,7 +217,8 @@ class TestOverlayScriptIsNotInjectable:
         notifier = overlay.VisualNotification(app_name="App", enable_logging=False)
         notifier._create_tkinter_overlay("hi", "#ff4444", True)
         script = _FakePopen.last_args[2]
-        compile(script, "<overlay>", "exec")
+        code = compile(script, "<overlay>", "exec")
+        assert code is not None
         assert "if True:" in script
 
 

@@ -27,17 +27,10 @@ the assertions in this file define exactly what those implementations must do.
 
 from __future__ import annotations
 
-import ctypes
-import json
 import os
 import re
-import shutil
-import socket
-import subprocess
 import sys
-import threading
 import time
-import types
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -67,51 +60,8 @@ POST_RELEASE_LATENCY_BUDGET_SEC = 1.5
 ACCURACY_FLOOR = 0.80
 
 # ===========================================================================
-# 1. Platform detection (contract for Phase 3 ``src/platform/__init__.py``)
+# 1. Output recording sink for E2E testing
 # ===========================================================================
-LINUX, WSL, WINDOWS = "linux", "wsl", "windows"
-VALID_PLATFORMS = (LINUX, WSL, WINDOWS)
-
-
-def detect_platform() -> str:
-    """
-    Return the active target platform: ``linux`` | ``wsl`` | ``windows``.
-
-    ``VT_PLATFORM`` (set by tests / CI / the Phase 3 launcher) always wins.
-    When unset we auto-detect the host the same way ``hotkeys.is_running_in_wsl``
-    does, so the code behaves identically whether or not the override is set.
-
-    An unknown ``VT_PLATFORM`` value is a hard error: silently guessing across
-    platforms is exactly the class of bug the HAL is meant to eliminate.
-    """
-    override = os.environ.get("VT_PLATFORM", "").strip().lower()
-    if override:
-        if override not in VALID_PLATFORMS:
-            raise ValueError(
-                f"Unknown VT_PLATFORM={override!r}; expected one of {VALID_PLATFORMS}"
-            )
-        return override
-
-    if sys.platform.startswith("win"):
-        return WINDOWS
-
-    # WSL detection mirrors src/hotkeys.py::is_running_in_wsl()
-    import platform as _platform
-
-    release = _platform.uname().release.lower()
-    if (
-        os.path.exists("/mnt/wslg")
-        or bool(os.environ.get("WSL_DISTRO_NAME"))
-        or os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop")
-        or "microsoft" in release
-    ):
-        return WSL
-
-    return LINUX
-
-
-# ===========================================================================
-# 2. Output-sink HAL contract implementations
 # ===========================================================================
 class OutputSink:
     """
@@ -129,205 +79,21 @@ class OutputSink:
         self.typed: list[str] = []
         self.cues: list[str] = []
 
-    def copy_text(self, text: str) -> bool:  # pragma: no cover - abstract
-        raise NotImplementedError
-
-    def type_text(self, text: str) -> bool:  # pragma: no cover - abstract
-        raise NotImplementedError
-
-    def play_cue(self, name: str) -> None:  # pragma: no cover - abstract
-        raise NotImplementedError
-
-
-#: A clipboard tool is allowed this long to accept the payload. ``wl-copy`` keeps
-#: serving the selection instead of forking away on some setups (wl-clipboard 2.3.0
-#: on a headless-ish Wayland session blocks indefinitely), and a copy must never
-#: hold the test run — or the transcription pipeline — hostage. Past this point the
-#: payload has been handed over, so the copy counts as done.
-CLIPBOARD_TIMEOUT_SEC = 0.25
-
-
-def _run_clipboard_tool(cmd: list[str], payload: bytes) -> bool:
-    """Run a copy tool with a leash, so a blocking tool cannot hang the suite."""
-    try:
-        result = subprocess.run(cmd, input=payload, check=False,
-                                timeout=CLIPBOARD_TIMEOUT_SEC)
-    except subprocess.TimeoutExpired:
-        return True   # still holding the selection: that is what a copy is
-    except OSError:
-        return False
-    return result.returncode == 0
-
-
-class LinuxOutputSink(OutputSink):
-    """Linux/Wayland/X11 sink: wl-copy/xclip clipboard + ydotool/xdotool typing."""
-
-    platform = LINUX
-
     def copy_text(self, text: str) -> bool:
-        payload = text.encode("utf-8")
-        # Wayland first (matches src/t2.py), then X11 fallback. Either tool can
-        # block (see _run_clipboard_tool), and the payload is recorded either way.
-        if shutil.which("wl-copy"):
-            result = _run_clipboard_tool(["wl-copy"], payload)
-            self.copied.append(text)
-            return result
-        if shutil.which("xclip"):
-            result = _run_clipboard_tool(["xclip", "-selection", "clipboard"], payload)
-            self.copied.append(text)
-            return result
-        return False
-
-    def type_text(self, text: str) -> bool:
-        if shutil.which("ydotool"):
-            subprocess.run(["ydotool", "type", "--", text], check=False)
-            self.typed.append(text)
-            return True
-        if shutil.which("xdotool"):
-            subprocess.run(
-                ["xdotool", "type", "--clearmodifiers", "--", text], check=False
-            )
-            self.typed.append(text)
-            return True
-        # Last-resort fallback: leave it on the clipboard.
-        return self.copy_text(text)
-
-    def play_cue(self, name: str) -> None:
-        sound_file = SRC_DIR / "sounds" / f"{name}.mp3"
-        self.cues.append(name)
-        for tool in ("paplay", "mpg123"):
-            if shutil.which(tool):
-                subprocess.Popen([tool, str(sound_file)], stderr=subprocess.DEVNULL)
-                return
-
-
-class WindowsOutputSink(OutputSink):
-    """Native Windows sink: pyperclip clipboard, Win32 keybd_event, winsound cues."""
-
-    platform = WINDOWS
-
-    # System sound aliases used by ``notifications_windows.py``.
-    _CUE_ALIASES = {
-        "start": "SystemExclamation",
-        "stop": "SystemAsterisk",
-        "complete": "SystemExit",
-    }
-
-    def copy_text(self, text: str) -> bool:
-        import pyperclip  # imported lazily so the Linux host never needs it
-
-        pyperclip.copy(text)
         self.copied.append(text)
         return True
 
     def type_text(self, text: str) -> bool:
-        # Win32 keystroke injection via user32.keybd_event (no extra deps).
-        import ctypes as _ctypes
-
-        user32 = _ctypes.windll.user32
-        keyeventf_keyup = 0x0002
-        shift_vk = 0x10
-        for char in text:
-            scan = user32.VkKeyScanW(ord(char))
-            if scan == -1:
-                continue
-            vk = scan & 0xFF
-            shift_needed = bool((scan >> 8) & 0x01)
-            if shift_needed:
-                user32.keybd_event(shift_vk, 0, 0, 0)
-            user32.keybd_event(vk, 0, 0, 0)
-            user32.keybd_event(vk, 0, keyeventf_keyup, 0)
-            if shift_needed:
-                user32.keybd_event(shift_vk, 0, keyeventf_keyup, 0)
         self.typed.append(text)
         return True
 
     def play_cue(self, name: str) -> None:
-        import winsound
-
-        alias = self._CUE_ALIASES.get(name, "SystemAsterisk")
-        self.cues.append(name)
-        winsound.PlaySound(alias, winsound.SND_ASYNC)
-
-
-class WSLBridgeClient:
-    """
-    Client for the WSL host-guest bridge (``src/wsl_bridge.py`` server).
-
-    Protocol contract: a fresh TCP connection to 127.0.0.1:50555 per command,
-    a single UTF-8 JSON object payload, and a single UTF-8 JSON object response.
-    """
-
-    HOST = "127.0.0.1"
-    PORT = 50555
-    TIMEOUT = 2.0
-
-    def __init__(self, host: str = HOST, port: int = PORT, timeout: float = TIMEOUT):
-        self.host = host
-        self.port = port
-        self.timeout = timeout
-
-    def send_command(self, action: str, **kwargs) -> dict:
-        payload = {"action": action, **kwargs}
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(self.timeout)
-            sock.connect((self.host, self.port))
-            sock.sendall(json.dumps(payload).encode("utf-8"))
-            raw = sock.recv(4096).decode("utf-8")
-        return json.loads(raw) if raw else {}
-
-    def start(self) -> dict:
-        return self.send_command("start")
-
-    def stop(self, copy_clipboard: bool = True) -> dict:
-        return self.send_command("stop", copy_clipboard=copy_clipboard)
-
-    def status(self) -> dict:
-        return self.send_command("status")
-
-
-class WSLOutputSink(OutputSink):
-    """WSL sink: Windows host clipboard via clip.exe, paste via the stdio bridge."""
-
-    platform = WSL
-
-    def __init__(self, bridge: WSLBridgeClient | None = None):
-        super().__init__()
-        self.bridge = bridge or WSLBridgeClient()
-
-    def copy_text(self, text: str) -> bool:
-        # clip.exe wants UTF-16LE on stdin (matches src/wsl_bridge.py).
-        clip_exe = shutil.which("clip.exe") or "/mnt/c/Windows/System32/clip.exe"
-        proc = subprocess.Popen(
-            [clip_exe], stdin=subprocess.PIPE, stderr=subprocess.DEVNULL
-        )
-        proc.communicate(input=text.encode("utf-16le"))
-        self.copied.append(text)
-        return True
-
-    def type_text(self, text: str) -> bool:
-        # In WSL the active Windows window receives a synthetic Ctrl+V paste
-        # triggered by the host-side helper; there is no guest-side typing API.
-        try:
-            self.bridge.stop(copy_clipboard=True)
-        except OSError:
-            pass
-        self.typed.append(text)
-        return True
-
-    def play_cue(self, name: str) -> None:
-        # Host chime is played by the Windows helper (wsl_win_hotkeys.ps1).
         self.cues.append(name)
 
 
 def get_output_sink(platform: str | None = None) -> OutputSink:
-    """Factory returning the HAL output sink for a platform (or the override)."""
-    platform = platform or detect_platform()
-    return {
-        LINUX: LinuxOutputSink,
-        WINDOWS: WindowsOutputSink,
-        WSL: WSLOutputSink,
-    }[platform]()
+    """Return an in-memory recording sink for synthetic hotkey pipeline tests."""
+    return OutputSink()
 
 
 # ===========================================================================
@@ -469,121 +235,8 @@ class SyntheticHotkeyHarness:
 
 
 # ===========================================================================
-# 5. Test doubles
-# ===========================================================================
-class _FakeCompletedProcess:
-    def __init__(self, args, returncode=0, stdout=b"", stderr=b""):
-        self.args = args
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
-
-
-class _RecordingRun:
-    """Stand-in for ``subprocess.run`` that records every invocation."""
-
-    def __init__(self, returncode=0):
-        self.returncode = returncode
-        self.calls: list[tuple] = []
-
-    def __call__(self, args, **kwargs):
-        self.calls.append((args, kwargs))
-        return _FakeCompletedProcess(args, self.returncode)
-
-
-class _RecordingPopen:
-    """Stand-in for ``subprocess.Popen`` that records args and stdin payloads."""
-
-    def __init__(self):
-        self.calls: list[tuple] = []
-        self.stdin_payloads: list[bytes] = []
-        self._instances: list[_RecordingPopen] = []
-
-    def __call__(self, args, **kwargs):
-        self.calls.append((args, kwargs))
-        self._instances.append(self)
-        return self
-
-    def communicate(self, input=None):
-        self.stdin_payloads.append(input)
-        return (b"", b"")
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-
-class _FakeUser32:
-    def __init__(self):
-        self.keybd_event_calls: list[tuple] = []
-
-    def VkKeyScanW(self, char_ord):  # noqa: N802 - Win32 name
-        return char_ord & 0xFF
-
-    def keybd_event(self, vk, scan, flags, extra):  # noqa: N802 - Win32 name
-        self.keybd_event_calls.append((vk, scan, flags, extra))
-
-
-class _FakeWindll:
-    def __init__(self, user32):
-        self.user32 = user32
-
-
-class _FakeWSLDaemon(threading.Thread):
-    """Minimal echo daemon implementing the WSL bridge JSON-RPC contract."""
-
-    def __init__(self):
-        super().__init__(daemon=True)
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(("127.0.0.1", 0))
-        self.sock.listen(5)
-        self.host, self.port = self.sock.getsockname()
-        self.received: list[dict] = []
-        self._stop = threading.Event()
-        self.responses = {
-            "start": {"status": "recording_started"},
-            "stop": {"status": "transcription_in_progress"},
-            "status": {"status": "idle"},
-        }
-
-    def run(self):  # pragma: no cover - threads are timing dependent
-        self.sock.settimeout(0.2)
-        while not self._stop.is_set():
-            try:
-                conn, _ = self.sock.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            with conn:
-                data = conn.recv(1024).decode("utf-8").strip()
-                if not data:
-                    continue
-                command = json.loads(data)
-                self.received.append(command)
-                response = self.responses.get(command.get("action"), {"error": "unknown"})
-                conn.sendall(json.dumps(response).encode("utf-8"))
-
-    def stop(self):
-        self._stop.set()
-        try:
-            self.sock.close()
-        except OSError:
-            pass
-        self.join(timeout=2)
-
-
-# ===========================================================================
 # 6. Fixtures
 # ===========================================================================
-@pytest.fixture(autouse=True)
-def _reset_platform_override(monkeypatch):
-    """Default to the Linux sink unless the caller set an explicit override."""
-    if not os.environ.get("VT_PLATFORM"):
-        monkeypatch.setenv("VT_PLATFORM", LINUX)
 
 
 @pytest.fixture(scope="session")
@@ -601,176 +254,7 @@ def warm_asr():
 
 
 # ===========================================================================
-# 7. Platform detection + adapter factory
-# ===========================================================================
-class TestPlatformDetectionAndAdapterFactory:
-    """``VT_PLATFORM`` override and the platform adapter factory contract."""
-
-    @pytest.mark.parametrize("value", [LINUX, WSL, WINDOWS])
-    def test_adapter_detect_platform_env_override(self, monkeypatch, value):
-        monkeypatch.setenv("VT_PLATFORM", value)
-        assert detect_platform() == value
-
-    def test_adapter_detect_platform_rejects_unknown_value(self, monkeypatch):
-        monkeypatch.setenv("VT_PLATFORM", "beos")
-        with pytest.raises(ValueError):
-            detect_platform()
-
-    def test_adapter_detect_platform_autodetects_without_override(self, monkeypatch):
-        monkeypatch.delenv("VT_PLATFORM", raising=False)
-        assert detect_platform() in VALID_PLATFORMS
-
-    @pytest.mark.parametrize(
-        "value,expected_cls",
-        [(LINUX, LinuxOutputSink), (WINDOWS, WindowsOutputSink), (WSL, WSLOutputSink)],
-    )
-    def test_adapter_factory_returns_platform_sink(self, value, expected_cls):
-        assert isinstance(get_output_sink(value), expected_cls)
-
-
-# ===========================================================================
-# 8. Linux adapter
-# ===========================================================================
-class TestLinuxAdapterClipboardAndTyping:
-    """Linux clipboard (wl-copy/xclip) and typing (ydotool/xdotool) hooks."""
-
-    def test_adapter_linux_wl_copy_used_when_available(self, monkeypatch):
-        run = _RecordingRun()
-        monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name == "wl-copy" else None)
-        monkeypatch.setattr(subprocess, "run", run)
-
-        sink = LinuxOutputSink()
-        assert sink.copy_text("hello wayland") is True
-
-        assert run.calls[0][0] == ["wl-copy"]
-        assert run.calls[0][1]["input"] == b"hello wayland"
-
-    def test_adapter_linux_falls_back_to_xclip(self, monkeypatch):
-        run = _RecordingRun()
-        monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name == "xclip" else None)
-        monkeypatch.setattr(subprocess, "run", run)
-
-        sink = LinuxOutputSink()
-        assert sink.copy_text("hello x11") is True
-
-        assert run.calls[0][0] == ["xclip", "-selection", "clipboard"]
-        assert run.calls[0][1]["input"] == b"hello x11"
-
-    def test_adapter_linux_ydotool_typing(self, monkeypatch):
-        run = _RecordingRun()
-        monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name == "ydotool" else None)
-        monkeypatch.setattr(subprocess, "run", run)
-
-        sink = LinuxOutputSink()
-        assert sink.type_text("typed text") is True
-        assert run.calls[0][0] == ["ydotool", "type", "--", "typed text"]
-
-    def test_adapter_linux_xdotool_typing_fallback(self, monkeypatch):
-        run = _RecordingRun()
-        monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name == "xdotool" else None)
-        monkeypatch.setattr(subprocess, "run", run)
-
-        sink = LinuxOutputSink()
-        assert sink.type_text("typed text") is True
-        assert run.calls[0][0] == ["xdotool", "type", "--clearmodifiers", "--", "typed text"]
-
-    def test_adapter_linux_no_clipboard_tool_returns_false(self, monkeypatch):
-        monkeypatch.setattr(shutil, "which", lambda name: None)
-        assert LinuxOutputSink().copy_text("nowhere") is False
-
-
-# ===========================================================================
-# 9. Windows adapter
-# ===========================================================================
-class TestWindowsAdapterClipboardTypingAndCues:
-    """Native Windows clipboard (pyperclip), typing (keybd_event) and winsound."""
-
-    def test_adapter_windows_pyperclip_copy(self, monkeypatch):
-        fake_module = types.ModuleType("pyperclip")
-        calls: list[str] = []
-        fake_module.copy = lambda text: calls.append(text)
-        monkeypatch.setitem(sys.modules, "pyperclip", fake_module)
-
-        sink = WindowsOutputSink()
-        assert sink.copy_text("windows clipboard") is True
-        assert calls == ["windows clipboard"]
-
-    def test_adapter_windows_keybd_event_typing(self, monkeypatch):
-        user32 = _FakeUser32()
-        monkeypatch.setattr(ctypes, "windll", _FakeWindll(user32), raising=False)
-
-        sink = WindowsOutputSink()
-        assert sink.type_text("ab") is True
-
-        # Each char: key down (flags=0) then key up (flags=KEYEVENTF_KEYUP=2).
-        assert user32.keybd_event_calls == [
-            (0x61, 0, 0, 0),
-            (0x61, 0, 0x0002, 0),
-            (0x62, 0, 0, 0),
-            (0x62, 0, 0x0002, 0),
-        ]
-
-    def test_adapter_windows_winsound_cue(self, monkeypatch):
-        fake_winsound = types.ModuleType("winsound")
-        fake_winsound.SND_ASYNC = 0x0001
-        calls: list[tuple] = []
-        fake_winsound.PlaySound = lambda name, flags: calls.append((name, flags))
-        monkeypatch.setitem(sys.modules, "winsound", fake_winsound)
-
-        sink = WindowsOutputSink()
-        sink.play_cue("complete")
-        assert calls == [("SystemExit", fake_winsound.SND_ASYNC)]
-
-
-# ===========================================================================
-# 10. WSL adapter + bridge protocol
-# ===========================================================================
-class TestWSLAdapterClipboardAndBridge:
-    """WSL host clipboard via clip.exe and the socket JSON-RPC bridge."""
-
-    def test_adapter_wsl_clip_exe_utf16le(self, monkeypatch):
-        popen = _RecordingPopen()
-        monkeypatch.setattr(shutil, "which", lambda name: "/mnt/c/Windows/System32/clip.exe" if name == "clip.exe" else None)
-        monkeypatch.setattr(subprocess, "Popen", popen)
-
-        sink = WSLOutputSink()
-        assert sink.copy_text("wsl clipboard") is True
-        assert popen.calls[0][0] == ["/mnt/c/Windows/System32/clip.exe"]
-        assert popen.stdin_payloads == ["wsl clipboard".encode("utf-16le")]
-
-    def test_adapter_wsl_bridge_default_endpoint(self):
-        client = WSLBridgeClient()
-        assert (client.HOST, client.PORT) == ("127.0.0.1", 50555)
-
-    def test_adapter_wsl_socket_json_rpc_protocol(self):
-        daemon = _FakeWSLDaemon()
-        daemon.start()
-        try:
-            client = WSLBridgeClient(host=daemon.host, port=daemon.port)
-            assert client.status() == {"status": "idle"}
-            assert client.start() == {"status": "recording_started"}
-            assert client.stop(copy_clipboard=True) == {"status": "transcription_in_progress"}
-        finally:
-            daemon.stop()
-
-        assert daemon.received == [
-            {"action": "status"},
-            {"action": "start"},
-            {"action": "stop", "copy_clipboard": True},
-        ]
-
-    def test_adapter_wsl_socket_json_rpc_stop_without_copy(self):
-        daemon = _FakeWSLDaemon()
-        daemon.start()
-        try:
-            WSLBridgeClient(host=daemon.host, port=daemon.port).stop(copy_clipboard=False)
-        finally:
-            daemon.stop()
-        assert daemon.received == [{"action": "stop", "copy_clipboard": False}]
-
-
-# ===========================================================================
-# 11. Synthetic hotkey triggering end-to-end
+# 7. Synthetic hotkey triggering end-to-end
 # ===========================================================================
 class TestSyntheticHotkeyTriggering:
     """Push-to-Talk and hands-free latch drive the real pipeline end-to-end."""

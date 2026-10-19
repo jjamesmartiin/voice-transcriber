@@ -116,6 +116,7 @@ class TestGlobalToggleShim:
 
         monkeypatch.setattr(hotkeys, "_current_hotkey_instance", None)
         hotkeys.set_global_middle_click_enabled(True)  # must not raise
+        assert hotkeys._current_hotkey_instance is None
 
     def test_registration_is_identity_scoped(self, monkeypatch):
         """A stale teardown must not steal the live manager's registration.

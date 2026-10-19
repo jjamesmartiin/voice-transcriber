@@ -222,7 +222,8 @@ class TestCrossPlatform:
     def test_file_is_valid_utf8(self, stats_file):
         """Explicit utf-8, never the Windows ANSI default."""
         stats.record_transcription(1, 1.0)
-        stats_file.read_bytes().decode("utf-8")  # must not raise
+        decoded = stats_file.read_bytes().decode("utf-8")  # must not raise
+        assert decoded and "words" in decoded
 
     def test_path_with_a_weird_parent_is_created(self, tmp_path, monkeypatch):
         """Spaces/unicode/dots in the override path must not break creation."""

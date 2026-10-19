@@ -107,6 +107,7 @@ def test_the_network_guard_still_allows_loopback():
     server.listen(1)
     try:
         client = socket.create_connection(server.getsockname(), timeout=1)
+        assert client is not None
         client.close()
     finally:
         server.close()

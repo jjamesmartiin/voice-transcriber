@@ -45,14 +45,11 @@ def test_transcribe_known_text_validation(sample_audio_file):
     print(f"[Validation] Transcribed Text: '{transcribed_text}'")
 
     # If audio is speech (e.g. gTTS), check WER
-    if transcribed_text:
-        wer = compute_wer(expected_text, transcribed_text)
-        print(f"[Validation] Word Error Rate (WER): {wer:.2%}")
-        # WER threshold check for valid speech
-        assert wer < 0.5, f"Word Error Rate too high: {wer:.2%}"
-    else:
-        # If synthetic audio sine tones were used, verify function completed cleanly
-        print("[Validation] Synthetic audio processed without error.")
+    assert transcribed_text, f"Expected non-empty transcription for {audio_path}"
+    wer = compute_wer(expected_text, transcribed_text)
+    print(f"[Validation] Word Error Rate (WER): {wer:.2%}")
+    # WER threshold check for valid speech
+    assert wer < 0.5, f"Word Error Rate too high: {wer:.2%}"
 
 def test_transcription_performance_time(sample_audio_file):
     """
@@ -71,7 +68,8 @@ def test_transcription_performance_time(sample_audio_file):
     print(f"[Performance] Transcribe Time: {transcribe_time:.2f} s")
     print(f"[Performance] Real-Time Factor (RTF): {rtf:.2f}x")
 
-    # Assert reasonable performance bound
+    # Assert real-time factor performance bound (transcription must be faster than real time)
+    assert rtf < 1.0, f"Transcription should be faster than real time (RTF < 1.0), got {rtf:.2f}x"
     assert transcribe_time > 0, "Transcribe time should be positive"
 
 def test_recording_time_and_buffer_performance():

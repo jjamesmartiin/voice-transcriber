@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from hotkeys import WaylandGlobalHotkeys
 import t2
 
@@ -28,11 +29,10 @@ def test_power_draw_measurement(cpu_power_monitor):
     or verifies CPU usage tracking fallback.
     """
     power_watts = cpu_power_monitor.measure_system_power_watts()
-    if power_watts is not None:
-        assert power_watts >= 0.0, f"Power draw should be non-negative, got {power_watts} W"
-        print(f"\n[Hardware Power Draw] Battery Power Draw: {power_watts:.2f} W")
-    else:
-        print("\n[Hardware Power Draw] AC Power / VM detected (hardware battery power unavailable). Using CPU utilization metric.")
+    if power_watts is None:
+        pytest.skip("AC Power / VM detected (hardware battery power measurement unavailable)")
+    assert power_watts >= 0.0, f"Power draw should be non-negative, got {power_watts} W"
+    print(f"\n[Hardware Power Draw] Battery Power Draw: {power_watts:.2f} W")
 
 def test_cpu_isolation_idle_vs_processing(cpu_power_monitor, sample_audio_file):
     """

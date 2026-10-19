@@ -21,7 +21,7 @@ def normalize_text(text):
     text_clean = re.sub(r'[-_]', ' ', text.lower())
     return re.sub(r'[^\w\s]', '', text_clean).strip()
 
-def run_tests():
+def test_no_trailing_hallucinations():
     print("=" * 80)
     print("🧪 RUNNING TARGETED TRAILING HALLUCINATION & RETENTION TESTS")
     print("=" * 80)
@@ -109,5 +109,7 @@ def run_tests():
         print("⚠️ SOME TEST CASES FAILED.")
     print("=" * 80)
 
+    assert passed_all, "Trailing hallucination check failed on benchmark audio"
+
 if __name__ == "__main__":
-    run_tests()
+    test_no_trailing_hallucinations()

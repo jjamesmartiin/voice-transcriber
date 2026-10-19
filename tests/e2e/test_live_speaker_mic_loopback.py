@@ -40,6 +40,8 @@ import sounddevice as sd
 src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src")
 sys.path.insert(0, src_dir)
 
+__test__ = False  # Interactive loopback runner (see docs/agent_testing_workflow.md)
+
 from main import SimpleVoiceTranscriber
 import t2
 

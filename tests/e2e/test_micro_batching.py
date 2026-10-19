@@ -15,6 +15,8 @@ from pathlib import Path
 # Ensure src is in sys.path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
+__test__ = False  # Benchmark script, not an automated pytest test suite
+
 import transcribe2
 from micro_batcher import StreamingMicroBatcher
 

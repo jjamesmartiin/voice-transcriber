@@ -676,6 +676,7 @@ class TestNotificationShutdownRace:
 
         notifier.overlay = VanishOnCall()
         notifier.show_recording()  # used to raise AttributeError
+        assert notifier.overlay is None
 
     def test_cleanup_nulls_both_components_even_if_one_raises(self):
         from voice_transcriber.platform.windows.notifications import WindowsVisualNotification
