@@ -124,9 +124,6 @@ class WindowsVisualNotification:
         self.update_state("PROCESSING", message)
 
     def show_completed(self, sub_text=None, **kwargs):
-        message = "✓ COMPLETED"
-        if sub_text:
-            message = f"✓ {sub_text[:30]}..."
         logger.info(f"Transcription: {sub_text}")
 
         overlay = self.overlay

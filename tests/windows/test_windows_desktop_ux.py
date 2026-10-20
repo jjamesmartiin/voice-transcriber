@@ -8,10 +8,9 @@
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = REPO_ROOT / "src"
@@ -533,8 +532,6 @@ class TestTrayLifecycleAndMenu:
         assert seen["thread"] is not threading.current_thread()
 
     def test_quit_without_a_callback_removes_the_icon_before_exiting(self, monkeypatch):
-        import ctypes
-
         import voice_transcriber.platform.windows.tray as tray_mod
         from voice_transcriber.platform.windows import win32
 
@@ -647,8 +644,6 @@ class TestTrayLifecycleAndMenu:
         fake_user32.DestroyMenu.assert_called_once_with(777)
 
     def test_tooltip_and_balloon_text_fit_the_win32_buffers(self, monkeypatch):
-        import voice_transcriber.platform.windows.tray as tray_mod
-
         tray = self._tray(monkeypatch, MagicMock())
         tray._nid = MagicMock()
         tray._icons = {"READY": 1}
