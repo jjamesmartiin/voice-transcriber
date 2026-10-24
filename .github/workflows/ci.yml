@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@2cb76beab460be7e44442c7ebdcbc30b638416df # v23
+        uses: DeterminateSystems/nix-installer-action@9383ce2bf08796b65508822f5982f49151badc4e # v23
 
       - name: Run shared + Linux tests
         run: nix develop --command python -m pytest tests/shared tests/linux -q
@@ -95,7 +95,7 @@ jobs:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@2cb76beab460be7e44442c7ebdcbc30b638416df # v23
+        uses: DeterminateSystems/nix-installer-action@9383ce2bf08796b65508822f5982f49151badc4e # v23
 
       - name: Run shared + WSL tests
         env:
