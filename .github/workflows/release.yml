@@ -71,7 +71,7 @@ jobs:
           cat REQUIREMENTS.txt
 
       - name: Upload AppImage and REQUIREMENTS.txt to release
-        uses: softprops/action-gh-release@b5a645e6d7f681d09866ab86ba7918b222989555 # v2
+        uses: softprops/action-gh-release@6680cc089e59314c4460b839412c25fb6a71ce3b # v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: |
@@ -126,7 +126,7 @@ jobs:
           Get-Item dist/installer/*-setup.exe | Select-Object Name, Length
 
       - name: Upload Windows assets to release
-        uses: softprops/action-gh-release@b5a645e6d7f681d09866ab86ba7918b222989555 # v2
+        uses: softprops/action-gh-release@6680cc089e59314c4460b839412c25fb6a71ce3b # v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: |
