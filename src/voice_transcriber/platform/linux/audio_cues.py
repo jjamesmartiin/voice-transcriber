@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 
 from ..base import BaseAudioCuePlayer
 
@@ -33,9 +34,11 @@ class LinuxAudioCuePlayer(BaseAudioCuePlayer):
         for tool in ("paplay", "mpg123"):
             if shutil.which(tool):
                 try:
-                    subprocess.Popen(
+                    proc = subprocess.Popen(
                         [tool, sound_file], stderr=subprocess.DEVNULL
                     )
+                    if hasattr(proc, "wait"):
+                        threading.Thread(target=proc.wait, daemon=True).start()
                     return
                 except Exception:
                     continue

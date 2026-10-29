@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 
 from ..base import BaseAudioCuePlayer
 
@@ -32,7 +33,9 @@ class MacOSAudioCuePlayer(BaseAudioCuePlayer):
         afplay = shutil.which("afplay") or ("/usr/bin/afplay" if os.path.exists("/usr/bin/afplay") else None)
         if afplay:
             try:
-                subprocess.Popen([afplay, sound_file], stderr=subprocess.DEVNULL)
+                proc = subprocess.Popen([afplay, sound_file], stderr=subprocess.DEVNULL)
+                if hasattr(proc, "wait"):
+                    threading.Thread(target=proc.wait, daemon=True).start()
                 return
             except Exception:
                 pass

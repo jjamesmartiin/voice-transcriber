@@ -291,6 +291,8 @@ if __name__ == "__main__":
         process = subprocess.Popen([sys.executable, '-c', overlay_script],
                                  stderr=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL)
+        if hasattr(process, "wait"):
+            threading.Thread(target=process.wait, daemon=True).start()
         with self._overlay_lock:
             self.overlay_processes.append(process)
 
@@ -307,6 +309,8 @@ if __name__ == "__main__":
             cmd.append('--timeout=2')  # Shorter timeout
 
         process = subprocess.Popen(cmd, stderr=subprocess.DEVNULL)
+        if hasattr(process, "wait"):
+            threading.Thread(target=process.wait, daemon=True).start()
         with self._overlay_lock:
             self.overlay_processes.append(process)
 
@@ -316,13 +320,15 @@ if __name__ == "__main__":
             processes, self.overlay_processes = self.overlay_processes, []
         for process in processes:
             try:
-                process.terminate()
-                process.wait(timeout=0.2)
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=0.2)
+                    except Exception:
+                        process.kill()
+                        process.wait(timeout=0.2)
             except Exception:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
+                pass
         self.overlay_processes = []
 
     def _show_terminal_notification(self, text, sub_text=None, elapsed_sec=None, rec_duration=None, proc_time=None):
@@ -387,9 +393,6 @@ if __name__ == "__main__":
         """Hide all active notifications."""
         if self.tui:
             self.tui.update_state("READY")
-        if not self.active:
-            return
-
         self.active = False
         self._cleanup_overlays()
 

@@ -251,8 +251,13 @@ class WSLHotkeyManager(BaseHotkeyManager):
                 self.process.stdin.write("EXIT\n")
                 self.process.stdin.flush()
                 self.process.terminate()
+                self.process.wait(timeout=1.0)
             except Exception:
-                pass
+                try:
+                    self.process.kill()
+                    self.process.wait(timeout=1.0)
+                except Exception:
+                    pass
             self.process = None
         # Let the old reader exit before a restart spawns a replacement, so two
         # threads can never drain the same stream.

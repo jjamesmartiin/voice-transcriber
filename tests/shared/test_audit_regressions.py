@@ -602,4 +602,41 @@ class TestStartupInterruptionCleansUp:
         assert len(cleaned) == 1
 
 
+class TestProcessReaping:
+    """Spawned notification and audio cue processes must be waited on to prevent zombie leaks."""
+
+    def test_notification_overlay_waits_for_child_process(self, monkeypatch):
+        import notifications
+        waited = []
+
+        class MockProc:
+            def wait(self, timeout=None):
+                waited.append(True)
+
+        monkeypatch.setattr(notifications.subprocess, "Popen", lambda *a, **kw: MockProc())
+        notifier = notifications.VisualNotification(app_name="TestApp", enable_logging=False)
+        notifier._create_zenity_notification("Test", persistent=False)
+        import time
+        time.sleep(0.05)
+        assert len(waited) == 1
+
+    def test_linux_audio_cue_waits_for_child_process(self, monkeypatch):
+        from voice_transcriber.platform.linux.audio_cues import LinuxAudioCuePlayer
+        import shutil
+        waited = []
+
+        class MockProc:
+            def wait(self, timeout=None):
+                waited.append(True)
+
+        player = LinuxAudioCuePlayer()
+        monkeypatch.setattr(shutil, "which", lambda cmd: "/bin/paplay" if cmd == "paplay" else None)
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: MockProc())
+        player.play_cue("start")
+        import time
+        time.sleep(0.05)
+        assert len(waited) == 1
+
+
+
 
