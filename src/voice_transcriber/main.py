@@ -262,17 +262,21 @@ class SimpleVoiceTranscriber:
         # If configured to wait on startup (default True), ensure the model is
         # 100% loaded and warmed up BEFORE initializing hotkeys so the user's very
         # first keypress transcribes instantly without waiting.
-        if getattr(t2, 'WAIT_FOR_MODEL_ON_STARTUP', True):
-            if self.preload_thread and self.preload_thread.is_alive():
-                self.preload_thread.join(timeout=20.0)
-                if self.preload_thread.is_alive():
-                    logger.warning(
-                        "Model still loading after 20s; registering hotkeys anyway "
-                        "(the first dictation will wait for the model)."
-                    )
+        try:
+            if getattr(t2, 'WAIT_FOR_MODEL_ON_STARTUP', True):
+                if self.preload_thread and self.preload_thread.is_alive():
+                    self.preload_thread.join(timeout=20.0)
+                    if self.preload_thread.is_alive():
+                        logger.warning(
+                            "Model still loading after 20s; registering hotkeys anyway "
+                            "(the first dictation will wait for the model)."
+                        )
 
-        # Initialize global hotkey system after model is ready
-        self.init_hotkeys()
+            # Initialize global hotkey system after model is ready
+            self.init_hotkeys()
+        except KeyboardInterrupt:
+            self.cleanup()
+            raise
 
     def _safe_tui_start(self):
         """Start the selected TUI; if the ratatui frontend fails, fall back to Rich.
@@ -2373,12 +2377,20 @@ def cli():
         except Exception as e:
             logger.debug("Single-instance check bypassed: %s", e)
 
+    app = None
     try:
         if check_permissions():
             app = SimpleVoiceTranscriber()
             sys.exit(0 if app.run() else 1)
         else:
             sys.exit(1)
+    except KeyboardInterrupt:
+        if app is not None:
+            try:
+                app.cleanup()
+            except Exception:
+                pass
+        sys.exit(0)
     finally:
         if _mutex_handle is not None:
             try:

@@ -573,3 +573,33 @@ class TestProcessAudioStreamChunkedInput:
         assert called[0][0] == 30 * 1024
 
 
+class TestStartupInterruptionCleansUp:
+    """Interruption (SIGINT / KeyboardInterrupt) during startup waits must clean up resources."""
+
+    def test_interruption_during_preload_wait_calls_cleanup(self, monkeypatch):
+        from unittest.mock import MagicMock
+        import voice_transcriber.main as vt_main
+
+        cleaned = []
+
+        class FakePreloadThread:
+            def is_alive(self):
+                return True
+
+            def join(self, timeout=None):
+                raise KeyboardInterrupt()
+
+        monkeypatch.setattr(vt_main, "load_audio_config", lambda: None)
+        monkeypatch.setattr(vt_main, "preload_model", lambda **kw: FakePreloadThread())
+        monkeypatch.setattr(vt_main, "create_tui", lambda: MagicMock())
+        monkeypatch.setattr(vt_main.SimpleVoiceTranscriber, "_start_model_load_watcher", lambda self: None)
+        monkeypatch.setattr(vt_main.SimpleVoiceTranscriber, "_safe_tui_start", lambda self: None)
+        monkeypatch.setattr(vt_main.SimpleVoiceTranscriber, "cleanup", lambda self: cleaned.append(True))
+
+        with pytest.raises(KeyboardInterrupt):
+            vt_main.SimpleVoiceTranscriber()
+
+        assert len(cleaned) == 1
+
+
+

@@ -21,14 +21,15 @@ mod textfit;
 mod theme_picker;
 mod ui;
 
-use std::io;
+use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::tty::IsTty;
+use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Clear, Paragraph, Widget, Wrap};
-use ratatui::{DefaultTerminal, TerminalOptions, Viewport};
+use ratatui::{DefaultTerminal, Terminal, TerminalOptions, Viewport};
 
 use app::{Action, App, Level, OutStatus, RunState, Theme};
 use demo::Script;
@@ -43,11 +44,15 @@ const TICK: Duration = Duration::from_millis(100);
 
 fn safe_restore() {
     let _ = std::panic::catch_unwind(|| {
+        let _ = crossterm::execute!(
+            io::stdout(),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine),
+            crossterm::cursor::MoveToColumn(0),
+            crossterm::cursor::Show,
+            crossterm::cursor::EnableBlinking,
+        );
+        let _ = io::stdout().flush();
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Show);
-    });
-    let _ = std::panic::catch_unwind(|| {
-        ratatui::restore();
     });
 }
 
@@ -77,6 +82,12 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        safe_restore();
+        default_hook(info);
+    }));
+
     let result = match connect {
         Some(path) => run_ipc(&path, theme),
         None => run_local(demo_enabled, theme),
@@ -95,13 +106,23 @@ struct Runtime {
 }
 
 impl Runtime {
+    fn create_terminal(viewport_h: u16) -> io::Result<DefaultTerminal> {
+        crossterm::terminal::enable_raw_mode()?;
+        let backend = CrosstermBackend::new(io::stdout());
+        let mut terminal = Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(viewport_h),
+            },
+        )?;
+        terminal.hide_cursor()?;
+        Ok(terminal)
+    }
+
     fn new(app: &App) -> io::Result<Self> {
         let (w, _) = crossterm::terminal::size().unwrap_or((80, 24));
         let viewport_h = ui::max_status_height(app, w).max(1);
-        let mut terminal = ratatui::init_with_options(TerminalOptions {
-            viewport: Viewport::Inline(viewport_h),
-        });
-        terminal.hide_cursor()?;
+        let terminal = Self::create_terminal(viewport_h)?;
         Ok(Self {
             terminal,
             viewport_h,
@@ -325,10 +346,7 @@ impl Runtime {
         }
         let (w, _) = crossterm::terminal::size().unwrap_or((80, 24));
         let h = ui::max_status_height(app, w).max(1);
-        self.terminal = ratatui::init_with_options(TerminalOptions {
-            viewport: Viewport::Inline(h),
-        });
-        self.terminal.hide_cursor()?;
+        self.terminal = Self::create_terminal(h)?;
         self.viewport_h = h;
         self.suspended = false;
         self.header_done = false;
@@ -348,10 +366,7 @@ impl Runtime {
         let want = ui::max_status_height(app, w).max(1);
         if want != self.viewport_h {
             self.terminal.clear()?;
-            self.terminal = ratatui::init_with_options(TerminalOptions {
-                viewport: Viewport::Inline(want),
-            });
-            self.terminal.hide_cursor()?;
+            self.terminal = Self::create_terminal(want)?;
             self.viewport_h = want;
         }
         Ok(())

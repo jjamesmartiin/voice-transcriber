@@ -872,6 +872,14 @@ def reset_terminal():
             hotkeys.reset_global_hotkeys()
         except Exception:
             pass
+
+        # Ensure cursor is visible on POSIX terminals
+        if sys.platform != "win32":
+            try:
+                sys.stdout.write("\033[?25h")
+                sys.stdout.flush()
+            except Exception:
+                pass
     except Exception:
         pass
 
