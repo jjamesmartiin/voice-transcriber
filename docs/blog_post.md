@@ -88,9 +88,11 @@ When speaking off the cuff, most of us naturally hesitate, repeat words, and cor
 
 > "remind me tuesday no wait make that wednesday uh and uh also add a note to the github issue"
 
-Typing out every false start verbatim often requires more time to edit than typing manually. The post-processor converts that into clean, formatted text:
+Typing out every false start verbatim often requires more time to edit than typing manually. With full cleanup enabled (`cleanup_mode: full`, or pressing `s` in the TUI), the post-processor converts that into clean, formatted text:
 
 > "Remind me Wednesday and also add a note to the GitHub issue."
+
+*(By default, the engine runs in `artifacts` cleanup mode: it scrubs conversational fillers and silence hallucinations while preserving every spoken word verbatim so nothing is accidentally deleted unless you opt into active retraction resolution.)*
 
 This stage runs in approximately **15–35 microseconds** using regular expressions and prefix tries. It deliberately avoids large language models or network calls so it remains instant and predictable:
 

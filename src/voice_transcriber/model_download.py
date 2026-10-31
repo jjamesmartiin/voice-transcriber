@@ -919,6 +919,16 @@ def install_from_local_bundle(source, dest=None, revision=None):
                                            revision=revision)
 
 
+#: Files added by the packager (scripts/prepare_model_release.py) to every bundle.
+_BUNDLE_METADATA_FILES = {"LICENSE", "NOTICE"}
+
+
+def _part_sort_key(filename: str):
+    """Sort partN chunks numerically so part10 follows part9, not part1."""
+    m = re.search(r"\.part(\d+)", filename)
+    return (int(m.group(1)), filename) if m else (0, filename)
+
+
 def _assemble_parts(spec, part_paths, manifest, dest, origin,
                     resolved_url=None, source_kind="remote"):
     """Verify, decompress, concatenate and extract verified parts into ``dest``.
@@ -929,7 +939,7 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
     Verification is driven by ``spec.digests`` and never assumes a particular
     filename, so a GGUF or ONNX artifact installs through this same path.
     """
-    part_names = sorted(manifest)
+    part_names = sorted(manifest, key=_part_sort_key)
     dest_parent = os.path.dirname(os.path.abspath(dest))
     os.makedirs(dest_parent, exist_ok=True)
     lock_dir = dest + ".lock"
@@ -969,10 +979,31 @@ def _assemble_parts(spec, part_paths, manifest, dest, origin,
 
         # Extract into a staging dir, then atomically move into place.
         staging = os.path.join(tmp_root, "extracted")
+        allowed_dirs = {
+            os.path.dirname(f) for f in spec.package_files if os.path.dirname(f)
+        }
+        expanded_dirs = set()
+        for d in allowed_dirs:
+            cur = d
+            while cur:
+                expanded_dirs.add(cur)
+                cur = os.path.dirname(cur)
+
         with tarfile.open(tar_path, "r") as tf:
             _check_tar_members(tf, os.path.abspath(staging))
             for member in tf.getmembers():
-                if member.name not in spec.package_files:
+                clean_name = os.path.normpath(member.name).replace("\\", "/")
+                if clean_name in ("", "."):
+                    continue
+                if member.isdir():
+                    if clean_name in expanded_dirs:
+                        continue
+                    raise RuntimeError(
+                        f"Refusing archive directory {member.name!r}: not in "
+                        f"{spec.name} package_files allowlist."
+                    )
+                if (clean_name not in spec.package_files
+                        and clean_name not in _BUNDLE_METADATA_FILES):
                     raise RuntimeError(
                         f"Refusing archive member {member.name!r}: not in "
                         f"{spec.name} package_files allowlist."

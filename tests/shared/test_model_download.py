@@ -1252,6 +1252,25 @@ def test_install_rejects_archive_member_not_in_allowlist(monkeypatch, tmp_path):
             spec.name, str(bundle), dest=str(tmp_path / "dest"))
 
 
+def test_install_allows_license_notice_and_subdirectories(monkeypatch, tmp_path):
+    """The packager adds LICENSE and NOTICE, and diarization uses a subdirectory."""
+    files = {
+        "sub/model.onnx": b"fake-onnx",
+        "LICENSE": b"MIT License",
+        "NOTICE": b"Third party notices",
+    }
+    spec = _synthetic_spec(files={"sub/model.onnx": b"fake-onnx"})
+    monkeypatch.setitem(model_download.MODELS, spec.name, spec)
+    bundle = _make_bundle(tmp_path, spec.asset_prefix, files)
+
+    installed = model_download.install_model_from_local_bundle(
+        spec.name, str(bundle), dest=str(tmp_path / "dest"))
+    assert installed is not None
+    assert (tmp_path / "dest" / "sub" / "model.onnx").read_bytes() == b"fake-onnx"
+    assert (tmp_path / "dest" / "LICENSE").read_bytes() == b"MIT License"
+    assert (tmp_path / "dest" / "NOTICE").read_bytes() == b"Third party notices"
+
+
 def _complete_dest_fixture(monkeypatch, tmp_path):
     """A synthetic spec, a valid bundle and a pre-existing dest directory."""
     files = {"config.json": b"{}", "weights.gguf": b"fake-gguf-weights"}

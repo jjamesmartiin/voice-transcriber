@@ -4268,7 +4268,11 @@ def record_audio_stream(interactive_mode=False, stream_callback=None, stop_event
                         print(f"{RATE}Hz failed on secondary, trying default {default_rate}Hz...")
                         frames = perform_recording(fallback_idx, default_rate)
                         if frames is not None:
-                            ACTUAL_RATE = default_rate
+                            try:
+                                import scipy.signal  # noqa: F401
+                                ACTUAL_RATE = 16000
+                            except ImportError:
+                                ACTUAL_RATE = default_rate
                 except Exception:
                     pass
 
@@ -4294,6 +4298,12 @@ def record_audio_stream(interactive_mode=False, stream_callback=None, stop_event
                             d_info = sd.query_devices(default_idx)
                         d_rate = int(d_info['default_samplerate'])
                         frames = perform_recording(default_idx, d_rate)
+                        if frames is not None:
+                            try:
+                                import scipy.signal  # noqa: F401
+                                ACTUAL_RATE = 16000
+                            except ImportError:
+                                ACTUAL_RATE = d_rate
                     except Exception:
                         pass
                 if frames is not None:

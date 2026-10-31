@@ -1080,8 +1080,17 @@ def send_command(
         family = socket.AF_UNIX
         destination = address
 
+    effective_timeout = timeout
+    if effective_timeout is None:
+        if cmd == "wait":
+            wait_limit = float(fields.get("timeout") or 30.0)
+            effective_timeout = max(DEFAULT_TIMEOUT, wait_limit + 5.0)
+        else:
+            effective_timeout = DEFAULT_TIMEOUT
+
     client = socket.socket(family, socket.SOCK_STREAM)
-    client.settimeout(timeout)
+    client.settimeout(effective_timeout)
+    data = b""
     try:
         try:
             client.connect(destination)
@@ -1093,13 +1102,21 @@ def send_command(
                     f"({type(exc).__name__}: {exc})"
                 ),
             }
-        client.sendall((json.dumps(request) + "\n").encode("utf-8"))
-        data = b""
-        while b"\n" not in data:
-            chunk = client.recv(4096)
-            if not chunk:
-                break
-            data += chunk
+        try:
+            client.sendall((json.dumps(request) + "\n").encode("utf-8"))
+            while b"\n" not in data:
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        except (OSError, TimeoutError) as exc:
+            return {
+                "ok": False,
+                "error": (
+                    f"control request failed at {address} "
+                    f"({type(exc).__name__}: {exc})"
+                ),
+            }
     finally:
         try:
             client.close()
@@ -1110,7 +1127,10 @@ def send_command(
     if not reply:
         return {"ok": False, "error": "engine closed the connection without replying"}
     try:
-        return json.loads(reply)
+        parsed = json.loads(reply)
+        if not isinstance(parsed, dict):
+            return {"ok": False, "error": f"non-object reply: {reply!r}"}
+        return parsed
     except json.JSONDecodeError:
         return {"ok": False, "error": f"unparseable reply: {reply!r}"}
 

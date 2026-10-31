@@ -138,7 +138,7 @@ def check_microphone_mute(fix: bool = False) -> Dict[str, Any]:
     source = state["name"]
     label = source or "the default input"
     result: Dict[str, Any] = {
-        "ok": not muted,
+        "ok": bool(muted is False),
         "checked": True,
         "muted": muted,
         "source": source,

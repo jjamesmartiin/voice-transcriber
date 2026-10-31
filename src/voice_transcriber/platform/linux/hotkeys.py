@@ -242,6 +242,18 @@ class LinuxHotkeyManager(BaseHotkeyManager):
                 "~": (uinput.KEY_GRAVE, True),
             }
 
+            # If text contains characters not expressible in raw uinput US scancodes
+            # (e.g. non-ASCII, accents, emoji, CJK), delegate to the clipboard typing sink
+            # rather than silently dropping characters.
+            unmappable = [c for c in text if c.lower() not in key_map]
+            if unmappable:
+                logger.debug(
+                    "Text contains %d characters unmappable to basic uinput scancodes (%r); falling back to clipboard typing sink",
+                    len(unmappable), unmappable[0]
+                )
+                from .clipboard import LinuxClipboardSink
+                return LinuxClipboardSink().type_text(text, fast=fast)
+
             for char in text:
                 shift = False
                 key = None

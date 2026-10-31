@@ -666,3 +666,12 @@ def test_a_rejected_rewrite_logs_the_reason(caplog, monkeypatch):
     assert result == "buy milk", "the invalid rewrite must still be discarded"
     assert "absent from the input" in caplog.text
     assert "s1-mini" in caplog.text
+
+
+def test_newlines_rejected_when_structure_is_prose_or_inline():
+    """Candidates containing line breaks must be rejected unless structure is blocks."""
+    original = "here is the plan first step second step"
+    candidate = "Here is the plan.\n\n- first step\n- second step"
+    assert formatter.validate(original, candidate, structure="prose") is not None
+    assert formatter.validate(original, candidate, structure="inline") is not None
+

@@ -8,7 +8,7 @@ engine** instead of reaching into internals.
 Two halves, one vocabulary:
 
 - the **engine** binds a Unix socket and serves commands (see
-  [`src/control.py`](../src/control.py));
+  [`src/voice_transcriber/control.py`](../src/voice_transcriber/control.py));
 - **`main.py` itself is the client** — `python src/main.py <verb>`.
 
 The same verbs also arrive from the ratatui frontend over its own socket, so the

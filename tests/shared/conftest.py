@@ -159,3 +159,15 @@ def _block_real_llama_server(monkeypatch):
         raise AssertionError(
             f"test attempted to spawn the real llama-server binary: {attempts}")
     _SPAWN_ATTEMPTS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_model_download_state(monkeypatch):
+    """Ensure mutable global state in model_download does not leak between tests."""
+    try:
+        import model_download
+        monkeypatch.setattr(model_download, "_prompt_allowed", None)
+        monkeypatch.setattr(model_download, "_status_handler", None)
+    except Exception:
+        pass
+    yield

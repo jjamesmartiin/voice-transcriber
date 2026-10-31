@@ -5,11 +5,11 @@ that implements it. Everything else — validation, the error messages, what the
 config may name — is derived from it, so adding a backend is one entry plus a
 module exposing `transcribe_audio` and `preload_model`.
 
-Cohere Transcribe is the default. It won its measurement against faster-whisper
-(base.en / small.en) on the 154-clip eval in `eval/` — WER 2.79% against 8.75%
-and 9.38%, and faster — which is why whisper is not here. NVIDIA Parakeet TDT
-0.6B v3 is declared as a second, selectable backend; whether it should become
-the default is settled by the bake-off in `docs/asr-bakeoff.md`, not here.
+Cohere Transcribe is the default. It won its evaluation on the 154-clip
+benchmark in `eval/` with lower WER and near-zero silence hallucinations, which
+is why it is the default backend. NVIDIA Parakeet TDT 0.6B v3 is declared as a
+second, selectable backend; whether it should become the default is settled by
+the bake-off in `docs/asr-bakeoff.md`, not here.
 
 Nothing in this module imports a backend at import time, so a model-free test run
 never pays for `torch` or `sherpa_onnx`.

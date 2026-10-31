@@ -12,7 +12,7 @@
 ### Why Voice Transcriber?
 
 - **100% Offline & Private**: Powered by local Cohere Transcribe weights (`cohere-transcribe-03-2026`). Zero API keys, zero cloud subscriptions, zero telemetry.
-- **Microsecond Post-Processing (~16 µs)**: Removes verbal retractions (*"no wait, make that Wednesday"*), parses spoken ordinals/dates (*"October 20th"*), converts numbers to digits, and applies personal developer dictionaries with homophone guards (*"push to Gitea"* vs *"cup of tea"*).
+- **Microsecond Post-Processing (~16 µs)**: Removes verbal retractions (*"no wait, make that Wednesday"* in full cleanup mode), parses spoken ordinals/dates (*"October 20th"*), converts numbers to digits, and applies personal developer dictionaries with homophone guards (*"push to Gitea"* vs *"cup of tea"*).
 - **Push-to-Talk + Hands-Free Space Latch**: Hold `Alt+Shift` (or middle mouse button) anywhere on the desktop to talk. Tap `Space` while holding to latch hands-free. `Alt+Shift` is just the default — the settings modal (or `vt hotkey add`) binds as many chords as you like.
 - **Direct OS Keystroke Injection**: Types natively into any focused window across Linux (Wayland `uinput`/`ydotool`, X11), Windows (Win32 `SendInput`), and WSL2.
 - **Ratatui Terminal REPL**: High-performance inline Rust TUI with live status, all-time time-saved tracking, and simultaneous multi-device microphone VU metering.
@@ -51,13 +51,23 @@ Voice Transcriber is evaluated with a reproducible test suite in `eval/` across 
 | **Overall Speech Pipeline** | **142** | **3.57%** | **1.43%** | **70.4%** | — |
 | **Silence / Quiet Room Gate** | **12** | — | — | — | **0 / 12 (0.0%)** |
 
-> **Latency Breakdown**: Streaming VAD: `0 ms` · Post-Processor: `~16 µs` · Cohere CPU Inference: `~0.15x RTF` (~0.7s on 5s audio) · End-to-End Delivery: `< 1.0 s`.  
+> **Latency Breakdown**: Streaming VAD: `< 1 ms` · Post-Processor: `15–40 µs` · Cohere CPU Inference: `~0.15–0.25x RTF` (~0.7–1.2s on 5s audio) · Typical Delivery: `~0.8–1.4 s`.  
 > *Read the engineering deep dive in the [Technical Blog Post](docs/blog_post.md).*
 
 The same 154-clip harness was used to evaluate **Parakeet TDT 0.6B v3** as an
 alternative ASR backend. It is faster and much lighter, but loses every accuracy
 slice, so **Cohere remains the default**; set `model_backend: parakeet` to opt
 in. The measurement and verdict are in [`docs/asr-bakeoff.md`](docs/asr-bakeoff.md).
+
+### Comparison: Voice Transcriber vs. Whisper / whisper.cpp
+
+| Dimension | Voice Transcriber | Whisper / whisper.cpp |
+| :--- | :--- | :--- |
+| **Silence Hallucinations** | **0.0%** (12/12 silence clips returned empty string) | Frequent hallucinations (*"Thank you for watching"*, subtitle credits, repetition loops) on natural speech pauses |
+| **Spoken Retractions & Fillers** | **Native microsecond post-processing** (`~16 µs`): resolves mid-sentence corrections (*"Tuesday no wait Wednesday"* → *"Wednesday"* in full mode), collapses stutters, formats dates & numbers | Verbatim output only; spoken false starts and hesitation markers must be manually edited |
+| **Desktop Integration** | **Turnkey global engine**: push-to-talk (`Alt+Shift`), hands-free space latch, Wayland `uinput`/`ydotool`, Win32 `SendInput`, macOS `pbcopy` | Raw inference engine / CLI tool; desktop hotkeys and focus-aware keystroke injection require custom glue scripts |
+| **Terminal UI** | High-performance Rust **Ratatui** TUI with live status, multi-device VU meters, and instant configuration picker | None (CLI stdout or third-party wrappers) |
+| **Privacy & Cost** | **100% offline & open-source (MIT)**; zero cloud APIs, subscriptions, or telemetry | whisper.cpp is open-source; proprietary dictation GUIs (Superwhisper, MacWhisper Pro) are macOS-only and require paid tiers |
 
 ---
 
@@ -129,7 +139,8 @@ for the platform you are targeting.
 | Requirement | Detail |
 | :--- | :--- |
 | **CPU** | `x86_64` or `arm64`. Inference is **CPU-only** — no GPU is required or used. |
-| **Disk (running from source)** | ~4 GB for the Cohere weights (`model.safetensors` is 3.9 GB) plus ~1.5 GB for the Python environment — budget ~6 GB. |
+| **RAM / Memory** | **8 GB minimum (16 GB recommended)**. Default model consumes ~4.7 GiB resident memory (RSS). |
+| **Disk (running from source)** | ~4 GB for the Cohere weights (`model.safetensors` is 3.9 GB) plus ~1.5 GB for the Python environment. Budget ~10–12 GB during first-time archive decompression and extraction. |
 | **Disk (standalone Windows EXE)** | ~6 GB — the bundle carries its own Python, PyTorch, and the full 3.9 GB model. |
 | **Network** | ~2.8 GB download on **first launch only**, for the compressed model weights. Fully offline afterwards. Set `VT_AUTO_DOWNLOAD_MODEL=0` to skip the download and supply weights yourself. |
 | **Model weights** | Auto-installed on first run, or provided via `VT_MODEL_DIR` / a local `models/cohere/`. The download is split-xz and needs ~2.8 GB down / ~4 GB on disk. |
@@ -803,7 +814,7 @@ Supported options:
 - `keep_bluetooth_handsfree`: `true` keeps Bluetooth devices in hands-free mode so media does not pause when recording ends.
 - `punctuation_mode`: `full`, `no_terminal_period`, `no_punctuation`, or `lowercase_no_punctuation` (legacy alias `semi-formal` → `no_terminal_period`).
 - `structure_mode`: spoken-list formatting — `off` (default), `inline` (markers only: `"- one. - two."`), or `blocks` (real bullets and paragraph breaks). Typed output is automatically downgraded to `inline`, because a newline is an Enter keypress in whatever window has focus; `blocks` is for the clipboard/paste path. See [`docs/formatting.md`](docs/formatting.md).
-- `cleanup_mode`: how much the post-processing pass may change the words — `off` (keeps every word, deletes nothing), `artifacts` (removes noise: silence hallucinations, filler, stutters, trailing mutterings — but leaves your corrections verbatim), or `full` (default: also resolves self-corrections such as `"Tuesday no sorry Wednesday"` → `"Wednesday"`). Number/date formatting, the dictionary, casing and the punctuation preset are separate settings and are not gated by it. See [`docs/cleanup_modes.md`](docs/cleanup_modes.md).
+- `cleanup_mode`: how much the post-processing pass may change the words — `off` (keeps every word, deletes nothing), `artifacts` (default: removes noise: silence hallucinations, filler, stutters, trailing mutterings — but leaves your corrections verbatim), or `full` (also resolves self-corrections such as `"Tuesday no sorry Wednesday"` → `"Wednesday"`). Number/date formatting, the dictionary, casing and the punctuation preset are separate settings and are not gated by it. See [`docs/cleanup_modes.md`](docs/cleanup_modes.md).
 - `enable_slm`: `true` to enable the optional local vLLM grammar-polish pass (default `false`).
 - `sound_theme`: audio cue pack — `proximity` (default), `pop`, `chime`, or `silent`.
 - `ui_theme`: `auto` (default: follow your desktop's accent color — GNOME's `accent-color` today — falling back to the terminal heuristic and then green) or one of `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white`. `VT_UI_THEME` overrides it per session.

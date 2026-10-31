@@ -384,6 +384,25 @@ class TestSocketTransport:
         assert response["ok"] is False
         assert "no running Voice Transcriber" in response["error"]
 
+    def test_send_command_never_raises_on_recv_timeout(self, sock_path):
+        """send_command must return ok: False rather than raising TimeoutError."""
+        gate = threading.Event()
+
+        class HangingEngine(_FakeEngine):
+            def handle_control(self, cmd, request):
+                gate.wait(2.0)
+                return {"ok": True}
+
+        server = _server(sock_path, HangingEngine())
+        assert server.start() is True
+        try:
+            res = control.send_command("status", socket_path=server.socket_path, timeout=0.05)
+            assert res["ok"] is False
+            assert "control request failed" in res["error"]
+        finally:
+            gate.set()
+            server.stop()
+
     def test_an_explicit_path_implies_the_unix_transport(self, sock_path):
         server = _server(sock_path)
         assert server.transport == control.UNIX

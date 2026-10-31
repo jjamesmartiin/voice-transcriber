@@ -8,7 +8,7 @@
 > still to confirm on this platform.
 
 
-Voice Transcriber runs natively on macOS (both Apple Silicon M-series and Intel Macs) with global hotkeys, CoreAudio recording, PyTorch MPS hardware acceleration, and active-window text injection.
+Voice Transcriber runs natively on macOS (both Apple Silicon M-series and Intel Macs) with global hotkeys, CoreAudio recording, CPU vector acceleration (NEON / Accelerate SIMD), and active-window text injection.
 
 ---
 

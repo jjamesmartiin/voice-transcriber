@@ -167,3 +167,18 @@ class TestPasteTextSupport:
         finally:
             manager.cleanup()
 
+    def test_linux_hotkey_manager_unmappable_chars_fallback(self, monkeypatch):
+        from unittest.mock import MagicMock
+        LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager
+        LinuxClipboardSink = hal.load_backend("linux", "clipboard").LinuxClipboardSink
+        manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+        manager.virtual_keyboard = MagicMock()
+        manager.uinput = MagicMock()
+        mock_sink_type = MagicMock(return_value=True)
+        monkeypatch.setattr(LinuxClipboardSink, "type_text", mock_sink_type)
+        try:
+            assert manager.type_text("café", fast=True) is True
+            assert mock_sink_type.called
+        finally:
+            manager.cleanup()
+

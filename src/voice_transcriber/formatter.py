@@ -459,6 +459,10 @@ def validate(original: str, candidate: str, *, structure: str | None = None) -> 
     if structure == "prose" and items:
         return "output contains list markup but prose was requested"
 
+    # Line breaks are only allowed when structured block output is in force.
+    if structure in ("prose", "inline") and ("\n" in candidate or "\r" in candidate):
+        return f"output contains line breaks but structure was {structure!r}"
+
     return None
 
 

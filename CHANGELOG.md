@@ -14,6 +14,14 @@ existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Model bundle extraction allowlist**: allow `LICENSE`, `NOTICE`, and declared subdirectory members in release tarballs so clean online installs succeed.
+- **Keystroke injection newline sanitization**: collapse newlines before synthetic typing and reject formatter candidates with line breaks under prose/inline structure modes so Enter never inadvertently executes in a terminal.
+- **Control API robustness**: wrap `sendall`/`recv` in `(OSError, TimeoutError)`, scale client timeout for `wait`, and validate dictionary responses.
+- **Linux uinput unmappable character fallback**: delegate to clipboard typing sink when text contains characters outside basic US scancodes rather than silently dropping them.
+- **Audio rate tracking & doctor mute check**: fix `ACTUAL_RATE` calculation after secondary device fallback and ensure unknown mute states do not evaluate to healthy.
+
 ## [1.4.4] — 2026-10-12
 
 ### Changed

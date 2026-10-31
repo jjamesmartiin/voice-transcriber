@@ -4,6 +4,7 @@ Voice Transcriber main entry point and runtime orchestrator.
 Cross-platform voice dictation with global hotkeys, streaming VAD, and instant text injection.
 """
 import logging
+import re
 import threading
 import time
 import os
@@ -1543,7 +1544,10 @@ class SimpleVoiceTranscriber:
                             time.sleep(0.01 if is_fast else 0.05)
 
                         add_space = getattr(t2, 'AUTO_TYPE_TRAILING_SPACE', True)
-                        text_to_type = (transcription + ' ') if add_space else transcription
+                        # Safety: Typing into focused windows must never send Enter / newlines
+                        # (which could execute shell commands or send partial chat messages).
+                        safe_text = re.sub(r'[\r\n]+', ' ', transcription).strip()
+                        text_to_type = (safe_text + ' ') if add_space else safe_text
                         if self.hotkey_system and self.hotkey_system.type_text(text_to_type, fast=is_fast):
                             logger.info("Typed (%s, %d chars)", 'fast' if is_fast else 'slow', len(text_to_type))
                             logger.debug("Typed text: %s", text_to_type)
