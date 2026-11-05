@@ -29,12 +29,25 @@ class TestLiveVllmSlmIntegration(unittest.TestCase):
         vllm_url = os.environ.get("VT_VLLM_URL", "http://localhost:8000/v1/chat/completions")
         models_url = vllm_url.replace("/chat/completions", "/models")
 
-        # Check if local vLLM service is active
+        # Check if local vLLM service is active with a compatible instruct/SLM model
         try:
             req = urllib.request.Request(models_url)
             with urllib.request.urlopen(req, timeout=1.0) as resp:
                 if resp.status != 200:
                     self.skipTest("vLLM service not responding with 200 OK")
+                import json
+                model_data = json.loads(resp.read().decode("utf-8"))
+                model_names = [
+                    m.get("id", "") or m.get("name", "")
+                    for m in (model_data.get("data", []) or model_data.get("models", []))
+                ]
+                if not any(
+                    any(k in m.lower() for k in ("qwen2.5", "llama-3.2", "instruct", "slm", "dictation"))
+                    for m in model_names
+                ):
+                    self.skipTest(f"Active model ({model_names}) is not an SLM instruct model")
+        except self.failureException:
+            raise
         except Exception:
             self.skipTest("Local vLLM server is not running on port 8000")
 
@@ -50,8 +63,8 @@ class TestLiveVllmSlmIntegration(unittest.TestCase):
             slm_result1 = process_slm_llm_rewrite(raw_input, timeout_sec=2.0)
             self.assertTrue(len(slm_result1) > 0)
 
-            # 2. Full hybrid pipeline accuracy
-            full_result1 = clean_speech_transcription(raw_input)
+            # 2. Full hybrid pipeline accuracy (retractions require cleanup_mode="full")
+            full_result1 = clean_speech_transcription(raw_input, cleanup_mode="full")
 
             self.assertEqual(
                 full_result1.rstrip("."),
@@ -69,8 +82,8 @@ class TestLiveVllmSlmIntegration(unittest.TestCase):
             )
 
             # 3. Idempotency (repeatability across 3 consecutive runs)
-            full_result2 = clean_speech_transcription(raw_input)
-            full_result3 = clean_speech_transcription(raw_input)
+            full_result2 = clean_speech_transcription(raw_input, cleanup_mode="full")
+            full_result3 = clean_speech_transcription(raw_input, cleanup_mode="full")
 
             self.assertEqual(
                 full_result1, full_result2, "vLLM SLM pass must be idempotent (run 1 vs run 2)"
