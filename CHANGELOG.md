@@ -12,6 +12,72 @@ model-revision-derived tag (`model-<name>-<rev>` for `cohere`, `formatter` and
 changes — never per app release — so a new app version normally reuses the
 existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
+## [1.5.0] — 2026-11-05
+
+### Added
+
+- **Meeting mode speaker tracking**: online diarization labels speakers live as the
+  meeting is captured, and the final transcript is written with speaker turns.
+- **Windows desktop UX**: system tray, focus-safe overlay, single-instance guard
+  with duplicate-launch feedback, and autostart that survives an upgrade.
+- **Windows standalone build**: prebuilt zips run without a Python install.
+- **Cleanup mode defaults to `artifacts`** so normal dictation is not rewritten
+  while filler/retraction cleanup is still available.
+- `doctor --fix` repairs a muted default microphone with no engine running; the
+  NixOS uinput/`input`-group prerequisite is diagnosed rather than silently fatal.
+
+### Changed
+
+- **Nix contextual rules** for spoken symbols and code identifiers (comment
+  markers, arrows, comparisons) so dictating into code editors is not mangled.
+- Post-processing refuses formatter output that contains line breaks in prose /
+  inline modes, and newlines are stripped before synthetic typing — Enter can
+  no longer be injected by a transcript.
+- Linux hotkey handling skips the mouse grab while a button is held and caches
+  ignored paths instead of re-scanning them on every event.
+- Perf: Cohere prompt/token caches and the meeting capture queue are bounded.
+
+### Fixed
+
+- **Zombie subprocesses**: overlay and audio-cue children are reaped, and the
+  audio worker no longer clears the active frame buffer of a new recording.
+- **IPC hardening**: tolerant config parsing, lossy UTF-8 decoding, read/write
+  timeouts, a wall-clock deadline on connection reading, EOF without a trailing
+  newline, and rejection of un-terminated oversized requests.
+- **Control API**: `sendall`/`recv` failures surface as errors instead of
+  tracebacks, `wait` scales its client timeout, and dictionary responses are
+  validated.
+- **Model download**: HTTPS only, environment proxies ignored, archive members
+  allowlisted, `LICENSE`/`NOTICE`/subdirectory members accepted, and all Cohere
+  digests pinned.
+- **`llama-server`**: an unvetted PATH binary is refused and tar members are
+  checked before extraction.
+- **Terminal restoration** on the ratatui frontend, plus a guarded startup
+  interrupt; the Rich frontend's `show_warning` signature now matches across
+  platforms.
+- **Config**: `VT_*` overrides apply unconditionally, a non-mapping config is
+  backed up before saving, `reset` restores the live model backend and language,
+  and a saved custom dictionary is no longer lost between tests or sessions.
+- **Data dir**: the model cache is local (not roaming) on Windows, and an empty
+  `XDG_DATA_HOME` means unset rather than the current directory.
+- **Post-processor**: sentence boundaries and real question marks preserved,
+  `"one"` kept a word after an ordinal, articles not collapsed before
+  single-letter code, spoken IPs converted without a CIDR suffix, and list
+  markers broadened to Unicode bullets and Markdown.
+- **Linux typing sink**: `ydotool`/`xdotool` return codes are verified before
+  claiming success, and unmappable characters fall back to clipboard typing
+  instead of being dropped.
+- **Stats**: UTC timestamps and a monotonic `last_used` progression.
+- **Micro-batcher** keeps draining its worker queue on a join timeout; the
+  TUI's read loop no longer dies after the first idle second, and time-saved
+  totals render when per-utterance savings are zero.
+- **WSL**: `wslPath` single-quote escaping, newline sanitization in the sound
+  theme bridge, and validated ALSA PulseAudio config creation.
+- **Misc**: rotating log file, robust `VT_LOG_LEVEL` parsing, ASCII fallback for
+  a falsy/UTF-8 stream encoding, safe terminal notification fallback, atomic
+  meeting transcript writes (`mkstemp`), and control-socket endpoint trust
+  validation.
+
 ## [Unreleased]
 
 ### Fixed
