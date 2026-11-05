@@ -136,7 +136,7 @@ class MacOSVisualNotification:
             title = title_or_message
             text = message
         else:
-            title = self.app_name
+            title = "WARNING"
             text = title_or_message
         logger.warning("%s: %s", title, text)
         if self.tui and hasattr(self.tui, "print_warning"):
@@ -144,5 +144,5 @@ class MacOSVisualNotification:
         if self.tui and hasattr(self.tui, "update_state"):
             self.tui.update_state("READY")
         self._display_notification(
-            str(text), title=title, subtitle="Warning"
+            str(text), title=self.app_name, subtitle="Warning"
         )
