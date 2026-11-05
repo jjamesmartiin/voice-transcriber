@@ -638,5 +638,25 @@ class TestProcessReaping:
         assert len(waited) == 1
 
 
+def test_visual_notification_show_warning_signatures(monkeypatch):
+    """show_warning must accept both single-arg and (title, message) two-arg forms."""
+    from unittest.mock import MagicMock
+    import notifications
+    warnings = []
+    fake_tui = MagicMock()
+    fake_tui.print_warning = lambda title, msg: warnings.append((title, msg))
+
+    monkeypatch.setattr(notifications.VisualNotification, "_create_overlay", lambda *a, **kw: None)
+    monkeypatch.setattr(notifications.threading, "Timer", lambda *a, **kw: MagicMock())
+
+    notifier = notifications.VisualNotification(app_name="VT", tui=fake_tui, enable_logging=False)
+    notifier.show_warning("Just a warning message")
+    assert warnings[-1] == ("WARNING", "Just a warning message")
+
+    notifier.show_warning("Custom Title", "Detailed warning message")
+    assert warnings[-1] == ("Custom Title", "Detailed warning message")
+
+
+
 
 

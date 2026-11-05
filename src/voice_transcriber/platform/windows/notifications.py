@@ -164,7 +164,10 @@ class WindowsVisualNotification:
             tray.set_state("READY")
             tray.show_balloon("Voice Transcriber Error", str(message), is_error=True)
 
-    def show_warning(self, title: str, message: str):
+    def show_warning(self, title: str = "WARNING", message: str | None = None):
+        if message is None:
+            message = title
+            title = "Voice Transcriber"
         logger.warning("%s: %s", title, message)
         tray = self.tray
         if tray:

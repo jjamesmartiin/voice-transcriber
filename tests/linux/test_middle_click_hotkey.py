@@ -750,6 +750,7 @@ def test_linux_grab_mouse_busy_device_handled_cleanly(monkeypatch, caplog):
 
     LinuxHotkeyManager = ScriptedLinuxHotkeyManager
     manager = LinuxHotkeyManager(MagicMock(), MagicMock())
+    manager.virtual_keyboard = MagicMock()
     device = FakeDevice("TPPS/2 Elan TrackPoint", [272, 273, 274])
     device.ungrab = lambda: None
 

@@ -184,12 +184,18 @@ class VisualNotification:
         timer.start()
         self._notification_timers.append(timer)
 
-    def show_warning(self, text="WARNING"):
+    def show_warning(self, title_or_text="WARNING", message=None):
         """Show a warning notification."""
+        if message is not None:
+            title = title_or_text
+            text = message
+        else:
+            title = "WARNING"
+            text = title_or_text
         self._cleanup_overlays()
-        self._create_overlay("WARNING", "#ff8800", persistent=False)
+        self._create_overlay(title, "#ff8800", persistent=False)
         if self.tui:
-            self.tui.print_warning("WARNING", text)
+            self.tui.print_warning(title, text)
             self.tui.update_state("READY")
         else:
             self._show_terminal_notification(text)

@@ -131,12 +131,18 @@ class MacOSVisualNotification:
             str(message), title=self.app_name, subtitle="Error"
         )
 
-    def show_warning(self, message="WARNING"):
-        logger.warning(message)
+    def show_warning(self, title_or_message="WARNING", message=None):
+        if message is not None:
+            title = title_or_message
+            text = message
+        else:
+            title = self.app_name
+            text = title_or_message
+        logger.warning("%s: %s", title, text)
         if self.tui and hasattr(self.tui, "print_warning"):
-            self.tui.print_warning("WARNING", str(message))
+            self.tui.print_warning(title, str(text))
         if self.tui and hasattr(self.tui, "update_state"):
             self.tui.update_state("READY")
         self._display_notification(
-            str(message), title=self.app_name, subtitle="Warning"
+            str(text), title=title, subtitle="Warning"
         )
