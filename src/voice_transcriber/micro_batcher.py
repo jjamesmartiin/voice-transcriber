@@ -259,10 +259,12 @@ def trim_trailing_silence(audio_pcm, sample_rate=16000, frame_len_ms=25, silence
     return flat
 
 class StreamingMicroBatcher:
-    def __init__(self, sample_rate=16000, mode=None, min_chunk_sec=4.5, max_chunk_sec=7.0, silence_thresh=0.015, min_silence_sec=0.25, overlap_sec=0.3, tui=None, on_text=None):
+    def __init__(self, sample_rate=16000, mode=None, min_chunk_sec=4.5, max_chunk_sec=7.0, silence_thresh=0.015, min_silence_sec=0.25, overlap_sec=0.3, tui=None, on_text=None, speaker_tracker=None):
         self.sample_rate = sample_rate
         self.mode = mode or os.environ.get('VT_MICRO_BATCHING', 'auto').lower()
         self.tui = tui
+        #: Optional online speaker tracker for live meeting diarization.
+        self.speaker_tracker = speaker_tracker
         #: Called with the running transcript after each transcribed chunk, for
         #: a live view (meeting mode). Optional: dictation passes none, so this
         #: costs it nothing. See :meth:`_advance_live_text` for why the running
@@ -270,6 +272,7 @@ class StreamingMicroBatcher:
         self.on_text = on_text
         self._live_text = ''
         self._live_index = -1
+        self._live_turns = []
 
         # Configure thresholds based on mode
         if self.mode == 'always' or self.mode == '1' or self.mode == 'true':
@@ -309,6 +312,9 @@ class StreamingMicroBatcher:
         self.next_chunk_idx = 0
         self._live_text = ''
         self._live_index = -1
+        self._live_turns = []
+        if self.speaker_tracker is not None:
+            self.speaker_tracker.reset()
         self.running = True
         self.join_timeout = 25.0
 
@@ -330,7 +336,35 @@ class StreamingMicroBatcher:
         with self.results_lock:
             return _display_text(self._live_text)
 
-    def _advance_live_text(self, chunk_index, text, has_overlap, is_forced):
+    def refresh_live_text(self):
+        """Re-render the running transcript with updated speaker names."""
+        with self.results_lock:
+            if not getattr(self, '_live_turns', None):
+                return
+            lines = []
+            for turn in self._live_turns:
+                label = (
+                    self.speaker_tracker.format_label(turn['spk_id'])
+                    if self.speaker_tracker is not None
+                    else turn['spk_label']
+                )
+                body = (
+                    turn['text']
+                    .replace(SEGMENT_SENTINEL, " ")
+                    .replace(SOFT_SEGMENT_SENTINEL, " ")
+                    .strip()
+                )
+                if body:
+                    lines.append(f"[{label}] {body}")
+            self._live_text = "\n".join(lines)
+            live = self._live_text
+        if live and self.on_text is not None:
+            try:
+                self.on_text(_display_text(live))
+            except Exception as e:
+                logger.debug("Micro-batch refresh live text callback error: %s", e)
+
+    def _advance_live_text(self, chunk_index, text, has_overlap, is_forced, spk_id=None, spk_label=None):
         """Fold one chunk's transcript into the running text (caller holds the lock).
 
         Returns the raw running text, or ``None`` when there is nothing new to
@@ -346,6 +380,37 @@ class StreamingMicroBatcher:
         self._live_index = chunk_index
         if not text:
             return None
+
+        if spk_label is not None and spk_id is not None:
+            # Live speaker tracking branch: group consecutive chunks by speaker
+            if not self._live_turns:
+                self._live_turns.append({'spk_id': spk_id, 'spk_label': spk_label, 'text': text.strip()})
+            elif self._live_turns[-1]['spk_id'] == spk_id:
+                sep = SOFT_SEGMENT_SENTINEL if is_forced else " "
+                self._live_turns[-1]['text'] = deduplicate_text_overlap(
+                    self._live_turns[-1]['text'], text, has_speech_overlap=has_overlap, separator=sep
+                )
+            else:
+                self._live_turns.append({'spk_id': spk_id, 'spk_label': spk_label, 'text': text.strip()})
+
+            lines = []
+            for turn in self._live_turns:
+                lbl = (
+                    self.speaker_tracker.format_label(turn['spk_id'])
+                    if self.speaker_tracker is not None
+                    else turn['spk_label']
+                )
+                body = (
+                    turn['text']
+                    .replace(SEGMENT_SENTINEL, " ")
+                    .replace(SOFT_SEGMENT_SENTINEL, " ")
+                    .strip()
+                )
+                if body:
+                    lines.append(f"[{lbl}] {body}")
+            self._live_text = "\n".join(lines)
+            return self._live_text
+
         if not self._live_text:
             self._live_text = text.strip()
         else:
@@ -403,13 +468,21 @@ class StreamingMicroBatcher:
                     if is_inter and is_forced and text:
                         text = text.rstrip('. \t\r\n')
 
+                spk_id = None
+                spk_label = None
+                if text and self.speaker_tracker is not None:
+                    try:
+                        spk_id, spk_label, _ = self.speaker_tracker.identify(flat, self.sample_rate)
+                    except Exception as e:
+                        logger.debug("Live speaker tracker identify error: %s", e)
+
                 with self.results_lock:
                     # `is_forced` describes the cut *before* this chunk: a clean
                     # silence cut is a real pause, a forced energy-trough cut is a
                     # weaker boundary. The stitcher turns that into a sentinel.
                     self.transcribed_chunks.append((chunk_index, text, has_overlap, is_forced))
                     live_text = self._advance_live_text(
-                        chunk_index, text, has_overlap, is_forced)
+                        chunk_index, text, has_overlap, is_forced, spk_id=spk_id, spk_label=spk_label)
 
                 # Published outside the results lock, because the callback writes
                 # to a socket. Guarded separately so a display failure is not

@@ -734,6 +734,9 @@ class SimpleVoiceTranscriber:
         """Replace the live speakers map with a normalised ordered list."""
         import t2
         self.speaker_names = t2.normalize_speaker_names(names)
+        batcher = getattr(self, "_meeting_batcher", None)
+        if batcher is not None and hasattr(batcher, "refresh_live_text"):
+            batcher.refresh_live_text()
         return list(self.speaker_names)
 
     def open_speaker_editor(self):
@@ -881,12 +884,28 @@ class SimpleVoiceTranscriber:
         """
         self._stop_meeting_live_batcher()
         try:
+            import t2
             from micro_batcher import StreamingMicroBatcher
+            tracker = None
+            if getattr(t2, "get_diarization", lambda: "off")() == "on":
+                try:
+                    from voice_transcriber.speaker_tracker import LiveSpeakerTracker
+                    if LiveSpeakerTracker.available():
+                        max_spk_raw = getattr(t2, "get_diarization_speakers", lambda: "auto")()
+                        max_spk = int(max_spk_raw) if max_spk_raw not in ("auto", None) else 8
+                        tracker = LiveSpeakerTracker(
+                            max_speakers=max_spk,
+                            speaker_names_getter=self.get_speaker_names,
+                        )
+                except Exception as exc:
+                    logger.debug("live speaker tracker initialization failed: %s", exc)
+
             self.meeting_live_text = ""
             self._meeting_batcher = StreamingMicroBatcher(
                 sample_rate=self.meeting.sample_rate,
                 tui=self.tui,
                 on_text=self._on_meeting_live_text,
+                speaker_tracker=tracker,
             )
             self._meeting_batcher.start()
         except Exception as exc:
