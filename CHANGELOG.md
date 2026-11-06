@@ -12,6 +12,25 @@ model-revision-derived tag (`model-<name>-<rev>` for `cohere`, `formatter` and
 changes — never per app release — so a new app version normally reuses the
 existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
+## [1.5.1] — 2026-11-05
+
+### Fixed
+
+- **A missing audio backend no longer kills the process at import.**
+  `import sounddevice` calls `Pa_Initialize()`, which raises where no audio stack
+  answers (a container, a headless session, an AppImage whose private `/nix`
+  store cannot resolve the host's ALSA config). That aborted the whole app with a
+  traceback, so even `help` and `doctor` — neither of which touches audio — died
+  with it. The failure is now reported where audio is used, and as a doctor
+  warning, instead of as an import crash.
+- **The AppImage had no microphone on NixOS.** It runs in a private `/nix`
+  chroot, so a NixOS `/etc/alsa/conf.d` (symlinks into the host store) is
+  unreadable there and ALSA aborted the entire config load: PortAudio then
+  reported no host API at all. The bundle now ships its own ALSA config, picked
+  up only where the host one is an unreachable NixOS store path; other distros
+  keep using their own pipewire/pulse config. Verified with `doctor` inside the
+  built AppImage: 2 input devices found where there were none.
+
 ## [1.5.0] — 2026-11-05
 
 ### Added

@@ -660,3 +660,18 @@ def test_visual_notification_show_warning_signatures(monkeypatch):
 
 
 
+
+
+def test_missing_portaudio_is_a_clear_error_not_an_import_crash():
+    """`import sounddevice` calls Pa_Initialize(), which raises where no audio
+    stack answers (container, headless session, AppImage namespace hiding
+    /dev/snd). That used to abort the whole process at import, so `help` and
+    `doctor` - neither of which touches audio - died with a traceback.
+    """
+    import t2
+
+    fallback = t2.NoAudioBackend(RuntimeError("Pa_Initialize failed"))
+    with pytest.raises(RuntimeError, match="no audio backend"):
+        fallback.query_devices()
+    # The real module must still expose a sounddevice object when audio works.
+    assert t2.sd is not None

@@ -242,7 +242,7 @@ Being transparent about test limits is also helpful: because GitHub's Ubuntu run
 
 If you'd like to try it out on your machine:
 
-- **Linux:** Download `vt-x86_64.AppImage` from [releases], or run via Nix: `nix run github:jjamesmartiin/voice-transcriber`
+- **Linux:** Download `vt-x86_64.AppImage` from [releases], or run via Nix: `nix run github:jjamesmartiin/voice-transcriber`. The AppImage is about 1.1 GB because it is a whole Nix closure—Python, `numpy`, `torch` and the `sherpa-onnx` runtime are bundled in, so it does not care which distro you run it on; the only thing it fetches at runtime is the model weights, on first launch.
 - **Windows:** Download the installer `VoiceTranscriber-windows-x86_64-setup.exe` or portable `VoiceTranscriber-windows-x86_64.zip` from [releases] (no Python required). Or clone and run `scripts\setup.bat` then `scripts\run.bat`.
 - **macOS / from source:** Clone the repo and run `./scripts/setup.sh` then `./scripts/run.sh` (or `nix run .`).
 

@@ -82,8 +82,36 @@ import atexit
 import locale
 import time
 import numpy as np
-import sounddevice as sd
 import logging
+
+
+class NoAudioBackend:
+    """Stands in for sounddevice when PortAudio cannot initialise.
+
+    ``import sounddevice`` calls ``Pa_Initialize()``, which raises on a box with
+    no reachable audio stack (a container, a headless session, an AppImage whose
+    namespace hides /dev/snd). That used to kill the whole process at import, so
+    even ``help``/``doctor`` - neither of which needs audio - died with a
+    traceback. Attribute access now fails where audio is actually used.
+    """
+
+    def __init__(self, error):
+        self.error = error
+
+    def __getattr__(self, name):
+        raise RuntimeError(
+            f"no audio backend: PortAudio failed to initialise ({self.error})"
+        ) from self.error
+
+
+try:
+    import sounddevice as sd
+except Exception as _audio_exc:  # PortAudioError is not an OSError
+    logging.getLogger(__name__).warning(
+        "no audio backend: PortAudio failed to initialise: %s", _audio_exc
+    )
+    sd = NoAudioBackend(_audio_exc)
+
 logger = logging.getLogger(__name__)
 from transcribe2 import transcribe_audio, get_model
 import transcribe2

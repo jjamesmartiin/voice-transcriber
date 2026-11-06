@@ -40,7 +40,7 @@
           };
         };
 
-      version = "1.5.0";
+      version = "1.5.1";
     in
     {
       packages = forEachSupportedSystem ({ system, pkgs, sherpaPkgs }:
@@ -130,7 +130,7 @@
 
           default = pkgs.stdenv.mkDerivation {
             pname = "vt";
-            version = "1.5.0";
+            version = "1.5.1";
             src = ./.;
             
             installPhase = ''
@@ -158,11 +158,26 @@
               mkdir -p $out/share/metainfo
               cp packaging/linux/*.appdata.xml $out/share/metainfo/
 
+              # ALSA config, kept inside the bundle. The AppImage runs in a
+              # private /nix chroot, so a NixOS /etc/alsa/conf.d (symlinks into
+              # the host store) cannot be read there and ALSA aborts the whole
+              # config load: PortAudio then finds no host API and there is no
+              # microphone. The pre-load hook is what probes /etc, so it goes.
+              mkdir -p $out/share/alsa
+              cp -r ${pkgs.alsa-lib}/share/alsa/. $out/share/alsa/
+              sed -i '/^# pre-load the configuration files/,/^\]$/d' $out/share/alsa/alsa.conf
+
               mkdir -p $out/bin
               cat > $out/bin/vt << EOF
               #!${pkgs.bash}/bin/bash
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:\$PATH"
               export PYTHONPATH="$out/share/vt:\$PYTHONPATH"
+              # Use the bundled ALSA config only where the host one is a NixOS
+              # store symlink the AppImage chroot cannot resolve; elsewhere the
+              # host's pipewire/pulse config is the right default.
+              if [ -z "\$ALSA_CONFIG_PATH" ] && [ -e /etc/NIXOS ]; then
+                export ALSA_CONFIG_PATH="$out/share/alsa/alsa.conf"
+              fi
               # ratatui frontend built by this flake. Override for local dev with
               # VT_TUI_BIN=/path/to/vt-tui, or force the Rich UI with VT_TUI=rich.
               if [ -z "\$VT_TUI_BIN" ]; then
