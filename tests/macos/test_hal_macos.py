@@ -7,6 +7,8 @@ import subprocess
 import sys
 import time
 import types
+
+import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -549,7 +551,11 @@ class TestMacOSHotkeyBinds:
         """``alt`` means the modifier by the space bar, which is Cmd here."""
         manager = self._manager("alt+shift")
         try:
-            FakeKey, keys = self._fake_key_namespace(shift_l="shift_l")
+            # Real pynput exposes all of these; the fake has to as well, or the
+            # chord's keys resolve to nothing and set_binds refuses it.
+            FakeKey, keys = self._fake_key_namespace(
+                shift_l="shift_l", alt_l="alt_l", alt_r="alt_r", alt="alt", space="space"
+            )
             manager._Key = keys
             cmd = FakeKey("cmd_l")
             manager.CMD_KEYS = {cmd}
@@ -570,5 +576,39 @@ class TestMacOSHotkeyBinds:
             assert list(manager.binds) == before
             assert manager.set_binds(12345) is False
             assert list(manager.binds) == before
+        finally:
+            manager.cleanup()
+
+
+    def test_a_letter_bind_resolves_through_the_character(self):
+        """Letters have no pynput *Key* attribute; they arrive as a KeyCode.
+
+        ``keybinds.PYNPUT_ATTRS['a']`` is empty, so `ctrl+a` used to produce an
+        empty alternative set: it could never match, while ``set_binds`` returned
+        True and the control API stored it. Windows resolves letters through
+        ``KeyCode.from_char``; macOS must do the same.
+        """
+        manager = self._manager()
+        try:
+            try:
+                from pynput.keyboard import KeyCode
+            except Exception:  # pragma: no cover - pynput absent
+                pytest.skip("pynput is not installed")
+
+            manager._KeyCode = KeyCode
+            resolved = manager._key_set_for("a")
+            assert resolved, "a letter bind resolved to nothing"
+            assert KeyCode.from_char("a") in resolved
+            assert manager.set_binds("ctrl+a") is True
+        finally:
+            manager.cleanup()
+
+    def test_a_chord_with_an_unmatchable_key_is_refused(self):
+        manager = self._manager("ctrl+shift")
+        try:
+            manager._Key = types.SimpleNamespace()  # nothing resolves
+            assert manager.set_binds("ctrl+a") is False
+            # ...and the previous chord is still live.
+            assert [b.keys for b in manager.binds] == [("ctrl", "shift")]
         finally:
             manager.cleanup()

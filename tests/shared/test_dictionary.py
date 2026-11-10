@@ -579,3 +579,31 @@ def test_a_json_path_round_trips_through_save_and_load(tmp_path):
     assert list(tmp_path.glob("dictionary.local.json.corrupt-*")) == []
     assert dictionary.add_entry("wi fi", "Wi-Fi", path=path) is True
     assert dictionary.load_dictionary(path)["wi fi"] == "Wi-Fi"
+
+
+def test_a_contextual_rule_without_a_trigger_is_refused(tmp_path):
+    import dictionary
+
+    """It would be saved, listed, and never fire.
+
+    ``ContextualRule.apply`` only compiles a pattern when there is a trigger, so a
+    rule with only ``spoken`` matched the phrase and replaced nothing. The CLI
+    printed "✓ Added" and the user found out by testing their dictation.
+    """
+    target = tmp_path / "dictionary.local.yaml"
+
+    with pytest.raises(ValueError, match="at least one trigger"):
+        dictionary.add_contextual_rule(target="Gitea", spoken="get tea", path=str(target))
+
+    assert not target.exists() or "Gitea" not in target.read_text(encoding="utf-8")
+
+
+def test_a_contextual_rule_with_a_trigger_still_saves(tmp_path):
+    import dictionary
+
+    target = tmp_path / "dictionary.local.yaml"
+    dictionary.add_contextual_rule(
+        target="Gitea", spoken="get tea", triggers_before="push to", path=str(target)
+    )
+    rules = dictionary.load_contextual_rules(target)
+    assert rules and rules[0]["target"] == "Gitea"

@@ -65,9 +65,9 @@ dev = [
 # and pandas into a dictation app that never imports them.
 eval = [
     "datasets",
+    "gtts",          # eval/build_eval.py synthesises the "technical" slice with it
 ]
 gui = [
-    "gtts",
     "tkinter",
 ]
 

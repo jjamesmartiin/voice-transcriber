@@ -268,16 +268,28 @@ class MacOSHotkeyManager(BaseHotkeyManager):
         """The pynput keys that satisfy one canonical name (may be empty).
 
         Attribute spellings come from the one declaration table
-        (``keybinds.KEYS`` via ``keybinds.PYNPUT_ATTRS``); letters and digits
-        have none and resolve through their character instead.
+        (``keybinds.KEYS`` via ``keybinds.PYNPUT_ATTRS``); letters and digits have
+        none (``PYNPUT_ATTRS['a'] == ()``) and resolve through their character,
+        the same way the Windows backend does. Without that fallback a chord like
+        ``ctrl+a`` produced an empty alternative set here, so it could never match
+        while ``set_binds`` still reported success.
         """
         if self._Key is None:
             return set()
-        return {
+        alternatives = {
             member
             for attr in keybinds.PYNPUT_ATTRS.get(name, ())
             if (member := getattr(self._Key, attr, None)) is not None
         }
+        from_char = getattr(self._KeyCode, "from_char", None)
+        char = name if len(name) == 1 and (name.isalpha() or name.isdigit()) else None
+        if char is not None and from_char is not None:
+            for candidate in {char.lower(), char.upper()}:
+                try:
+                    alternatives.add(from_char(candidate))
+                except Exception:
+                    pass
+        return alternatives
 
     def _expanded_bind_keys(self):
         """Binds as macOS chords, with the platform's Cmd standing in for Alt.
@@ -313,7 +325,25 @@ class MacOSHotkeyManager(BaseHotkeyManager):
             logger.warning(f"Rejected push-to-talk binds {binds!r}: {e}")
             return False
         with self._lock:
+            previous = self.binds
             self.binds = parsed
+        # Refuse a bind whose every key resolved to nothing: reporting success for
+        # a chord this backend can never match is how a saved hotkey ends up
+        # silently dead.
+        unresolvable = [
+            name
+            for bind in parsed
+            for name in bind.keys
+            if not self._key_set_for(name)
+        ]
+        if unresolvable:
+            with self._lock:
+                self.binds = previous
+            logger.warning(
+                "Rejected push-to-talk binds %r: %s cannot be matched on macOS",
+                binds, ", ".join(sorted(set(unresolvable))),
+            )
+            return False
         logger.info(f"Push-to-talk binds: {keybinds.describe_binds(parsed)}")
         return True
 

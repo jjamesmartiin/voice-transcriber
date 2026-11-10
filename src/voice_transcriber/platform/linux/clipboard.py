@@ -13,10 +13,13 @@ Contract (locked by ``tests/e2e/test_end_to_end_crossplatform.py``):
 """
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 
 from ..base import BaseClipboardSink
+
+logger = logging.getLogger(__name__)
 
 
 #: A clipboard tool is allowed this long to accept the payload. ``wl-copy`` keeps
@@ -25,6 +28,12 @@ from ..base import BaseClipboardSink
 #: never block the transcription pipeline. Past this point the payload has been
 #: handed over, so the copy counts as done.
 CLIPBOARD_TIMEOUT_SEC = 0.25
+
+#: Floor for the typing helpers' leash. They type at roughly 1 ms per character
+#: plus the tool's own start-up, so the wait scales with the text; this is the
+#: part that covers start-up. Without any bound a wedged `ydotoold` blocked the
+#: transcription thread until the app was killed.
+TYPING_TIMEOUT_FLOOR_SEC = 5.0
 
 
 def _run_clipboard_tool(cmd: list, payload: bytes) -> bool:
@@ -59,20 +68,28 @@ class LinuxClipboardSink(BaseClipboardSink):
     def type_text(self, text: str, fast: bool = False) -> bool:
         if not text:
             return True
+        # A typing helper that stops responding must not hold the transcription
+        # thread forever: give it a generous but finite leash. `ydotool` types
+        # roughly 1 ms per character, so this scales with the text.
+        timeout = max(TYPING_TIMEOUT_FLOOR_SEC, len(text) * 0.02)
         if shutil.which("ydotool"):
             cmd = ["ydotool", "type", "-d", "1", "-s", "1", "--", text] if fast else ["ydotool", "type", "--", text]
             try:
-                res = subprocess.run(cmd, check=False)
+                res = subprocess.run(cmd, check=False, timeout=timeout)
                 if res.returncode == 0:
                     return True
+            except subprocess.TimeoutExpired:
+                logger.warning("ydotool type timed out after %.1fs", timeout)
             except OSError:
                 pass
         if shutil.which("xdotool"):
             cmd = ["xdotool", "type", "--delay", "1", "--clearmodifiers", "--", text] if fast else ["xdotool", "type", "--clearmodifiers", "--", text]
             try:
-                res = subprocess.run(cmd, check=False)
+                res = subprocess.run(cmd, check=False, timeout=timeout)
                 if res.returncode == 0:
                     return True
+            except subprocess.TimeoutExpired:
+                logger.warning("xdotool type timed out after %.1fs", timeout)
             except OSError:
                 pass
         # Last-resort fallback: leave it on the clipboard.

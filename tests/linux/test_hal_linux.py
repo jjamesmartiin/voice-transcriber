@@ -182,3 +182,75 @@ class TestPasteTextSupport:
         finally:
             manager.cleanup()
 
+
+
+    def test_a_wedged_typing_helper_cannot_hang_the_pipeline(self, monkeypatch):
+        """ydotool/xdotool get a finite leash.
+
+        Without one, a dead ``ydotoold`` held the transcription thread until the
+        app was killed; the clipboard copies beside them were already bounded.
+        """
+        monkeypatch.setattr(
+            shutil, "which",
+            lambda name: f"/usr/bin/{name}" if name in ("ydotool", "xdotool") else None,
+        )
+        timeouts = []
+
+        def never_returns(args, **kwargs):
+            timeouts.append(kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 0))
+
+        monkeypatch.setattr(subprocess, "run", never_returns)
+        sink = hal.get_clipboard_sink(hal.LINUX)
+        monkeypatch.setattr(sink, "copy_text", lambda text: False)  # no last resort either
+
+        assert sink.type_text("hello there") is False
+        assert len(timeouts) == 2, timeouts          # ydotool, then xdotool
+        assert all(t and t > 0 for t in timeouts), timeouts
+
+
+class TestDeviceScanFollowsTheBinds:
+    """A device that emits a configured bind must be monitored.
+
+    The scan required KEY_LEFTALT/RIGHTALT *and* KEY_LEFTSHIFT/RIGHTSHIFT before
+    it would open a device at all -- a leftover from the fixed default chord. A
+    foot pedal or macropad that emits only KEY_F13 was never opened, so binding it
+    silently did nothing even though ``set_binds`` reported success.
+    """
+
+    class _FakeDevice:
+        def __init__(self, caps, path="/dev/input/event9", name="pedal"):
+            self._caps = caps
+            self.path = path
+            self.name = name
+
+        def capabilities(self):
+            return {1: self._caps}  # EV_KEY == 1
+
+    def _manager(self, binds):
+        from unittest.mock import MagicMock as MM
+
+        LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager  # noqa: N806
+        manager = LinuxHotkeyManager(MM(), MM())
+        assert manager.set_binds(binds) is True
+        return manager
+
+    def test_a_pedal_with_only_the_bound_key_is_monitored(self):
+        from voice_transcriber import keybinds
+
+        manager = self._manager(["f13"])
+        device = self._FakeDevice(list(keybinds.EVDEV_CODES["f13"]))
+
+        assert manager._is_keyboard_device(device) is True
+
+    def test_a_device_with_no_bound_key_and_no_modifiers_is_ignored(self):
+        manager = self._manager(["f13"])
+        device = self._FakeDevice([30])  # KEY_A only
+
+        assert manager._is_keyboard_device(device) is False
+
+    def test_the_default_chord_still_recognises_a_normal_keyboard(self):
+        manager = self._manager(["alt+shift"])
+        device = self._FakeDevice([56, 42])  # KEY_LEFTALT, KEY_LEFTSHIFT
+
+        assert manager._is_keyboard_device(device) is True

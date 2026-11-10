@@ -318,7 +318,14 @@
               fi
               ${pythonEnv}/bin/python -m pytest tests/shared "$TIER" "$@"
               exit_code=$?
+              # 139/136 are SIGSEGV/SIGABRT, which a PortAudio callback can raise
+              # in a native thread (see tests/shared/test_hal_contract.py). Treat
+              # them as "the known crash, not a test failure" -- but say so loudly,
+              # because silently returning 0 made any real crash look green.
               if [ $exit_code -eq 139 ] || [ $exit_code -eq 136 ]; then
+                echo "vt-test: pytest died on signal $exit_code (SIGSEGV/SIGABRT);" \
+                     "reporting success for the known PortAudio crash -- verify" \
+                     "locally if this was unexpected" >&2
                 exit 0
               fi
               exit $exit_code

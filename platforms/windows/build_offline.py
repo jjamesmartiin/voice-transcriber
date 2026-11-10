@@ -359,7 +359,6 @@ def build_exe(noconsole: bool = False):
         "--hidden-import=voice_transcriber.hotkeys",
         "--hidden-import=voice_transcriber.logging_setup",
         "--hidden-import=voice_transcriber.micro_batcher",
-        "--hidden-import=voice_transcriber.model_backend",
         "--hidden-import=voice_transcriber.model_download",
         "--hidden-import=voice_transcriber.notifications",
         "--hidden-import=voice_transcriber.post_processor",

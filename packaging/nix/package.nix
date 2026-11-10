@@ -51,6 +51,7 @@ python3Packages.buildPythonApplication {
     rich
     scipy
     sentencepiece
+    sherpa-onnx
     sounddevice
     soundfile
     torch

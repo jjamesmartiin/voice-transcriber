@@ -2114,6 +2114,22 @@ def set_contextual_rules(rules: list[dict | ContextualRule] | None) -> None:
     _CONTEXTUAL_RULES = compiled
 
 
+#: The inline ``dictionary:`` block from the user's config, held as its own
+#: layer. It is merged by :func:`load_merged_dictionaries` rather than pushed
+#: through :func:`set_custom_dictionary`, because that marks the dictionaries as
+#: already loaded and the file layers are then never read -- so configuring an
+#: inline map silently disabled both the shipped dictionary and the personal one
+#: the CLI writes (measured: 167 entries became 1).
+_INLINE_DICTIONARY: dict[str, str] = {}
+
+
+def set_inline_dictionary(mapping: dict[str, str] | None) -> None:
+    """Set the config-file dictionary layer; the merge rebuilds on next use."""
+    global _INLINE_DICTIONARY, _CUSTOM_DICT_INITIALIZED
+    _INLINE_DICTIONARY = dict(mapping or {})
+    _CUSTOM_DICT_INITIALIZED = False
+
+
 def set_custom_dictionary(mapping: dict[str, str] | None) -> None:
     """
     Sets and compiles the custom word/phrase replacement dictionary.
@@ -2368,6 +2384,10 @@ def load_merged_dictionaries() -> tuple[dict[str, str], list[dict[str, Any]]]:
             except Exception:
                 pass
             break
+
+    # 2. The config file's inline dictionary: the documented middle layer.
+    if _INLINE_DICTIONARY:
+        _merge_in(dict(_INLINE_DICTIONARY), [])
 
     # 3. Personal / local (gitignored) dictionary candidates
     local_candidates = []
@@ -3038,7 +3058,11 @@ CONFIG_MIRRORED_SETTERS = (
     ("structure_mode", set_structure_mode),
     ("cleanup_mode", set_cleanup_mode),
     ("formatter_settings", set_formatter_settings),
-    ("custom_dictionary", set_custom_dictionary),
+    # The config file's inline dictionary is a *layer* of the merged dictionary,
+    # not a replacement for it: publishing it through ``set_custom_dictionary``
+    # marked the files as already loaded, so a config with a `dictionary:` block
+    # silently dropped the shipped and personal dictionaries.
+    ("custom_dictionary", set_inline_dictionary),
     ("contextual_rules", set_contextual_rules),
 )
 
@@ -3098,7 +3122,9 @@ def apply_settings_from_config(
     if dictionary_file:
         load_custom_dictionary_from_file(dictionary_file)
     elif isinstance(dictionary, dict) and dictionary:
-        set_custom_dictionary(dictionary)
+        # A layer, not a replacement: the shipped and personal dictionary files
+        # must still load, and they are merged with this one on first use.
+        set_inline_dictionary(dictionary)
         if contextual_rules:
             set_contextual_rules(contextual_rules)
     elif contextual_rules:

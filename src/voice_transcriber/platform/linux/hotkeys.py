@@ -327,14 +327,35 @@ class LinuxHotkeyManager(BaseHotkeyManager):
             logger.error(f"Error emitting paste via uinput: {e}")
             return False
 
+    def _bind_codes(self):
+        """Every evdev key code the configured binds care about.
+
+        A device only needs to expose *one* of these to be worth monitoring: a
+        foot pedal that emits nothing but KEY_F13 is a perfectly good
+        push-to-talk trigger, and the Alt+Shift requirement below is only a
+        heuristic for recognising a keyboard.
+        """
+        codes = set()
+        for bind in self.binds:
+            codes.update(keybinds.evdev_codes(bind))
+        return codes
+
     def _is_keyboard_device(self, device):
-        """Check if a device looks like a keyboard we want to monitor."""
+        """Check if a device looks like a keyboard, or carries a bound key."""
         try:
             caps = device.capabilities()
             if self.evdev.ecodes.EV_KEY not in caps:
                 return False
 
             key_caps = caps[self.evdev.ecodes.EV_KEY]
+
+            # A device that can emit a configured bind is monitorable whatever
+            # else it looks like. Without this, rebinding to a dedicated
+            # macropad/pedal silently never fired: the scan required Alt+Shift
+            # (a leftover from the fixed default chord) before opening a device
+            # at all.
+            if self._bind_codes() & set(key_caps):
+                return True
 
             has_letters = any(
                 key in key_caps
@@ -562,6 +583,14 @@ class LinuxHotkeyManager(BaseHotkeyManager):
         with self._lock:
             self.binds = parsed
         logger.info("Push-to-talk binds set to %s", keybinds.describe_binds(parsed))
+        # A new chord may name a key on a device that was not monitored for the
+        # old one (a pedal that only emits F13, say), so rescan rather than keep
+        # the previous device list.
+        try:
+            self._ignored_paths = set()
+            self.scan_for_devices()
+        except Exception as exc:
+            logger.debug("Rescan after a bind change failed: %s", exc)
         return True
 
     def is_middle_click_pressed(self):

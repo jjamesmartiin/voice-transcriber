@@ -1332,3 +1332,16 @@ class TestOneEngineOneSocket:
             assert control.send_command("status", socket_path=str(sock_path))["ok"] is True
         finally:
             server.stop()
+
+
+def test_the_value_cap_cannot_be_bypassed_through_an_alias():
+    """The handler reads value/name/mode; the cap used to check only `value`.
+
+    `{"cmd": "speakers", "name": "x" * 200000}` therefore reached
+    ``set_speaker_names`` with an unbounded string.
+    """
+    over = "x" * (control.MAX_VALUE_CHARS + 1)
+    for key in ("value", "name", "mode"):
+        reply = _router().dispatch(json.dumps({"cmd": "speakers", key: over}))
+        assert reply["ok"] is False, key
+        assert "over the" in reply["error"], (key, reply)

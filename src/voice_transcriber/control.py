@@ -474,6 +474,19 @@ def default_socket_path() -> str:
         base = os.path.join(tempfile.gettempdir(), f"vt-{_user_identifier()}")
         try:
             os.makedirs(base, mode=0o700, exist_ok=True)
+            # /tmp has no XDG guarantee, so the directory must actually be ours:
+            # another local user could pre-create `$TMPDIR/vt-<uid>` and then
+            # unlink or replace the socket inside it.
+            st = os.lstat(base)
+            ours = (not hasattr(os, "getuid")) or st.st_uid == os.getuid()
+            private = (st.st_mode & 0o077) == 0
+            if not (ours and private):
+                logger.warning(
+                    "Refusing %s for the control socket (uid %s, mode %s); "
+                    "using a private directory instead",
+                    base, st.st_uid, oct(st.st_mode & 0o777),
+                )
+                base = tempfile.mkdtemp(prefix="vt-control-")
         except OSError:
             base = tempfile.gettempdir()
     return os.path.join(base, f"vt-control-{_user_identifier()}.sock")
@@ -657,13 +670,6 @@ class ControlServer:
         self._meeting_timer: threading.Timer | None = None
         self._meeting_generation = 0
         self._meeting_limit: float | None = None
-
-    @property
-    def address(self) -> str:
-        """A human-readable address for logs and error messages."""
-        if self.transport == TCP:
-            return f"{self.host}:{self.port}" if self.port else self.endpoint_file
-        return self.socket_path
 
     @property
     def started(self) -> bool:
@@ -1022,7 +1028,11 @@ class ControlServer:
         if verb == "wait":
             request = _bound_wait(request)
         elif verb in _VERBATIM_VALUE_VERBS:
-            raw = request.get("value")
+            # The handler accepts the same input under `value`, `name` or `mode`,
+            # so the cap has to look at all three: checking only `value` left the
+            # limit bypassable with a 200 kB `name`.
+            raw = next((request.get(k) for k in ("value", "name", "mode")
+                        if request.get(k) is not None), None)
             length = len(str(raw)) if raw is not None else 0
             if length > MAX_VALUE_CHARS:
                 return {

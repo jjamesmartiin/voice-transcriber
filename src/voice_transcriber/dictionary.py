@@ -466,7 +466,14 @@ def add_contextual_rule(
     path: Optional[str | Path] = None,
     local: Optional[bool] = None,
 ) -> bool:
-    """Add or update a contextual disambiguation rule."""
+    """Add or update a contextual disambiguation rule.
+
+    A rule needs at least one trigger (``triggers_before`` or ``triggers_after``):
+    without one nothing tells a contextual rule when to fire, so
+    :meth:`post_processor.ContextualRule.apply` would match the spoken phrase and
+    have nothing to replace. Saving it anyway produced a rule the user saw in the
+    list that could never change a single word.
+    """
     def _to_list(v):
         if not v:
             return []
@@ -484,6 +491,11 @@ def add_contextual_rule(
     after = _to_list(triggers_after)
     if after:
         rule_dict["triggers_after"] = after
+    if not before and not after:
+        raise ValueError(
+            "a contextual rule needs at least one trigger "
+            "(--before or --after); without one it can never fire"
+        )
     g = _to_list(guards)
     if g:
         rule_dict["guards"] = g
@@ -690,15 +702,19 @@ def main(args=None):
 
     elif parsed.command == "add-contextual":
         use_local = not parsed.common if not parsed.file else None
-        is_new = add_contextual_rule(
-            target=parsed.target,
-            spoken=parsed.spoken,
-            triggers_before=parsed.before,
-            triggers_after=parsed.after,
-            guards=parsed.guards,
-            path=parsed.file,
-            local=use_local,
-        )
+        try:
+            is_new = add_contextual_rule(
+                target=parsed.target,
+                spoken=parsed.spoken,
+                triggers_before=parsed.before,
+                triggers_after=parsed.after,
+                guards=parsed.guards,
+                path=parsed.file,
+                local=use_local,
+            )
+        except ValueError as e:
+            print(f"✕ {e}", file=sys.stderr)
+            sys.exit(2)
         action = "Added" if is_new else "Updated"
         tier = "common" if parsed.common else ("custom file" if parsed.file else "local (gitignored)")
         print(f"✓ {action} contextual rule for '{parsed.target}' in {tier}")
