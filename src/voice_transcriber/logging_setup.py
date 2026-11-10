@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 DEFAULT_LEVEL = "WARNING"
@@ -76,6 +77,34 @@ def default_log_path() -> Path:
     return Path(base) / "vt" / "vt.log"
 
 
+def _chmod_owner_only(path) -> None:
+    """Best-effort 0600 on POSIX; a no-op elsewhere."""
+    if os.name != "posix":
+        return
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+class _OwnerOnlyRotatingFileHandler(RotatingFileHandler):
+    """A rotating log that stays owner-only after every rollover.
+
+    The handler creates the new file itself at rollover time, so it lands with
+    the process umask (0644 on most systems) and the chmod done when the log was
+    first opened no longer protects it. At ``VT_LOG_LEVEL=DEBUG`` the file
+    contains the dictated text, so another local user reading it is a real leak.
+    """
+
+    def _open(self):
+        # `doRollover` closes, renames and then reopens through this method, so
+        # this is the one place that covers both the first open and every
+        # rollover.
+        stream = super()._open()
+        _chmod_owner_only(self.baseFilename)
+        return stream
+
+
 def configure_logging(level: str | int | None = None, log_file=None, console: bool = True):
     """Install console and file handlers on the root logger.
 
@@ -96,21 +125,15 @@ def configure_logging(level: str | int | None = None, log_file=None, console: bo
     log_path: Path | None = None
     if not _env_flag("VT_LOG_DISABLE"):
         try:
-            from logging.handlers import RotatingFileHandler
-
             target = Path(log_file) if log_file is not None else default_log_path()
             target.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = RotatingFileHandler(
+            file_handler = _OwnerOnlyRotatingFileHandler(
                 target, maxBytes=10 * 1024 * 1024, backupCount=3, encoding="utf-8"
             )
             file_handler.setFormatter(formatter)
             handlers.append(file_handler)
             log_path = target
-            if os.name == "posix":
-                try:
-                    os.chmod(target, 0o600)
-                except OSError:
-                    pass
+            _chmod_owner_only(target)
         except Exception:
             log_path = None
 

@@ -259,6 +259,18 @@ _NUMBER_WORDS = {
 #: summarisation is rejected.
 _MIN_RETENTION = 0.4
 
+#: Guardrail 2b: a negation that the rewrite drops inverts the sentence's meaning,
+#: and it passes every other guardrail - the surviving words really are the
+#: input's words, in order. Bare "no" is deliberately absent: it is the
+#: retraction marker the cleaner deletes on purpose ("Tuesday no wait
+#: Wednesday"), so requiring it would reject correct output. "not", "never" and
+#: the contractions have no such second job.
+_NEGATION_RE = re.compile(
+    r"\b(?:not|never|cannot|none|nobody|nothing|nowhere|neither|nor)\b"
+    r"|n['\u2019]t\b",
+    re.IGNORECASE,
+)
+
 _LIST_ITEM_RE = re.compile(
     r"^[ \t]*(?:[-*+#\u2022\u2023\u25cf\u25aa\u2013\u2014]|\d+[.)])[ \t]*(\S.*?)\s*$",
     re.MULTILINE,
@@ -440,6 +452,11 @@ def validate(original: str, candidate: str, *, structure: str | None = None) -> 
             if token not in seen:
                 seen.append(token)
         return f"output contains text absent from the input: {', '.join(seen[:5])}"
+
+    # Guardrail 2b: no dropped negation. "I never said that" -> "I said that."
+    # satisfies every check above, and inverts the sentence the user dictated.
+    if len(_NEGATION_RE.findall(candidate)) < len(_NEGATION_RE.findall(original)):
+        return "output dropped a negation the input contained"
 
     # Guardrail 3: a list item the user never said is the failure mode that
     # would destroy trust in the feature, so items are checked verbatim.

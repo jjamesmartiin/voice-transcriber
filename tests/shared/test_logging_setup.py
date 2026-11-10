@@ -128,3 +128,28 @@ class TestConfigureLogging:
         logging.warning("test message")
         mode = stat.S_IMODE(os.stat(target).st_mode)
         assert mode == 0o600, f"Expected 0600, got {oct(mode)}"
+
+
+def test_a_rolled_log_file_is_still_owner_only(tmp_path):
+    """The rotated file must not come back world-readable.
+
+    ``RotatingFileHandler`` creates the replacement file itself, with the process
+    umask, so the chmod done when the log was first opened stops applying after
+    the first rollover. At VT_LOG_LEVEL=DEBUG the file holds dictated text.
+    """
+    import os
+    import stat
+
+    target = tmp_path / "vt.log"
+    logging_setup.configure_logging(log_file=target, console=False)
+    handler = next(
+        h for h in logging.getLogger().handlers
+        if isinstance(h, logging_setup._OwnerOnlyRotatingFileHandler)
+    )
+    handler.maxBytes = 200  # force a rollover on the next write
+
+    logging.getLogger("vt.test").warning("before rollover")
+    handler.doRollover()  # explicit: an implicit rollover is not guaranteed here
+
+    mode = stat.S_IMODE(os.stat(target).st_mode)
+    assert mode == 0o600, f"rolled log is {oct(mode)}"

@@ -779,6 +779,9 @@ class TestTcpTransport:
         finally:
             server.stop()
         assert seen.get("cmd") == "status"
+        # The test used to assert only the verb, so the token could have reached
+        # the engine unnoticed. It is stripped after authorization.
+        assert "token" not in seen, seen
 
 
 # ---------------------------------------------------------------------------
@@ -1211,3 +1214,121 @@ class TestStatusAndWait:
     def test_wait_rejects_a_non_numeric_timeout(self, engine):
         with pytest.raises(ValueError, match="wait expects seconds"):
             engine.handle_control("wait", {"value": "soon"})
+
+
+class TestWaitTimeout:
+    """`wait` must block for as long as the caller asked, not 5 seconds.
+
+    Regression: the client's socket timeout was fixed at DEFAULT_TIMEOUT and only
+    extended when a caller passed ``timeout=None`` *and* a ``timeout`` field. The
+    documented call (docs/control_api.md, and the CLI's `wait 60`) passes
+    ``value``, so every wait that outlived 5 s returned "control request failed
+    ... timed out" while the engine was still working.
+    """
+
+    @pytest.mark.parametrize("fields,expected", [
+        ({"value": "20"}, 20.0),
+        ({"timeout_seconds": "5"}, 5.0),   # the spelling the verb catalogue names
+        ({"timeout": "30"}, 30.0),
+        ({}, 30.0),
+        ({"value": "not a number"}, 30.0),  # never raises; the engine reports it
+        ({"value": "-5"}, 0.0),
+    ])
+    def test_the_requested_wait_is_read_from_every_documented_spelling(self, fields, expected):
+        assert control._wait_limit_seconds(fields) == expected
+
+    @requires_af_unix
+    def test_a_wait_longer_than_the_default_timeout_succeeds(self, sock_path, monkeypatch):
+        import time as _time
+
+        class SlowEngine:
+            def handle_control(self, cmd, request):
+                _time.sleep(0.4)
+                return {"ok": True, "cmd": cmd}
+
+        monkeypatch.setattr(control, "DEFAULT_TIMEOUT", 0.1)
+        server = _server(sock_path, SlowEngine())
+        assert server.start() is True
+        try:
+            reply = control.send_command(
+                "wait", socket_path=server.socket_path, value="2"
+            )
+        finally:
+            server.stop()
+
+        assert reply == {"ok": True, "cmd": "wait"}, reply
+
+
+def test_the_engine_reads_the_wait_limit_from_the_catalogues_key():
+    """`help --json` names the `wait` value `timeout_seconds`; honour it.
+
+    The handler only read ``value``/``name``/``mode``, so a client that followed
+    the catalogue blocked for the 30 s default instead of the 2 s it asked for.
+    """
+    import time as _time
+    from unittest.mock import MagicMock
+
+    import main
+
+    engine = main.SimpleVoiceTranscriber.__new__(main.SimpleVoiceTranscriber)
+    engine.tui = MagicMock()
+    engine.tui.state = "PROCESSING"  # so `wait` actually has to wait
+    engine.recording = False
+    engine.hotkey_system = None
+    engine.last_transcription = ""
+
+    started = _time.monotonic()
+    reply = engine.handle_control("wait", {"timeout_seconds": "0"})
+    elapsed = _time.monotonic() - started
+
+    assert reply["timed_out"] is True
+    assert elapsed < 2.0, f"waited {elapsed:.1f}s; the timeout_seconds key was ignored"
+
+
+@requires_af_unix
+class TestOneEngineOneSocket:
+    """A second instance must not take a live engine's control socket.
+
+    Regression: ``_start_unix`` unlinked whatever was at the path before binding,
+    and ``stop()`` unlinked it whether or not this server had bound it. The
+    single-instance mutex is Windows-only, so on Linux/macOS launching twice
+    silently stranded the running engine (still dictating, unreachable from `vt`),
+    and quitting either process could delete the other's socket.
+    """
+
+    def test_a_second_server_refuses_a_live_socket(self, sock_path):
+        first = _server(sock_path)
+        assert first.start() is True
+        try:
+            assert _server(sock_path).start() is False
+            assert os.path.exists(sock_path)
+            assert control.send_command("status", socket_path=str(sock_path))["ok"] is True
+        finally:
+            first.stop()
+        assert not os.path.exists(sock_path)
+
+    def test_stopping_a_refused_server_leaves_the_live_socket_alone(self, sock_path):
+        first = _server(sock_path)
+        assert first.start() is True
+        try:
+            refused = _server(sock_path)
+            assert refused.start() is False
+            refused.stop()  # must not unlink a socket it never bound
+            assert os.path.exists(sock_path)
+            assert control.send_command("status", socket_path=str(sock_path))["ok"] is True
+        finally:
+            first.stop()
+
+    def test_a_stale_socket_file_is_still_replaced(self, sock_path):
+        """The guard must not turn a crashed engine's leftovers into a lockout."""
+        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stale.bind(str(sock_path))
+        stale.close()  # bound but no listener: the file now names nobody
+        assert os.path.exists(sock_path)
+
+        server = _server(sock_path)
+        assert server.start() is True
+        try:
+            assert control.send_command("status", socket_path=str(sock_path))["ok"] is True
+        finally:
+            server.stop()

@@ -456,3 +456,57 @@ class TestQuantizeDynamicDefaults:
         fake_model = object()
         assert tc._maybe_quantize_dynamic(fake_model, device="cpu") is fake_model
 
+
+
+# ===========================================================================
+# 3b. The batcher handed to the worker is the one that gets finished
+# ===========================================================================
+class TestTheRecordingOwnsItsBatcher:
+    """Regression: process_recording ignored the batcher it was given.
+
+    It re-read ``self.micro_batcher`` instead, so a second push-to-talk while the
+    first utterance was still transcribing finished the *new* recording's
+    batcher: that worker stopped, the new recording's audio was discarded, and
+    the first utterance was never transcribed. One deleted line.
+    """
+
+    def test_the_handed_over_batcher_is_finished_and_the_live_one_is_not(self, monkeypatch):
+        from main import SimpleVoiceTranscriber
+        import t2 as t2mod
+
+        monkeypatch.setattr(t2mod, "ENABLE_SLM", False)
+        monkeypatch.setattr(t2mod, "OUTPUT_MODE", "clipboard")
+        monkeypatch.setattr(t2mod, "AUTO_TYPE_TRAILING_SPACE", True)
+        monkeypatch.setattr(t2mod, "AUTO_TYPE_AUTO_PUNCTUATE", True)
+        monkeypatch.setattr(t2mod, "IS_MUTED", True)
+
+        app = SimpleVoiceTranscriber.__new__(SimpleVoiceTranscriber)
+        app.recording = False
+        app.copy_to_clipboard = False
+        app.start_time = 0.0
+        app.release_time = 1.0
+        app.last_finish_time = 0.0
+        app.audio_frames = None
+        app.last_transcription = ""
+        app.model_load_error = None
+        app._model_ready_event = MagicMock()
+        app._model_ready_event.is_set.return_value = True
+        app.tui = MagicMock()
+        app.visual_notification = MagicMock()
+        app.audio_cues = MagicMock()
+        app.hotkey_system = MagicMock()
+        app.hotkey_system.are_modifiers_pressed.return_value = False
+        app.hotkey_system.type_text.return_value = True
+        app.clipboard_sink = MagicMock()
+
+        first = MagicMock()
+        first.finish_and_get_text.return_value = "the first utterance"
+        second = MagicMock()
+        second.finish_and_get_text.return_value = "the second utterance"
+        # The recording in flight belongs to `first`; `second` is already live.
+        app.micro_batcher = second
+
+        app.process_recording(micro_batcher=first)  # must not raise
+
+        first.finish_and_get_text.assert_called_once()
+        second.finish_and_get_text.assert_not_called()

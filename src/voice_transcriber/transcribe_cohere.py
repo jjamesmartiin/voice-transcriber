@@ -471,7 +471,10 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     try:
         model, processor = get_model(device=device)
     except Exception as e:
-        return f"Error loading model: {e}"
+        # Returning an error string here would be stitched into the transcript
+        # and typed into the user's window. Report it where a failure belongs.
+        logger.error("Cohere model failed to load, no text for this audio: %s", e)
+        return ""
 
     _configure_torch_runtime(device)
     start_time = time.time()

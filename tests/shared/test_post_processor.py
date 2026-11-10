@@ -1057,6 +1057,31 @@ def test_marker_phrases_that_are_not_retractions(text):
     assert pp.process_verbal_retractions(text) == text
 
 
+def test_a_name_keeps_its_capital_mid_sentence():
+    """Only *known* over-capitalised words are lowercased.
+
+    The rule used to be "lowercase every mid-sentence capital unless it is on a
+    short proper-noun list", which damaged ordinary dictation: verified
+    "I emailed Sarah yesterday" -> "I emailed sarah yesterday". ASR only adds a
+    capital it has a reason for, so the default is now to keep it.
+    """
+    for sentence in (
+        "I emailed Sarah yesterday",
+        "I think Dave is right",
+        "Ask Mary about the budget",
+        "we shipped it to Postgres and Redis",
+    ):
+        assert pp.normalize_mid_sentence_casing(sentence) == sentence
+
+
+def test_over_capitalised_common_words_are_still_lowercased():
+    """The other half of the same rule: function words are lowercased."""
+    assert pp.normalize_mid_sentence_casing("so The plan is That we go") == \
+        "so the plan is that we go"
+    assert pp.normalize_mid_sentence_casing("He Asks about it") == "He asks about it"
+    assert pp.normalize_mid_sentence_casing("This Is important") == "This is important"
+
+
 def test_weekday_capitalisation_is_preserved_mid_sentence():
     """"on Tuesday, no, Wednesday" must not lose the capital on Wednesday.
 
@@ -1166,7 +1191,7 @@ def test_dangling_word_regex_does_not_destroy_adjective_sentence_boundaries():
 @pytest.mark.parametrize("spoken,expected", [
     ("I can list them like: Thing one. Thing two.", "I can list them like: Thing one. Thing two."),
     ("Note: Remember this", "Note: Remember this."),
-    ("Three things - Alpha, Beta", "Three things - Alpha, beta."),
+    ("Three things - Alpha, Beta", "Three things - Alpha, Beta."),
 ])
 def test_a_list_cue_keeps_the_capital_after_it(spoken, expected):
     """A colon or dash introduces a list or label, so the capital is the writer's.

@@ -368,7 +368,10 @@ def transcribe_audio(audio_data=None, audio_path=None, sample_rate=16000, device
     try:
         recognizer = get_model(device=device)
     except Exception as e:
-        return f"Error loading model: {e}"
+        # Never return an error string as text: it gets stitched into the
+        # transcript and typed into the focused window.
+        logger.error("Parakeet model failed to load, no text for this audio: %s", e)
+        return ""
 
     start = time.time()
     try:

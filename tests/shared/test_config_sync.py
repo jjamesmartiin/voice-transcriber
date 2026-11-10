@@ -534,15 +534,15 @@ def test_punctuation_modes_in_post_processor():
 
     # 1. Full mode
     set_punctuation_mode("full")
-    assert clean_speech_transcription(sample, punctuation_mode="full") == "Hello world, this is voice transcriber."
+    assert clean_speech_transcription(sample, punctuation_mode="full") == "Hello world, this is Voice Transcriber."
 
     # 2. No terminal period (semi-formal)
-    assert clean_speech_transcription(sample, punctuation_mode="no_terminal_period") == "Hello world, this is voice transcriber"
-    assert clean_speech_transcription(sample, punctuation_mode="semi-formal") == "Hello world, this is voice transcriber"
+    assert clean_speech_transcription(sample, punctuation_mode="no_terminal_period") == "Hello world, this is Voice Transcriber"
+    assert clean_speech_transcription(sample, punctuation_mode="semi-formal") == "Hello world, this is Voice Transcriber"
 
     # 3. No punctuation / autocorrect
-    assert clean_speech_transcription(sample, punctuation_mode="no_punctuation") == "Hello world this is voice transcriber"
-    assert clean_speech_transcription(sample, punctuation_mode="autocorrect") == "Hello world this is voice transcriber"
+    assert clean_speech_transcription(sample, punctuation_mode="no_punctuation") == "Hello world this is Voice Transcriber"
+    assert clean_speech_transcription(sample, punctuation_mode="autocorrect") == "Hello world this is Voice Transcriber"
 
     # 4. Aesthetic lowercase
     assert clean_speech_transcription(sample, punctuation_mode="aesthetic_lowercase") == "hello world, this is voice transcriber"

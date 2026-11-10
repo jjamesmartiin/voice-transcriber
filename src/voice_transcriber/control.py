@@ -649,6 +649,10 @@ class ControlServer:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._started = False
+        #: Whether *this* server bound the socket. Only then may ``stop()`` remove
+        #: it: unlinking a live engine's socket is how a second instance used to
+        #: strand the first one's control API.
+        self._owns_socket = False
         #: Opt-in meeting ceiling state (see ``VT_MEETING_MAX_SECONDS``).
         self._meeting_timer: threading.Timer | None = None
         self._meeting_generation = 0
@@ -678,8 +682,31 @@ class ControlServer:
             return self._start_tcp()
         return self._start_unix()
 
+    def _socket_is_live(self) -> bool:
+        """Whether something is already accepting on our socket path.
+
+        A stale file left by a killed engine must be replaced; a *live* socket
+        belongs to a running engine. Taking it over leaves that engine
+        unreachable from ``vt`` and the control API, silently.
+        """
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                probe.settimeout(0.2)
+                probe.connect(self.socket_path)
+            return True
+        except OSError:
+            return False
+
     def _start_unix(self) -> bool:
         if not unix_sockets_supported():
+            return False
+        if os.path.exists(self.socket_path) and self._socket_is_live():
+            logger.warning(
+                "A Voice Transcriber control API is already live at %s; this "
+                "instance will not take its socket over. Control verbs address "
+                "the other instance.",
+                self.socket_path,
+            )
             return False
         try:
             try:
@@ -690,6 +717,7 @@ class ControlServer:
                 pass
             server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             server.bind(self.socket_path)
+            self._owns_socket = True
             try:
                 os.chmod(self.socket_path, 0o600)
             except OSError:
@@ -795,11 +823,13 @@ class ControlServer:
             self._thread.join(timeout=1.0)
             self._thread = None
         try:
-            st = os.lstat(self.socket_path)
-            if stat.S_ISSOCK(st.st_mode):
-                os.unlink(self.socket_path)
+            if self._owns_socket:
+                st = os.lstat(self.socket_path)
+                if stat.S_ISSOCK(st.st_mode):
+                    os.unlink(self.socket_path)
         except OSError:
             pass
+        self._owns_socket = False
         if self.transport == TCP:
             _remove_endpoint_file(self.endpoint_file)
             self.port = None
@@ -979,6 +1009,11 @@ class ControlServer:
         if not self._authorized(request):
             return {"ok": False, "error": "unauthorized"}
 
+        # The bearer token is transport plumbing: once it has been checked, the
+        # engine has no reason to see it. Dropping it here means no handler (or
+        # future logging of a request) can publish it.
+        request.pop("token", None)
+
         cmd = str(request.get("cmd") or request.get("command") or "").strip()
         if not cmd:
             return {"ok": False, "error": "missing 'cmd'"}
@@ -1025,10 +1060,29 @@ class ControlServer:
         return reply
 
 
+def _wait_limit_seconds(fields: dict) -> float:
+    """How long a ``wait`` call asked to block for.
+
+    Three spellings mean the same thing: ``value`` (the CLI and
+    ``docs/control_api.md``), ``timeout_seconds`` (what the verb catalogue names)
+    and ``timeout`` (an older one). A value the engine would reject is ignored
+    here rather than raised - this client must never raise.
+    """
+    for key in ("value", "timeout_seconds", "timeout"):
+        raw = fields.get(key)
+        if raw is None:
+            continue
+        try:
+            return max(0.0, float(raw))
+        except (TypeError, ValueError):
+            continue
+    return 30.0
+
+
 def send_command(
     cmd: str,
     socket_path: str | None = None,
-    timeout: float = DEFAULT_TIMEOUT,
+    timeout: float | None = None,
     **fields,
 ) -> dict:
     """Send one command to the running engine and return its JSON reply.
@@ -1082,11 +1136,14 @@ def send_command(
 
     effective_timeout = timeout
     if effective_timeout is None:
-        if cmd == "wait":
-            wait_limit = float(fields.get("timeout") or 30.0)
-            effective_timeout = max(DEFAULT_TIMEOUT, wait_limit + 5.0)
-        else:
-            effective_timeout = DEFAULT_TIMEOUT
+        # `wait` blocks for as long as the caller asked (plus a margin), because
+        # the engine is busy for exactly that long. Before this, the default 5 s
+        # socket timeout always won and every documented `wait` failed.
+        effective_timeout = (
+            max(DEFAULT_TIMEOUT, _wait_limit_seconds(fields) + 5.0)
+            if cmd == "wait"
+            else DEFAULT_TIMEOUT
+        )
 
     client = socket.socket(family, socket.SOCK_STREAM)
     client.settimeout(effective_timeout)

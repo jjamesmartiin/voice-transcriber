@@ -224,16 +224,12 @@ MID_SENTENCE_CAP_REGEX = re.compile(r"(?<![.!?\n])\s+([A-Z][a-zA-Z0-9_-]+)")
 _UPPERCASE_CHAR_REGEX = re.compile(r"[A-Z]")
 MID_SENTENCE_BOUNDARY_REGEX = re.compile(r"[.?!]\s+[a-zA-Z]")
 
-# Words after which a capitalized word is treated as a proper noun (name, place, day)
-# and exempted from mid-sentence decapitalization, e.g. "Send it to Alice", "on Wednesday".
-PROPER_NOUN_PRECEDERS = {
-    "to", "for", "with", "at", "in", "on", "about", "from", "by", "of",
-}
 
-# Common English function/discourse words that ASR sometimes over-capitalizes mid-sentence
-# (e.g. "to Like quit", "in This section"). These are NEVER treated as proper nouns,
-# even after a preposition. Day/month names are intentionally NOT included so
-# "on Monday" / "in May" keep their capitalization.
+#: Determiners, pronouns, auxiliaries and the most common verbs: the words ASR
+#: tends to capitalise mid-sentence for no reason. Everything *not* in here is
+#: assumed to be capitalised on purpose (a name, a brand, a product), because
+#: lowercasing a real name ("sarah", "gitea") damages the very text the user is
+#: about to send.
 COMMON_MID_SENTENCE_WORDS = {
     "like", "this", "that", "these", "those", "then", "there", "their", "they",
     "when", "where", "why", "how", "who", "which", "what", "if", "and", "but",
@@ -247,6 +243,27 @@ COMMON_MID_SENTENCE_WORDS = {
     "might", "must", "shall", "want", "need", "let", "make", "get", "take", "go",
     "come", "see", "know", "think", "say", "tell", "use", "try", "look", "put",
     "give", "find", "work", "play", "start", "stop", "keep", "help", "check", "fix",
+    # Determiners and pronouns
+    "the", "a", "an", "it", "its", "we", "you", "he", "she", "him", "her", "his",
+    "hers", "us", "me", "my", "mine", "our", "ours", "your", "yours", "them",
+    "theirs", "whom", "whose", "all", "any", "some", "more", "most", "much",
+    "many", "few", "other", "another", "such", "same", "each", "every", "both",
+    "either", "neither", "than", "too", "even", "still", "yet", "again", "once",
+    "twice", "today", "tonight", "tomorrow",
+    # The verbs that turn up capitalised mid-sentence most often.
+    "went", "got", "made", "came", "saw", "took", "knew", "thought", "said", "told",
+    "looked", "used", "tried", "gave", "found", "worked", "started", "stopped",
+    "kept", "helped", "checked", "fixed", "called", "send", "sent", "read", "write",
+    "wrote", "run", "ran", "move", "moved", "add", "added", "change", "changed",
+    "show", "showed", "wait", "waited", "ask", "asked", "answer", "answered",
+    "seems", "seem", "looks", "wants", "wanted", "needs", "needed",
+    # Their inflections, which ASR capitalises just as often.
+    "asks", "goes", "going", "gets", "getting", "makes", "making", "takes",
+    "taking", "sees", "seeing", "says", "saying", "tells", "telling", "thinks",
+    "thinking", "knows", "knowing", "works", "working", "plays", "played",
+    "playing", "stops", "doing", "having", "puts", "putting", "lets",
+    "uses", "tries", "reads", "writes", "runs", "running", "coming", "moves",
+    "adds", "changes", "shows", "waits",
 }
 
 def normalize_mid_sentence_casing(text: str) -> str:
@@ -275,25 +292,11 @@ def normalize_mid_sentence_casing(text: str) -> str:
         # from being exempted (they should still decapitalize to is/as/us).
         if len(word) > 2 and word.endswith("s") and word[:-1].isupper():
             return m.group(0)
-        # Preserve proper nouns (names/places/days) that follow a preposition
-        # (e.g. "to Alice", "on Wednesday"), unless it is a common English word
-        # that ASR over-capitalized (e.g. "to Like", "on This")
-        start_idx = m.start()
-        idx = start_idx - 1
-        while idx >= 0 and text[idx] in " \t\r\n":
-            idx -= 1
-        boundary_char = text[idx] if idx >= 0 else ""
-        end_prev = idx + 1
-        while idx >= 0 and text[idx] not in " \t\r\n":
-            idx -= 1
-        start_prev = idx + 1
-        prev_word = text[start_prev:end_prev].rstrip(".,;:!?") if end_prev > start_prev else ""
-        if prev_word.lower() in PROPER_NOUN_PRECEDERS and word.lower() not in COMMON_MID_SENTENCE_WORDS:
-            return m.group(0)
-        # A colon or dash introduces a list or a label, so the capital after it
-        # is the writer's, not ASR over-capitalisation ("I can list them like:
-        # Thing one"). The regex lookbehind only knows about sentence ends.
-        if boundary_char in ":-\u2013\u2014":
+        # Everything else: ASR can only add a capital it has a reason for, and
+        # names, brands and products are exactly that. Lowercase only the words
+        # known to be over-capitalised mid-sentence; a name it gets right stays
+        # right ("I emailed Sarah", not "sarah").
+        if word.lower() not in COMMON_MID_SENTENCE_WORDS:
             return m.group(0)
         lowercased = word[0].lower() + word[1:]
         return " " + lowercased

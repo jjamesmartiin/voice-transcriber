@@ -248,8 +248,8 @@ def warm_asr():
     transcribe2.set_backend(backend)
     warm_audio = load_test_audio("short_word")
     probe = transcribe2.transcribe_audio(audio_data=warm_audio)
-    if isinstance(probe, str) and probe.startswith("Error loading model"):
-        pytest.skip(f"ASR backend ({backend}) unavailable: {probe}")
+    if not (probe or "").strip():
+        pytest.skip(f"ASR backend ({backend}) produced no text; model weights missing?")
     return backend
 
 
