@@ -86,3 +86,65 @@ class TestRecordAudioStreamContract:
         frames = t2.record_audio_stream(stop_event=cycle_stop)
         assert isinstance(frames, list)
 
+
+
+# ---------------------------------------------------------------------------
+# Resampling: a 48 kHz-only device must not come out ringing or drifting
+# ---------------------------------------------------------------------------
+class TestStreamingResampler:
+    """`resample_poly` per block is wrong twice over.
+
+    Each call zero-pads both ends (a filter transient at every ~21 ms boundary)
+    and returns ``ceil(len * up / down)`` samples, so a 48 kHz stream arrives a
+    little short of 16 kHz and the shortfall accumulates across an utterance.
+    Measured against a whole-signal resample on a two-tone signal: -3 dB SNR
+    before, +18 dB after.
+    """
+
+    def _tone(self, rate, seconds=2.0):
+        t = np.arange(int(rate * seconds)) / rate
+        return (0.5 * np.sin(2 * np.pi * 440 * t)
+                + 0.3 * np.sin(2 * np.pi * 2100 * t)).astype(np.float32)
+
+    def _stream(self, resampler, block, size):
+        return np.concatenate([resampler.process(block[i:i + 1024])
+                               for i in range(0, size, 1024)])
+
+    def test_the_stream_lands_at_exactly_the_target_rate(self):
+        for rate in (48000, 44100, 32000):
+            block = self._tone(rate)
+            out = self._stream(t2.make_resampler(rate), block, len(block))
+            expected = round(len(block) * 16000 / rate)
+            assert abs(len(out) - expected) <= 1, (rate, len(out), expected)
+
+    def test_odd_block_sizes_do_not_drift(self):
+        """PortAudio does not promise our block size."""
+        rate = 48000
+        block = self._tone(rate)
+        resampler = t2.make_resampler(rate)
+        chunks = [resampler.process(block[i:i + 1470]) for i in range(0, len(block), 1470)]
+        assert abs(sum(len(c) for c in chunks) - round(len(block) / 3)) <= 1
+
+    def test_it_matches_a_whole_signal_resample(self):
+        import scipy.signal as ss
+
+        rate = 48000
+        block = self._tone(rate)
+        reference = ss.resample_poly(block, 16000, rate)
+        out = self._stream(t2.make_resampler(rate), block, len(block))
+
+        n = min(len(reference), len(out))
+        snr = 10 * np.log10(np.sum(reference[:n] ** 2)
+                            / max(np.sum((reference[:n] - out[:n]) ** 2), 1e-20))
+        assert snr > 12.0, f"streamed resample is only {snr:.1f} dB from the reference"
+
+    def test_it_stays_float32_and_finite(self):
+        out = self._stream(t2.make_resampler(48000), self._tone(48000), 48000)
+        assert out.dtype == np.float32
+        assert np.isfinite(out).all()
+
+    def test_a_native_16k_device_is_passed_through_untouched(self):
+        block = np.arange(10, dtype=np.float32)
+        assert t2.make_resampler(16000).process(block).tolist() == block.tolist()
+        # An unknown/unset rate must not raise either.
+        assert t2.make_resampler(None).process(block).size == 10

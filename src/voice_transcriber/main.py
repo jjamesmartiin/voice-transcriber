@@ -248,6 +248,10 @@ class SimpleVoiceTranscriber:
         # fails). Started at construction so every entry point (interactive app,
         # tests) shares the same non-blocking behavior.
         self._start_model_load_watcher()
+        # The optional formatter's backend (llama-server) is warmed here too, for
+        # the same reason: the first formatted utterance must not be the one that
+        # waits for a process to spawn.
+        self._start_formatter_warm()
 
         # Out-of-process control API (see control.py). Started here -- after
         # every attribute a control verb touches exists, but BEFORE the
@@ -445,6 +449,28 @@ class SimpleVoiceTranscriber:
         """Spawn a daemon watcher that updates the UI once the model finishes loading."""
         threading.Thread(target=self._watch_model_load, daemon=True).start()
 
+    def _start_formatter_warm(self):
+        """Warm the optional formatter's backend off the dictation path.
+
+        Nothing else does it: `format_text` calls `module.warm()` on the first
+        utterance, and that spawns `llama-server` and polls its health endpoint
+        for up to 60 s while holding the backend lock, on the thread that is
+        trying to type. Warming here means the first formatted sentence is not
+        the one that pays for it.
+        """
+        def _warm():
+            try:
+                import t2 as _t2mod
+                if getattr(_t2mod, "FORMATTER", "off") != "on":
+                    return
+                import formatter
+
+                formatter.warm()
+            except Exception as e:
+                logger.debug(f"Formatter warm-up skipped: {e}")
+
+        threading.Thread(target=_warm, daemon=True, name="vt-formatter-warm").start()
+
     def _on_model_download_status(self, stage, pct, text):
         """Show first-run model-download progress in the TUI prompt line.
 
@@ -469,26 +495,35 @@ class SimpleVoiceTranscriber:
         Runs on its own daemon thread so the main/hotkey loops never block on a
         slow or failed model load (e.g. a stalled connection to huggingface.co).
         """
+        timed_out = False
         try:
             for t in self._preload_threads():
                 if t is not None:
                     t.join(timeout=MODEL_READY_TIMEOUT_S)
                     if t.is_alive():
-                        self.model_load_error = "model load timed out"
+                        timed_out = True
         except Exception as e:
             logger.debug(f"Model-load watcher error: {e}")
 
-        # Only a load that actually produced a model counts as success.
+        # Only a load that actually produced a model counts as success. A load
+        # that is merely *slow* is not a failure: the weights are ~2.8 GB on a
+        # first run, and recording the timeout as a terminal error dropped every
+        # dictation for the rest of the session -- even after the model arrived.
         try:
             import transcribe2
             backend_mod = transcribe2.get_backend()  # already imported by the preload
             loaded = getattr(backend_mod, '_model', None) is not None
         except Exception:
             loaded = False
-        if not loaded:
+        if not loaded and not timed_out:
             self.model_load_error = (
                 "model weights failed to load (check your connection to "
                 "huggingface.co, then restart the app to retry)"
+            )
+        elif not loaded:
+            logger.info(
+                "Model still loading after %.0fs; dictation will wait for it "
+                "instead of failing.", MODEL_READY_TIMEOUT_S,
             )
         self._model_ready_event.set()
 
@@ -1386,6 +1421,29 @@ class SimpleVoiceTranscriber:
         def _process_worker():
             if active_record_thread:
                 active_record_thread.join(timeout=RECORD_THREAD_JOIN_TIMEOUT_S)
+                if active_record_thread.is_alive():
+                    # The capture thread is wedged inside PortAudio and still owns
+                    # the audio buffer. Dispatching from here would read it while
+                    # it is being appended to (the tail can be sent twice or
+                    # dropped), so stop the batcher and lose this utterance
+                    # loudly rather than transcribe corrupted audio.
+                    logger.error(
+                        "Recording thread did not stop within %.0fs; dropping this "
+                        "utterance's audio",
+                        RECORD_THREAD_JOIN_TIMEOUT_S,
+                    )
+                    if active_batcher is not None:
+                        try:
+                            active_batcher.stop()
+                        except Exception:
+                            pass
+                    try:
+                        self.visual_notification.show_error(
+                            "Microphone stalled; that utterance was dropped"
+                        )
+                    except Exception:
+                        pass
+                    return
             captured_frames = getattr(self, 'audio_frames', None)
             with self._process_lock:
                 self.process_recording(
@@ -1495,7 +1553,12 @@ class SimpleVoiceTranscriber:
             if not self._model_ready_event.is_set():
                 logger.info("⏳ Audio captured; waiting for the model to finish loading...")
                 if not self._model_ready_event.wait(timeout=MODEL_READY_TIMEOUT_S):
-                    self.model_load_error = "model load timed out"
+                    # The watcher sets this event even when the load is merely
+                    # slow, so an event that never arrives means the preload
+                    # never reported back. That will not fix itself.
+                    self.model_load_error = (
+                        "the model never finished loading (restart the app to retry)"
+                    )
                 if self.model_load_error:
                     logger.error(f"Model load failed: {self.model_load_error}")
                     try:

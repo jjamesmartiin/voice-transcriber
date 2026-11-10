@@ -1690,3 +1690,53 @@ def test_both_config_snapshot_paths_call_the_single_entry_point(tmp_path, monkey
     assert "dictionary" not in applies[0] and "dictionary_file" not in applies[0]
     assert all(n <= 1 for n in counts.values()), f"reset published directly: {counts}"
     assert counts.get("set_number_digits_mode") == 1
+
+
+def test_a_vt_env_override_is_not_written_into_the_config_file(tmp_path, monkeypatch):
+
+    """`VT_IS_MUTED=0 vt` must not become the user's saved default.
+
+    ``_apply_env_overrides`` writes the value into the module globals and the save
+    path serialises every global, so a one-off run silently changed the setting
+    for every later run.
+    """
+    import yaml
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.dump({"is_muted": True, "typing_wpm": 40}), encoding="utf-8")
+    monkeypatch.setattr(t2, "get_config_file", lambda: cfg)
+    monkeypatch.setenv("VT_IS_MUTED", "0")
+
+    t2.load_audio_config(file_path=str(cfg))
+    assert t2.IS_MUTED is False, "the override must still apply to this run"
+
+    t2.set_typing_wpm(55)  # any unrelated save
+    saved = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+
+    assert saved["is_muted"] is True, "the env override was persisted"
+    assert saved["typing_wpm"] == 55, "a normal setting must still be saved"
+
+
+def test_one_bad_value_does_not_skip_the_rest_of_the_config(tmp_path, monkeypatch):
+    """A malformed value used to abort the load *before* the snapshot was published.
+
+    `sound_theme: off` is read by YAML as a bool; the whole load then raised and
+    the post-processor kept its defaults, so the settings UI and the cleaner
+    disagreed for the entire run.
+    """
+    import yaml
+    import post_processor as pp
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        yaml.dump({"sound_theme": False, "formatter": "on", "cleanup_mode": "off"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(t2, "get_config_file", lambda: cfg)
+    monkeypatch.setattr(t2, "apply_bluetooth_handsfree_policy", lambda *a, **k: False)
+
+    t2.load_audio_config(file_path=str(cfg))
+
+    assert t2.FORMATTER == "on"
+    assert pp._FORMATTER_ENABLED is True, "the snapshot was not published"
+    assert pp._CLEANUP_MODE == t2.CLEANUP_MODE

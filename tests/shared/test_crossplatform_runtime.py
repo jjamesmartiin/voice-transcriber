@@ -269,8 +269,11 @@ class TestAudioFramesEmptyCheck:
 
         app.process_recording()
 
+        # Only an *unreported* load is terminal. A load that is merely slow sets
+        # the event from the watcher and must not poison the session (see
+        # tests/shared/test_model_load_watcher.py).
         assert app.model_load_error is not None
-        assert "timed out" in app.model_load_error
+        assert "never finished loading" in app.model_load_error
 
     def test_numpy_audio_frames_still_work(self, monkeypatch):
         app = self._make_app(
@@ -510,3 +513,54 @@ class TestTheRecordingOwnsItsBatcher:
 
         first.finish_and_get_text.assert_called_once()
         second.finish_and_get_text.assert_not_called()
+
+
+class TestStuckCaptureThread:
+    """A capture thread wedged in PortAudio must not be raced.
+
+    ``record_thread.join(timeout=10)`` was unchecked: on a timeout the processing
+    thread built the tail chunk from ``audio_buffer``/``total_samples`` while the
+    capture thread could still be appending to them, so the last block was
+    dispatched twice or dropped.
+    """
+
+    def test_a_wedged_capture_thread_drops_the_utterance_loudly(self, monkeypatch):
+        from main import SimpleVoiceTranscriber
+        import t2 as t2mod
+
+        monkeypatch.setattr("main.RECORD_THREAD_JOIN_TIMEOUT_S", 0.01)
+        monkeypatch.setattr(t2mod, "IS_MUTED", False)
+
+        class _StuckThread:
+            def join(self, timeout=None):
+                return None
+
+            def is_alive(self):
+                return True
+
+        batcher = MagicMock()
+        app = SimpleVoiceTranscriber.__new__(SimpleVoiceTranscriber)
+        app.recording = True
+        app.release_time = 0.0
+        app.start_time = 0.0
+        app.copy_to_clipboard = False
+        app.stop_event = MagicMock()
+        app.record_thread = _StuckThread()
+        app.micro_batcher = batcher
+        app.audio_frames = None
+        app._process_lock = threading.Lock()
+        app.tui = MagicMock()
+        app.visual_notification = MagicMock()
+        app.hotkey_system = MagicMock()
+        app.audio_cues = MagicMock()
+
+        processed = []
+        app.process_recording = lambda **kwargs: processed.append(kwargs)
+
+        app.stop_recording()
+        app.process_thread.join(timeout=5.0)
+
+        assert processed == [], "the tail must not be dispatched onto a live buffer"
+        batcher.stop.assert_called_once()          # released without stitching
+        batcher.finish_and_get_text.assert_not_called()
+        assert app.visual_notification.show_error.called
