@@ -1542,3 +1542,58 @@ def test_cli_rejects_an_unknown_model():
     result = _run_cli("--model", "definitely-not-a-model", "--verify-only", "--dest", "/tmp")
     assert result.returncode == 2
     assert "unknown model" in result.stdout
+
+
+def test_local_model_source_finds_the_appimage_without_the_env_vars(monkeypatch, tmp_path):
+    """nix-appimage's AppRun exports neither $APPIMAGE nor $APPDIR.
+
+    Verified against the released `vt-x86_64.AppImage`: neither name appears
+    anywhere in its AppRun, so keying only on those variables meant a
+    double-clicked AppImage never found `model-bundle/` beside it and an
+    airgapped install fell through to the network. The launched image is found
+    from the process that exec'd us instead: the kernel makes the .AppImage path
+    that process's argv[0].
+    """
+    app_dir = tmp_path / "app"
+    run_dir = tmp_path / "run"
+    app_dir.mkdir()
+    run_dir.mkdir()
+    appimage = app_dir / "vt-x86_64.AppImage"
+    appimage.write_bytes(b"")
+    bundle = app_dir / "model-bundle"
+    bundle.mkdir()
+
+    monkeypatch.chdir(run_dir)
+    monkeypatch.delenv("VT_MODEL_SOURCE_DIR", raising=False)
+    monkeypatch.delenv("VT_MODEL_BUNDLE", raising=False)
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    monkeypatch.delenv("APPDIR", raising=False)
+    monkeypatch.setattr(
+        model_download, "_ancestor_argv0", lambda limit=4: iter(["/bin/bash", str(appimage)])
+    )
+
+    assert model_download._local_model_source() == (str(bundle), False)
+
+
+def test_local_model_source_ignores_ancestors_that_are_not_an_appimage(monkeypatch, tmp_path):
+    """No AppImage anywhere: the cwd candidate is still what wins, as before."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    elsewhere = tmp_path / "models"
+    elsewhere.mkdir()
+    (elsewhere / "model-bundle").mkdir()
+
+    monkeypatch.chdir(run_dir)
+    monkeypatch.delenv("VT_MODEL_SOURCE_DIR", raising=False)
+    monkeypatch.delenv("VT_MODEL_BUNDLE", raising=False)
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    monkeypatch.delenv("APPDIR", raising=False)
+    monkeypatch.setattr(model_download, "_ancestor_argv0", lambda limit=4: iter(["/bin/bash"]))
+
+    assert model_download._local_model_source() == (None, False)
+
+
+def test_ancestor_walk_stops_quietly_when_proc_is_unavailable(monkeypatch):
+    """A hardened /proc (hidepid) must not break the install path."""
+    monkeypatch.setattr(model_download.os, "getpid", lambda: 999999999)
+    assert list(model_download._ancestor_argv0()) == []

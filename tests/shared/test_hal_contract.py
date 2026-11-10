@@ -356,3 +356,21 @@ class TestOneFileIsOneModule:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "OK", result.stdout
+
+
+def test_t2s_wsl_detector_is_the_hal(monkeypatch):
+    """`t2` must not answer "are we WSL" with its own detector.
+
+    It used a second, subtly different one (DISTRO_NAME/WSL_INTEROP/uname), which
+    missed the HAL's binfmt_misc marker: with ``VT_PLATFORM=wsl`` on a host that
+    has no ``/mnt/wslg`` the HAL said WSL while ``t2`` said Linux, so the WSL ALSA
+    setup silently did not run.
+    """
+    import t2
+
+    monkeypatch.setenv("VT_PLATFORM", hal.WSL)
+    assert t2._is_wsl() is True
+    monkeypatch.setenv("VT_PLATFORM", hal.LINUX)
+    assert t2._is_wsl() is False
+    monkeypatch.setenv("VT_PLATFORM", hal.WINDOWS)
+    assert t2._is_wsl() is False

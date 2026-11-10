@@ -178,7 +178,7 @@ class FakeWirePlumberSettings:
 
 
 @pytest.fixture
-def wp_settings(monkeypatch):
+def wp_settings(monkeypatch, tmp_path):
     """Fake WirePlumber settings, with the exit hook captured instead of registered."""
     fake = FakeWirePlumberSettings()
     registered = []
@@ -187,6 +187,9 @@ def wp_settings(monkeypatch):
     monkeypatch.setattr(t2, "_register_exit_hook", registered.append)
     monkeypatch.setattr(t2, "_bt_autoswitch_before", None)
     monkeypatch.setattr(t2, "_bt_restore_registered", False)
+    # The borrow record is app state: keep it in the test's tmp dir, never in the
+    # real per-user data dir (a test must not write the user's live state).
+    monkeypatch.setattr(t2, "get_data_dir", lambda: str(tmp_path))
     fake.registered = registered
     return fake
 
@@ -229,6 +232,135 @@ def test_bt_policy_is_skipped_when_the_current_value_is_unknown(wp_settings):
 def test_bt_restore_is_a_noop_when_nothing_was_changed(wp_settings):
     assert t2.restore_bluetooth_autoswitch() is False
     assert wp_settings.calls == []
+
+
+def test_bt_borrow_is_recorded_on_disk_and_cleared_when_returned(wp_settings, tmp_path):
+    """The loan is persisted, so a killed process can still be undone later."""
+    record = tmp_path / "bluetooth_autoswitch_borrowed.json"
+    assert not record.exists()
+
+    t2.apply_bluetooth_handsfree_policy(True)
+    assert json.loads(record.read_text("utf-8")) == {"before": True}
+
+    t2.restore_bluetooth_autoswitch()
+    assert not record.exists(), "a returned loan must not look borrowed"
+
+
+def test_bt_borrow_that_was_already_correct_records_nothing(wp_settings, tmp_path):
+    """Nothing is borrowed, so nothing is written and nothing needs undoing."""
+    wp_settings.autoswitch = False
+    assert t2.apply_bluetooth_handsfree_policy(True) is True
+    assert not (tmp_path / "bluetooth_autoswitch_borrowed.json").exists()
+
+
+def test_a_borrow_left_by_a_killed_run_is_undone_on_the_next_start(wp_settings, tmp_path):
+    """SIGKILL skips the exit hook; the next start must give the setting back.
+
+    Without this the setting stays disabled forever after one crash while
+    recording, which some apps surface as "no microphone at all" for every
+    Bluetooth headset.
+    """
+    (tmp_path / "bluetooth_autoswitch_borrowed.json").write_text(
+        json.dumps({"before": True}), encoding="utf-8")
+    wp_settings.autoswitch = False  # what the dead run left behind
+
+    assert t2.recover_stale_bluetooth_borrow() is True
+    assert wp_settings.autoswitch is True
+    assert not (tmp_path / "bluetooth_autoswitch_borrowed.json").exists()
+
+
+def test_a_borrow_already_matching_the_system_is_simply_dropped(wp_settings, tmp_path):
+    (tmp_path / "bluetooth_autoswitch_borrowed.json").write_text(
+        json.dumps({"before": True}), encoding="utf-8")
+
+    assert t2.recover_stale_bluetooth_borrow() is True
+    assert wp_settings.writes() == []
+    assert not (tmp_path / "bluetooth_autoswitch_borrowed.json").exists()
+
+
+def test_an_unreadable_borrow_record_is_discarded_not_guessed(wp_settings, tmp_path):
+    """A corrupt record must not be turned into a wpctl write."""
+    (tmp_path / "bluetooth_autoswitch_borrowed.json").write_text("{not json", encoding="utf-8")
+
+    assert t2.recover_stale_bluetooth_borrow() is False
+    assert wp_settings.writes() == []
+    assert not (tmp_path / "bluetooth_autoswitch_borrowed.json").exists()
+
+
+def test_recovery_is_skipped_when_the_current_value_cannot_be_read(wp_settings, tmp_path):
+    """wpctl unreadable means leave the record for a later run, not write blind."""
+    (tmp_path / "bluetooth_autoswitch_borrowed.json").write_text(
+        json.dumps({"before": True}), encoding="utf-8")
+    wp_settings.readable = False
+
+    assert t2.recover_stale_bluetooth_borrow() is False
+    assert wp_settings.writes() == []
+    assert (tmp_path / "bluetooth_autoswitch_borrowed.json").exists()
+
+
+class TestInputDeviceIdentity:
+    """A saved index is a number, not a microphone.
+
+    PortAudio renumbers devices on every USB/Bluetooth hotplug, so an index that
+    was PipeWire's processed source yesterday can be a raw ``hw:`` node today.
+    That is the regression that silently degraded capture quality: the config
+    said one device and the app opened another, with no error.
+    """
+
+    def _sd(self, monkeypatch, devices):
+        class _FakeSD:
+            default = type("D", (), {"device": (None, None)})()
+
+            @staticmethod
+            def query_devices(index=None):
+                if index is None:
+                    return devices
+                if not 0 <= index < len(devices):
+                    raise ValueError("no such device")
+                return devices[index]
+
+        monkeypatch.setattr(t2, "sd", _FakeSD)
+
+    def _devices(self):
+        return [
+            {"name": "HD-Audio Generic: ALC257 Analog (hw:1,0)", "max_input_channels": 2},
+            {"name": "acp-pdm-mach: - (hw:2,0)", "max_input_channels": 2},
+            {"name": "default", "max_input_channels": 128},
+        ]
+
+    def test_the_same_device_at_the_same_index_matches(self, monkeypatch):
+        self._sd(monkeypatch, self._devices())
+        assert t2.input_index_matches_name(2, "default") is True
+
+    def test_a_reused_index_does_not_match(self, monkeypatch):
+        self._sd(monkeypatch, self._devices())
+        assert t2.input_index_matches_name(2, "acp-pdm-mach: - (hw:2,0)") is False
+
+    def test_a_vanished_index_does_not_match(self, monkeypatch):
+        self._sd(monkeypatch, self._devices())
+        assert t2.input_index_matches_name(9, "default") is False
+
+    def test_no_expectation_means_no_complaint(self, monkeypatch):
+        self._sd(monkeypatch, self._devices())
+        assert t2.input_index_matches_name(None, "default") is True
+        assert t2.input_index_matches_name(2, None) is True
+
+    def test_a_reused_index_is_re_resolved_by_name_on_load(self, monkeypatch, tmp_path):
+        """The load path follows the name, not the number."""
+        self._sd(monkeypatch, self._devices())
+        config = tmp_path / "config.yaml"
+        config.write_text(
+            "input_device_index: 1\nprimary_device_name: default\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(t2, "get_config_file", lambda: config)
+        monkeypatch.setattr(t2, "set_default_input_device", lambda index: None)
+        monkeypatch.setattr(t2, "apply_bluetooth_handsfree_policy", lambda *a, **k: False)
+        monkeypatch.delenv("VT_INPUT_DEVICE_INDEX", raising=False)
+
+        t2.load_audio_config(file_path=str(config))
+
+        assert t2.PRIMARY_DEVICE_NAME == "default"
+        assert t2.INPUT_DEVICE_INDEX == 2, "index 1 is a different microphone now"
 
 
 def test_tui_status_bar_matches_settings():

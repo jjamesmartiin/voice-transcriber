@@ -773,6 +773,41 @@ def _fetch_part_manifest(base_url, prefix):
     return _parse_part_manifest(data.decode("utf-8", "replace"), prefix), resolved_url
 
 
+def _ancestor_argv0(limit=4):
+    """``argv[0]`` of this process and its ancestors, nearest first (best effort).
+
+    Linux only and entirely optional: any failure just ends the walk, because
+    this is a hint for finding a bundle directory, not a requirement.
+    """
+    pid = os.getpid()
+    for _ in range(limit):
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                yield fh.read().split(b"\0", 1)[0].decode("utf-8", "replace")
+            with open(f"/proc/{pid}/stat", "r", encoding="utf-8", errors="replace") as fh:
+                pid = int(fh.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            return
+
+
+def _appimage_dirs():
+    """Directories an AppImage was launched from, as far as can be told.
+
+    ``$APPIMAGE`` / ``$APPDIR`` are the documented signals, but the type-2
+    runtime this project ships (nix-appimage) exports neither: verified against
+    the released ``vt-x86_64.AppImage``, whose ``AppRun`` contains neither name.
+    So the launched image is also found from the process that started us -- the
+    kernel execs the AppImage, making its path that process's ``argv[0]``.
+    """
+    for env, take_dirname in (("APPIMAGE", True), ("APPDIR", False)):
+        base = (os.environ.get(env) or "").strip()
+        if base:
+            yield os.path.dirname(os.path.abspath(base)) if take_dirname else base
+    for arg0 in _ancestor_argv0():
+        if arg0.lower().endswith(".appimage"):
+            yield os.path.dirname(os.path.abspath(arg0))
+
+
 def _local_model_source():
     """Locate an on-disk split bundle to install from, without the network.
 
@@ -780,8 +815,8 @@ def _local_model_source():
     is an explicit operator override and is used as-is even if it does not
     exist, so a typo surfaces instead of silently downloading. A
     ``model-bundle`` directory next to the executable, next to the running
-    AppImage (``$APPIMAGE`` / ``$APPDIR``) or the working directory is
-    auto-detected, which is the USB-stick layout for airgapped installs.
+    AppImage or the working directory is auto-detected, which is the USB-stick
+    layout for airgapped installs.
     """
     override = (os.environ.get("VT_MODEL_SOURCE_DIR")
                 or os.environ.get("VT_MODEL_BUNDLE") or "").strip()
@@ -792,13 +827,8 @@ def _local_model_source():
     ]
     # A double-clicked AppImage runs from a read-only squashfs mount and its
     # ``sys.executable`` is the bundled interpreter, so look next to the
-    # ``.AppImage`` file itself (the AppImage runtime exports both vars).
-    for env in ("APPIMAGE", "APPDIR"):
-        base = (os.environ.get(env) or "").strip()
-        if not base:
-            continue
-        if env == "APPIMAGE":
-            base = os.path.dirname(os.path.abspath(base))
+    # ``.AppImage`` file itself.
+    for base in _appimage_dirs():
         candidates.append(os.path.join(base, "model-bundle"))
     candidates.append(os.path.join(os.getcwd(), "model-bundle"))
     for cand in candidates:

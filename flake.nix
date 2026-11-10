@@ -172,10 +172,17 @@
               #!${pkgs.bash}/bin/bash
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:\$PATH"
               export PYTHONPATH="$out/share/vt:\$PYTHONPATH"
-              # Use the bundled ALSA config only where the host one is a NixOS
-              # store symlink the AppImage chroot cannot resolve; elsewhere the
-              # host's pipewire/pulse config is the right default.
-              if [ -z "\$ALSA_CONFIG_PATH" ] && [ -e /etc/NIXOS ]; then
+              # The bundled ALSA config is an AppImage-only workaround: inside
+              # its private /nix chroot, /etc/alsa/conf.d (symlinks into the
+              # host store) does not resolve and ALSA aborts the whole load, so
+              # PortAudio finds no host API. Probe for that instead of keying on
+              # /etc/NIXOS alone -- every NixOS user has that file, and the
+              # bundled copy has the pre-load hook removed, so it cannot see
+              # PipeWire/Pulse at all: the only devices left are raw hw: nodes
+              # and the user's chosen microphone disappears (v1.5.1 shipped
+              # that regression). A host config that loads is always preferred.
+              if [ -z "\$ALSA_CONFIG_PATH" ] && [ -e /etc/NIXOS ] \
+                 && ! aplay -L >/dev/null 2>&1; then
                 export ALSA_CONFIG_PATH="$out/share/alsa/alsa.conf"
               fi
               # ratatui frontend built by this flake. Override for local dev with

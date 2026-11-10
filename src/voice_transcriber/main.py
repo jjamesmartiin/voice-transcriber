@@ -1471,7 +1471,6 @@ class SimpleVoiceTranscriber:
                 print("⚠️ [vLLM SLM On-Demand Polish] No changes made or guardrail triggered: Clipboard preserved.")
                 return
 
-        micro_batcher = getattr(self, 'micro_batcher', None)
         if not micro_batcher and (audio_frames is None or len(audio_frames) == 0):
             # Hide recording notification
             try:
@@ -1933,7 +1932,9 @@ class SimpleVoiceTranscriber:
         verb = control.normalize_verb(cmd)
 
         raw_value = request.get("value")
-        for key in ("name", "mode"):
+        # `timeout_seconds` is what the verb catalogue names for `wait`, so a
+        # caller following `help --json` must not silently get the 30 s default.
+        for key in ("name", "mode", "timeout_seconds"):
             if raw_value is None:
                 raw_value = request.get(key)
         value = None if raw_value is None else str(raw_value).strip()
@@ -2320,8 +2321,10 @@ class SimpleVoiceTranscriber:
 
 def check_permissions():
     """Check if user has proper permissions for input device access"""
-    from hotkeys import is_running_in_wsl
-    if is_running_in_wsl() or sys.platform.startswith("win") or sys.platform == "darwin" or hal.detect_platform() in (hal.WINDOWS, hal.MACOS):
+    # Only native Linux needs the input group: Windows and macOS inject input a
+    # different way, and WSL goes through the host bridge. Ask the HAL, which is
+    # the only place that decides a platform.
+    if hal.detect_platform() != hal.LINUX:
         return True
 
     import grp

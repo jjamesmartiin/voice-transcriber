@@ -24,15 +24,19 @@ if "PULSE_SERVER" not in os.environ:
         os.environ["PULSE_SERVER"] = "/mnt/wslg/PulseServer"
 
 def _is_wsl() -> bool:
-    if sys.platform == "win32":
+    """Whether this *is* WSL, as the HAL decides.
+
+    This used to be a second, subtly different detector (it did not know the
+    HAL's binfmt_misc/WSLInterop marker), so with ``VT_PLATFORM=wsl`` on a host
+    without ``/mnt/wslg`` the HAL said WSL while this said Linux and the WSL ALSA
+    setup was skipped. The HAL is the only place that answers this question.
+    """
+    try:
+        import hal
+
+        return hal.detect_platform() == hal.WSL
+    except Exception:
         return False
-    if "microsoft" in os.environ.get("WSL_DISTRO_NAME", "").lower():
-        return True
-    if os.path.exists("/mnt/wslg") or "WSL_INTEROP" in os.environ:
-        return True
-    if hasattr(os, "uname"):
-        return "microsoft" in os.uname().release.lower()
-    return False
 
 def _setup_wsl_alsa() -> None:
     """In WSL, point ALSA at PulseAudio safely."""
@@ -719,6 +723,70 @@ _bt_autoswitch_before = None
 _bt_restore_registered = False
 
 
+def _bt_borrow_file():
+    """Where a borrowed WirePlumber value is recorded while it is in effect.
+
+    The setting is global and persisted, so a process killed mid-recording
+    (SIGKILL, a crash, a closed terminal) never runs its exit hook. Recording
+    the loan on disk is what lets the next start put it back instead of leaving
+    the machine reconfigured for good.
+    """
+    return Path(get_data_dir()) / "bluetooth_autoswitch_borrowed.json"
+
+
+def _note_bt_borrow(before):
+    try:
+        path = _bt_borrow_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"before": bool(before)}), encoding="utf-8")
+    except Exception as e:
+        logger.debug(f"Could not record the borrowed Bluetooth autoswitch value: {e}")
+
+
+def _forget_bt_borrow():
+    try:
+        _bt_borrow_file().unlink()
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.debug(f"Could not clear the borrowed Bluetooth autoswitch record: {e}")
+
+
+def recover_stale_bluetooth_borrow():
+    """Undo a borrow that a previous run never returned.
+
+    Called on startup before this run takes its own loan. Returns True when the
+    system already matches the recorded value or was put back. Never raises and
+    never invents a value: an unreadable record is discarded, and a wpctl that
+    cannot report the current setting leaves the record for a later run.
+    """
+    try:
+        before = json.loads(_bt_borrow_file().read_text(encoding="utf-8")).get("before")
+    except FileNotFoundError:
+        return False
+    except Exception:
+        _forget_bt_borrow()
+        return False
+    if not isinstance(before, bool):
+        _forget_bt_borrow()
+        return False
+    current = get_wireplumber_bt_autoswitch()
+    if current is None:
+        return False
+    if current == before:
+        _forget_bt_borrow()
+        return True
+    if not set_wireplumber_bt_autoswitch(before):
+        return False
+    logger.info(
+        "Restored Bluetooth autoswitch-to-headset-profile to %s: a previous run "
+        "borrowed it and was killed before putting it back",
+        "on" if before else "off",
+    )
+    _forget_bt_borrow()
+    return True
+
+
 def _register_exit_hook(fn):
     """Indirection over atexit.register so tests can observe the hook."""
     atexit.register(fn)
@@ -738,9 +806,11 @@ def restore_bluetooth_autoswitch():
     if before is None:
         return False
     if get_wireplumber_bt_autoswitch() == before:
+        _forget_bt_borrow()
         return True
     restored = set_wireplumber_bt_autoswitch(before)
     if restored:
+        _forget_bt_borrow()
         logger.info(
             "Restored Bluetooth autoswitch-to-headset-profile to %s on exit",
             "on" if before else "off",
@@ -771,6 +841,9 @@ def apply_bluetooth_handsfree_policy(keep_handsfree: bool = True):
     desired = not keep_handsfree
     if current == desired:
         return True
+    # Recorded before the change, so a kill between here and the exit hook is
+    # recoverable on the next start.
+    _note_bt_borrow(current)
     return set_wireplumber_bt_autoswitch(desired)
 
 
@@ -787,6 +860,28 @@ def find_device_index(name):
     except Exception:
         pass
     return None
+
+
+def input_index_matches_name(index, name):
+    """Whether PortAudio's device at ``index`` is still the one called ``name``.
+
+    Indices are positional: every USB/Bluetooth hotplug renumbers them, so a
+    saved index silently becomes a *different* microphone. That is how a config
+    that selected PipeWire's processed ``default`` source ended up recording from
+    a raw ``hw:`` DMIC node, with nothing in the log to show for it.
+    """
+    if index is None or not name:
+        return True
+    try:
+        with silence_stderr():
+            device = sd.query_devices(index)
+    except Exception:
+        return False  # that index is gone
+    actual = str(device.get('name') or '').strip().lower()
+    wanted = str(name).strip().lower()
+    # ``name in actual`` is the same rule ``find_device_index`` resolves by, so a
+    # hand-written partial name does not warn on every start.
+    return actual == wanted or wanted in actual
 
 def get_active_device_name(include_model=True):
     """Return the name of the device that will be used or was last used"""
@@ -828,7 +923,7 @@ def check_microphone_health():
     issues = []
 
     # 1. PulseAudio source verification (WSL / Linux)
-    if os.path.exists("/mnt/wslg") or os.environ.get("WSL_DISTRO_NAME"):
+    if _is_wsl():
         try:
             import subprocess
             res = subprocess.run(["pactl", "list", "sources", "short"], capture_output=True, text=True, timeout=2)
@@ -1332,6 +1427,25 @@ def load_audio_config(file_path=None):
                 except Exception:
                     INPUT_DEVICE_INDEX = None
 
+            # ...and that the index still means the device the config named.
+            # Following the number after a hotplug is how a user ends up
+            # recording the wrong microphone with no error to show for it.
+            if PRIMARY_DEVICE_NAME and not input_index_matches_name(
+                    INPUT_DEVICE_INDEX, PRIMARY_DEVICE_NAME):
+                resolved = find_device_index(PRIMARY_DEVICE_NAME)
+                if resolved is None:
+                    logger.warning(
+                        "Microphone %r is no longer at index %s and could not be "
+                        "found by name; falling back to the system default",
+                        PRIMARY_DEVICE_NAME, INPUT_DEVICE_INDEX,
+                    )
+                else:
+                    logger.warning(
+                        "Microphone %r is no longer at index %s; using index %s",
+                        PRIMARY_DEVICE_NAME, INPUT_DEVICE_INDEX, resolved,
+                    )
+                INPUT_DEVICE_INDEX = resolved
+
             if INPUT_DEVICE_INDEX is not None:
                 set_default_input_device(INPUT_DEVICE_INDEX)
                 # Print secondary device info
@@ -1347,6 +1461,7 @@ def load_audio_config(file_path=None):
         _apply_env_overrides()
 
         # Apply Bluetooth hands-free policy on Linux / PipeWire
+        recover_stale_bluetooth_borrow()
         apply_bluetooth_handsfree_policy(KEEP_BLUETOOTH_HANDSFREE)
 
         # Publish the whole runtime snapshot through the single entry point.

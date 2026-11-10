@@ -21,9 +21,13 @@ count:
 import os
 import socket
 import sys
+from pathlib import Path
 
 import pytest
 import yaml
+
+#: Repo root, for the flake-text pins below.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ---------------------------------------------------------------------------
@@ -675,3 +679,29 @@ def test_missing_portaudio_is_a_clear_error_not_an_import_crash():
         fallback.query_devices()
     # The real module must still expose a sounddevice object when audio works.
     assert t2.sd is not None
+
+
+def test_bundled_alsa_config_is_only_used_when_the_host_one_cannot_load():
+    """The AppImage workaround must not reach `nix run` on the same host.
+
+    v1.5.1 forced `ALSA_CONFIG_PATH` to the bundle's own alsa.conf whenever
+    `/etc/NIXOS` existed. The bundle's copy has the pre-load hook deleted, so
+    `alsa.conf.d` (PipeWire, PulseAudio) never loads: PortAudio then enumerates
+    *only* raw `hw:` nodes, PipeWire's processed source disappears from the mic
+    list, and the device a user had picked becomes unopenable. Verified on a
+    NixOS box: the wrapper's env gave `[HD-Audio Generic, acp-pdm-mach]`, while
+    the host config gave `[HD-Audio Generic, pipewire, default]`.
+
+    The discriminator has to be whether the host config actually loads, not
+    whether the box is NixOS.
+    """
+    flake = (REPO_ROOT / "flake.nix").read_text(encoding="utf-8")
+    wrapper = flake.split('cat > $out/bin/vt << EOF', 1)[1].split("EOF", 1)[0]
+    assert "ALSA_CONFIG_PATH" in wrapper, "the AppImage ALSA fix was removed"
+
+    branch = wrapper.split('if [ -z "\\$ALSA_CONFIG_PATH" ]', 1)[1]
+    branch = branch.split("fi", 1)[0]
+    assert "aplay -L" in branch, (
+        "the bundled ALSA config is selected without probing the host config; "
+        "that hides PipeWire from `nix run`/`nix build` users"
+    )

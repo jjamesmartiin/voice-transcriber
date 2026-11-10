@@ -419,7 +419,10 @@ class TestWSLMicrophoneHealthCheck:
 
     def test_wslg_only_monitor_reports_warning(self, monkeypatch):
         """If WSLg only has speaker monitor and no input mic, flags an issue."""
-        monkeypatch.setattr(os.path, "exists", lambda p: p == "/mnt/wslg")
+        # The health check asks the HAL whether it is on WSL (it used to sniff
+        # /mnt/wslg itself), so the simulation states the platform rather than
+        # faking a filesystem path.
+        monkeypatch.setenv("VT_PLATFORM", "wsl")
 
         # pactl returns only monitor
         pactl_output = "0\tsink.monitor\tPipeWire\ts16le 2ch 48000Hz\tIDLE"
