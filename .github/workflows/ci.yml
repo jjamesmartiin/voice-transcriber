@@ -20,6 +20,12 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # Re-triggering without a dummy commit. Needed for real: a run enqueued during
+  # the 2026-11-11 GitHub Actions outage was left `queued` with no jobs forever -
+  # it could not be cancelled, re-run (`this workflow is already running`) or
+  # deleted (403) - so the only way to get a fresh matrix was a new push. This
+  # makes that a button, or `gh workflow run ci.yml --ref main`.
+  workflow_dispatch:
 
 jobs:
   unit-tests-linux:
