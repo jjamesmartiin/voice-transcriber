@@ -12,6 +12,59 @@ model-revision-derived tag (`model-<name>-<rev>` for `cohere`, `formatter` and
 changes — never per app release — so a new app version normally reuses the
 existing bundle. See [`docs/releasing.md`](docs/releasing.md).
 
+## [Unreleased]
+
+Everything below is in the tree but not yet in a tagged release.
+
+### Fixed
+
+- **A config-file `dictionary:` block no longer replaces the dictionaries.** It is
+  now one *layer* of the merge, so copying the documented example config keeps the
+  shipped entries and whatever `dictionary add` wrote (measured before: 167 entries
+  became 1).
+- **`VT_*` overrides are no longer written back on save.** A one-off
+  `VT_IS_MUTED=0` run used to persist `is_muted: false` the next time any setting
+  was saved.
+- **One malformed setting no longer desyncs the run.** A value YAML reads as a
+  bool (`sound_theme: off`) aborted the settings load before the snapshot was
+  published, leaving the UI and the post-processor disagreeing; the snapshot is
+  published in a `finally` and the value is coerced.
+- **Linux: a device that emits a bound key is monitored.** The input scan required
+  Alt+Shift before opening a device, so a foot pedal or macropad emitting only F13
+  never fired while `vt hotkey add f13` reported success.
+- **macOS: letters and digits in a chord resolve.** `ctrl+a` produced an empty key
+  set and could never match; a chord that resolves to nothing is now refused and
+  the previous bind stays live.
+- **The engine no longer loses audio, text or time on the main path**: a slow model
+  load cannot delay the start of recording, a wedged typing helper is bounded
+  instead of holding the transcription thread, and 48 kHz input is handled.
+- **`dictionary add-contextual` refuses a rule with no trigger**, which used to
+  save, list and never fire.
+- **`vt hotkey keys` / `vt hotkey` print their answer** instead of only
+  `✓ hotkey → READY`; any verb now echoes the values its catalogue entry documents.
+- **`formatter_context: email` produces its layout again.** The greeting /
+  body / sign-off blocks were discarded by the line-break guardrail ("output
+  contains line breaks but structure was 'prose'") on every backend that answered
+  the way the model card describes, so the setting could not do the one thing it
+  exists for. Line breaks are now allowed where they are harmless - the clipboard
+  path - and typed output still stays one paragraph, because a newline is an
+  Enter keypress in the focused window. Pinned by
+  `tests/shared/test_formatter.py` and `tests/shared/test_post_processor.py`; the
+  e2e formatter tier went from 6 to 8 passing against a real `llama-server`.
+- **A `llama-server` on `PATH` is reachable from the Nix dev shell.** The backend
+  refuses a `PATH` binary unless `VT_ALLOW_PATH_LLAMA_SERVER=1` (a packaged app
+  must not run whichever one it finds first), which the shell now sets because
+  it is the one place that installs one - so `nix develop --command python -m
+  pytest tests/e2e` exercises the formatter instead of skipping it. Documented in
+  the README, and named in the backend's own "not found" message.
+- **The AppImage's workarounds stay inside the AppImage**, and a missing PortAudio
+  is reported where audio is used rather than at import.
+
+### Security
+
+- The control socket's `/tmp` fallback directory must belong to the user and be
+  private, and the value-length cap now covers `name`/`mode` as well as `value`.
+
 ## [1.5.1] — 2026-11-05
 
 ### Fixed

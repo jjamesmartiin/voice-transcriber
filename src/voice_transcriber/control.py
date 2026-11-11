@@ -1299,8 +1299,39 @@ def _print_human(verb: str, response: dict) -> None:
         _print_verbs()
         return
 
+    # Echo what the verb reported, under the `returns` keys its catalogue entry
+    # documents. Printing only `state` made `hotkey keys` (whose whole purpose is
+    # the key catalogue) print "✓ hotkey → READY" and drop the answer, and hid
+    # the new value from `wpm`, `speakers`, `hotkey` and friends.
+    reported = _print_returns(verb, response)
+
     detail = response.get("state") or response.get("device") or response.get("theme")
+    if detail and reported:
+        detail = None
     console_text.safe_print(f"✓ {verb}" + (f" → {detail}" if detail else ""))
+
+
+def _print_returns(verb: str, response: dict) -> bool:
+    """Print the reply's own values; True when anything was printed."""
+    printed = False
+    for key in verb_spec(verb).get("returns", ()):
+        value = response.get(key)
+        if value is None:
+            continue
+        if key == "keys":
+            # The bindable-key catalogue, grouped the way `vt hotkey keys`
+            # documents it (one line per group, canonical names only).
+            groups: dict[str, list[str]] = {}
+            for entry in value:
+                groups.setdefault(entry.get("group", "other"), []).append(entry["name"])
+            for group, names in groups.items():
+                console_text.safe_print(f"{group}: {', '.join(names)}")
+        elif isinstance(value, (list, tuple)):
+            console_text.safe_print(f"{key}: {', '.join(str(v) for v in value) or '(none)'}")
+        else:
+            console_text.safe_print(f"{key}: {value}")
+        printed = True
+    return printed
 
 
 def run_cli(argv=None, stream=None) -> int | None:

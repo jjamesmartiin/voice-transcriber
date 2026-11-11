@@ -132,6 +132,10 @@ def formatter_on(server):
 
     pp.set_cleanup_mode("full")
     pp.set_structure_mode("off")
+    # These fixtures describe a *layout* (an email's greeting/body/sign-off), so
+    # they need the delivery path a layout is safe on: the clipboard. Typed
+    # output keeps the paragraph (see formatter.validate).
+    pp.set_formatter_allow_breaks(True)
     pp.set_formatter_settings(enabled=True, model="llama-server",
                               style="semi-formal", context="general")
     try:
@@ -139,6 +143,7 @@ def formatter_on(server):
     finally:
         pp.set_formatter_settings(enabled=False, model=None,
                                   style="semi-formal", context="general")
+        pp.set_formatter_allow_breaks(False)
         pp.set_cleanup_mode("full")
         pp.set_structure_mode("off")
 

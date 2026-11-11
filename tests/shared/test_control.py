@@ -798,6 +798,30 @@ class TestCli:
         for verb in control.VERBS:
             assert verb in out
 
+    def test_hotkey_keys_prints_the_catalogue(self, capsys):
+        """`vt hotkey keys` is documented as the human-readable key list.
+
+        It printed `✓ hotkey → READY` and dropped the catalogue it exists for.
+        """
+        control._print_human("hotkey", {
+            "ok": True,
+            "state": "READY",
+            "hotkeys": ["alt+shift"],
+            "keys": [
+                {"name": "ctrl", "group": "modifiers", "aliases": []},
+                {"name": "f13", "group": "function", "aliases": []},
+            ],
+        })
+        out = capsys.readouterr().out
+        assert "hotkeys: alt+shift" in out
+        assert "modifiers: ctrl" in out
+        assert "function: f13" in out
+
+    def test_a_verbs_value_is_echoed_not_only_its_state(self, capsys):
+        """`wpm` cycled silently: only `state` was printed, never the new value."""
+        control._print_human("wpm", {"ok": True, "state": "READY", "typing_wpm": 55})
+        assert "typing_wpm: 55" in capsys.readouterr().out
+
     def test_unknown_verb_exits_two(self, capsys):
         assert control.run_cli(["definitely-not-a-verb"]) == 2
         assert "Unknown control verb" in capsys.readouterr().err

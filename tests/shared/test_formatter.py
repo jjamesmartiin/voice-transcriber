@@ -675,3 +675,29 @@ def test_newlines_rejected_when_structure_is_prose_or_inline():
     assert formatter.validate(original, candidate, structure="prose") is not None
     assert formatter.validate(original, candidate, structure="inline") is not None
 
+
+def test_an_email_layout_is_accepted_only_where_line_breaks_are_safe():
+    """`[Context: email]` is the one request that asks for a layout.
+
+    Its greeting / body / sign-off blocks used to be discarded as "line breaks
+    but structure was prose" on every backend that answered the way the model
+    card describes, which made the setting unable to do the one thing it exists
+    for. It is accepted where a newline is a newline (the clipboard) and refused
+    where a newline is an Enter keypress in a focused window.
+    """
+    original = "hi nora, are you free on friday? best, jacob"
+    layout = "Hi Nora,\n\nAre you free on Friday?\n\nBest,\nJacob"
+    assert formatter.validate(original, layout, structure="prose") is not None
+    assert formatter.validate(
+        original, layout, structure="prose", allow_breaks=True
+    ) is None
+
+
+def test_the_email_layout_reaches_the_caller_only_when_breaks_are_allowed(monkeypatch):
+    """The same answer is applied or discarded by `allow_breaks` alone."""
+    layout = "Hi Nora,\n\nAre you free on Friday?\n\nBest,\nJacob"
+    name = install_fake(monkeypatch, lambda text, **kw: layout)
+    original = "hi nora, are you free on friday? best, jacob"
+    assert formatter.format_text(original, backend=name) == original
+    assert formatter.format_text(original, backend=name, allow_breaks=True) == layout
+

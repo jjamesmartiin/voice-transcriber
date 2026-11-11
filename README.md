@@ -36,6 +36,30 @@ shipped as a self-contained PyInstaller `.exe`. The AppImage and venv
 
 ---
 
+## 🚦 Your First Run, and When Something Doesn't Work
+
+1. Launch it. The terminal shows the TUI and the model download (~2.8 GB, once —
+   minutes on a fast line, longer on a slow one). Everything after that is offline.
+2. Hold **`Alt+Shift`** (macOS: **`Option+Shift`** also works) and say a sentence.
+   Release, and the cleaned-up text appears in whatever window has focus.
+3. Tap `s` in the terminal for every other setting.
+
+If it does not do that, it is almost always one of these — each has a one-line fix:
+
+| Symptom | Cause | Fix |
+| :--- | :--- | :--- |
+| Nothing happens on the hotkey | No access to the input device | Linux: `sudo usermod -aG input $USER`, then log out and back in. macOS: allow **Accessibility** for your terminal. |
+| Recording works, nothing is typed | No typing tool on `PATH` | Install `ydotool` (Wayland), `xdotool` (X11), or allow Accessibility on macOS. The text is still on the clipboard, so `Ctrl`/`Cmd+V` works meanwhile. |
+| Records silence | The default microphone is muted | `./scripts/run.sh doctor --fix` (Windows: `scripts\run.bat doctor --fix`). |
+| `vt …` says *no running Voice Transcriber* | Every verb except `help` and `doctor` talks to a **running** engine | Start the app first, or point `VT_CONTROL_SOCKET` at the instance you mean. |
+| First launch appears stuck | It is downloading the weights | Watch the progress line; `VT_AUTO_DOWNLOAD_MODEL=0` plus a local `models/cohere/` skips it. |
+| Garbled glyphs in the terminal | The console cannot encode the emoji/box drawing | It degrades to ASCII on its own; `VT_ASCII=1` forces it. |
+
+`doctor` on its own (no `--fix`) checks microphones, permissions, hardware
+acceleration and the weight cache, and is the right thing to paste into an issue.
+
+---
+
 ## 📊 Benchmark & Accuracy
 
 Voice Transcriber is evaluated with a reproducible test suite in `eval/` across 154 speech and silence clips, scoring the real streaming pipeline with dynamic INT8 quantization on CPU. The recorded configuration is written into `eval/results.json` itself — backend, int8, number digits, block size, git revision, and a single copy-pasteable `reproduce` command — so these numbers can be re-derived rather than taken on trust:
@@ -181,8 +205,8 @@ for the platform you are targeting.
 | Requirement | Detail |
 | :--- | :--- |
 | **OS** | Windows 10 (2004+) or 11, 64-bit. |
-| **Virtualization** | **Virtual Machine Platform** and **WSL2** enabled — one-time, Administrator. `platforms\wsl\enable_wsl_features.bat` or `setup_wsl.ps1` does it for you. |
-| **Distro** | **NixOS-WSL** registered. `setup_wsl.ps1` downloads the `nixos.wsl` image and registers it. |
+| **Virtualization** | **Virtual Machine Platform** and **WSL2** enabled — one-time, Administrator. `platforms\wsl\enable_wsl_features.bat` or `scripts\setup_wsl.bat` does it for you. |
+| **Distro** | **NixOS-WSL** registered. `scripts\setup_wsl.bat` (or `platforms\wsl\setup_wsl.ps1`) downloads the `nixos.wsl` image and registers it. |
 | **Nix** | Nix with `nix-command` and `flakes` (the setup script writes `~/.config/nix/nix.conf`). |
 | **Audio** | **WSLg** (bundled with modern WSL) provides the PulseAudio server at `/mnt/wslg/runtime-dir/pulse/native`. No extra audio setup. |
 | **Host microphone** | Same Windows privacy setting as native — allow microphone access for desktop apps. |
@@ -444,8 +468,8 @@ Under Nix the same verbs pass through the wrapper: `nix run . -- status`.
 | :--- | :--- |
 | **Recording** | `start`, `stop`, `toggle`, `wait`, `status` |
 | **Devices** | `mics`, `set-mic`, `rescan-mics` |
-| **Settings** | `output`, `numbers`, `punctuation`, `theme`, `trailing-space`, `auto-punctuate`, `serial`, `spell`, `middle-click`, `mute` |
-| **Formatting** | `structure`, `cleanup`, `formatter`, `formatter-style`, `formatter-context`, `formatter-model` |
+| **Settings** | `output`, `numbers`, `punctuation`, `theme`, `trailing-space`, `auto-punctuate`, `serial`, `spell`, `middle-click`, `mute`, `wpm`, `hotkey` |
+| **Formatting** | `structure`, `cleanup`, `formatter`, `formatter-style`, `formatter-context`, `formatter-model`, `formatter-download` |
 | **Meeting** | `meeting`, `meeting-start`, `meeting-stop`, `meeting-spill`, `meeting-format`, `meeting-output`, `speakers`, `diarization`, `diarization-speakers`, `diarization-model` |
 | **Modals** | `settings`, `mic` (interactive — take over the terminal) |
 | **Lifecycle** | `reset-defaults`, `reset-terminal`, `ping`, `doctor`, `help`, `quit` |
@@ -627,7 +651,10 @@ Two optional models are registered bundles:
   That fetch is **Windows x64 only**, matching the artifact: on Linux and macOS
   install `llama-server` from your package manager (the Nix dev shell provides
   `pkgs.llama-cpp`) or point `VT_FORMATTER_BINARY` at an existing build — the app
-  never downloads the Windows archive there.
+  never downloads the Windows archive there. A `llama-server` on `PATH` is only
+  picked up with `VT_ALLOW_PATH_LLAMA_SERVER=1` (a packaged app must not run
+  whichever binary happens to be first on `PATH`; the Nix dev shell sets it for
+  you), so on a distro install either export that or use `VT_FORMATTER_BINARY`.
   Bring your own build with `VT_FORMATTER_BINARY`, or attach to a server that is
   already running with `VT_FORMATTER_SERVER_URL`. Licensed Apache-2.0 **plus an
   additional naming term**; see
@@ -812,10 +839,19 @@ Supported options:
 - `serial_collapse`: `true` (default) writes serial numbers, model/part codes and NATO phonetic dictation as a single token (`"A B C 1 2 3"` → `ABC123`, `"Alpha Bravo 4"` → `AB4`); `false` keeps single-space separators. Prose is never touched: a quantity followed by the indefinite article (`"170 a month"`, `"20 a year"`) stays as spoken, so only trigger-anchored or unambiguous runs collapse.
 - `spell_command`: `true` (default) enables the verbal spell command (`"spell C A T"` → `CAT`); `false` leaves `"spell ..."` phrases untouched.
 - `keep_bluetooth_handsfree`: `true` keeps Bluetooth devices in hands-free mode so media does not pause when recording ends.
-- `punctuation_mode`: `full`, `no_terminal_period`, `no_punctuation`, or `lowercase_no_punctuation` (legacy alias `semi-formal` → `no_terminal_period`).
+- `punctuation_mode`: `full`, `no_terminal_period`, `no_punctuation`, `aesthetic_lowercase`, or `gen_z` — the five
+  [formatting presets](#-formatting-mode-presets) above. Friendly aliases resolve to the
+  same preset (`casual`, `autocorrect`, `aesthetic`, `pure_gen_z`, `lowercase_no_punctuation`, legacy
+  `semi-formal`), so what the TUI shows and what the file stores never disagree.
 - `structure_mode`: spoken-list formatting — `off` (default), `inline` (markers only: `"- one. - two."`), or `blocks` (real bullets and paragraph breaks). Typed output is automatically downgraded to `inline`, because a newline is an Enter keypress in whatever window has focus; `blocks` is for the clipboard/paste path. See [`docs/formatting.md`](docs/formatting.md).
 - `cleanup_mode`: how much the post-processing pass may change the words — `off` (keeps every word, deletes nothing), `artifacts` (default: removes noise: silence hallucinations, filler, stutters, trailing mutterings — but leaves your corrections verbatim), or `full` (also resolves self-corrections such as `"Tuesday no sorry Wednesday"` → `"Wednesday"`). Number/date formatting, the dictionary, casing and the punctuation preset are separate settings and are not gated by it. See [`docs/cleanup_modes.md`](docs/cleanup_modes.md).
 - `enable_slm`: `true` to enable the optional local vLLM grammar-polish pass (default `false`).
+- `formatter`: `on` to enable the optional on-device rewrite (default `off`; it needs the
+  separate ~462 MiB model, see [Model Weights](#model-weights--offline-operation)). `formatter_style`
+  picks the register (`casual`, `semi-casual`, `semi-formal`, `formal`).
+- `formatter_context`: `general` (default) or `email`. `email` adds the greeting / body / sign-off
+  layout, and the blank lines are applied on the clipboard path — with auto-type on the text
+  stays one paragraph, because a newline is an Enter keypress in whatever window has focus.
 - `sound_theme`: audio cue pack — `proximity` (default), `pop`, `chime`, or `silent`.
 - `ui_theme`: `auto` (default: follow your desktop's accent color — GNOME's `accent-color` today — falling back to the terminal heuristic and then green) or one of `green`, `cyan`, `blue`, `magenta`, `yellow`, `red`, `white`. `VT_UI_THEME` overrides it per session.
 - `typing_wpm`: words-per-minute typing baseline used for the `⚡ saved` estimate (default `40`; preset cycling lives in the `wpm` control verb).

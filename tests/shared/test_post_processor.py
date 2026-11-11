@@ -1314,3 +1314,45 @@ def test_nix_dictionary_fires_are_visible_at_debug_level(caplog):
         pp.clean_speech_transcription(spoken, skip_slm=True)
     fired = [r.getMessage() for r in caplog.records if "contextual rule" in r.getMessage()]
     assert any("nixpkgs" in m and "nick's packages" in m for m in fired), fired
+
+
+# ---------------------------------------------------------------------------
+# The formatter's line-break permission
+# ---------------------------------------------------------------------------
+
+def test_an_email_layout_is_unlocked_only_by_the_clipboard_path(monkeypatch):
+    """`allow_breaks` reaches the formatter only for an email that is not typed.
+
+    The greeting / body / sign-off blocks of `[Context: email]` are real line
+    breaks, and a newline is an Enter keypress in whatever window has focus. So
+    the permission is two conditions: the email context, and a delivery path
+    that can carry a newline (t2 publishes `not AUTO_TYPE` on every output-mode
+    change). Either one alone must keep the text flat.
+    """
+    import formatter
+
+    seen = {}
+
+    def fake_format(text, **kwargs):
+        seen.update(kwargs)
+        return text
+
+    monkeypatch.setattr(formatter, "format_text", fake_format)
+    previous_cleanup = pp.get_cleanup_mode()
+    pp.set_cleanup_mode("full")
+    pp.set_formatter_settings(enabled=True, model="noop", context="email")
+    try:
+        for allow_breaks, context, expected in (
+            (True, "email", True),
+            (True, "general", False),
+            (False, "email", False),
+        ):
+            pp.set_formatter_allow_breaks(allow_breaks)
+            pp.set_formatter_settings(context=context)
+            pp.clean_speech_transcription(
+                "buy milk", skip_slm=True, cleanup_mode="full")
+            assert seen["allow_breaks"] is expected, (allow_breaks, context)
+    finally:
+        pp.set_formatter_allow_breaks(False)
+        pp.set_formatter_settings(enabled=False, model=None, context="general")
+        pp.set_cleanup_mode(previous_cleanup)

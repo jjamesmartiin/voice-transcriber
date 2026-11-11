@@ -3006,6 +3006,18 @@ _FORMATTER_ENABLED = False
 _FORMATTER_MODEL: str | None = None
 _FORMATTER_STYLE = "semi-formal"
 _FORMATTER_CONTEXT = "general"
+#: May this text carry real line breaks? True only when the delivery path can
+#: take them (the clipboard): a newline is an Enter keypress in a focused window.
+#: Published by t2 alongside the effective structure mode; the default fails
+#: safe (typed) for anyone driving this module without a config layer.
+_FORMATTER_ALLOW_BREAKS = False
+
+
+def set_formatter_allow_breaks(allow: bool) -> bool:
+    """Publish whether real line breaks are safe for the current output path."""
+    global _FORMATTER_ALLOW_BREAKS
+    _FORMATTER_ALLOW_BREAKS = bool(allow)
+    return _FORMATTER_ALLOW_BREAKS
 
 
 def set_formatter_settings(enabled=None, model=None, style=None, context=None) -> dict:
@@ -3079,6 +3091,7 @@ def apply_settings_from_config(
     formatter_model=None,
     formatter_style=None,
     formatter_context=None,
+    allow_breaks=None,
     dictionary=None,
     dictionary_file=None,
     contextual_rules=None,
@@ -3106,6 +3119,8 @@ def apply_settings_from_config(
         set_punctuation_mode(punctuation_mode)
     if structure_mode is not None:
         set_structure_mode(structure_mode)
+    if allow_breaks is not None:
+        set_formatter_allow_breaks(allow_breaks)
     if cleanup_mode is not None:
         set_cleanup_mode(cleanup_mode)
     if any(v is not None for v in (
@@ -3166,12 +3181,18 @@ def _apply_formatter(text: str, structure_mode: str | None = None) -> str:
         # The same resolution `_resolve_segment_sentinels` uses: an explicit
         # argument wins, otherwise the published (already downgraded) mode.
         effective = _STRUCTURE_MODE if structure_mode is None else normalize_structure_mode(structure_mode)
+        # The one request that asks for a layout: `[Context: email]` means
+        # greeting / body / sign-off as separate blocks, so its line breaks are
+        # accepted where they are harmless (clipboard). Typed output keeps the
+        # flat paragraph, because a newline would press Enter in the focused
+        # window - the same rule that downgrades `blocks` for typing.
         return format_text(
             text,
             style=_FORMATTER_STYLE,
             structure=structure_for_mode(effective),
             context=_FORMATTER_CONTEXT,
             model=_FORMATTER_MODEL,
+            allow_breaks=_FORMATTER_ALLOW_BREAKS and _FORMATTER_CONTEXT == "email",
         )
     except Exception:
         return text

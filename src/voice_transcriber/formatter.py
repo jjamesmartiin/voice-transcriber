@@ -399,7 +399,13 @@ def _restore_list_item_casing(candidate: str, original: str) -> str:
     return _LIST_ITEM_LINE_RE.sub(fix, candidate)
 
 
-def validate(original: str, candidate: str, *, structure: str | None = None) -> str | None:
+def validate(
+    original: str,
+    candidate: str,
+    *,
+    structure: str | None = None,
+    allow_breaks: bool = False,
+) -> str | None:
     """Check a candidate against every guardrail.
 
     Returns ``None`` when the candidate is usable, or a human-readable reason
@@ -409,6 +415,13 @@ def validate(original: str, candidate: str, *, structure: str | None = None) -> 
     ``structure`` is the axis the control line asked for. When it is ``prose``
     the user turned structured output off, and list markup in the answer means
     the model ignored the control line.
+
+    ``allow_breaks`` says line breaks are acceptable for *this* request: the
+    text is going somewhere a newline is a newline (the clipboard) rather than
+    an Enter keypress in a focused window. Without it, the email context's
+    greeting/body/sign-off layout - the one thing `[Context: email]` exists for -
+    was discarded as "line breaks but structure was prose" on every backend that
+    answered the way the model card describes.
     """
     if not isinstance(candidate, str):
         return "backend returned a non-string"
@@ -476,8 +489,14 @@ def validate(original: str, candidate: str, *, structure: str | None = None) -> 
     if structure == "prose" and items:
         return "output contains list markup but prose was requested"
 
-    # Line breaks are only allowed when structured block output is in force.
-    if structure in ("prose", "inline") and ("\n" in candidate or "\r" in candidate):
+    # Line breaks are only allowed when they are safe where the text is going:
+    # block output in force, or a request that asked for a layout and is not
+    # being typed (see `allow_breaks`).
+    if (
+        structure in ("prose", "inline")
+        and not allow_breaks
+        and ("\n" in candidate or "\r" in candidate)
+    ):
         return f"output contains line breaks but structure was {structure!r}"
 
     return None
@@ -515,6 +534,7 @@ def format_text(
     backend: str | None = None,
     model: str | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    allow_breaks: bool = False,
 ) -> str:
     """Format ``text``, or return it unchanged. Never raises.
 
@@ -571,7 +591,9 @@ def format_text(
         if elapsed > timeout_s:
             return original
 
-        reason = validate(original, candidate, structure=structure)
+        reason = validate(
+            original, candidate, structure=structure, allow_breaks=allow_breaks
+        )
         if reason is not None:
             # A rejected rewrite returns exactly what `formatter: off` returns, so
             # without this line a discarded answer is invisible - and that

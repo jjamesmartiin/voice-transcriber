@@ -463,6 +463,9 @@ def binary_error_message() -> str:
         parts.append(
             f"Put a llama-server executable in {install}, or set {ENV_BINARY} to "
             f"an existing llama.cpp build.")
+        parts.append(
+            "A llama-server already installed on PATH is used only with "
+            "VT_ALLOW_PATH_LLAMA_SERVER=1.")
         parts.append(_pinned_refusal())
     return " ".join(parts)
 

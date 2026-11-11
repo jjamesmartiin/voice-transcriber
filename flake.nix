@@ -424,6 +424,12 @@
             shellHook = ''
               export PATH="${pkgs.lib.makeBinPath runtimeDeps}:$PATH"
               export PYTHONUNBUFFERED=1
+              # llama-server comes from pkgs.llama-cpp above, and the formatter
+              # refuses a PATH binary unless this is set: a packaged app must
+              # never run whichever `llama-server` happens to be first on PATH,
+              # but a dev shell is exactly the case where that build is what you
+              # mean. Without it the formatter's e2e tier skips itself.
+              export VT_ALLOW_PATH_LLAMA_SERVER=1
               export PS1='\[\033[1;32m\][VT-dev:\w]\$\[\033[0m\] '
               # Send the banner to stderr: `nix develop --command ... --json`
               # is a documented way to drive the app, and a banner on stdout

@@ -1494,6 +1494,7 @@ def load_audio_config(file_path=None):
                 spell_command=SPELL_COMMAND,
                 punctuation_mode=PUNCTUATION_MODE,
                 structure_mode=get_effective_structure_mode(),
+                allow_breaks=not AUTO_TYPE,
                 cleanup_mode=CLEANUP_MODE,
                 formatter_enabled=(FORMATTER == "on"),
                 formatter_model=FORMATTER_MODEL,
@@ -1657,6 +1658,7 @@ def reset_to_defaults() -> dict:
         spell_command=SPELL_COMMAND,
         punctuation_mode=PUNCTUATION_MODE,
         structure_mode=get_effective_structure_mode(),
+        allow_breaks=not AUTO_TYPE,
         cleanup_mode=CLEANUP_MODE,
         formatter_enabled=(FORMATTER == "on"),
         formatter_model=FORMATTER_MODEL,
@@ -1999,11 +2001,22 @@ def get_effective_structure_mode() -> str:
 
 
 def _push_structure_mode() -> str:
-    """Publish the effective structure mode to the post-processor; never saves."""
+    """Publish the effective structure mode to the post-processor; never saves.
+
+    The same call publishes whether real line breaks are safe: they are only
+    safe where the text is *not* typed into a focused window, which is exactly
+    the `AUTO_TYPE` half of the delivery mode. That keeps the formatter from
+    emitting an email's blank lines as Enter keypresses.
+    """
     effective = get_effective_structure_mode()
     try:
         from post_processor import set_structure_mode as post_set_structure
         post_set_structure(effective)
+    except Exception:
+        pass
+    try:
+        from post_processor import set_formatter_allow_breaks as post_set_breaks
+        post_set_breaks(not AUTO_TYPE)
     except Exception:
         pass
     return effective
