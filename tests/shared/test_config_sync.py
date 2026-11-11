@@ -344,6 +344,34 @@ class TestInputDeviceIdentity:
         self._sd(monkeypatch, self._devices())
         assert t2.input_index_matches_name(9, "default") is False
 
+    def test_silencing_stderr_cannot_invalidate_a_usable_device(self, monkeypatch, tmp_path):
+        """Silencing is a nicety; failing to silence must not drop the microphone.
+
+        Found on the macOS CI runner. Every device query runs inside
+        ``silence_stderr()`` and interprets an exception as "that device is
+        invalid", so a harness whose ``sys.stderr`` has no real fd (a capture
+        object, a GUI host, some launchers) made every query look broken and the
+        saved selection was silently discarded. The silencer is a no-op when it
+        cannot redirect, so only the query's own failure counts.
+        """
+        import io
+
+        class _NoFdStderr(io.StringIO):
+            def fileno(self):
+                raise io.UnsupportedOperation("no fd in this host")
+
+        devices = [{"name": "fake-output", "max_input_channels": 0},
+                   {"name": "Yeti", "max_input_channels": 1}]
+        self._sd(monkeypatch, devices)
+        monkeypatch.setattr(t2.sys, "stderr", _NoFdStderr())
+
+        config = tmp_path / "config.yaml"
+        config.write_text("primary_device_name: Yeti\ninput_device_index: 1\n")
+        t2.load_audio_config(file_path=str(config))
+
+        assert t2.INPUT_DEVICE_INDEX == 1, "a broken fd 2 must not cost the user their mic"
+        assert t2.PRIMARY_DEVICE_NAME == "Yeti"
+
     def test_no_expectation_means_no_complaint(self, monkeypatch):
         self._sd(monkeypatch, self._devices())
         assert t2.input_index_matches_name(None, "default") is True

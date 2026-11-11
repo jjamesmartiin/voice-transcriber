@@ -138,16 +138,31 @@ def preload_model(device="cpu"):
 # Suppress ALSA/PortAudio error spam
 @contextlib.contextmanager
 def silence_stderr():
-    """Context manager to silence stderr at the OS level (hides C library errors)"""
-    new_target = os.open(os.devnull, os.O_WRONLY)
-    old_target = os.dup(sys.stderr.fileno())
+    """Silence stderr at the OS level (hides C library errors). Best effort.
+
+    Every caller uses this around a *query* whose result it then interprets, so
+    a silencer that cannot do its job must not be allowed to look like a failed
+    query. It used to raise whenever `sys.stderr` had no real fd - a test
+    harness, a GUI host, some launchers - and the callers' `except Exception`
+    read that as "this device is invalid", which silently dropped the user's
+    saved microphone on macOS CI. Silencing is a nicety; failing to silence is
+    a no-op.
+    """
+    try:
+        new_target = os.open(os.devnull, os.O_WRONLY)
+        old_target = os.dup(sys.stderr.fileno())
+    except (AttributeError, OSError, ValueError):
+        yield  # no real fd to redirect; the query still runs, just noisily
+        return
     try:
         os.dup2(new_target, sys.stderr.fileno())
         yield
     finally:
-        os.dup2(old_target, sys.stderr.fileno())
-        os.close(new_target)
-        os.close(old_target)
+        try:
+            os.dup2(old_target, sys.stderr.fileno())
+        finally:
+            os.close(new_target)
+            os.close(old_target)
 
 # Get appropriate directories for file storage
 def get_data_dir():

@@ -130,6 +130,7 @@ class TestConfigureLogging:
         assert mode == 0o600, f"Expected 0600, got {oct(mode)}"
 
 
+@pytest.mark.skipif(os.name != "posix", reason="mode bits are POSIX; Windows uses ACLs")
 def test_a_rolled_log_file_is_still_owner_only(tmp_path):
     """The rotated file must not come back world-readable.
 

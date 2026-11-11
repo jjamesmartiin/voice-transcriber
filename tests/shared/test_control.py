@@ -1371,6 +1371,7 @@ def test_the_value_cap_cannot_be_bypassed_through_an_alias():
         assert "over the" in reply["error"], (key, reply)
 
 
+@requires_af_unix
 class TestLastResortNet:
     def test_a_bug_above_the_handler_still_answers_and_the_server_survives(
             self, sock_path, monkeypatch):

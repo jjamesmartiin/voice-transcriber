@@ -63,7 +63,7 @@ def test_every_skip_and_xfail_says_who_it_is_for():
     """
     problems = []
     for path in _modules():
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for call in _skip_markers(tree):
             name = ast.unparse(call.func)
             if not _has_a_reason(call, name):
@@ -76,7 +76,7 @@ def test_no_test_function_shadows_another_in_the_same_scope():
     """A redefined test name is never collected, so it is coverage that does not run."""
     problems = []
     for path in _modules():
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
 
         def check(body, scope, path=path):
             seen = {}

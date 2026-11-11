@@ -17,7 +17,13 @@ def test_a_backend_load_failure_is_not_returned_as_transcript_text(monkeypatch, 
     import importlib
 
     # Import the package module directly: `transcribe_parakeet` has no compat shim.
-    module = importlib.import_module(f"voice_transcriber.{module_name}")
+    try:
+        module = importlib.import_module(f"voice_transcriber.{module_name}")
+    except ImportError as exc:  # noqa: PERF203 - one platform-specific import
+        # `transcribe_cohere` imports torch at module level. The Windows and
+        # macOS CI jobs install no torch on purpose, so this asserts the real
+        # behaviour only where the real module exists.
+        pytest.skip(f"{module_name} needs a runtime this job does not install ({exc})")
 
     def _boom(*args, **kwargs):
         raise RuntimeError("no local model")
