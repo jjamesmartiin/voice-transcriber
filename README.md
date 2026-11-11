@@ -922,6 +922,7 @@ Every location has an override, so you are never stuck with the default:
 | Offline model bundle | `VT_MODEL_SOURCE_DIR` |
 | Meeting transcripts | `VT_MEETING_OUTPUT_DIR` |
 | Settings file | `VT_CONFIG_FILE` (also how the test suite keeps off your live settings) |
+| Formatter request budget | `VT_FORMATTER_TIMEOUT_S` (default `3`; past it the rewrite is discarded) |
 | Stats file | `VT_STATS_FILE` |
 | Log file | `VT_LOG_FILE` |
 | External dictionary | `dictionary_file` in the config |

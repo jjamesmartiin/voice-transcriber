@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
 import re
 import time
 from typing import Any
@@ -171,6 +172,16 @@ CONTEXTS = ("general", "email")
 DEFAULT_STYLE = "semi-formal"
 DEFAULT_CONTEXT = "general"
 DEFAULT_TIMEOUT_S = 3.0
+
+#: The budget is the latency promise, not a model limit: past it the rewrite is
+#: discarded and the user gets the cleaned transcript. It is therefore a
+#: *setting*, and on a machine that is busy enough the model can need longer than
+#: the default for the two fixtures that generate a whole email or list - measured
+#: here at >3 s while the ASR model was resident, which is why the e2e parity tier
+#: raises it (tests/e2e/conftest.py). Silent by design: a discarded rewrite is
+#: indistinguishable from the formatter being off, so if the text stops looking
+#: formatted, this is the first knob to try.
+ENV_TIMEOUT = "VT_FORMATTER_TIMEOUT_S"
 
 #: Input token ceiling. Longer transcripts are chunked at sentence boundaries
 #: rather than truncated.
@@ -525,6 +536,21 @@ def _request_backend_model(module: Any, model: str | None) -> bool:
         return False
 
 
+def _timeout_from_environment() -> float:
+    """The request budget: ``VT_FORMATTER_TIMEOUT_S`` if it names a positive
+    number, otherwise :data:`DEFAULT_TIMEOUT_S`. A bad value is ignored rather
+    than fatal - the formatter may not take dictation down with it."""
+    raw = os.environ.get(ENV_TIMEOUT, "").strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = 0.0
+        if value > 0:
+            return value
+    return DEFAULT_TIMEOUT_S
+
+
 def format_text(
     text: str,
     *,
@@ -533,7 +559,7 @@ def format_text(
     context: str = DEFAULT_CONTEXT,
     backend: str | None = None,
     model: str | None = None,
-    timeout_s: float = DEFAULT_TIMEOUT_S,
+    timeout_s: float | None = None,
     allow_breaks: bool = False,
 ) -> str:
     """Format ``text``, or return it unchanged. Never raises.
@@ -546,6 +572,9 @@ def format_text(
     original = text if isinstance(text, str) else ""
     if not original.strip():
         return original
+
+    if timeout_s is None:
+        timeout_s = _timeout_from_environment()
 
     try:
         module = load_backend(backend)

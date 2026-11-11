@@ -67,6 +67,13 @@ Everything below is in the tree but not yet in a tagged release.
 
 ### Added
 
+- **`VT_FORMATTER_TIMEOUT_S`** sets the formatter's request budget (default
+  `3` seconds). It is a latency promise, not a model limit: past it the rewrite
+  is discarded and the cleaned transcript is used, silently. On a machine busy
+  enough the two longest generations — a whole email, a whole list — need longer
+  than 3 s while the ASR model is resident, and the feature then simply looks
+  switched off. Raise this if formatted text stops appearing.
+
 - **`VT_CONFIG_FILE`** overrides the settings file, the way `VT_STATS_FILE` and
   `VT_LOG_FILE` already override theirs. It exists because the test suite needed
   it: in a checkout with no `config/config.yaml`, the app falls back to the

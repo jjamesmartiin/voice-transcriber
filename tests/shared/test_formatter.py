@@ -701,3 +701,33 @@ def test_the_email_layout_reaches_the_caller_only_when_breaks_are_allowed(monkey
     assert formatter.format_text(original, backend=name) == original
     assert formatter.format_text(original, backend=name, allow_breaks=True) == layout
 
+
+
+def test_the_request_budget_can_be_set_by_the_environment(monkeypatch):
+    """`VT_FORMATTER_TIMEOUT_S` is a *setting*, and bad values are ignored.
+
+    The budget is a latency promise, not a model limit: past it the rewrite is
+    discarded and the user silently gets the cleaned transcript. On a busy
+    machine the two fixtures that generate a whole email or list need longer than
+    the 3 s default, which made the e2e parity tier fail for a reason that had
+    nothing to do with parity, so it raises the budget for itself.
+    """
+    seen = {}
+
+    def record(text, *, timeout_s=0.0, **kwargs):
+        seen["timeout_s"] = timeout_s
+        return text
+
+    name = install_fake(monkeypatch, record)
+
+    monkeypatch.setenv("VT_FORMATTER_TIMEOUT_S", "12.5")
+    formatter.format_text("buy milk", backend=name)
+    assert seen["timeout_s"] == 12.5
+
+    formatter.format_text("buy milk", backend=name, timeout_s=1.25)
+    assert seen["timeout_s"] == 1.25, "an explicit argument still wins"
+
+    for bad in ("", "nonsense", "0", "-4"):
+        monkeypatch.setenv("VT_FORMATTER_TIMEOUT_S", bad)
+        formatter.format_text("buy milk", backend=name)
+        assert seen["timeout_s"] == formatter.DEFAULT_TIMEOUT_S, bad

@@ -90,13 +90,30 @@ Open waves (each ends in a green run of every tier):
   Two settings-resolution tests now `monkeypatch.delenv("VT_CONFIG_FILE")` for
   their own duration — the same pattern `test_logging_setup.py` already used for
   `VT_LOG_FILE`.
-- [ ] **Wave 1b — mutation-check the invariants, not the suite.** Reintroduce each
-  bug named in `AGENTS.md`'s "Invariants to preserve" (HAL-only OS branching,
-  latch semantics, `set_binds` returning `False`, the control API never blocking
-  or raising, settings-modal-only config, formatter off = byte-identical) and
-  confirm a test fails. An invariant that survives is a real hole. Hand-run for
-  the six first; build a tool in `tools/` only if the pilot finds gaps worth
-  sweeping for.
+- [x] **Wave 1b — mutation-check the invariants. DONE 2026-11-10: 3 holes found
+  and closed, out of 6 mutations.** One mutation per invariant in `AGENTS.md`,
+  applied to the real source, the targeted tier run, then reverted (`git
+  status` clean after each). **Killed:** unknown `VT_PLATFORM` falling back
+  instead of raising; the WSL bridge releasing a latch instead of holding it;
+  the formatter running with `cleanup_mode: off`. **Survived, so each got the
+  test it was missing:**
+  - *Linux `set_binds` reporting success on a chord it cannot parse.* macOS and
+    WSL each pinned their half; Linux had no test at all, so a "saved" chord
+    that could never fire looked identical to a working one. Pinned by
+    `tests/linux/test_hal_linux.py::TestSetBindsRefusesWhatItCannotHonour`.
+  - *A bug inside `ControlServer.dispatch` escaping the socket handler.* The
+    existing test raises from `handle_control`, which `dispatch` already turns
+    into a reply, so narrowing the last-resort `except Exception` was invisible.
+    This is the case where the engine writes nothing and a client hangs. Pinned
+    by `tests/shared/test_control.py::TestLastResortNet`.
+  - *`load_audio_config` creating the settings file.* The "make sure it exists"
+    instinct survived the whole suite: the settings modal being the only writer
+    was documented but never pinned, and a startup that writes the file freezes
+    the shipped defaults as the user's choices. Pinned by
+    `tests/shared/test_config_write_hygiene.py::test_loading_a_config_never_creates_one`.
+  All three mutations were re-run afterwards and are now killed. Method and
+  result are recorded here because the *next* invariant added to `AGENTS.md`
+  should arrive with its own mutation.
 - [ ] **Wave 1c — fake-drift.** Extend the existing `REQUIRED_FUNCTIONS` /
   `test_hal_contract.py` pattern to the other fake-driven modules (windows
   hotkeys, the WSL bridge, `llama_server`, `model_download`, `audio_state`) so a

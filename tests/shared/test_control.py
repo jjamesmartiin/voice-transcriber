@@ -1369,3 +1369,38 @@ def test_the_value_cap_cannot_be_bypassed_through_an_alias():
         reply = _router().dispatch(json.dumps({"cmd": "speakers", key: over}))
         assert reply["ok"] is False, key
         assert "over the" in reply["error"], (key, reply)
+
+
+class TestLastResortNet:
+    def test_a_bug_above_the_handler_still_answers_and_the_server_survives(
+            self, sock_path, monkeypatch):
+        """An exception in `dispatch` itself, not in the verb handler.
+
+        Found by mutation: narrowing the socket handler's ``except Exception``
+        survived the whole suite, because the existing test raises from
+        ``handle_control`` — which ``dispatch`` already converts into a reply.
+        The case that matters is a bug *above* that: the engine would then write
+        nothing at all to the socket, and a client (`vt start`, a script) would
+        hang on a reply that never comes, while the engine looked healthy.
+        """
+        server = _server(sock_path)
+        original = server.dispatch
+        state = {"boom": True}
+
+        def dispatch(line):
+            if state["boom"]:
+                raise RuntimeError("boom")
+            return original(line)
+
+        monkeypatch.setattr(server, "dispatch", dispatch)
+        assert server.start() is True
+        try:
+            reply = control.send_command("ping", socket_path=server.socket_path)
+            assert reply["ok"] is False, reply
+            assert "boom" in reply["error"], reply
+
+            # …and the engine is still serving, which is the half that matters.
+            state["boom"] = False
+            assert control.send_command("ping", socket_path=server.socket_path)["ok"] is True
+        finally:
+            server.stop()

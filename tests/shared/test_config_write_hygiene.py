@@ -118,3 +118,19 @@ def test_the_data_dir_is_owner_only_when_created(tmp_path, monkeypatch):
 
     assert data_dir == tmp_path / "vt"
     assert stat.S_IMODE(data_dir.stat().st_mode) == 0o700
+
+
+def test_loading_a_config_never_creates_one(tmp_path, monkeypatch):
+    """Loading must be read-only: the settings modal is the only writer.
+
+    Found by mutation: adding ``save_audio_config()`` to ``load_audio_config``
+    — the "make sure the file exists" instinct — survived the whole suite. The
+    invariant it breaks is in AGENTS.md (the settings modal is the only
+    configuration entry point) and in the README ("there is no config file until
+    the settings modal writes one"), and a startup that writes the file turns
+    the shipped defaults into the user's choices permanently: every later
+    upgrade would then be unable to change a default it had already "saved".
+    """
+    config = tmp_path / "config.yaml"
+    _point_at(monkeypatch, config)
+    assert not config.exists(), "load_audio_config must not create the file"

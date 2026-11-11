@@ -254,3 +254,34 @@ class TestDeviceScanFollowsTheBinds:
         device = self._FakeDevice([56, 42])  # KEY_LEFTALT, KEY_LEFTSHIFT
 
         assert manager._is_keyboard_device(device) is True
+
+
+class TestSetBindsRefusesWhatItCannotHonour:
+    """`set_binds` must report failure, not save a chord that can never fire.
+
+    AGENTS.md: "a backend that cannot honour a change returns ``False`` from
+    ``set_binds`` rather than silently keeping the old chord". The WSL and macOS
+    backends each pinned their half of that; the Linux one had no test, so the
+    mutation that made it return ``True`` on an unparseable chord survived the
+    whole suite. It matters more here than anywhere: `vt hotkey add` reports the
+    result to the user, and a "saved" chord that never fires is indistinguishable
+    from a broken keyboard.
+    """
+
+    def _manager(self):
+        from unittest.mock import MagicMock as MM
+
+        LinuxHotkeyManager = hal.load_backend("linux", "hotkeys").LinuxHotkeyManager  # noqa: N806
+        manager = LinuxHotkeyManager(MM(), MM())
+        assert manager.set_binds(["alt+shift"]) is True
+        return manager
+
+    def test_an_unknown_key_is_refused_and_the_old_bind_stays(self):
+        manager = self._manager()
+        assert manager.set_binds(["hyper+shift"]) is False
+        assert [bind.chord for bind in manager.binds] == ["alt+shift"]
+
+    def test_an_unparseable_value_is_refused_without_raising(self):
+        manager = self._manager()
+        assert manager.set_binds(12345) is False
+        assert [bind.chord for bind in manager.binds] == ["alt+shift"]
