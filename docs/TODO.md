@@ -114,10 +114,18 @@ Open waves (each ends in a green run of every tier):
   All three mutations were re-run afterwards and are now killed. Method and
   result are recorded here because the *next* invariant added to `AGENTS.md`
   should arrive with its own mutation.
-- [ ] **Wave 1c — fake-drift.** Extend the existing `REQUIRED_FUNCTIONS` /
-  `test_hal_contract.py` pattern to the other fake-driven modules (windows
-  hotkeys, the WSL bridge, `llama_server`, `model_download`, `audio_state`) so a
-  fake cannot drift from the real signature while its tests stay green.
+- [x] **Wave 1c — fake-drift. DONE 2026-11-10.** Extended the "one declared
+  contract" pattern to a *comparison*: `test_backend_registry.py` now requires
+  every backend in all three pluggable seams (formatter, diarize, ASR) to accept
+  the shipped default backend's parameter names, in one direction only, so a fake
+  may add parameters but cannot fall behind. No hardcoded spec, so it cannot drift
+  from the call sites. It failed on the first run, which is the point: the
+  diarization fake could not accept `min_duration_on`/`min_duration_off`, which
+  the real backend takes — a caller tuning those against the fake would have hit a
+  `TypeError` production never sees. Fixed by accepting them (documented as
+  ignored: synthetic turns have no gaps to merge). Not covered: the 273
+  `MagicMock()`-based fakes, where the mock invents any attribute and a signature
+  check is meaningless — that half is what the Wave 1b mutations stand in for.
 - [ ] **Wave 2 — dedup, coverage-neutral.** Parametrise the 6 groups in
   `test_post_processor.py`; collapse the duplicated registry tests into one
   shared parametrised module; merge only those `tests/wsl` pins that assert the

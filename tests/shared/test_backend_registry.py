@@ -184,3 +184,62 @@ class TestConfigIntegration:
         cfg.write_text(yaml.dump({}))
         t2.load_audio_config()
         assert t2.MODEL_BACKEND == transcribe2.DEFAULT_BACKEND
+
+
+# ---------------------------------------------------------------------------
+# Every backend must accept what the shipped default accepts
+# ---------------------------------------------------------------------------
+#: ``(registry module, its required callables)`` for all three pluggable seams.
+_REGISTRIES = [
+    ("formatter", "voice_transcriber.formatter"),
+    ("diarize", "voice_transcriber.diarize"),
+    ("asr", "voice_transcriber.transcribe2"),
+]
+
+
+@pytest.mark.parametrize("label,module_path", _REGISTRIES)
+def test_every_backend_accepts_the_default_backends_keywords(label, module_path):
+    """A fake that cannot take a keyword the real backend takes is drift.
+
+    This is the fake-drift class: tests run against `diarizers.fake`, production
+    runs against `diarizers.sherpa_onnx`, and nothing compared the two. The rule
+    is deliberately one-directional — every backend must *accept* the default
+    backend's parameter names, and may add its own — so it needs no hardcoded
+    spec and cannot drift from the call sites. Measured when it was written: the
+    diarization fake was missing ``min_duration_on``/``min_duration_off``, which
+    the real backend takes, so a caller tuning those against the fake would have
+    hit a TypeError that production never sees.
+    """
+    import importlib
+    import inspect
+
+    registry = importlib.import_module(module_path)
+    required = registry.REQUIRED_FUNCTIONS
+    default_module = importlib.import_module(registry.BACKENDS[registry.DEFAULT_BACKEND])
+
+    problems = []
+    for name, backend_path in registry.BACKENDS.items():
+        module = importlib.import_module(backend_path)
+        for function_name in required:
+            reference = getattr(default_module, function_name, None)
+            candidate = getattr(module, function_name, None)
+            if reference is None:  # the registry's own check owns that message
+                continue
+            if candidate is None:
+                problems.append(f"{name}.{function_name} is missing")
+                continue
+            wanted = inspect.signature(reference).parameters
+            got = inspect.signature(candidate).parameters
+            if any(p.kind is p.VAR_KEYWORD for p in got.values()):
+                continue
+            missing = [
+                f"{function_name}({p})"
+                for p, spec in wanted.items()
+                if p not in got and spec.kind is not spec.VAR_KEYWORD
+            ]
+            problems.extend(f"{name}: cannot accept {m}" for m in missing)
+
+    assert not problems, (
+        f"{label} backends disagree with "
+        f"{registry.DEFAULT_BACKEND!r}: " + "; ".join(problems)
+    )

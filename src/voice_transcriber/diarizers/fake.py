@@ -99,8 +99,19 @@ def diarize(
     *,
     num_speakers=None,
     threshold=0.5,
+    min_duration_on=0.3,
+    min_duration_off=0.5,
     progress=None,
 ) -> list[Turn]:
+    """Synthesize (or replay) turns.
+
+    ``threshold``, ``min_duration_on`` and ``min_duration_off`` are accepted and
+    ignored: the turns here are synthesized, so there is no clustering to
+    threshold and no gap to merge. They are in the signature because the real
+    backend takes them and ``test_backend_registry.py`` requires every backend to
+    accept the default backend's keywords - a fake that cannot take one is drift,
+    and a caller tuning it would get a TypeError production never sees.
+    """
     if FAILURE is not None:
         raise FAILURE
     if DELAY_S:
