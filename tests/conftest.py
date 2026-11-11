@@ -54,9 +54,88 @@ _TEST_CONTROL_ENDPOINT = Path(tempfile.gettempdir()) / f"vt-control-tests-{os.ge
 os.environ.setdefault("VT_CONTROL_ENDPOINT", str(_TEST_CONTROL_ENDPOINT))
 os.environ.setdefault("VT_CONTROL_ENDPOINT_FILE", str(_TEST_CONTROL_ENDPOINT))
 
+# The Bluetooth hands-free autoswitch records which WirePlumber value it borrowed
+# in the per-user data dir, so a killed process can put it back on the next start.
+# A test that exercises the recording path wrote that loan into the developer's
+# live data dir, and the next real start then "recovered" a value nothing had
+# changed. Same mitigation as the log and stats files above.
+_TEST_BT_BORROW_FILE = Path(tempfile.gettempdir()) / f"vt-bt-borrow-tests-{os.getpid()}.json"
+os.environ.setdefault("VT_BT_BORROW_FILE", str(_TEST_BT_BORROW_FILE))
+
+# The settings file. From a checkout this resolves to <repo>/config/config.yaml,
+# which is usually absent - so it fell through to the per-user
+# audio_device_config.json, the very file a packaged install and a *running
+# engine* share. Every t2 setter a test called without patching CONFIG_FILE
+# rewrote the developer's live settings (mic, output mode, theme, mute) and the
+# test still passed. Tests that pin the resolution itself unset this for
+# themselves, exactly as tests/shared/test_logging_setup.py does for VT_LOG_FILE.
+_TEST_CONFIG_FILE = Path(tempfile.gettempdir()) / f"vt-config-tests-{os.getpid()}.yaml"
+os.environ.setdefault("VT_CONFIG_FILE", str(_TEST_CONFIG_FILE))
+
 #: The shipped custom dictionary, captured once per session by
 #: ``_isolate_runtime_settings`` (see the note there).
 _SHIPPED_DICTIONARY = None
+
+
+def _user_state_dirs():
+    """The real directories holding state that belongs to the user, not a test.
+
+    ``AGENTS.md``: *"tests must monkeypatch `t2.CONFIG_FILE`; never let a test or
+    a manual command write the user's live settings."* Nothing enforced that,
+    and the failure mode is invisible — the test passes while the developer's own
+    config, dictionary or device settings are overwritten.
+
+    Resolved from the pure path helper (``paths``, which imports nothing but
+    ``os``) rather than from ``t2``, so the guard cannot drag the app into the
+    tests that deliberately pin import behaviour in subprocesses.
+    """
+    dirs = [Path(__file__).resolve().parent.parent / "config"]
+    try:
+        from voice_transcriber import paths
+        data = Path(paths._data_dir())
+    except Exception:  # pragma: no cover - an unimportable app is another test's job
+        return dirs
+    return dirs + [data, data / "config"]
+
+
+def _user_state_snapshot():
+    """mtime + size for every entry in each user-state directory.
+
+    mtime and size, not contents: they are three syscalls per test rather than a
+    hash of the weights directory, and a write cannot preserve both — including
+    through the atomic ``mkstemp`` + ``os.replace`` path the config and
+    dictionary writers use, which a ``open(..., "w")`` hook would miss.
+    """
+    state = {}
+    for directory in _user_state_dirs():
+        try:
+            with os.scandir(directory) as entries:
+                found = list(entries)
+        except OSError:
+            continue
+        for entry in found:
+            try:
+                info = entry.stat()
+            except OSError:
+                continue
+            state[entry.path] = (info.st_mtime_ns, info.st_size)
+    return state
+
+
+@pytest.fixture(autouse=True)
+def _no_writes_to_real_user_state():
+    """Fail the test that writes the user's live config, dictionary or data dir."""
+    before = _user_state_snapshot()
+    yield
+    after = _user_state_snapshot()
+    changed = sorted(
+        path for path in set(before) | set(after) if before.get(path) != after.get(path)
+    )
+    assert not changed, (
+        "this test wrote real user state: " + ", ".join(changed)
+        + " -- point the path (usually t2.CONFIG_FILE, VT_STATS_FILE, VT_LOG_FILE"
+        " or a VT_MODEL_DIR-style env var) at tmp_path instead"
+    )
 
 @pytest.fixture(autouse=True)
 def _isolate_runtime_settings():

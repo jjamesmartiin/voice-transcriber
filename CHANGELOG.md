@@ -65,6 +65,19 @@ Everything below is in the tree but not yet in a tagged release.
 - The control socket's `/tmp` fallback directory must belong to the user and be
   private, and the value-length cap now covers `name`/`mode` as well as `value`.
 
+### Added
+
+- **`VT_CONFIG_FILE`** overrides the settings file, the way `VT_STATS_FILE` and
+  `VT_LOG_FILE` already override theirs. It exists because the test suite needed
+  it: in a checkout with no `config/config.yaml`, the app falls back to the
+  per-user `audio_device_config.json` — the file a packaged install *and a
+  running engine* share — so a test that called any setting setter rewrote the
+  developer's microphone, output mode and theme and still passed. The suite now
+  points this at a temp file, and a new guard in `tests/conftest.py` fails any
+  test that writes real user state (it also caught a Bluetooth borrow record
+  being left in the live data dir, and 19 tests that asserted on a config save
+  which had silently failed).
+
 ## [1.5.1] — 2026-11-05
 
 ### Fixed

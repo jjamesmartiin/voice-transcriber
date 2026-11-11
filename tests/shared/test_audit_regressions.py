@@ -395,6 +395,10 @@ class TestConfigResolutionIsolation:
         import t2
         from voice_transcriber import paths
 
+        # See test_get_config_file_anchors_to_repo_root: the session default is a
+        # temp file, and this test is about the resolution itself.
+        monkeypatch.delenv("VT_CONFIG_FILE", raising=False)
+
         foreign_dir = tmp_path / "foreign"
         foreign_dir.mkdir()
         dummy_json = foreign_dir / "config.json"
@@ -414,6 +418,11 @@ class TestConfigResolutionIsolation:
     def test_get_config_file_anchors_to_repo_root(self, monkeypatch, tmp_path):
         import t2
         from voice_transcriber import paths
+
+        # The session points VT_CONFIG_FILE at a temp file so a test cannot write
+        # the live settings; this test is about the *resolution*, so it unseats
+        # that default for its own duration.
+        monkeypatch.delenv("VT_CONFIG_FILE", raising=False)
 
         repo_dir = tmp_path / "fake_repo"
         repo_config_dir = repo_dir / "config"

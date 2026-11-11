@@ -188,8 +188,12 @@ def wp_settings(monkeypatch, tmp_path):
     monkeypatch.setattr(t2, "_bt_autoswitch_before", None)
     monkeypatch.setattr(t2, "_bt_restore_registered", False)
     # The borrow record is app state: keep it in the test's tmp dir, never in the
-    # real per-user data dir (a test must not write the user's live state).
+    # real per-user data dir (a test must not write the user's live state). The
+    # env var is the seam that does it now - patching get_data_dir is no longer
+    # enough, and this fixture is what taught us the record was reaching the real
+    # data dir through every other test that started a recording.
     monkeypatch.setattr(t2, "get_data_dir", lambda: str(tmp_path))
+    monkeypatch.setenv("VT_BT_BORROW_FILE", str(tmp_path / "bluetooth_autoswitch_borrowed.json"))
     fake.registered = registered
     return fake
 
@@ -1740,3 +1744,28 @@ def test_one_bad_value_does_not_skip_the_rest_of_the_config(tmp_path, monkeypatc
     assert t2.FORMATTER == "on"
     assert pp._FORMATTER_ENABLED is True, "the snapshot was not published"
     assert pp._CLEANUP_MODE == t2.CLEANUP_MODE
+
+
+# ---------------------------------------------------------------------------
+# The two paths the suite can no longer write (tests/conftest.py)
+# ---------------------------------------------------------------------------
+
+def test_the_config_path_can_be_overridden_by_the_environment(monkeypatch, tmp_path):
+    """`VT_CONFIG_FILE` is how the session keeps tests off the live settings file.
+
+    Without it, `get_config_file()` falls back to the per-user
+    `audio_device_config.json` in a checkout with no `config/config.yaml` - the
+    file a packaged install *and* a running engine share - so a test that called
+    any `t2` setter silently rewrote the developer's microphone, output mode and
+    theme, and still passed.
+    """
+    target = tmp_path / "elsewhere.yaml"
+    monkeypatch.setenv("VT_CONFIG_FILE", str(target))
+    assert t2.get_config_file() == target
+
+
+def test_the_borrow_record_path_can_be_overridden_by_the_environment(monkeypatch, tmp_path):
+    """Same shape for the Bluetooth borrow record; the WP tests use this seam."""
+    target = tmp_path / "borrowed.json"
+    monkeypatch.setenv("VT_BT_BORROW_FILE", str(target))
+    assert t2._bt_borrow_file() == target

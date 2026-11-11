@@ -921,6 +921,7 @@ Every location has an override, so you are never stuck with the default:
 | Diarization / Parakeet weights | `VT_DIARIZATION_MODELS`, `VT_PARAKEET_MODELS` |
 | Offline model bundle | `VT_MODEL_SOURCE_DIR` |
 | Meeting transcripts | `VT_MEETING_OUTPUT_DIR` |
+| Settings file | `VT_CONFIG_FILE` (also how the test suite keeps off your live settings) |
 | Stats file | `VT_STATS_FILE` |
 | Log file | `VT_LOG_FILE` |
 | External dictionary | `dictionary_file` in the config |

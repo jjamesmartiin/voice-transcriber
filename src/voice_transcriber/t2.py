@@ -483,8 +483,18 @@ def _dump_toml(d: dict) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 def get_config_file():
-    """Find local project config.yaml/config.yml/config.json/config.toml (in root or config/ dir), fallback to global data dir"""
+    """Find local project config.yaml/config.yml/config.json/config.toml (in root or config/ dir), fallback to global data dir
+
+    ``VT_CONFIG_FILE`` wins over everything, like ``VT_STATS_FILE`` and
+    ``VT_LOG_FILE`` do. Tests use it so a run cannot rewrite the live settings
+    file that a packaged install and a running engine share; a user can use it
+    to keep two profiles apart.
+    """
     from voice_transcriber import paths
+
+    override = os.environ.get("VT_CONFIG_FILE", "").strip()
+    if override:
+        return Path(override)
 
     repo_root = paths.find_repo_root()
     if repo_root is not None:
@@ -731,7 +741,15 @@ def _bt_borrow_file():
     (SIGKILL, a crash, a closed terminal) never runs its exit hook. Recording
     the loan on disk is what lets the next start put it back instead of leaving
     the machine reconfigured for good.
+
+    ``VT_BT_BORROW_FILE`` overrides the location, like ``VT_STATS_FILE`` and
+    ``VT_LOG_FILE`` do: this is real user state, and a test that exercised the
+    recording path wrote a loan into the developer's live data dir. The next
+    real start then "recovered" a value nothing had changed.
     """
+    override = os.environ.get("VT_BT_BORROW_FILE", "").strip()
+    if override:
+        return Path(override)
     return Path(get_data_dir()) / "bluetooth_autoswitch_borrowed.json"
 
 
@@ -1513,6 +1531,12 @@ def save_audio_config(file_path=None):
         CONFIG_FILE = Path(file_path)
     elif CONFIG_FILE is None:
         CONFIG_FILE = get_config_file()
+    else:
+        # The global is a Path in production, but a caller or a test can set it to
+        # a str. Coerce here rather than let the writer fail on `.exists`: that
+        # error is logged and the save is dropped, so the caller believes it saved
+        # and asserts against a file that was never written (19 tests did).
+        CONFIG_FILE = Path(CONFIG_FILE)
     with _CONFIG_LOCK:
         _write_audio_config()
 

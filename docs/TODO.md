@@ -64,12 +64,32 @@ and made faster. Measured, not guessed (numbers and method in
 
 Open waves (each ends in a green run of every tier):
 
-- [ ] **Wave 1a — no test may touch real user state.** `AGENTS.md` says tests
-  must monkeypatch `t2.CONFIG_FILE` and never write the user's live settings;
-  nothing enforces it. Add one autouse `conftest` guard that fails if a test opens
-  the real `config/config.yaml`, dictionary, `stats.json` or log for writing, then
-  fix whatever it catches. Highest value per line in this list: the failure it
-  prevents is the maintainer's own setup, silently.
+- [x] **Wave 1a — no test may touch real user state. DONE 2026-11-10; it earned
+  its keep immediately.** The guard is mtime+size around every test over
+  `<repo>/config`, `<data-dir>` and `<data-dir>/config` — mechanism-agnostic, so
+  it catches a direct write, the atomic `mkstemp`+`os.replace` path and a newly
+  created file. It was proved non-vacuous first, by writing through `os.replace`
+  in both places and watching it fail. It then caught three real leaks, none of
+  which any test noticed:
+
+  - **the suite was rewriting the live settings file.** In a checkout with no
+    `config/config.yaml`, `get_config_file()` falls back to the per-user
+    `audio_device_config.json` — the one a packaged install *and a running
+    engine* share. Every test that called a `t2` setter without patching
+    `CONFIG_FILE` overwrote the developer's microphone, output mode, theme and
+    mute, and passed. Fixed by adding `VT_CONFIG_FILE` (same shape as
+    `VT_STATS_FILE`) and pointing it at a temp file for the session.
+  - **a Bluetooth borrow record** written into the live data dir by every test
+    that started a recording; the next real start then "recovered" a value
+    nothing had changed. New `VT_BT_BORROW_FILE`, redirected for the session.
+  - **19 tests asserted on a config save that never happened.** They patched
+    `t2.CONFIG_FILE` with a `str`, so `save_audio_config()` died on
+    `'str' object has no attribute 'exists'`, logged it, and dropped the write.
+    The global is coerced to `Path` now, in one place.
+
+  Two settings-resolution tests now `monkeypatch.delenv("VT_CONFIG_FILE")` for
+  their own duration — the same pattern `test_logging_setup.py` already used for
+  `VT_LOG_FILE`.
 - [ ] **Wave 1b — mutation-check the invariants, not the suite.** Reintroduce each
   bug named in `AGENTS.md`'s "Invariants to preserve" (HAL-only OS branching,
   latch semantics, `set_binds` returning `False`, the control API never blocking
