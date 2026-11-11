@@ -157,15 +157,29 @@ Open waves (each ends in a green run of every tier):
     parametrisation, `unittest` assertions, or test names-as-documentation. Every
     candidate in this wave needed reading before touching, and two thirds of them
     were wrong.
-- [ ] **Wave 3 — speed and skip hygiene.** The three 3.7 s subprocess-import tests
-  and the 2.7 s `test_the_cohere_loader_does_not_search_cwd` dominate the serial
-  run; check whether they can share one child process. Triage the 47 skip/xfail
-  markers so each names the CI gap it covers (as `tests/wsl/*` already do). No
-  module was found where wall clock justified restructuring — the win was
-  parallelism: `-n auto` takes the model-free tiers from **71 s to 14 s**, and it
-  is now the default in both runners (`tools/vt_dev.py` already did it; the
-  flake's `nix run .#test` did not, and was 60 s for the same work).
-
+- [x] **Wave 3 — speed and skip hygiene. DONE 2026-11-10: no speed change was
+  justified, and the skip convention was already followed — so the deliverable
+  became a guard instead of 36 edits.**
+  - **Speed: nothing to do, measured.** All three top durations
+    (`test_import_cohere_backend_keeps_stderr_intact` 3.4 s,
+    `test_idle_socket_is_not_a_quit_request` 3.0 s,
+    `test_the_cohere_loader_does_not_search_cwd` 2.6 s) are already
+    `@pytest.mark.slow`, and the fast tier (`-m "not slow"`) is 1888 tests in
+    10.9 s. They cannot be merged into one child either: each asserts an
+    *absence* in a fresh interpreter — no torch, no `http.client`, fd 2 not
+    `/dev/null` — and a shared process lets one import contaminate the next, which
+    is the property they exist to prove. The real speed win was `-n auto` in Wave 0
+    (71 s → 14 s); after that the suite's floor is its slowest single test.
+  - **Skip/xfail: 36 real markers, every one already names a reason.** The 47
+    that a line-grep counts include multi-line `reason=` continuations and
+    `parametrize(marks=…)`. Nothing needed renaming, so the useful artifact is a
+    rule that keeps it that way: `tests/shared/test_suite_hygiene.py` checks four
+    conventions (reason on every `skip`/`skipif`/`xfail`; no test name shadowed in
+    the same scope, which is *never collected*; no `test_*.py` outside a tier,
+    which no tier collects; tier directories matching `tools/vt_dev.py`). Each was
+    proved non-vacuous by writing a probe that violates it and watching it fail —
+    which also caught a bug in the guard itself: the first version accepted
+    `@pytest.mark.skipif(True)` because it treated the *condition* as the reason.
 ---
 
 - [ ] **Pause-separated lists are paragraphs, not bullets (post-processing).** Segment boundaries are now carried end-to-end (hard silence cut, soft energy-trough cut) and `blocks` mode turns them into paragraph/line breaks, verified by model-free tests in `tests/shared/test_structure_blocks.py`. What is *not* done: promoting a run of pause-separated short fragments to a bullet list, and using the measured gap in milliseconds (the batcher currently reports the *kind* of cut, not its duration). Both need a confidence rule that has been measured against real dictation, not invented. The e2e behaviour with real audio has also not been re-run since the sentinel was introduced: the worktree has no weights, so `tests/e2e/` could not be executed. Run `./scripts/test.sh e2e` on a machine with the model before trusting the pause path end-to-end.
