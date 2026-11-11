@@ -64,26 +64,6 @@ def test_noop_backend_is_registered_and_complete():
         assert hasattr(module, fn), f"noop backend is missing {fn}"
 
 
-def test_default_backend_is_a_registry_key():
-    assert formatter.DEFAULT_BACKEND in formatter.BACKENDS
-
-
-def test_available_backends_lists_the_registry():
-    assert formatter.available_backends() == sorted(formatter.BACKENDS)
-    assert set(formatter.available_backends()) == {"llama-server", "noop"}
-
-
-def test_resolve_backend_name_defaults_to_s1_mini():
-    assert formatter.resolve_backend_name(None) == formatter.DEFAULT_BACKEND
-    assert formatter.resolve_backend_name("noop") == "noop"
-    assert formatter.resolve_backend_name("  NOOP  ") == "noop"
-
-
-def test_resolve_backend_name_rejects_an_unknown_name():
-    with pytest.raises(formatter.UnknownBackendError, match="Unknown formatter backend"):
-        formatter.resolve_backend_name("gpt-4")
-
-
 def test_s1_mini_is_no_longer_a_backend_at_all():
     """C4 was dropped, so "s1-mini" must not be selectable as a runtime.
 
@@ -99,13 +79,6 @@ def test_s1_mini_is_no_longer_a_backend_at_all():
     assert "s1-mini" in formatter.MODELS
 
 
-def test_the_shipped_backend_exists_and_satisfies_the_contract():
-    module = formatter.load_backend("llama-server")
-    assert module is not None, "C3 ships formatters/llama_server.py"
-    for fn in formatter.REQUIRED_FUNCTIONS:
-        assert hasattr(module, fn)
-
-
 def test_an_unavailable_shipped_backend_still_yields_the_original(monkeypatch):
     """Present-but-unusable is the common case on a machine with no weights."""
     monkeypatch.setenv("PATH", "/nonexistent")
@@ -113,18 +86,6 @@ def test_an_unavailable_shipped_backend_still_yields_the_original(monkeypatch):
     formatter.reset_backend_cache()
     original = "buy milk"
     assert formatter.format_text(original, backend="llama-server") == original
-
-
-def test_backend_missing_part_of_the_contract_loads_as_none(monkeypatch):
-    incomplete = types.SimpleNamespace(available=lambda: True)  # no format_text/warm
-    monkeypatch.setitem(formatter.BACKENDS, "broken", "voice_transcriber.formatters.broken")
-    monkeypatch.setitem(formatter._loaded, "broken", incomplete)
-    # A cached module is trusted; the contract is checked at import time, so
-    # simulate the real path by clearing the cache entry.
-    formatter._loaded.pop("broken")
-    monkeypatch.setattr(
-        formatter.importlib, "import_module", lambda _name: incomplete)
-    assert formatter.load_backend("broken") is None
 
 
 # ---------------------------------------------------------------------------

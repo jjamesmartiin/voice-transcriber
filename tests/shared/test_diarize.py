@@ -56,28 +56,8 @@ def test_fake_backend_is_registered_and_satisfies_the_contract():
         assert hasattr(module, fn), f"fake backend is missing {fn}"
 
 
-def test_default_backend_is_a_registry_key():
-    assert diarize.DEFAULT_BACKEND in diarize.BACKENDS
-
-
 def test_default_backend_is_sherpa_onnx():
     assert diarize.DEFAULT_BACKEND == "sherpa-onnx"
-
-
-def test_available_backends_lists_the_registry():
-    assert diarize.available_backends() == sorted(diarize.BACKENDS)
-    assert set(diarize.available_backends()) == {"sherpa-onnx", "fake"}
-
-
-def test_resolve_backend_name_is_case_and_space_insensitive():
-    assert diarize.resolve_backend_name(None) == diarize.DEFAULT_BACKEND
-    assert diarize.resolve_backend_name("fake") == "fake"
-    assert diarize.resolve_backend_name("  FAKE  ") == "fake"
-
-
-def test_resolve_backend_name_rejects_an_unknown_name():
-    with pytest.raises(diarize.UnknownBackendError, match="Unknown diarization backend"):
-        diarize.resolve_backend_name("pyannote")
 
 
 def test_an_absent_backend_still_degrades_to_none(monkeypatch):
@@ -93,22 +73,6 @@ def test_an_absent_backend_still_degrades_to_none(monkeypatch):
         diarize.BACKENDS, "unbuilt", "voice_transcriber.diarizers.unbuilt")
     diarize.reset_backend_cache()
     assert diarize.load_backend("unbuilt") is None
-
-
-def test_the_shipped_backend_exists_and_satisfies_the_contract():
-    module = diarize.load_backend("sherpa-onnx")
-    assert module is not None, "D3 ships diarizers/sherpa_onnx.py"
-    for fn in diarize.REQUIRED_FUNCTIONS:
-        assert hasattr(module, fn)
-
-
-def test_backend_missing_part_of_the_contract_loads_as_none(monkeypatch):
-    import types
-
-    incomplete = types.SimpleNamespace(available=lambda: True)  # no diarize()
-    monkeypatch.setitem(diarize.BACKENDS, "broken", "voice_transcriber.diarizers.broken")
-    monkeypatch.setattr(diarize.importlib, "import_module", lambda _name: incomplete)
-    assert diarize.load_backend("broken") is None
 
 
 # ---------------------------------------------------------------------------

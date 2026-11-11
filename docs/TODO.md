@@ -126,10 +126,37 @@ Open waves (each ends in a green run of every tier):
   ignored: synthetic turns have no gaps to merge). Not covered: the 273
   `MagicMock()`-based fakes, where the mock invents any attribute and a signature
   check is meaningless — that half is what the Wave 1b mutations stand in for.
-- [ ] **Wave 2 — dedup, coverage-neutral.** Parametrise the 6 groups in
-  `test_post_processor.py`; collapse the duplicated registry tests into one
-  shared parametrised module; merge only those `tests/wsl` pins that assert the
-  *same* literal. Gate: ~60 fewer items, coverage unchanged, all tiers green.
+- [x] **Wave 2 — dedup, coverage-neutral. DONE 2026-11-10: 12 definitions became
+  6, coverage identical.** The gate above said "~60 fewer items": that was wrong,
+  and measuring first is why nothing was broken. Parametrising does **not** reduce
+  collected items (each param is an item) — it reduces *definitions*. Collected
+  count is 2157 before and after; coverage is 69% before and after (statements
+  16810 → 16831 from this session's guard/override code, missed 4727 → 4730,
+  partial branches 973 → 974).
+  - **Real duplication, merged:** the formatter and diarizer registry contracts
+    were five copy-pasted pairs (one per registry, in `test_diarize.py` and
+    `test_formatter.py`) — same contract, different backend names in it. Written
+    twice, a property could be added to one registry's list and never checked on
+    the other, which is the exact failure mode the registry exists to prevent.
+    Now one parametrised `TestTheSharedDegradableContract` over both, plus the
+    case/whitespace property folded in. 12 definitions → 6.
+  - **The six "identical body" groups in `test_post_processor.py` were false
+    positives.** They are already-parametrised *datasets* with distinct names —
+    `test_nato_phonetic_collapse` vs `test_a_trigger_noun_still_collapses` vs
+    `test_one_non_prose_letter_restores_the_initialism` all call
+    `process_serial_numbers`, and their names are what says which invariant broke.
+    Merging them would have deleted signal, not duplication. Same for
+    `tests/wsl/*`: the shared literals (`HOTKEY_DOWN`, `VT_PLATFORM`, `clipboard`)
+    are shared *vocabulary*, each asserted for a different invariant — the
+    structural-pin pattern AGENTS.md blesses.
+  - **One real defect found:** `test_audio_state.py` had
+    `test_reports_unchecked_on_hosts_without_wpctl` in two different classes.
+    Both ran (pytest collects per class), so nothing was dead, but a failure
+    printed a name that could not tell you which. Renamed by subject.
+  - Lesson for Wave 3 and any repeat: an AST "same body" count does not know about
+    parametrisation, `unittest` assertions, or test names-as-documentation. Every
+    candidate in this wave needed reading before touching, and two thirds of them
+    were wrong.
 - [ ] **Wave 3 — speed and skip hygiene.** The three 3.7 s subprocess-import tests
   and the 2.7 s `test_the_cohere_loader_does_not_search_cwd` dominate the serial
   run; check whether they can share one child process. Triage the 47 skip/xfail

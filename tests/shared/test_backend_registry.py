@@ -243,3 +243,80 @@ def test_every_backend_accepts_the_default_backends_keywords(label, module_path)
         f"{label} backends disagree with "
         f"{registry.DEFAULT_BACKEND!r}: " + "; ".join(problems)
     )
+
+
+# ---------------------------------------------------------------------------
+# The contract the two *degradable* registries share
+# ---------------------------------------------------------------------------
+#: `(label, module path, default backend, declared backends, the noun used in its
+#: error text)`. The formatter and the diarizer both degrade to `None` when a
+#: backend is missing, unlike the ASR registry above, which raises - that
+#: polarity is the one thing a caller must know, so it is documented here.
+DEGRADABLE_REGISTRIES = [
+    ("formatter", "voice_transcriber.formatter", "llama-server",
+     {"llama-server", "noop"}, "formatter"),
+    ("diarize", "voice_transcriber.diarize", "sherpa-onnx",
+     {"sherpa-onnx", "fake"}, "diarization"),
+]
+
+
+@pytest.fixture(params=DEGRADABLE_REGISTRIES, ids=[r[0] for r in DEGRADABLE_REGISTRIES])
+def registry(request):
+    import importlib
+
+    label, path, default, declared, noun = request.param
+    module = importlib.import_module(path)
+    return types.SimpleNamespace(
+        label=label, module=module, default=default, declared=declared, noun=noun)
+
+
+class TestTheSharedDegradableContract:
+    """Five properties, both registries, one definition.
+
+    These were five copy-pasted pairs (one per registry, in `test_diarize.py` and
+    `test_formatter.py`): the same contract with different names in it. Written
+    twice, a property could be added to one registry's list and silently never
+    checked on the other - which is the whole failure mode the registry exists to
+    prevent. Parametrising over both also means a registry that loses one of them
+    fails loudly instead of just having a shorter file.
+    """
+
+    def test_the_default_backend_is_a_registry_key(self, registry):
+        assert registry.module.DEFAULT_BACKEND in registry.module.BACKENDS
+        assert registry.module.DEFAULT_BACKEND == registry.default
+
+    def test_available_backends_lists_the_registry(self, registry):
+        assert registry.module.available_backends() == sorted(registry.module.BACKENDS)
+        assert set(registry.module.available_backends()) == registry.declared
+
+    def test_the_shipped_backend_exists_and_satisfies_the_contract(self, registry):
+        module = registry.module.load_backend(registry.default)
+        assert module is not None, f"{registry.label} ships a default backend"
+        for function in registry.module.REQUIRED_FUNCTIONS:
+            assert hasattr(module, function), function
+
+    def test_an_unknown_name_is_refused_with_the_registrys_own_error(self, registry):
+        with pytest.raises(registry.module.UnknownBackendError,
+                           match=f"Unknown {registry.noun} backend"):
+            registry.module.resolve_backend_name("definitely-not-a-backend")
+
+    def test_a_backend_missing_part_of_its_contract_loads_as_none(self, registry, monkeypatch):
+        """Degrade to `None`, not raise: neither feature may take dictation down."""
+        incomplete = types.SimpleNamespace(**{
+            fn: (lambda *a, **k: None) for fn in registry.module.REQUIRED_FUNCTIONS[:-1]
+        })
+        monkeypatch.setitem(registry.module.BACKENDS, "broken",
+                            "voice_transcriber.nowhere.broken")
+        loaded = getattr(registry.module, "_loaded", None)
+        if loaded is not None:
+            # A cached module is trusted, and the contract is checked at import
+            # time, so clear the cache to simulate the real path.
+            loaded.pop("broken", None)
+        monkeypatch.setattr(registry.module.importlib, "import_module",
+                            lambda _name: incomplete)
+        assert registry.module.load_backend("broken") is None
+
+    def test_case_and_whitespace_are_tolerated(self, registry):
+        other = sorted(registry.declared - {registry.default})[0]
+        assert registry.module.resolve_backend_name(None) == registry.module.DEFAULT_BACKEND
+        assert registry.module.resolve_backend_name(f"  {other.upper()}  ") == other

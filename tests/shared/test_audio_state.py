@@ -254,7 +254,7 @@ class TestDoctorMuteCheck:
         assert info["muted"] is False
         assert wpctl.mute_calls() == []
 
-    def test_reports_unchecked_on_hosts_without_wpctl(self, no_wpctl):
+    def test_the_mute_check_reports_unchecked_without_wpctl(self, no_wpctl):
         import doctor
 
         info = doctor.check_microphone_mute()
@@ -576,7 +576,7 @@ class TestDoctorBluetoothProfile:
         assert "no microphone at all" in info["detail"]
         assert "autoswitch-to-headset-profile true" in info["fix_command"]
 
-    def test_reports_unchecked_on_hosts_without_wpctl(self, monkeypatch):
+    def test_the_bluetooth_check_reports_unchecked_without_wpctl(self, monkeypatch):
         import doctor
 
         monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
