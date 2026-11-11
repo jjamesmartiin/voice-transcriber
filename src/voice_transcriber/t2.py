@@ -1349,8 +1349,17 @@ def load_audio_config(file_path=None):
                 )
                 config = {}
 
+            # A load *replaces* the selection. Inheriting the index that a
+            # previous config (or a previous session) left in memory meant the
+            # name-based re-resolution below was skipped entirely, so pointing the
+            # app at another config file kept the old microphone - and it made
+            # `test_reset_keeps_microphone_and_unknown_keys` order-dependent: it
+            # passed on Linux only because the global happened to be None there,
+            # and on macOS (which has real devices, so earlier tests set it) the
+            # stale index failed validation and the user's mic was dropped.
             PRIMARY_DEVICE_NAME = config.get('primary_device_name')
             SECONDARY_DEVICE_NAME = config.get('secondary_device_name')
+            INPUT_DEVICE_INDEX = config.get('input_device_index')
             OVERRIDE_MODE = config.get('override_mode', 'auto')
             IS_MUTED = _normalize_bool(config.get('is_muted', True), default=True)
             raw_out_mode = config.get('output_mode')

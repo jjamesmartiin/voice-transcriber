@@ -1797,3 +1797,34 @@ def test_the_borrow_record_path_can_be_overridden_by_the_environment(monkeypatch
     target = tmp_path / "borrowed.json"
     monkeypatch.setenv("VT_BT_BORROW_FILE", str(target))
     assert t2._bt_borrow_file() == target
+
+
+def test_loading_a_config_replaces_the_device_selection(monkeypatch, tmp_path):
+    """A load must not inherit the microphone that was already selected.
+
+    Found on the macOS CI runner: `load_audio_config` started from the existing
+    module global, so the name-based re-resolution was skipped whenever an earlier
+    test (or an earlier config) had left an index behind. The stale index then
+    failed validation and the user's saved microphone was dropped - on Linux the
+    test only passed because the global happened to be `None` there.
+    """
+    devices = [{"name": "fake-output", "max_input_channels": 0},
+               {"name": "Yeti", "max_input_channels": 1}]
+
+    class _FakeSD:
+        default = type("D", (), {"device": (None, None)})()
+
+        @staticmethod
+        def query_devices(index=None):
+            return devices if index is None else devices[index]
+
+    monkeypatch.setattr(t2, "sd", _FakeSD)
+    monkeypatch.setattr(t2, "INPUT_DEVICE_INDEX", 0)  # a stale selection in memory
+    monkeypatch.setattr(t2, "PRIMARY_DEVICE_NAME", None)
+
+    config = tmp_path / "config.yaml"
+    config.write_text("primary_device_name: Yeti\ninput_device_index: 1\n")
+    t2.load_audio_config(file_path=str(config))
+
+    assert t2.PRIMARY_DEVICE_NAME == "Yeti"
+    assert t2.INPUT_DEVICE_INDEX == 1, "the config's device must win over the stale global"

@@ -367,9 +367,14 @@ class TestSocketTransport:
             client = socketlib.socket(socketlib.AF_UNIX, socketlib.SOCK_STREAM)
             client.settimeout(5.0)
             client.connect(server.socket_path)
-            # Send 1025 bytes without a newline
-            client.sendall(b"x" * 1025)
-            client.shutdown(socketlib.SHUT_WR)
+            # Send 1025 bytes without a newline. The server may reject and close
+            # while this is still in flight - macOS reports ENOTCONN rather than
+            # EPIPE - so the write is best effort; the reply below is the test.
+            try:
+                client.sendall(b"x" * 1025)
+                client.shutdown(socketlib.SHUT_WR)
+            except OSError:
+                pass
             raw = client.recv(4096).decode().strip()
             client.close()
             reply = json.loads(raw)

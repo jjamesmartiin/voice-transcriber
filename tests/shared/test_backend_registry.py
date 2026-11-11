@@ -215,7 +215,13 @@ def test_every_backend_accepts_the_default_backends_keywords(label, module_path)
 
     registry = importlib.import_module(module_path)
     required = registry.REQUIRED_FUNCTIONS
-    default_module = importlib.import_module(registry.BACKENDS[registry.DEFAULT_BACKEND])
+    try:
+        default_module = importlib.import_module(registry.BACKENDS[registry.DEFAULT_BACKEND])
+    except ImportError as exc:
+        # The default backend is the reference, so an unimportable one skips the
+        # whole comparison: the ASR default imports torch, which the Windows and
+        # macOS CI jobs do not install.
+        pytest.skip(f"{label}: {registry.DEFAULT_BACKEND} is not importable here ({exc})")
 
     problems = []
     for name, backend_path in registry.BACKENDS.items():
