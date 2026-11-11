@@ -32,6 +32,17 @@ nix develop --command python tests/e2e/test_live_speaker_mic_loopback.py all
 nix develop --command python tests/benchmark_synthetic_e2e.py
 ```
 
+### Line coverage
+
+Which lines the suite never reaches, and which gaps are dark by construction:
+[`test-coverage.md`](test-coverage.md). Re-derive the baseline with
+
+```bash
+nix develop --command env COVERAGE_FILE=/tmp/vt-cov.data \
+  coverage run --branch --source=src -m pytest tests/shared tests/linux -q
+nix develop --command env COVERAGE_FILE=/tmp/vt-cov.data coverage report --sort=cover
+```
+
 ---
 
 ## 3. Agent Self-Validation & Clipboard Verification Protocol

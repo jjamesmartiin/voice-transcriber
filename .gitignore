@@ -51,3 +51,8 @@ stats.json
 
 __pycache__/
 *.pyc
+# Line coverage output (docs/test-coverage.md). Same reason as the pytest cache:
+# it is generated, large-ish, and never read by the app.
+.coverage
+.coverage.*
+htmlcov/

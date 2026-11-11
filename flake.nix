@@ -316,7 +316,7 @@
               elif [ "$(uname)" = "Darwin" ]; then
                 TIER=tests/macos
               fi
-              ${pythonEnv}/bin/python -m pytest tests/shared "$TIER" "$@"
+              ${pythonEnv}/bin/python -m pytest tests/shared "$TIER" -n auto "$@"
               exit_code=$?
               # 139/136 are SIGSEGV/SIGABRT, which a PortAudio callback can raise
               # in a native thread (see tests/shared/test_hal_contract.py). Treat
@@ -398,6 +398,11 @@
             pip
             pytest
             pytest-xdist
+            # Line coverage for the suite, dev shell only: it is a measuring
+            # instrument, never a runtime dependency (packaging/nix/package.nix
+            # is pinned against pyproject's runtime list by
+            # tests/shared/test_nixpkgs_expression.py). See docs/test-coverage.md.
+            coverage
             psutil
             pyyaml
             rich

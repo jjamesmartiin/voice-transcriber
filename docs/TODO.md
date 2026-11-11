@@ -35,6 +35,67 @@ limitations and verification log.
 
 ---
 
+## Test-suite audit — measured 2026-11-10
+
+Asked whether the tests test *valid* things, and whether they can be deduplicated
+and made faster. Measured, not guessed (numbers and method in
+[`test-coverage.md`](test-coverage.md)):
+
+* **Size:** 96 test files, 1,671 test functions, 2,144 collected across the
+  model-free tiers. Baseline coverage **69%** (16,810 statements, 4,727 missed).
+* **Vacuous tests: there is no epidemic.** A first AST pass reported 36
+  assertion-free tests; the real number is **5**, and all five are deliberate
+  "must not raise" / "the catalogue validates" checks. That first number was
+  wrong because it ignored `unittest`'s `self.assertX` and `pytest.raises` — the
+  lesson for anyone re-running this: a grep-shaped metric does not understand
+  assertion styles, so lean on coverage and mutation instead.
+* **Duplication is small and half of it is deliberate.** The 15 "identical"
+  bodies are 5 *shapes* in `tests/wsl/*`, each asserting a different literal for
+  a different invariant of a PowerShell bridge CI cannot execute — that is the
+  sanctioned structural-pin pattern in `AGENTS.md`, not copy-paste. The genuine
+  duplicates are ~5 registry tests copy-pasted between `test_diarize.py` and
+  `test_formatter.py`, and 6 groups of same-shape bodies inside
+  `test_post_processor.py` that want `@pytest.mark.parametrize`.
+* **`tests/benchmark_synthetic_e2e.py` is not dead — do not delete it.** It is a
+  script with a `__main__`, run by path from
+  [`agent_testing_workflow.md`](agent_testing_workflow.md) §2, and pytest never
+  collects it because no tier targets `tests/` itself. It looks like a stranded
+  test file; it is a documented harness.
+
+Open waves (each ends in a green run of every tier):
+
+- [ ] **Wave 1a — no test may touch real user state.** `AGENTS.md` says tests
+  must monkeypatch `t2.CONFIG_FILE` and never write the user's live settings;
+  nothing enforces it. Add one autouse `conftest` guard that fails if a test opens
+  the real `config/config.yaml`, dictionary, `stats.json` or log for writing, then
+  fix whatever it catches. Highest value per line in this list: the failure it
+  prevents is the maintainer's own setup, silently.
+- [ ] **Wave 1b — mutation-check the invariants, not the suite.** Reintroduce each
+  bug named in `AGENTS.md`'s "Invariants to preserve" (HAL-only OS branching,
+  latch semantics, `set_binds` returning `False`, the control API never blocking
+  or raising, settings-modal-only config, formatter off = byte-identical) and
+  confirm a test fails. An invariant that survives is a real hole. Hand-run for
+  the six first; build a tool in `tools/` only if the pilot finds gaps worth
+  sweeping for.
+- [ ] **Wave 1c — fake-drift.** Extend the existing `REQUIRED_FUNCTIONS` /
+  `test_hal_contract.py` pattern to the other fake-driven modules (windows
+  hotkeys, the WSL bridge, `llama_server`, `model_download`, `audio_state`) so a
+  fake cannot drift from the real signature while its tests stay green.
+- [ ] **Wave 2 — dedup, coverage-neutral.** Parametrise the 6 groups in
+  `test_post_processor.py`; collapse the duplicated registry tests into one
+  shared parametrised module; merge only those `tests/wsl` pins that assert the
+  *same* literal. Gate: ~60 fewer items, coverage unchanged, all tiers green.
+- [ ] **Wave 3 — speed and skip hygiene.** The three 3.7 s subprocess-import tests
+  and the 2.7 s `test_the_cohere_loader_does_not_search_cwd` dominate the serial
+  run; check whether they can share one child process. Triage the 47 skip/xfail
+  markers so each names the CI gap it covers (as `tests/wsl/*` already do). No
+  module was found where wall clock justified restructuring — the win was
+  parallelism: `-n auto` takes the model-free tiers from **71 s to 14 s**, and it
+  is now the default in both runners (`tools/vt_dev.py` already did it; the
+  flake's `nix run .#test` did not, and was 60 s for the same work).
+
+---
+
 - [ ] **Pause-separated lists are paragraphs, not bullets (post-processing).** Segment boundaries are now carried end-to-end (hard silence cut, soft energy-trough cut) and `blocks` mode turns them into paragraph/line breaks, verified by model-free tests in `tests/shared/test_structure_blocks.py`. What is *not* done: promoting a run of pause-separated short fragments to a bullet list, and using the measured gap in milliseconds (the batcher currently reports the *kind* of cut, not its duration). Both need a confidence rule that has been measured against real dictation, not invented. The e2e behaviour with real audio has also not been re-run since the sentinel was introduced: the worktree has no weights, so `tests/e2e/` could not be executed. Run `./scripts/test.sh e2e` on a machine with the model before trusting the pause path end-to-end.
 
 - [x] **`import t2` pulled a network client into an offline-first package — fixed.** `t2` resolved its config path at import time, so `CONFIG_FILE = get_config_file()` called `from voice_transcriber import model_download`, and `model_download` imports `http.client` and `urllib.request` at module scope. The cause was that the pure path helpers (`find_repo_root`, `get_data_dir`, `_has_repo_marker`, `_per_user_model_dir`) lived inside the downloader, so every module that needed a path imported an HTTP client — `dictionary.py` did the same at module scope. They now live in `voice_transcriber/paths.py` (imports only `os`), with `model_download` re-exporting them so its public API and its callers are unchanged. `import t2`, `import dictionary` and `import post_processor` all leave no `urllib.request` or `http.client` in `sys.modules`, pinned by three subprocess guards in `tests/shared/test_offline_import.py` (each verified failing with a repoint reverted). One caution learned here: the tests that monkeypatch `find_repo_root`/`get_data_dir` are load-bearing for *safety*, not just assertions — while two were briefly out of sync, a test wrote through to the real `config/dictionary.local.yaml`.
